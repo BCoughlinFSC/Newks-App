@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Newk's Net Sales by Day & Location</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 1.5rem;
+      background: #0b1020;
+      color: #f4f4f4;
+    }
+    h1 {
+      margin-bottom: 0.5rem;
+    }
+    .card {
+      background: #151a2e;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    }
+    label {
+      display: inline-block;
+      margin-right: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    input, select, button {
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid #444b6b;
+      background: #101426;
+      color: #f4f4f4;
+    }
+    button {
+      cursor: pointer;
+      background: #2a7be4;
+      border: none;
+      font-weight: 600;
+      padding: 0.4rem 0.9rem;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+      min-width: 100%;
+    }
+    th, td {
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid #262b40;
+      border-right: 1px solid #262b40;
+      font-size: 0.9rem;
+      white-space: nowrap;
+    }
+    th {
+      text-align: center;
+      background: #171c32;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      font-weight: 600;
+    }
+    th:first-child, td:first-child {
+      text-align: left;
+    }
+    td:not(:first-child):not(:last-child) {
+      text-align: right;
+    }
+    .pill {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      background: #222744;
+      font-size: 0.75rem;
+    }
+    .status {
+      font-size: 0.85rem;
+      margin-top: 0.25rem;
+      opacity: 0.9;
+    }
+    .error {
+      color: #ff8080;
+    }
+    .success {
+      color: #7ce38b;
+    }
+    .locations-list {
+      max-height: 10rem;
+      overflow-y: auto;
+      border-radius: 8px;
+      border: 1px solid #272c45;
+      padding: 0.4rem 0.6rem;
+      margin-top: 0.25rem;
+      background: #0d1121;
+      font-size: 0.85rem;
+    }
+    .locations-list label {
+      display: flex;
+      align-items: center;
+      margin-bottom: 0.25rem;
+      margin-right: 0;
+    }
+    .locations-list input[type="checkbox"] {
+      margin-right: 0.4rem;
+    }
+    .summary {
+      font-size: 0.9rem;
+      margin-top: 0.4rem;
+      opacity: 0.9;
+    }
+    /* Pivot table styling */
+    div[style*="overflow-x"] {
+      max-width: 100%;
+      margin-top: 0.75rem;
+    }
+    #resultsTable {
+      border: 1px solid #262b40;
+    }
+    #resultsTable th:first-child {
+      min-width: 200px;
+      max-width: 300px;
+    }
+    #resultsTable td:first-child {
+      min-width: 200px;
+      max-width: 300px;
+    }
+    #resultsTable th:not(:first-child):not(:last-child) {
+      min-width: 80px;
+    }
+    #resultsTable th:last-child {
+      min-width: 100px;
+      background: #1a1f35;
+    }
+    #resultsTable td:last-child {
+      background: #1a1f35;
+    }
+  </style>
+</head>
+<body>
+  <h1>Newk's Net Sales</h1>
+  <p style="opacity:0.9; max-width:600px;">
+    Simple view of net sales by business date and location, powered by Toast Analytics.
+  </p>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Filters</h2>
+    <div>
+      <label>
+        Start date:
+        <input type="date" id="startDate" />
+      </label>
+      <label>
+        End date:
+        <input type="date" id="endDate" />
+      </label>
+      <button id="runBtn">Run report</button>
+    </div>
+    <div style="margin-top:0.75rem;">
+      <span class="pill">Locations</span>
+      <div id="locationsContainer" class="locations-list">
+        Loading locations...
+      </div>
+    </div>
+    <div id="status" class="status"></div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+      <h2 style="margin-top:0; margin-bottom:0;">Results</h2>
+      <button id="downloadBtn" style="display: none; margin-left: auto;">Download CSV</button>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div style="overflow-x: auto;">
+      <table id="resultsTable">
+        <thead id="resultsHead">
+          <tr>
+            <th style="position: sticky; left: 0; z-index: 2; background: #171c32;">Location</th>
+            <!-- Date columns will be inserted here -->
+          </tr>
+        </thead>
+        <tbody id="resultsBody">
+          <tr>
+            <td colspan="100" style="text-align:center; opacity:0.7;">
+              Run a report to see results.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const locationsContainer = document.getElementById('locationsContainer');
+    const runBtn = document.getElementById('runBtn');
+    const statusEl = document.getElementById('status');
+    const resultsBody = document.getElementById('resultsBody');
+    const summaryEl = document.getElementById('summary');
+    const resultsHead = document.getElementById('resultsHead');
+    const downloadBtn = document.getElementById('downloadBtn');
+    
+    // Store current data for CSV export
+    let currentData = null;
+    let currentDateRange = { start: '', end: '' };
+
+    async function loadLocations() {
+      try {
+        const resp = await fetch('/locations');
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || ('HTTP ' + resp.status));
+        }
+        const locations = await resp.json();
+        if (!Array.isArray(locations) || locations.length === 0) {
+          locationsContainer.textContent = 'No locations found.';
+          return;
+        }
+
+        const allId = 'loc_all';
+        const allLabel = document.createElement('label');
+        const allCheckbox = document.createElement('input');
+        allCheckbox.type = 'checkbox';
+        allCheckbox.id = allId;
+        allCheckbox.checked = true;
+        allLabel.appendChild(allCheckbox);
+        allLabel.appendChild(document.createTextNode('All active locations'));
+        locationsContainer.innerHTML = '';
+        locationsContainer.appendChild(allLabel);
+
+        locations.forEach(loc => {
+          const label = document.createElement('label');
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = loc.restaurantGuid;
+          checkbox.checked = true;
+          label.appendChild(checkbox);
+          label.appendChild(
+            document.createTextNode(' ' + (loc.restaurantName || loc.restaurantGuid))
+          );
+          locationsContainer.appendChild(label);
+        });
+
+        allCheckbox.addEventListener('change', () => {
+          const checked = allCheckbox.checked;
+          const boxes = locationsContainer.querySelectorAll('input[type="checkbox"]:not(#' + allId + ')');
+          boxes.forEach(cb => cb.checked = checked);
+        });
+      } catch (err) {
+        console.error(err);
+        locationsContainer.textContent = 'Error loading locations.';
+      }
+    }
+
+    async function runReport() {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      if (!start || !end) {
+        alert('Please select both start and end dates.');
+        return;
+      }
+
+      const checkboxes = locationsContainer.querySelectorAll('input[type="checkbox"]');
+      const selected = [];
+      checkboxes.forEach(cb => {
+        if (cb.id !== 'loc_all' && cb.checked && cb.value && cb.value.trim()) {
+          selected.push(cb.value);
+        }
+      });
+
+      // If no locations selected, show error
+      if (selected.length === 0) {
+        statusEl.textContent = 'Error: Please select at least one location.';
+        statusEl.className = 'status error';
+        return;
+      }
+
+      const params = new URLSearchParams();
+      params.set('start_date', start);
+      params.set('end_date', end);
+      selected.forEach(id => params.append('restaurant_ids', id));
+
+      runBtn.disabled = true;
+      statusEl.textContent = 'Running report...';
+      statusEl.className = 'status';
+
+      try {
+        const resp = await fetch('/sales/net?' + params.toString());
+        if (!resp.ok) {
+          let errorText = await resp.text();
+          // Try to parse as JSON to get the detail message
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorText = errorJson.detail || errorText;
+          } catch (e) {
+            // Not JSON, use as-is
+          }
+          throw new Error(errorText || ('HTTP ' + resp.status));
+        }
+        const data = await resp.json();
+        currentData = data;
+        currentDateRange = { start: start, end: end };
+        renderResults(data);
+        statusEl.textContent = 'Report complete.';
+        statusEl.className = 'status success';
+      } catch (err) {
+        console.error('Error running report:', err);
+        // Show user-friendly error message
+        let errorMsg = err.message || 'Unknown error';
+        
+        // Handle specific error cases
+        if (errorMsg.includes('429') || errorMsg.includes('rate limit') || errorMsg.includes('Too Many Requests')) {
+          errorMsg = 'Toast API rate limit exceeded. Please wait a few minutes before trying again. (Limits: 10 requests/hour for custom ranges)';
+          statusEl.className = 'status error';
+        } else if (errorMsg.includes('401') || errorMsg.includes('403')) {
+          errorMsg = 'Authentication error. Please check your Toast API credentials.';
+          statusEl.className = 'status error';
+        } else if (errorMsg.includes('504') || errorMsg.includes('timeout') || errorMsg.includes('Timed out')) {
+          errorMsg = 'Request timed out. Try narrowing the date range or selecting fewer locations.';
+          statusEl.className = 'status error';
+        } else {
+          statusEl.className = 'status error';
+          // Truncate very long error messages
+          if (errorMsg.length > 300) {
+            errorMsg = errorMsg.substring(0, 300) + '...';
+          }
+        }
+        
+        statusEl.textContent = 'Error: ' + errorMsg;
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    function renderResults(rows) {
+      resultsBody.innerHTML = '';
+      const headerRow = resultsHead && resultsHead.querySelector ? resultsHead.querySelector('tr') : null;
+      
+      if (!Array.isArray(rows) || rows.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 100;
+        td.style.textAlign = 'center';
+        td.style.opacity = '0.7';
+        td.textContent = 'No data found for that range.';
+        tr.appendChild(td);
+        resultsBody.appendChild(tr);
+        summaryEl.textContent = '';
+        // Clear date headers
+        if (headerRow) {
+          while (headerRow.children.length > 1) {
+            headerRow.removeChild(headerRow.lastChild);
+          }
+        }
+        // Hide download button
+        if (downloadBtn) {
+          downloadBtn.style.display = 'none';
+        }
+        return;
+      }
+
+      // Show download button
+      if (downloadBtn) {
+        downloadBtn.style.display = 'inline-block';
+      }
+
+      // Transform data into pivot table format
+      // Build a map: location -> date -> amount
+      const dataMap = {};
+      const dates = new Set();
+      let total = 0;
+
+      rows.forEach(row => {
+        const locName = row.restaurantName || row.restaurantGuid;
+        const date = row.businessDate;
+        const amount = Number(row.netSalesAmount) || 0;
+        
+        if (!dataMap[locName]) {
+          dataMap[locName] = {};
+        }
+        dataMap[locName][date] = amount;
+        dates.add(date);
+        total += amount;
+      });
+
+      // Sort dates
+      const sortedDates = Array.from(dates).sort();
+
+      // Build header row with dates
+      // Clear existing date headers (keep Location header)
+      if (headerRow) {
+        while (headerRow.children.length > 1) {
+          headerRow.removeChild(headerRow.lastChild);
+        }
+      }
+      
+      // Add date columns
+      if (headerRow) {
+        sortedDates.forEach(date => {
+          const th = document.createElement('th');
+          // Format date as M/D for display
+          const dateObj = new Date(date + 'T00:00:00');
+          const month = dateObj.getMonth() + 1;
+          const day = dateObj.getDate();
+          th.textContent = `${month}/${day}`;
+          th.title = date; // Full date on hover
+          headerRow.appendChild(th);
+        });
+
+        // Add a total column
+        const totalTh = document.createElement('th');
+        totalTh.textContent = 'Total';
+        totalTh.style.fontWeight = 'bold';
+        headerRow.appendChild(totalTh);
+      }
+
+      // Build data rows - one per location
+      const sortedLocations = Object.keys(dataMap).sort();
+      
+      sortedLocations.forEach(locName => {
+        const tr = document.createElement('tr');
+        
+        // Location name (sticky first column)
+        const locCell = document.createElement('td');
+        locCell.textContent = locName;
+        locCell.style.position = 'sticky';
+        locCell.style.left = '0';
+        locCell.style.zIndex = '1';
+        locCell.style.background = '#151a2e';
+        tr.appendChild(locCell);
+
+        // Date columns
+        let locationTotal = 0;
+        sortedDates.forEach(date => {
+          const td = document.createElement('td');
+          const amount = dataMap[locName][date] || 0;
+          locationTotal += amount;
+          td.textContent = amount > 0 ? `$${amount.toFixed(2)}` : '-';
+          td.style.textAlign = 'right';
+          if (amount === 0) {
+            td.style.opacity = '0.4';
+          }
+          tr.appendChild(td);
+        });
+
+        // Total column
+        const totalCell = document.createElement('td');
+        totalCell.textContent = `$${locationTotal.toFixed(2)}`;
+        totalCell.style.textAlign = 'right';
+        totalCell.style.fontWeight = 'bold';
+        totalCell.style.background = '#171c32';
+        tr.appendChild(totalCell);
+
+        resultsBody.appendChild(tr);
+      });
+
+      // Update summary
+      const locCount = sortedLocations.length;
+      const dateCount = sortedDates.length;
+      summaryEl.textContent =
+        `Total net sales: $${total.toFixed(2)} across ${locCount} locations and ${dateCount} days.`;
+    }
+
+    // Helper function to escape CSV values
+    function escapeCSV(value) {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      // If contains comma, quote, or newline, wrap in quotes and escape quotes
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    }
+
+    function downloadCSV() {
+      if (!currentData || currentData.length === 0) {
+        alert('No data to download. Please run a report first.');
+        return;
+      }
+
+      // Build the same pivot structure as the table
+      const dataMap = {};
+      const dates = new Set();
+
+      currentData.forEach(row => {
+        const locName = row.restaurantName || row.restaurantGuid;
+        const date = row.businessDate;
+        const amount = Number(row.netSalesAmount) || 0;
+        
+        if (!dataMap[locName]) {
+          dataMap[locName] = {};
+        }
+        dataMap[locName][date] = amount;
+        dates.add(date);
+      });
+
+      const sortedDates = Array.from(dates).sort();
+      const sortedLocations = Object.keys(dataMap).sort();
+
+      // Build CSV content
+      const csvRows = [];
+      
+      // Header row: Location, dates, Total
+      const headerRow = ['Location', ...sortedDates.map(d => {
+        const dateObj = new Date(d + 'T00:00:00');
+        const month = dateObj.getMonth() + 1;
+        const day = dateObj.getDate();
+        return `${month}/${day}/${dateObj.getFullYear()}`;
+      }), 'Total'].map(escapeCSV);
+      csvRows.push(headerRow.join(','));
+
+      // Data rows
+      sortedLocations.forEach(locName => {
+        const row = [escapeCSV(locName)];
+        let locationTotal = 0;
+        
+        sortedDates.forEach(date => {
+          const amount = dataMap[locName][date] || 0;
+          locationTotal += amount;
+          // Format as number (no $ sign for CSV)
+          row.push(amount.toFixed(2));
+        });
+        
+        // Add total
+        row.push(locationTotal.toFixed(2));
+        csvRows.push(row.join(','));
+      });
+
+      // Create CSV content
+      const csvContent = csvRows.join('\n');
+      
+      // Create download with BOM for Excel compatibility
+      const BOM = '\uFEFF';
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      // Generate filename with date range
+      const filename = `net_sales_${currentDateRange.start}_to_${currentDateRange.end}.csv`;
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up the URL
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    }
+
+    runBtn.addEventListener('click', runReport);
+    downloadBtn.addEventListener('click', downloadCSV);
+    loadLocations();
+  </script>
+</body>
+</html>
