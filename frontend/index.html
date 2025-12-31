@@ -2,544 +2,2138 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Newk's Net Sales by Day & Location</title>
+  <title>Newk's Custom Reporting Platform</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    * { box-sizing: border-box; }
     body {
-      font-family: system-ui, sans-serif;
-      margin: 1.5rem;
-      background: #0b1020;
-      color: #f4f4f4;
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #F8FAFC;
+      color: #2c2c2c;
     }
-    h1 {
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      position: relative;
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header-text {
+      flex: 1;
+    }
+    .header-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .auth-tab.active {
+      border-bottom-color: #C41E3A !important;
+      color: #C41E3A !important;
+      font-weight: 600 !important;
+    }
+    .auth-tab:not(.active) {
+      border-bottom-color: transparent !important;
+      color: #6B7280 !important;
+    }
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: #ffffff;
+      font-size: 0.9rem;
+    }
+    .user-name {
+      font-weight: 600;
+    }
+    .logout-btn {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .logout-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+    .header p {
+      margin: 0.5rem 0 0 0;
+      color: #fff;
+      opacity: 0.9;
+      font-size: 0.9rem;
+    }
+    .help-btn {
+      background: rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+    }
+    .help-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+      border-color: rgba(255, 255, 255, 0.5);
+      transform: translateY(-1px);
+    }
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+    }
+    .modal-overlay.hidden {
+      display: none;
+    }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      max-width: 600px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #E5E7EB;
+    }
+    .modal-header h2 {
+      margin: 0;
+      color: #C41E3A;
+      font-size: 1.5rem;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: #6B7280;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+    .modal-close:hover {
+      background: #F3F4F6;
+      color: #C41E3A;
+    }
+    .modal-form-group {
+      margin-bottom: 1.25rem;
+    }
+    .modal-form-group label {
+      display: block;
       margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: #374151;
+      font-size: 0.9rem;
+    }
+    .modal-form-group input,
+    .modal-form-group textarea,
+    .modal-form-group select {
+      width: 100%;
+      padding: 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #D1D5DB;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    .modal-form-group textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    .modal-form-group input:focus,
+    .modal-form-group textarea:focus,
+    .modal-form-group select:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.1);
+    }
+    .modal-actions {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 2px solid #E5E7EB;
+    }
+    .container {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 2rem;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
     }
     .card {
-      background: #151a2e;
+      background: #ffffff;
       border-radius: 12px;
-      padding: 1rem 1.25rem;
+      padding: 1.25rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+    }
+    .card h2 {
+      margin: 0 0 1rem 0;
+      color: #C41E3A;
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+    .saved-reports-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .report-item {
+      background: #faf8f5;
+      border: 1px solid #e8e0d5;
+      border-radius: 8px;
+      padding: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .report-item:hover {
+      background: #FEF2F2;
+      border-color: #C41E3A;
+      transform: translateY(-1px);
+    }
+    .report-item.active {
+      background: #FEF2F2;
+      border-color: #C41E3A;
+      border-width: 2px;
+      box-shadow: 0 2px 8px rgba(196, 30, 58, 0.15);
+    }
+    .report-item-name {
+      font-weight: 600;
+      color: #2c2c2c;
+      margin-bottom: 0.25rem;
+    }
+    .report-item-creator {
+      font-size: 0.75rem;
+      color: #666;
+    }
+    .new-report-btn {
+      background: #C41E3A;
+      color: #ffffff;
+      border: none;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 2px 4px rgba(196, 30, 58, 0.2);
+    }
+    .new-report-btn:hover {
+      background: #A01A2E;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(196, 30, 58, 0.3);
+    }
+    .main-content {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .form-group {
       margin-bottom: 1rem;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
     }
-    label {
-      display: inline-block;
-      margin-right: 1rem;
+    .form-group label {
+      display: block;
       margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: #2c2c2c;
+      font-size: 0.9rem;
     }
-    input, select, button {
-      padding: 0.4rem 0.6rem;
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
       border-radius: 6px;
-      border: 1px solid #444b6b;
-      background: #101426;
-      color: #f4f4f4;
+      border: 1px solid #d4c9b8;
+      background: #ffffff;
+      color: #2c2c2c;
+      font-size: 0.9rem;
+    }
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.1);
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    .checkbox-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      padding: 0.5rem 0;
+    }
+    .checkbox-group label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: normal;
+      margin: 0;
+      color: #2c2c2c;
+    }
+    .checkbox-group input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      accent-color: #C41E3A;
+    }
+    /* Scrollbar styling for locations */
+    .locations-grid::-webkit-scrollbar,
+    .saved-reports-list::-webkit-scrollbar {
+      width: 8px;
+    }
+    .locations-grid::-webkit-scrollbar-track,
+    .saved-reports-list::-webkit-scrollbar-track {
+      background: #f0ebe3;
+      border-radius: 4px;
+    }
+    .locations-grid::-webkit-scrollbar-thumb,
+    .saved-reports-list::-webkit-scrollbar-thumb {
+      background: #d4c9b8;
+      border-radius: 4px;
+    }
+    .locations-grid::-webkit-scrollbar-thumb:hover,
+    .saved-reports-list::-webkit-scrollbar-thumb:hover {
+      background: #c4b9a8;
+    }
+    .locations-grid {
+      max-height: 150px;
+      overflow-y: auto;
+      padding: 0.75rem;
+      background: #faf8f5;
+      border-radius: 6px;
+      border: 1px solid #e8e0d5;
+    }
+    .locations-grid label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0;
+      font-weight: normal;
+      margin: 0;
+      color: #2c2c2c;
+      font-size: 0.85rem;
+    }
+    .locations-grid label:hover {
+      color: #C41E3A;
+    }
+    .locations-grid input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      accent-color: #C41E3A;
+    }
+    .btn-group {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
     }
     button {
-      cursor: pointer;
-      background: #2a7be4;
+      padding: 0.6rem 1.25rem;
+      border-radius: 6px;
       border: none;
       font-weight: 600;
-      padding: 0.4rem 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+    }
+    .btn-primary {
+      background: #C41E3A;
+      color: #ffffff;
+      box-shadow: 0 2px 4px rgba(196, 30, 58, 0.2);
+    }
+    .btn-primary:hover {
+      background: #A01A2E;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(196, 30, 58, 0.3);
+    }
+    .btn-success {
+      background: #1E40AF;
+      color: #ffffff;
+      box-shadow: 0 2px 4px rgba(30, 64, 175, 0.2);
+    }
+    .btn-success:hover {
+      background: #1E3A8A;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(30, 64, 175, 0.3);
+    }
+    .btn-secondary {
+      background: #6c757d;
+      color: #ffffff;
+    }
+    .btn-secondary:hover {
+      background: #5a6268;
+    }
+    .btn-danger {
+      background: #d9534f;
+      color: #ffffff;
+    }
+    .btn-danger:hover {
+      background: #c9302c;
     }
     button:disabled {
       opacity: 0.6;
-      cursor: default;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+    .status {
+      padding: 0.75rem;
+      border-radius: 8px;
+      margin-top: 0.75rem;
+      font-size: 0.9rem;
+    }
+    .status.info {
+      background: #DBEAFE;
+      border: 1px solid #60A5FA;
+      color: #1E40AF;
+    }
+    .status.success {
+      background: #D1FAE5;
+      border: 1px solid #34D399;
+      color: #065F46;
+    }
+    .status.error {
+      background: #FEE2E2;
+      border: 1px solid #F87171;
+      color: #991B1B;
+    }
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .results-summary {
+      font-size: 0.9rem;
+      color: #666;
     }
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 0.75rem;
-      min-width: 100%;
     }
     th, td {
-      padding: 0.35rem 0.5rem;
-      border-bottom: 1px solid #262b40;
-      border-right: 1px solid #262b40;
+      padding: 0.75rem;
+      border-bottom: 1px solid #e8e0d5;
+      text-align: left;
       font-size: 0.9rem;
-      white-space: nowrap;
     }
     th {
-      text-align: center;
-      background: #171c32;
+      background: #faf8f5;
+      font-weight: 600;
       position: sticky;
       top: 0;
       z-index: 1;
-      font-weight: 600;
+      color: #2c2c2c;
     }
-    th:first-child, td:first-child {
-      text-align: left;
+    tr:hover {
+      background: #F0F9FF;
     }
-    td:not(:first-child):not(:last-child) {
-      text-align: right;
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: #999;
     }
-    .pill {
-      display: inline-block;
-      padding: 0.15rem 0.45rem;
-      border-radius: 999px;
-      background: #222744;
-      font-size: 0.75rem;
+    .hidden {
+      display: none;
     }
-    .status {
-      font-size: 0.85rem;
-      margin-top: 0.25rem;
-      opacity: 0.9;
-    }
-    .error {
-      color: #ff8080;
-    }
-    .success {
-      color: #7ce38b;
-    }
-    .locations-list {
-      max-height: 10rem;
-      overflow-y: auto;
-      border-radius: 8px;
-      border: 1px solid #272c45;
-      padding: 0.4rem 0.6rem;
-      margin-top: 0.25rem;
-      background: #0d1121;
-      font-size: 0.85rem;
-    }
-    .locations-list label {
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
       display: flex;
+      flex-direction: column;
+      justify-content: center;
       align-items: center;
-      margin-bottom: 0.25rem;
-      margin-right: 0;
+      z-index: 9999;
+      gap: 1rem;
     }
-    .locations-list input[type="checkbox"] {
-      margin-right: 0.4rem;
+    .loading-overlay.hidden {
+      display: none !important;
     }
-    .summary {
-      font-size: 0.9rem;
-      margin-top: 0.4rem;
-      opacity: 0.9;
+    .loading-spinner {
+      width: 60px;
+      height: 60px;
+      border: 6px solid #F0F9FF;
+      border-top: 6px solid #C41E3A;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
     }
-    /* Pivot table styling */
-    div[style*="overflow-x"] {
-      max-width: 100%;
-      margin-top: 0.75rem;
+    .loading-text {
+      color: white;
+      font-size: 1.1rem;
+      font-weight: 600;
+      text-align: center;
     }
-    #resultsTable {
-      border: 1px solid #262b40;
-    }
-    #resultsTable th:first-child {
-      min-width: 200px;
-      max-width: 300px;
-    }
-    #resultsTable td:first-child {
-      min-width: 200px;
-      max-width: 300px;
-    }
-    #resultsTable th:not(:first-child):not(:last-child) {
-      min-width: 80px;
-    }
-    #resultsTable th:last-child {
-      min-width: 100px;
-      background: #1a1f35;
-    }
-    #resultsTable td:last-child {
-      background: #1a1f35;
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
   </style>
 </head>
 <body>
-  <h1>Newk's Net Sales</h1>
-  <p style="opacity:0.9; max-width:600px;">
-    Simple view of net sales by business date and location, powered by Toast Analytics.
-  </p>
-
-  <div class="card">
-    <h2 style="margin-top:0;">Filters</h2>
-    <div>
-      <label>
-        Start date:
-        <input type="date" id="startDate" />
-      </label>
-      <label>
-        End date:
-        <input type="date" id="endDate" />
-      </label>
-      <button id="runBtn">Run report</button>
-    </div>
-    <div style="margin-top:0.75rem;">
-      <span class="pill">Locations</span>
-      <div id="locationsContainer" class="locations-list">
-        Loading locations...
+  <div class="header">
+    <div class="header-content">
+      <div class="header-text">
+        <h1>Newk's Custom Reporting Platform</h1>
+        <p>Build, save, and run custom reports using Toast data</p>
+      </div>
+      <div class="header-actions">
+        <div class="user-info hidden" id="userInfo">
+          <span class="user-name" id="userName"></span>
+          <button class="help-btn" id="adminBtn" style="display: none;">Admin Panel</button>
+          <button class="logout-btn" id="logoutBtn">Logout</button>
+        </div>
+        <button class="help-btn" id="helpBtn">I Need Help</button>
       </div>
     </div>
-    <div id="status" class="status"></div>
   </div>
 
-  <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-      <h2 style="margin-top:0; margin-bottom:0;">Results</h2>
-      <button id="downloadBtn" style="display: none; margin-left: auto;">Download CSV</button>
+  <div class="container">
+    <!-- Sidebar: Saved Reports -->
+    <div class="sidebar">
+      <div class="card">
+        <h2>Saved Reports</h2>
+        <button class="new-report-btn" id="newReportBtn">+ New Report</button>
+        <div style="margin-top: 1rem;">
+          <div class="saved-reports-list" id="savedReportsList">
+            <div class="empty-state">Loading...</div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="summary" id="summary"></div>
-    <div style="overflow-x: auto;">
-      <table id="resultsTable">
-        <thead id="resultsHead">
-          <tr>
-            <th style="position: sticky; left: 0; z-index: 2; background: #171c32;">Location</th>
-            <!-- Date columns will be inserted here -->
-          </tr>
-        </thead>
-        <tbody id="resultsBody">
-          <tr>
-            <td colspan="100" style="text-align:center; opacity:0.7;">
-              Run a report to see results.
-            </td>
-          </tr>
-        </tbody>
-      </table>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Report Builder -->
+      <div class="card">
+        <h2 id="builderTitle">Report Builder</h2>
+        
+        <div class="form-group">
+          <label>Report Name</label>
+          <input type="text" id="reportName" placeholder="e.g., Net Sales by Location - Weekly" />
+        </div>
+
+        <div class="form-group">
+          <label>Description (optional)</label>
+          <input type="text" id="reportDescription" placeholder="Brief description of this report" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Report Type</label>
+            <select id="reportType">
+              <option value="metrics">Metrics Report (Sales, Guest Count, etc.)</option>
+              <option value="menu">Menu Performance (Item-level Sales)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Date Range</label>
+            <select id="dateRangeType">
+              <option value="last_7_days">Last 7 Days</option>
+              <option value="last_30_days">Last 30 Days</option>
+              <option value="last_90_days">Last 90 Days</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row hidden" id="customDateRange">
+          <div class="form-group">
+            <label>Start Date</label>
+            <input type="date" id="customStartDate" />
+          </div>
+          <div class="form-group">
+            <label>End Date</label>
+            <input type="date" id="customEndDate" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; justify-content: space-between; align-items: center;">
+            <span>
+              <input type="checkbox" id="selectAllLocations" checked style="margin-right: 0.5rem; width: 16px; height: 16px; accent-color: #C41E3A;" /> 
+              Select All Locations
+            </span>
+            <span id="locationCount" style="font-size: 0.85rem; font-weight: normal; color: #666;"></span>
+          </label>
+          <div class="locations-grid" id="locationsGrid">
+            <div>Loading locations...</div>
+          </div>
+        </div>
+
+        <div class="form-group" id="filterBySection">
+          <label>Filter By</label>
+          <select id="filterByType">
+            <option value="">None</option>
+            <option value="itemTags">Item Tags</option>
+          </select>
+        </div>
+
+        <div class="form-group hidden" id="itemTagsSection">
+          <label style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Item Tags</span>
+            <span id="tagCount" style="font-size: 0.85rem; font-weight: normal; color: #666;"></span>
+          </label>
+          <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+            Select tags to filter menu items. Includes items, modifiers, and nested modifiers.
+          </div>
+          <div id="itemTagsLoadingStatus" style="padding: 0.75rem; color: #666; font-size: 0.85rem;">
+            Select Menu Performance to load item tags...
+          </div>
+          <div class="locations-grid hidden" id="itemTagsGrid" style="max-height: 200px;">
+            <!-- Dynamically populated with item tags -->
+          </div>
+        </div>
+
+
+        <div class="btn-group">
+          <button class="btn-primary" id="runReportBtn">Run Report</button>
+          <button class="btn-success" id="saveReportBtn">Save Report</button>
+          <button class="btn-secondary hidden" id="updateReportBtn">Update Report</button>
+          <button class="btn-danger hidden" id="deleteReportBtn">Delete Report</button>
+        </div>
+
+        <div class="status hidden" id="builderStatus"></div>
+      </div>
+
+      <!-- Results -->
+      <div class="card">
+        <div class="results-header">
+          <h2>Results</h2>
+          <button class="btn-success hidden" id="exportBtn">Download CSV</button>
+        </div>
+        <div class="results-summary" id="resultsSummary"></div>
+        <div style="overflow-x: auto;">
+          <table id="resultsTable">
+            <thead id="resultsHead"></thead>
+            <tbody id="resultsBody">
+              <tr>
+                <td colspan="100" class="empty-state">Run a report to see results</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Running report...<br><span style="font-size: 0.9rem; font-weight: normal; opacity: 0.9;">This may take a moment</span></div>
+  </div>
+
+  <!-- Login/Register Modal -->
+  <div id="authModal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="authModalTitle">Login</h2>
+        <button class="modal-close" id="closeAuthModal">&times;</button>
+      </div>
+      <form id="authForm">
+        <div class="modal-form-group">
+          <label for="authEmail">Email *</label>
+          <input type="email" id="authEmail" required placeholder="your.email@example.com" />
+        </div>
+        <div class="modal-form-group">
+          <label for="authPassword">Password *</label>
+          <input type="password" id="authPassword" required placeholder="Enter your password" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancelAuthBtn">Cancel</button>
+          <button type="submit" class="btn-primary" id="authSubmitBtn">Login</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Admin Panel Modal -->
+  <div id="adminModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 900px;">
+      <div class="modal-header">
+        <h2>Admin Panel</h2>
+        <button class="modal-close" id="closeAdminModal">&times;</button>
+      </div>
+      <div style="margin-bottom: 1.5rem;">
+        <button class="btn-primary" id="createUserBtn" style="margin-bottom: 1rem;">Create New User</button>
+      </div>
+      <div id="adminContent">
+        <div id="usersList" style="max-height: 500px; overflow-y: auto;">
+          <div style="text-align: center; padding: 2rem; color: #6B7280;">Loading users...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create User Modal -->
+  <div id="createUserModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Create New User</h2>
+        <button class="modal-close" id="closeCreateUserModal">&times;</button>
+      </div>
+      <form id="createUserForm">
+        <div class="modal-form-group">
+          <label for="newUserName">Name *</label>
+          <input type="text" id="newUserName" required placeholder="Enter user's name" />
+        </div>
+        <div class="modal-form-group">
+          <label for="newUserEmail">Email *</label>
+          <input type="email" id="newUserEmail" required placeholder="user@example.com" />
+        </div>
+        <div class="modal-form-group">
+          <label for="newUserPassword">Password *</label>
+          <input type="password" id="newUserPassword" required placeholder="Enter password (min 6 characters)" />
+        </div>
+        <div class="modal-form-group">
+          <label for="newUserRole">Role</label>
+          <select id="newUserRole">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancelCreateUserBtn">Cancel</button>
+          <button type="submit" class="btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Help Modal -->
+  <div id="helpModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Request Help</h2>
+        <button class="modal-close" id="closeHelpModal">&times;</button>
+      </div>
+      <form id="helpForm">
+        <div class="modal-form-group">
+          <label for="helpName">Your Name *</label>
+          <input type="text" id="helpName" required placeholder="Enter your name" />
+        </div>
+        <div class="modal-form-group">
+          <label for="helpEmail">Your Email *</label>
+          <input type="email" id="helpEmail" required placeholder="your.email@example.com" />
+        </div>
+        <div class="modal-form-group">
+          <label for="helpSubject">Subject *</label>
+          <input type="text" id="helpSubject" required placeholder="Brief description of your issue" />
+        </div>
+        <div class="modal-form-group">
+          <label for="helpPriority">Priority</label>
+          <select id="helpPriority">
+            <option value="1">Low</option>
+            <option value="2" selected>Medium</option>
+            <option value="3">High</option>
+            <option value="4">Urgent</option>
+          </select>
+        </div>
+        <div class="modal-form-group">
+          <label for="helpDescription">Description *</label>
+          <textarea id="helpDescription" required placeholder="Please provide details about what you need help with..."></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancelHelpBtn">Cancel</button>
+          <button type="submit" class="btn-primary">Submit Ticket</button>
+        </div>
+      </form>
     </div>
   </div>
 
   <script>
-    const locationsContainer = document.getElementById('locationsContainer');
-    const runBtn = document.getElementById('runBtn');
-    const statusEl = document.getElementById('status');
-    const resultsBody = document.getElementById('resultsBody');
-    const summaryEl = document.getElementById('summary');
-    const resultsHead = document.getElementById('resultsHead');
-    const downloadBtn = document.getElementById('downloadBtn');
-    
-    // Store current data for CSV export
-    let currentData = null;
-    let currentDateRange = { start: '', end: '' };
+    // State
+    let locations = [];
+    let savedReports = [];
+    let currentReportId = null;
+    let currentResults = null;
+    let reportTypeOptions = {};
+    let menuItems = null; // Store menu items with tags
+    let allItemTags = [];
+
+    // Initialize
+    async function init() {
+      // Check authentication first
+      const isAuth = await checkAuth();
+      if (!isAuth) {
+        // Will show login modal, wait for auth before continuing
+        setupEventListeners();
+        return;
+      }
+      
+      await loadLocations();
+      await loadReportTypes();
+      await loadSavedReports();
+      setupEventListeners();
+    }
 
     async function loadLocations() {
       try {
         const resp = await fetch('/locations');
+        locations = await resp.json();
+        renderLocations();
+      } catch (err) {
+        console.error('Error loading locations:', err);
+      }
+    }
+
+    async function loadReportTypes() {
+      try {
+        const resp = await fetch('/api/report-types');
+        reportTypeOptions = await resp.json();
+        updateFilterByOptions();
+      } catch (err) {
+        console.error('Error loading report types:', err);
+      }
+    }
+
+    async function loadMenuItems() {
+      try {
+        const statusEl = document.getElementById('itemTagsLoadingStatus');
+        statusEl.textContent = 'Loading item tags...';
+        statusEl.classList.remove('hidden');
+        
+        const resp = await fetch('/api/menu-items');
         if (!resp.ok) {
-          const text = await resp.text();
-          throw new Error(text || ('HTTP ' + resp.status));
+          throw new Error('Failed to load menu items');
         }
-        const locations = await resp.json();
-        if (!Array.isArray(locations) || locations.length === 0) {
-          locationsContainer.textContent = 'No locations found.';
+        
+        const data = await resp.json();
+        menuItems = data.items;
+        allItemTags = data.allTags;
+        
+        renderItemTags();
+        statusEl.classList.add('hidden');
+      } catch (err) {
+        console.error('Error loading menu items:', err);
+        const statusEl = document.getElementById('itemTagsLoadingStatus');
+        statusEl.textContent = 'Error loading item tags. Please try again.';
+        statusEl.style.color = '#d9534f';
+      }
+    }
+
+    function renderItemTags() {
+      const grid = document.getElementById('itemTagsGrid');
+      if (!allItemTags || allItemTags.length === 0) {
+        grid.innerHTML = '<div style="padding: 0.5rem; color: #666;">No item tags found in menu</div>';
+        grid.classList.remove('hidden');
+        return;
+      }
+      
+      grid.innerHTML = allItemTags.map(tag => `
+        <label>
+          <input type="checkbox" class="itemtag-checkbox" value="${tag}" />
+          ${tag}
+        </label>
+      `).join('');
+      
+      grid.classList.remove('hidden');
+      
+      // Add change listeners to update count
+      document.querySelectorAll('.itemtag-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateItemTagCount);
+      });
+      
+      updateItemTagCount();
+    }
+
+    function updateItemTagCount() {
+      const total = allItemTags.length;
+      const selected = document.querySelectorAll('.itemtag-checkbox:checked').length;
+      const countEl = document.getElementById('tagCount');
+      if (countEl) {
+        if (selected === 0) {
+          countEl.textContent = 'All items';
+        } else {
+          countEl.textContent = `${selected} of ${total} tags selected`;
+        }
+      }
+    }
+
+    async function loadSavedReports() {
+      if (!authToken) return;
+      
+      try {
+        const resp = await fetch('/api/saved-reports', {
+          headers: getAuthHeaders()
+        });
+        
+        if (resp.status === 401) {
+          // Token expired or invalid
+          clearAuth();
+          return;
+        }
+        
+        savedReports = await resp.json();
+        renderSavedReports();
+      } catch (err) {
+        console.error('Error loading saved reports:', err);
+        if (err.message.includes('401')) {
+          clearAuth();
+        }
+      }
+    }
+
+    function renderLocations() {
+      const grid = document.getElementById('locationsGrid');
+      if (locations.length === 0) {
+        grid.innerHTML = '<div>No locations found</div>';
+        return;
+      }
+      
+      grid.innerHTML = locations.map(loc => `
+        <label>
+          <input type="checkbox" class="location-checkbox" value="${loc.restaurantGuid}" checked />
+          ${loc.restaurantName}
+        </label>
+      `).join('');
+      
+      // Add change listeners to update count
+      document.querySelectorAll('.location-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateLocationCount);
+      });
+      
+      updateLocationCount();
+    }
+
+    function updateLocationCount() {
+      const total = locations.length;
+      const selected = document.querySelectorAll('.location-checkbox:checked').length;
+      const countEl = document.getElementById('locationCount');
+      if (countEl) {
+        countEl.textContent = `${selected} of ${total} selected`;
+      }
+    }
+
+    function renderSavedReports() {
+      const list = document.getElementById('savedReportsList');
+      if (savedReports.length === 0) {
+        list.innerHTML = '<div class="empty-state">No saved reports yet</div>';
+        return;
+      }
+      
+      list.innerHTML = savedReports.map(report => `
+        <div class="report-item" data-id="${report.id}">
+          <div class="report-item-name">${report.name}</div>
+          <div class="report-item-creator">Created ${new Date(report.createdAt).toLocaleDateString()}</div>
+        </div>
+      `).join('');
+      
+      // Add click handlers
+      document.querySelectorAll('.report-item').forEach(item => {
+        item.addEventListener('click', () => loadReport(item.dataset.id));
+      });
+    }
+
+    function updateFilterByOptions() {
+      const reportType = document.getElementById('reportType').value;
+      const filterByType = document.getElementById('filterByType').value;
+      const reportTypeConfig = reportTypeOptions.reportTypes?.find(t => t.id === reportType);
+      const itemTagsSection = document.getElementById('itemTagsSection');
+      
+      // Show/hide item tags section based on filter type selection
+      if (reportType === 'menu' && filterByType === 'itemTags' && reportTypeConfig?.supportsItemTagFilters) {
+        itemTagsSection.classList.remove('hidden');
+        // Load menu items if not already loaded
+        if (!menuItems) {
+          loadMenuItems();
+        }
+      } else {
+        itemTagsSection.classList.add('hidden');
+      }
+    }
+
+    // Authentication state
+    let currentUser = null;
+    let authToken = null;
+
+    // Check authentication on page load
+    async function checkAuth() {
+      authToken = localStorage.getItem('auth_token');
+      const userStr = localStorage.getItem('user');
+      
+      if (authToken && userStr) {
+        try {
+          currentUser = JSON.parse(userStr);
+          console.log('checkAuth - loaded user from localStorage:', currentUser);
+          console.log('checkAuth - user role:', currentUser?.role);
+          
+          // Refresh user info from server to get latest role
+          try {
+            const resp = await fetch('/api/auth/me', {
+              headers: getAuthHeaders()
+            });
+            if (resp.ok) {
+              const serverUser = await resp.json();
+              console.log('checkAuth - user from server:', serverUser);
+              console.log('checkAuth - server user role:', serverUser?.role);
+              currentUser = serverUser;
+              localStorage.setItem('user', JSON.stringify(serverUser));
+            }
+          } catch (err) {
+            console.warn('Could not refresh user info from server:', err);
+          }
+          
+          updateUIForAuth();
+          // Hide auth modal if authenticated
+          const authModal = document.getElementById('authModal');
+          if (authModal) {
+            authModal.classList.add('hidden');
+          }
+          return true;
+        } catch (e) {
+          console.error('Error parsing user data:', e);
+          clearAuth();
+        }
+      }
+      
+      // Not authenticated - show login modal
+      console.log('Not authenticated, showing login modal');
+      showAuthModal();
+      return false;
+    }
+
+    function updateUIForAuth() {
+      if (currentUser) {
+        console.log('updateUIForAuth - currentUser:', currentUser);
+        console.log('updateUIForAuth - currentUser.role:', currentUser.role);
+        document.getElementById('userName').textContent = currentUser.name;
+        document.getElementById('userInfo').classList.remove('hidden');
+        document.getElementById('authModal').classList.add('hidden');
+        
+        // Show admin button if user is admin
+        const adminBtn = document.getElementById('adminBtn');
+        console.log('Admin button element:', adminBtn);
+        if (currentUser.role === 'admin') {
+          console.log('User is admin, showing admin button');
+          adminBtn.style.display = 'inline-block';
+        } else {
+          console.log('User is not admin, hiding admin button');
+          adminBtn.style.display = 'none';
+        }
+      } else {
+        document.getElementById('userInfo').classList.add('hidden');
+        document.getElementById('adminBtn').style.display = 'none';
+      }
+    }
+
+    function clearAuth() {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      authToken = null;
+      currentUser = null;
+      updateUIForAuth();
+      showAuthModal();
+    }
+
+    function showAuthModal() {
+      document.getElementById('authModal').classList.remove('hidden');
+    }
+
+    async function handleAuth(e) {
+      e.preventDefault();
+      
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      
+      if (!email || !password) {
+        showStatus('error', 'Please fill in all required fields');
+        return;
+      }
+      
+      const submitBtn = document.getElementById('authSubmitBtn');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Logging in...';
+      
+      try {
+        console.log('Sending login request:', { email });
+        
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ email, password })
+        });
+        
+        if (!resp.ok) {
+          const error = await resp.json().catch(() => ({detail: resp.statusText}));
+          const errorMsg = error.detail || error.message || 'Authentication failed';
+          console.error('Auth error:', errorMsg, error);
+          throw new Error(errorMsg);
+        }
+        
+        const data = await resp.json();
+        console.log('Auth response:', data);
+        console.log('User from response:', data.user);
+        console.log('User role from response:', data.user?.role);
+        
+        // Store auth data
+        localStorage.setItem('auth_token', data.access_token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        authToken = data.access_token;
+        currentUser = data.user;
+        
+        console.log('Auth state updated:', { authToken: authToken ? 'present' : 'missing', currentUser });
+        console.log('Current user role:', currentUser?.role);
+        
+        updateUIForAuth();
+        showStatus('success', `Welcome, ${data.user.name}!`);
+        
+        // Hide auth modal
+        const authModal = document.getElementById('authModal');
+        if (authModal) {
+          authModal.classList.add('hidden');
+          console.log('Auth modal hidden');
+        }
+        
+        // Load app data
+        console.log('Loading app data...');
+        await loadLocations();
+        await loadReportTypes();
+        await loadSavedReports();
+        console.log('App data loaded');
+        
+      } catch (err) {
+        console.error('Auth error details:', err);
+        showStatus('error', `Error: ${err.message}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      }
+    }
+
+    function logout() {
+      clearAuth();
+      showStatus('success', 'Logged out successfully');
+      // Clear any user-specific data
+      loadSavedReports();
+    }
+
+    async function loadAdminUsers() {
+      if (!authToken || currentUser?.role !== 'admin') {
+        showStatus('error', 'Admin access required');
+        return;
+      }
+
+      const usersList = document.getElementById('usersList');
+      usersList.innerHTML = '<div style="text-align: center; padding: 2rem; color: #6B7280;">Loading users...</div>';
+
+      try {
+        const resp = await fetch('/api/admin/users', {
+          headers: getAuthHeaders()
+        });
+
+        if (resp.status === 403) {
+          showStatus('error', 'Admin access required');
+          document.getElementById('adminModal').classList.add('hidden');
           return;
         }
 
-        const allId = 'loc_all';
-        const allLabel = document.createElement('label');
-        const allCheckbox = document.createElement('input');
-        allCheckbox.type = 'checkbox';
-        allCheckbox.id = allId;
-        allCheckbox.checked = true;
-        allLabel.appendChild(allCheckbox);
-        allLabel.appendChild(document.createTextNode('All active locations'));
-        locationsContainer.innerHTML = '';
-        locationsContainer.appendChild(allLabel);
+        if (!resp.ok) {
+          throw new Error('Failed to load users');
+        }
 
-        locations.forEach(loc => {
-          const label = document.createElement('label');
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.value = loc.restaurantGuid;
-          checkbox.checked = true;
-          label.appendChild(checkbox);
-          label.appendChild(
-            document.createTextNode(' ' + (loc.restaurantName || loc.restaurantGuid))
-          );
-          locationsContainer.appendChild(label);
+        const users = await resp.json();
+        
+        if (users.length === 0) {
+          usersList.innerHTML = '<div style="text-align: center; padding: 2rem; color: #6B7280;">No users found</div>';
+          return;
+        }
+
+        usersList.innerHTML = `
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: #F3F4F6; border-bottom: 2px solid #E5E7EB;">
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Name</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Email</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Role</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Created</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Last Login</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users.map(user => `
+                <tr style="border-bottom: 1px solid #E5E7EB;">
+                  <td style="padding: 0.75rem;">${user.name}</td>
+                  <td style="padding: 0.75rem;">${user.email}</td>
+                  <td style="padding: 0.75rem;">
+                    <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; 
+                      background: ${user.role === 'admin' ? '#C41E3A' : '#6B7280'}; 
+                      color: white;">
+                      ${user.role === 'admin' ? 'Admin' : 'User'}
+                    </span>
+                  </td>
+                  <td style="padding: 0.75rem; color: #6B7280; font-size: 0.9rem;">
+                    ${new Date(user.createdAt).toLocaleDateString()}
+                  </td>
+                  <td style="padding: 0.75rem; color: #6B7280; font-size: 0.9rem;">
+                    ${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
+                  </td>
+                  <td style="padding: 0.75rem;">
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                      ${user.id !== currentUser.id ? `
+                        <button class="btn-secondary toggle-role-btn" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;" 
+                          data-user-id="${user.id}" data-new-role="${user.role === 'admin' ? 'user' : 'admin'}">
+                          ${user.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
+                        </button>
+                        <button class="btn-secondary delete-user-btn" style="font-size: 0.85rem; padding: 0.4rem 0.8rem; background: #DC2626; color: white; border-color: #DC2626;" 
+                          data-user-id="${user.id}" data-user-name="${user.name.replace(/"/g, '&quot;')}" data-user-email="${user.email.replace(/"/g, '&quot;')}">
+                          Delete
+                        </button>
+                      ` : '<span style="color: #6B7280; font-size: 0.85rem;">(You)</span>'}
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+        
+        // Attach event listeners to the buttons
+        usersList.querySelectorAll('.toggle-role-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const userId = btn.getAttribute('data-user-id');
+            const newRole = btn.getAttribute('data-new-role');
+            toggleUserRole(userId, newRole);
+          });
         });
-
-        allCheckbox.addEventListener('change', () => {
-          const checked = allCheckbox.checked;
-          const boxes = locationsContainer.querySelectorAll('input[type="checkbox"]:not(#' + allId + ')');
-          boxes.forEach(cb => cb.checked = checked);
+        
+        usersList.querySelectorAll('.delete-user-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const userId = btn.getAttribute('data-user-id');
+            const userName = btn.getAttribute('data-user-name');
+            const userEmail = btn.getAttribute('data-user-email');
+            deleteUser(userId, userName, userEmail);
+          });
         });
       } catch (err) {
-        console.error(err);
-        locationsContainer.textContent = 'Error loading locations.';
+        console.error('Error loading users:', err);
+        usersList.innerHTML = `<div style="text-align: center; padding: 2rem; color: #DC2626;">Error loading users: ${err.message}</div>`;
       }
+    }
+
+    async function toggleUserRole(userId, newRole) {
+      if (!confirm(`Are you sure you want to change this user's role to ${newRole}?`)) {
+        return;
+      }
+
+      try {
+        const resp = await fetch(`/api/admin/users/${userId}/role`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ role: newRole })
+        });
+
+        if (!resp.ok) {
+          const error = await resp.json().catch(() => ({detail: resp.statusText}));
+          throw new Error(error.detail || 'Failed to update user role');
+        }
+
+        showStatus('success', `User role updated to ${newRole}`);
+        loadAdminUsers(); // Refresh the list
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
+
+    async function deleteUser(userId, userName, userEmail) {
+      if (!confirm(`Are you sure you want to delete user "${userName}" (${userEmail})? This action cannot be undone.`)) {
+        return;
+      }
+
+      try {
+        const resp = await fetch(`/api/admin/users/${userId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+
+        if (!resp.ok) {
+          const error = await resp.json().catch(() => ({detail: resp.statusText}));
+          throw new Error(error.detail || 'Failed to delete user');
+        }
+
+        showStatus('success', `User ${userEmail} deleted successfully`);
+        loadAdminUsers(); // Refresh the list
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
+
+    async function createUser(e) {
+      e.preventDefault();
+
+      if (!authToken || currentUser?.role !== 'admin') {
+        showStatus('error', 'Admin access required');
+        return;
+      }
+
+      const name = document.getElementById('newUserName').value.trim();
+      const email = document.getElementById('newUserEmail').value.trim();
+      const password = document.getElementById('newUserPassword').value;
+      const role = document.getElementById('newUserRole').value;
+
+      if (!name || !email || !password) {
+        showStatus('error', 'Please fill in all required fields');
+        return;
+      }
+
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating...';
+
+      try {
+        const resp = await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ name, email, password, role })
+        });
+
+        if (!resp.ok) {
+          const error = await resp.json().catch(() => ({detail: resp.statusText}));
+          throw new Error(error.detail || 'Failed to create user');
+        }
+
+        showStatus('success', `User ${email} created successfully!`);
+        document.getElementById('createUserForm').reset();
+        document.getElementById('createUserModal').classList.add('hidden');
+        loadAdminUsers(); // Refresh the list
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      }
+    }
+
+    // Helper to add auth header to fetch requests
+    function getAuthHeaders() {
+      const headers = {'Content-Type': 'application/json'};
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      return headers;
+    }
+
+    function setupEventListeners() {
+      // Auth event listeners
+      document.getElementById('closeAuthModal').addEventListener('click', (e) => {
+        if (!currentUser) {
+          // Don't allow closing if not authenticated
+          e.preventDefault();
+          e.stopPropagation();
+          showStatus('error', 'Please login to continue');
+          return false;
+        }
+        document.getElementById('authModal').classList.add('hidden');
+      });
+      document.getElementById('cancelAuthBtn').addEventListener('click', () => {
+        if (!currentUser) {
+          showStatus('error', 'Please login to continue');
+          return;
+        }
+        document.getElementById('authModal').classList.add('hidden');
+      });
+      document.getElementById('authForm').addEventListener('submit', handleAuth);
+      document.getElementById('logoutBtn').addEventListener('click', logout);
+      document.getElementById('adminBtn').addEventListener('click', () => {
+        document.getElementById('adminModal').classList.remove('hidden');
+        loadAdminUsers();
+      });
+      document.getElementById('closeAdminModal').addEventListener('click', () => {
+        document.getElementById('adminModal').classList.add('hidden');
+      });
+      document.getElementById('createUserBtn').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.remove('hidden');
+      });
+      document.getElementById('closeCreateUserModal').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.add('hidden');
+      });
+      document.getElementById('cancelCreateUserBtn').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.add('hidden');
+      });
+      document.getElementById('createUserForm').addEventListener('submit', createUser);
+      
+      document.getElementById('newReportBtn').addEventListener('click', newReport);
+      document.getElementById('runReportBtn').addEventListener('click', runReport);
+      document.getElementById('saveReportBtn').addEventListener('click', saveReport);
+      document.getElementById('updateReportBtn').addEventListener('click', updateReport);
+      document.getElementById('deleteReportBtn').addEventListener('click', deleteReport);
+      document.getElementById('exportBtn').addEventListener('click', exportCSV);
+      document.getElementById('helpBtn').addEventListener('click', () => {
+        document.getElementById('helpModal').classList.remove('hidden');
+      });
+      document.getElementById('closeHelpModal').addEventListener('click', () => {
+        document.getElementById('helpModal').classList.add('hidden');
+      });
+      document.getElementById('cancelHelpBtn').addEventListener('click', () => {
+        document.getElementById('helpModal').classList.add('hidden');
+      });
+      document.getElementById('helpForm').addEventListener('submit', submitHelpTicket);
+      
+      document.getElementById('reportType').addEventListener('change', updateFilterByOptions);
+      document.getElementById('filterByType').addEventListener('change', updateFilterByOptions);
+      document.getElementById('dateRangeType').addEventListener('change', toggleCustomDateRange);
+      document.getElementById('selectAllLocations').addEventListener('change', toggleAllLocations);
+    }
+
+    function toggleCustomDateRange() {
+      const type = document.getElementById('dateRangeType').value;
+      document.getElementById('customDateRange').classList.toggle('hidden', type !== 'custom');
+    }
+
+    function toggleAllLocations() {
+      const checked = document.getElementById('selectAllLocations').checked;
+      document.querySelectorAll('.location-checkbox').forEach(cb => cb.checked = checked);
+      updateLocationCount();
+    }
+
+    function newReport() {
+      currentReportId = null;
+      document.getElementById('builderTitle').textContent = 'Report Builder - New Report';
+      document.getElementById('reportName').value = '';
+      document.getElementById('reportDescription').value = '';
+      document.getElementById('reportType').value = 'metrics';
+      document.getElementById('dateRangeType').value = 'last_7_days';
+      document.getElementById('selectAllLocations').checked = true;
+      toggleAllLocations();
+      updateFilterByOptions();
+      toggleCustomDateRange();
+      
+      // Update buttons
+      document.getElementById('saveReportBtn').classList.remove('hidden');
+      document.getElementById('updateReportBtn').classList.add('hidden');
+      document.getElementById('deleteReportBtn').classList.add('hidden');
+      
+      // Clear active state
+      document.querySelectorAll('.report-item').forEach(item => item.classList.remove('active'));
+      
+      showStatus('info', 'Creating new report');
+      updateLocationCount();
+    }
+
+    function loadReport(reportId) {
+      const report = savedReports.find(r => r.id === reportId);
+      if (!report) return;
+      
+      currentReportId = reportId;
+      document.getElementById('builderTitle').textContent = `Report Builder - ${report.name}`;
+      document.getElementById('reportName').value = report.name;
+      document.getElementById('reportDescription').value = report.description || '';
+      document.getElementById('reportType').value = report.config.reportType;
+      document.getElementById('dateRangeType').value = report.config.dateRangeType;
+      
+      if (report.config.customStartDate) {
+        document.getElementById('customStartDate').value = report.config.customStartDate;
+      }
+      if (report.config.customEndDate) {
+        document.getElementById('customEndDate').value = report.config.customEndDate;
+      }
+      
+      updateFilterByOptions();
+      toggleCustomDateRange();
+      
+      // Set locations
+      if (report.config.restaurantIds && report.config.restaurantIds.length > 0) {
+        document.getElementById('selectAllLocations').checked = false;
+        document.querySelectorAll('.location-checkbox').forEach(cb => {
+          cb.checked = report.config.restaurantIds.includes(cb.value);
+        });
+      } else {
+        document.getElementById('selectAllLocations').checked = true;
+        toggleAllLocations();
+      }
+      
+      updateLocationCount();
+      
+      // Set filter by and item tags
+      setTimeout(() => {
+        // Set filter by type
+        if (report.config.reportType === 'menu' && report.config.itemTags && report.config.itemTags.length > 0) {
+          document.getElementById('filterByType').value = 'itemTags';
+          updateFilterByOptions();
+        } else {
+          document.getElementById('filterByType').value = '';
+          updateFilterByOptions();
+        }
+        
+        // Restore item tags if menu report
+        if (report.config.reportType === 'menu' && report.config.itemTags) {
+          document.querySelectorAll('.itemtag-checkbox').forEach(cb => {
+            cb.checked = report.config.itemTags.includes(cb.value);
+          });
+          updateItemTagCount();
+        }
+      }, 100);
+      
+      // Update buttons
+      document.getElementById('saveReportBtn').classList.add('hidden');
+      document.getElementById('updateReportBtn').classList.remove('hidden');
+      document.getElementById('deleteReportBtn').classList.remove('hidden');
+      
+      // Highlight active report
+      document.querySelectorAll('.report-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.id === reportId);
+      });
+      
+      showStatus('success', `Loaded report: ${report.name}`);
     }
 
     async function runReport() {
-      const start = document.getElementById('startDate').value;
-      const end = document.getElementById('endDate').value;
-      if (!start || !end) {
-        alert('Please select both start and end dates.');
-        return;
-      }
-
-      const checkboxes = locationsContainer.querySelectorAll('input[type="checkbox"]');
-      const selected = [];
-      checkboxes.forEach(cb => {
-        if (cb.id !== 'loc_all' && cb.checked && cb.value && cb.value.trim()) {
-          selected.push(cb.value);
-        }
-      });
-
-      // If no locations selected, show error
-      if (selected.length === 0) {
-        statusEl.textContent = 'Error: Please select at least one location.';
-        statusEl.className = 'status error';
-        return;
-      }
-
-      const params = new URLSearchParams();
-      params.set('start_date', start);
-      params.set('end_date', end);
-      selected.forEach(id => params.append('restaurant_ids', id));
-
-      runBtn.disabled = true;
-      statusEl.textContent = 'Running report...';
-      statusEl.className = 'status';
-
+      const config = getReportConfig();
+      if (!validateConfig(config)) return;
+      
+      // Show loading overlay
+      document.getElementById('loadingOverlay').classList.remove('hidden');
+      showStatus('info', 'Running report...');
+      document.getElementById('runReportBtn').disabled = true;
+      
       try {
-        const resp = await fetch('/sales/net?' + params.toString());
+        const resp = await fetch('/api/reports/run', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(config)
+        });
+        
         if (!resp.ok) {
-          let errorText = await resp.text();
-          // Try to parse as JSON to get the detail message
-          try {
-            const errorJson = JSON.parse(errorText);
-            errorText = errorJson.detail || errorText;
-          } catch (e) {
-            // Not JSON, use as-is
-          }
-          throw new Error(errorText || ('HTTP ' + resp.status));
+          const error = await resp.text();
+          throw new Error(error);
         }
-        const data = await resp.json();
-        currentData = data;
-        currentDateRange = { start: start, end: end };
-        renderResults(data);
-        statusEl.textContent = 'Report complete.';
-        statusEl.className = 'status success';
+        
+        currentResults = await resp.json();
+        console.log('Report results:', currentResults); // Debug
+        renderResults(currentResults, config);
+        // Handle both old format (array) and new format (pivot object)
+        const rowCount = Array.isArray(currentResults) 
+          ? currentResults.length 
+          : (currentResults.pivotTable?.length || 0) + (currentResults.totals?.length || 0);
+        showStatus('success', `Report complete: ${rowCount} rows`);
       } catch (err) {
-        console.error('Error running report:', err);
-        // Show user-friendly error message
-        let errorMsg = err.message || 'Unknown error';
-        
-        // Handle specific error cases
-        if (errorMsg.includes('429') || errorMsg.includes('rate limit') || errorMsg.includes('Too Many Requests')) {
-          errorMsg = 'Toast API rate limit exceeded. Please wait a few minutes before trying again. (Limits: 10 requests/hour for custom ranges)';
-          statusEl.className = 'status error';
-        } else if (errorMsg.includes('401') || errorMsg.includes('403')) {
-          errorMsg = 'Authentication error. Please check your Toast API credentials.';
-          statusEl.className = 'status error';
-        } else if (errorMsg.includes('504') || errorMsg.includes('timeout') || errorMsg.includes('Timed out')) {
-          errorMsg = 'Request timed out. Try narrowing the date range or selecting fewer locations.';
-          statusEl.className = 'status error';
-        } else {
-          statusEl.className = 'status error';
-          // Truncate very long error messages
-          if (errorMsg.length > 300) {
-            errorMsg = errorMsg.substring(0, 300) + '...';
-          }
-        }
-        
-        statusEl.textContent = 'Error: ' + errorMsg;
+        showStatus('error', `Error: ${err.message}`);
       } finally {
-        runBtn.disabled = false;
+        // Hide loading overlay
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('runReportBtn').disabled = false;
       }
     }
 
-    function renderResults(rows) {
-      resultsBody.innerHTML = '';
-      const headerRow = resultsHead && resultsHead.querySelector ? resultsHead.querySelector('tr') : null;
-      
-      if (!Array.isArray(rows) || rows.length === 0) {
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
-        td.colSpan = 100;
-        td.style.textAlign = 'center';
-        td.style.opacity = '0.7';
-        td.textContent = 'No data found for that range.';
-        tr.appendChild(td);
-        resultsBody.appendChild(tr);
-        summaryEl.textContent = '';
-        // Clear date headers
-        if (headerRow) {
-          while (headerRow.children.length > 1) {
-            headerRow.removeChild(headerRow.lastChild);
-          }
-        }
-        // Hide download button
-        if (downloadBtn) {
-          downloadBtn.style.display = 'none';
-        }
+    async function saveReport() {
+      if (!authToken) {
+        showStatus('error', 'Please login to save reports');
+        showAuthModal();
         return;
       }
-
-      // Show download button
-      if (downloadBtn) {
-        downloadBtn.style.display = 'inline-block';
-      }
-
-      // Transform data into pivot table format
-      // Build a map: location -> date -> amount
-      const dataMap = {};
-      const dates = new Set();
-      let total = 0;
-
-      rows.forEach(row => {
-        const locName = row.restaurantName || row.restaurantGuid;
-        const date = row.businessDate;
-        const amount = Number(row.netSalesAmount) || 0;
-        
-        if (!dataMap[locName]) {
-          dataMap[locName] = {};
-        }
-        dataMap[locName][date] = amount;
-        dates.add(date);
-        total += amount;
-      });
-
-      // Sort dates
-      const sortedDates = Array.from(dates).sort();
-
-      // Build header row with dates
-      // Clear existing date headers (keep Location header)
-      if (headerRow) {
-        while (headerRow.children.length > 1) {
-          headerRow.removeChild(headerRow.lastChild);
-        }
+      
+      const name = document.getElementById('reportName').value.trim();
+      
+      if (!name) {
+        showStatus('error', 'Please enter a report name');
+        return;
       }
       
-      // Add date columns
-      if (headerRow) {
-        sortedDates.forEach(date => {
-          const th = document.createElement('th');
-          // Format date as M/D for display
-          const dateObj = new Date(date + 'T00:00:00');
-          const month = dateObj.getMonth() + 1;
-          const day = dateObj.getDate();
-          th.textContent = `${month}/${day}`;
-          th.title = date; // Full date on hover
-          headerRow.appendChild(th);
-        });
-
-        // Add a total column
-        const totalTh = document.createElement('th');
-        totalTh.textContent = 'Total';
-        totalTh.style.fontWeight = 'bold';
-        headerRow.appendChild(totalTh);
-      }
-
-      // Build data rows - one per location
-      const sortedLocations = Object.keys(dataMap).sort();
+      const config = getReportConfig();
       
-      sortedLocations.forEach(locName => {
-        const tr = document.createElement('tr');
-        
-        // Location name (sticky first column)
-        const locCell = document.createElement('td');
-        locCell.textContent = locName;
-        locCell.style.position = 'sticky';
-        locCell.style.left = '0';
-        locCell.style.zIndex = '1';
-        locCell.style.background = '#151a2e';
-        tr.appendChild(locCell);
-
-        // Date columns
-        let locationTotal = 0;
-        sortedDates.forEach(date => {
-          const td = document.createElement('td');
-          const amount = dataMap[locName][date] || 0;
-          locationTotal += amount;
-          td.textContent = amount > 0 ? `$${amount.toFixed(2)}` : '-';
-          td.style.textAlign = 'right';
-          if (amount === 0) {
-            td.style.opacity = '0.4';
-          }
-          tr.appendChild(td);
+      try {
+        const resp = await fetch('/api/saved-reports', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            name,
+            description: document.getElementById('reportDescription').value.trim(),
+            config
+          })
         });
+        
+        if (!resp.ok) {
+          const error = await resp.text();
+          throw new Error(error);
+        }
+        
+        await loadSavedReports();
+        showStatus('success', 'Report saved successfully!');
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
 
-        // Total column
-        const totalCell = document.createElement('td');
-        totalCell.textContent = `$${locationTotal.toFixed(2)}`;
-        totalCell.style.textAlign = 'right';
-        totalCell.style.fontWeight = 'bold';
-        totalCell.style.background = '#171c32';
-        tr.appendChild(totalCell);
+    async function updateReport() {
+      if (!currentReportId || !authToken) {
+        showStatus('error', 'Please login to update reports');
+        return;
+      }
+      
+      const name = document.getElementById('reportName').value.trim();
+      
+      if (!name) {
+        showStatus('error', 'Please enter a report name');
+        return;
+      }
+      
+      const config = getReportConfig();
+      
+      try {
+        const resp = await fetch(`/api/saved-reports/${currentReportId}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            name,
+            description: document.getElementById('reportDescription').value.trim(),
+            config
+          })
+        });
+        
+        if (!resp.ok) {
+          const error = await resp.text();
+          throw new Error(error);
+        }
+        
+        await loadSavedReports();
+        showStatus('success', 'Report updated successfully!');
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
 
-        resultsBody.appendChild(tr);
-      });
+    async function deleteReport() {
+      if (!currentReportId || !authToken) {
+        showStatus('error', 'Please login to delete reports');
+        return;
+      }
+      
+      if (!confirm('Are you sure you want to delete this report?')) return;
+      
+      try {
+        const resp = await fetch(`/api/saved-reports/${currentReportId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        
+        if (!resp.ok) {
+          const error = await resp.text();
+          throw new Error(error);
+        }
+        
+        await loadSavedReports();
+        newReport();
+        showStatus('success', 'Report deleted successfully!');
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
 
+    function getReportConfig() {
+      const selectedLocations = Array.from(document.querySelectorAll('.location-checkbox:checked')).map(cb => cb.value);
+      const selectedItemTags = Array.from(document.querySelectorAll('.itemtag-checkbox:checked')).map(cb => cb.value);
+      
+      return {
+        reportType: document.getElementById('reportType').value,
+        dateRangeType: document.getElementById('dateRangeType').value,
+        customStartDate: document.getElementById('customStartDate').value || null,
+        customEndDate: document.getElementById('customEndDate').value || null,
+        restaurantIds: selectedLocations,
+        groupBy: [], // No longer used - removed from UI
+        itemTags: selectedItemTags
+      };
+    }
+
+    function validateConfig(config) {
+      if (config.dateRangeType === 'custom' && (!config.customStartDate || !config.customEndDate)) {
+        showStatus('error', 'Please select custom date range');
+        return false;
+      }
+      if (config.restaurantIds.length === 0) {
+        showStatus('error', 'Please select at least one location');
+        return false;
+      }
+      return true;
+    }
+
+    function renderResults(results, config) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      
+      // Check if this is the new pivot format (object with pivotTable and totals)
+      if (results && typeof results === 'object' && !Array.isArray(results) && 
+          results.hasOwnProperty('pivotTable') && results.hasOwnProperty('totals')) {
+        console.log('Detected pivot format, rendering pivot table');
+        renderPivotResults(results, config);
+        return;
+      }
+      
+      console.log('Using old format, results type:', typeof results, 'isArray:', Array.isArray(results));
+      
+      // Old format: array of rows
+      if (!results || !Array.isArray(results) || results.length === 0) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td colspan="100" class="empty-state">No data found</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        return;
+      }
+      
+      // Build table headers dynamically based on result keys
+      const keys = Object.keys(results[0]);
+      head.innerHTML = `<tr>${keys.map(k => `<th>${formatHeader(k)}</th>`).join('')}</tr>`;
+      
+      // Build table rows
+      body.innerHTML = results.map(row => `
+        <tr>
+          ${keys.map(k => `<td>${formatCell(k, row[k])}</td>`).join('')}
+        </tr>
+      `).join('');
+      
+      // Show export button
+      document.getElementById('exportBtn').classList.remove('hidden');
+      
       // Update summary
-      const locCount = sortedLocations.length;
-      const dateCount = sortedDates.length;
-      summaryEl.textContent =
-        `Total net sales: $${total.toFixed(2)} across ${locCount} locations and ${dateCount} days.`;
+      document.getElementById('resultsSummary').textContent = `${results.length} rows`;
     }
 
-    // Helper function to escape CSV values
-    function escapeCSV(value) {
-      if (value === null || value === undefined) return '';
-      const str = String(value);
-      // If contains comma, quote, or newline, wrap in quotes and escape quotes
-      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return '"' + str.replace(/"/g, '""') + '"';
-      }
-      return str;
-    }
-
-    function downloadCSV() {
-      if (!currentData || currentData.length === 0) {
-        alert('No data to download. Please run a report first.');
+    function renderPivotResults(results, config) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      const pivotTable = results.pivotTable || [];
+      const totals = results.totals || [];
+      
+      if (pivotTable.length === 0 && totals.length === 0) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td colspan="100" class="empty-state">No data found</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        document.getElementById('resultsSummary').textContent = '0 rows';
         return;
       }
-
-      // Build the same pivot structure as the table
-      const dataMap = {};
-      const dates = new Set();
-
-      currentData.forEach(row => {
-        const locName = row.restaurantName || row.restaurantGuid;
-        const date = row.businessDate;
-        const amount = Number(row.netSalesAmount) || 0;
+      
+      // Detect report type: metrics (has dates) vs menu (has tags)
+      const isMetricsReport = pivotTable.length > 0 && 
+        totals.length > 0 && 
+        totals[0].hasOwnProperty('date') && 
+        totals[0].hasOwnProperty('totalNetSales');
+      
+      const columnNames = pivotTable.length > 0 ? Object.keys(pivotTable[0]).filter(k => k !== 'restaurantName') : [];
+      // Sort dates properly (YYYYMMDD format) or alphabetically for tags
+      const sortedColumns = isMetricsReport 
+        ? columnNames.sort((a, b) => {
+            // If both are date strings (8 digits), sort numerically
+            if (/^\d{8}$/.test(a) && /^\d{8}$/.test(b)) {
+              return a.localeCompare(b);
+            }
+            return a.localeCompare(b);
+          })
+        : columnNames.sort();
+      
+      let html = '';
+      
+      // Section 1: Totals at the top (expandable) - spreadsheet style
+      if (totals.length > 0 && pivotTable.length > 0) {
+        const expandId = 'expand-locations-' + Date.now();
         
-        if (!dataMap[locName]) {
-          dataMap[locName] = {};
+        if (isMetricsReport) {
+          // For metrics: show date totals with expandable locations
+          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">Location</th>';
+          sortedColumns.forEach(col => {
+            html += `<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">${formatDateHeader(col)}</th>`;
+          });
+          html += '</tr>';
+          
+          // Totals row (expandable) - this is the "All Locations Totals:" row
+          html += '<tr class="expandable-header" data-expand-id="' + expandId + '" style="cursor: pointer; background: #EFF6FF; border: 1px solid #BFDBFE;">';
+          html += '<td style="padding: 0.75rem; font-weight: 700; border: 1px solid #BFDBFE;">';
+          html += '<span class="expand-icon" style="display: inline-block; width: 20px; text-align: center; margin-right: 0.5rem;">▶</span> ';
+          html += 'All Locations Totals:';
+          html += '</td>';
+          sortedColumns.forEach(col => {
+            const totalForDate = totals.find(t => t.date === col);
+            const totalValue = totalForDate ? totalForDate.totalNetSales : 0;
+            html += `<td style="text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #BFDBFE;">${formatCell('Sales', totalValue)}</td>`;
+          });
+          html += '</tr>';
+          
+          // Location rows (initially hidden)
+          pivotTable.forEach((row, index) => {
+            html += '<tr class="location-row" data-expand-id="' + expandId + '" style="display: none; background: white;">';
+            html += '<td style="padding: 0.5rem 0.75rem 0.5rem 2.5rem; border: 1px solid #E5E7EB;">' + (row.restaurantName || '') + '</td>';
+            sortedColumns.forEach(col => {
+              const value = row[col];
+              const displayValue = (value !== null && value !== undefined) ? value : 0;
+              html += `<td style="padding: 0.5rem 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('Sales', displayValue)}</td>`;
+            });
+            html += '</tr>';
+          });
+        } else {
+          // For menu: show tag totals with expandable locations
+          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">Location</th>';
+          sortedColumns.forEach(col => {
+            html += `<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">${col}</th>`;
+          });
+          html += '</tr>';
+          
+          // Calculate totals for each tag
+          const tagTotals = {};
+          sortedColumns.forEach(tagName => {
+            tagTotals[tagName] = totals.find(t => t.itemTagName === tagName)?.totalQty || 0;
+          });
+          
+          // Totals row (expandable) - this is the "All Locations Totals:" row
+          html += '<tr class="expandable-header" data-expand-id="' + expandId + '" style="cursor: pointer; background: #EFF6FF; border: 1px solid #BFDBFE;">';
+          html += '<td style="padding: 0.75rem; font-weight: 700; border: 1px solid #BFDBFE;">';
+          html += '<span class="expand-icon" style="display: inline-block; width: 20px; text-align: center; margin-right: 0.5rem;">▶</span> ';
+          html += 'All Locations Totals:';
+          html += '</td>';
+          sortedColumns.forEach(tagName => {
+            html += `<td style="text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #BFDBFE;">${formatCell('quantity', tagTotals[tagName])}</td>`;
+          });
+          html += '</tr>';
+          
+          // Location rows (initially hidden)
+          pivotTable.forEach((row, index) => {
+            html += '<tr class="location-row" data-expand-id="' + expandId + '" style="display: none; background: white;">';
+            html += '<td style="padding: 0.5rem 0.75rem 0.5rem 2.5rem; border: 1px solid #E5E7EB;">' + (row.restaurantName || '') + '</td>';
+            sortedColumns.forEach(tagName => {
+              const value = row[tagName];
+              const displayValue = (value !== null && value !== undefined) ? value : 0;
+              html += `<td style="padding: 0.5rem 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('quantity', displayValue)}</td>`;
+            });
+            html += '</tr>';
+          });
         }
-        dataMap[locName][date] = amount;
-        dates.add(date);
-      });
+      } else if (totals.length > 0) {
+        // No locations, just show totals
+        if (isMetricsReport) {
+          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem;">Date</th>';
+          html += '<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem;">Total Net Sales</th></tr>';
+          totals.forEach(row => {
+            html += '<tr>';
+            html += `<td style="padding: 0.75rem; border: 1px solid #E5E7EB;"><strong>${formatDateHeader(row.date || '')}</strong></td>`;
+            html += `<td style="padding: 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('Sales', row.totalNetSales || 0)}</td>`;
+            html += '</tr>';
+          });
+        } else {
+          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem;">Item Tag Name</th>';
+          html += '<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem;">Total Qty</th></tr>';
+          totals.forEach(row => {
+            html += '<tr>';
+            html += `<td style="padding: 0.75rem; border: 1px solid #E5E7EB;"><strong>${row.itemTagName || ''}</strong></td>`;
+            html += `<td style="padding: 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('quantity', row.totalQty || 0)}</td>`;
+            html += '</tr>';
+          });
+        }
+      }
+      
+      // Section 3: Item Breakdown (for menu reports only)
+      if (!isMetricsReport && results.itemBreakdown && results.itemBreakdown.length > 0) {
+        // Debug: Log item breakdown data
+        console.log('Item Breakdown Data:', results.itemBreakdown);
+        const missingGuids = ['6d02e1aa-41c4-489e-bd72-90d12d79edf2', '99746810-e792-4e7a-b99f-0e30b470a2bd'];
+        const foundItems = results.itemBreakdown.filter(item => 
+          missingGuids.includes(item.menuItemGuid) || 
+          (item.menuItemName && item.menuItemName.includes('OLO Pairing Choice'))
+        );
+        if (foundItems.length > 0) {
+          console.log('Found items with missing GUIDs or OLO Pairing Choice:', foundItems);
+        } else {
+          console.log('Items with GUIDs 6d02e1aa-41c4-489e-bd72-90d12d79edf2 or 99746810-e792-4e7a-b99f-0e30b470a2bd NOT found in itemBreakdown');
+          console.log('Total items in breakdown:', results.itemBreakdown.length);
+          console.log('Sample items:', results.itemBreakdown.slice(0, 5));
+        }
+        
+        html += '<tr><td colspan="100" style="height: 20px; border: none;"></td></tr>'; // Spacer
+        html += '<tr><th colspan="3" style="background: #059669; color: white; text-align: center; font-weight: 700;">ITEM BREAKDOWN BY TAG</th></tr>';
+        html += '<tr><th>Item Tag Name</th><th>Item Name</th><th>Total Qty</th></tr>';
+        
+        // Group by tag name
+        const breakdownByTag = {};
+        results.itemBreakdown.forEach(item => {
+          const tagName = item.itemTagName || '';
+          if (!breakdownByTag[tagName]) {
+            breakdownByTag[tagName] = [];
+          }
+          breakdownByTag[tagName].push(item);
+        });
+        
+        // Render each tag's items
+        Object.keys(breakdownByTag).sort().forEach(tagName => {
+          breakdownByTag[tagName].forEach(item => {
+            html += '<tr>';
+            html += `<td><strong>${tagName}</strong></td>`;
+            html += `<td>${item.menuItemName || 'Unknown Item'}</td>`;
+            html += `<td>${formatCell('quantity', item.totalQty || 0)}</td>`;
+            html += '</tr>';
+          });
+        });
+      }
+      
+      head.innerHTML = '';
+      body.innerHTML = html;
+      
+      // Add click handlers for expandable rows
+      setTimeout(() => {
+        body.querySelectorAll('.expandable-header').forEach(header => {
+          header.addEventListener('click', function() {
+            const expandId = this.getAttribute('data-expand-id');
+            const locationRows = body.querySelectorAll(`.location-row[data-expand-id="${expandId}"]`);
+            const icon = this.querySelector('.expand-icon');
+            const isExpanded = locationRows[0] && locationRows[0].style.display !== 'none';
+            
+            locationRows.forEach(row => {
+              row.style.display = isExpanded ? 'none' : 'table-row';
+            });
+            
+            icon.textContent = isExpanded ? '▶' : '▼';
+          });
+        });
+      }, 100);
+      
+      // Show export button
+      document.getElementById('exportBtn').classList.remove('hidden');
+      
+      // Update summary
+      if (isMetricsReport) {
+        document.getElementById('resultsSummary').textContent = `${pivotTable.length} restaurants, ${totals.length} date totals`;
+      } else {
+        document.getElementById('resultsSummary').textContent = `${pivotTable.length} restaurants, ${totals.length} tag totals`;
+      }
+    }
 
-      const sortedDates = Array.from(dates).sort();
-      const sortedLocations = Object.keys(dataMap).sort();
+    function formatDateHeader(dateStr) {
+      // Format YYYYMMDD to MM/DD/YYYY or keep as is if already formatted
+      if (/^\d{8}$/.test(dateStr)) {
+        const year = dateStr.substring(0, 4);
+        const month = dateStr.substring(4, 6);
+        const day = dateStr.substring(6, 8);
+        return `${month}/${day}/${year}`;
+      }
+      return dateStr;
+    }
 
-      // Build CSV content
+    async function submitHelpTicket(e) {
+      e.preventDefault();
+      
+      const name = document.getElementById('helpName').value.trim();
+      const email = document.getElementById('helpEmail').value.trim();
+      const subject = document.getElementById('helpSubject').value.trim();
+      const priority = parseInt(document.getElementById('helpPriority').value);
+      const description = document.getElementById('helpDescription').value.trim();
+      
+      if (!name || !email || !subject || !description) {
+        showStatus('error', 'Please fill in all required fields');
+        return;
+      }
+      
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+      
+      try {
+        const resp = await fetch('/api/help/ticket', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            name,
+            email,
+            subject,
+            priority,
+            description
+          })
+        });
+        
+        if (!resp.ok) {
+          const error = await resp.text();
+          throw new Error(error);
+        }
+        
+        const result = await resp.json();
+        showStatus('success', `Help ticket submitted successfully! Ticket ID: ${result.ticketId || 'N/A'}`);
+        document.getElementById('helpForm').reset();
+        document.getElementById('helpModal').classList.add('hidden');
+      } catch (err) {
+        showStatus('error', `Error submitting ticket: ${err.message}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      }
+    }
+
+    function formatHeader(key) {
+      return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+    }
+
+    function formatCell(key, value) {
+      if (key.includes('Amount') || key.includes('Sales')) {
+        return `$${parseFloat(value || 0).toFixed(2)}`;
+      }
+      if (key === 'businessDate') {
+        return value;
+      }
+      if (key === 'quantity' || key.includes('Qty') || key.includes('quantity')) {
+        return typeof value === 'number' ? value.toLocaleString() : (value || '0');
+      }
+      return value || '';
+    }
+
+    function exportCSV() {
+      if (!currentResults) return;
+      
+      // Handle pivot format
+      if (currentResults.pivotTable && currentResults.totals) {
+        const csvRows = [];
+        const pivotTable = currentResults.pivotTable || [];
+        const totals = currentResults.totals || [];
+        
+        // Detect report type
+        const isMetricsReport = totals.length > 0 && 
+          totals[0].hasOwnProperty('date') && 
+          totals[0].hasOwnProperty('totalNetSales');
+        
+        if (pivotTable.length > 0) {
+          const columnNames = Object.keys(pivotTable[0]).filter(k => k !== 'restaurantName').sort();
+          
+          if (isMetricsReport) {
+            // Metrics report: Restaurants x Dates
+            csvRows.push('Restaurant Location,' + columnNames.map(col => formatDateHeader(col)).join(','));
+            pivotTable.forEach(row => {
+              csvRows.push((row.restaurantName || '') + ',' + columnNames.map(col => (row[col] || 0)).join(','));
+            });
+            
+            // Totals row
+            csvRows.push('TOTALS,' + columnNames.map(col => {
+              const totalRow = totals.find(t => t.date === col);
+              return totalRow ? (totalRow.totalNetSales || 0) : '';
+            }).join(','));
+          } else {
+            // Menu report: Restaurants x Tags
+            csvRows.push(',Item tag Name,' + columnNames.map(() => '').join(',') + ',TOTALS:,' + columnNames.map(() => 'Item Tag Name').join(','));
+            csvRows.push('Restaurant Location,' + columnNames.map(() => '').join(',') + ',,' + columnNames.map(() => 'Total Qty').join(','));
+            
+            pivotTable.forEach(row => {
+              csvRows.push((row.restaurantName || '') + ',' + columnNames.map(tag => (row[tag] || 0)).join(',') + ',,' + columnNames.map(() => '').join(','));
+            });
+            
+            // Totals section
+            totals.forEach(row => {
+              csvRows.push(',,' + columnNames.map(() => '').join(',') + ',,' + (row.itemTagName || '') + ',' + (row.totalQty || 0));
+            });
+            
+            // Item Breakdown section (if available)
+            if (currentResults.itemBreakdown && currentResults.itemBreakdown.length > 0) {
+              csvRows.push(''); // Empty row separator
+              csvRows.push('ITEM BREAKDOWN BY TAG');
+              csvRows.push('Item Tag Name,Item Name,Total Qty');
+              
+              // Group by tag for better organization
+              const breakdownByTag = {};
+              currentResults.itemBreakdown.forEach(item => {
+                const tagName = item.itemTagName || '';
+                if (!breakdownByTag[tagName]) {
+                  breakdownByTag[tagName] = [];
+                }
+                breakdownByTag[tagName].push(item);
+              });
+              
+              // Sort tags alphabetically
+              const sortedTags = Object.keys(breakdownByTag).sort();
+              sortedTags.forEach(tagName => {
+                // Sort items by quantity (descending)
+                const items = breakdownByTag[tagName].sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0));
+                items.forEach(item => {
+                  const itemName = (item.menuItemName || '').replace(/,/g, ';'); // Replace commas to avoid CSV issues
+                  csvRows.push(`${tagName},${itemName},${item.totalQty || 0}`);
+                });
+              });
+            }
+          }
+        }
+        
+        const csv = csvRows.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'report.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+      
+      // Old format: array
+      if (!Array.isArray(currentResults) || currentResults.length === 0) return;
+      
+      const keys = Object.keys(currentResults[0]);
       const csvRows = [];
       
-      // Header row: Location, dates, Total
-      const headerRow = ['Location', ...sortedDates.map(d => {
-        const dateObj = new Date(d + 'T00:00:00');
-        const month = dateObj.getMonth() + 1;
-        const day = dateObj.getDate();
-        return `${month}/${day}/${dateObj.getFullYear()}`;
-      }), 'Total'].map(escapeCSV);
-      csvRows.push(headerRow.join(','));
-
-      // Data rows
-      sortedLocations.forEach(locName => {
-        const row = [escapeCSV(locName)];
-        let locationTotal = 0;
-        
-        sortedDates.forEach(date => {
-          const amount = dataMap[locName][date] || 0;
-          locationTotal += amount;
-          // Format as number (no $ sign for CSV)
-          row.push(amount.toFixed(2));
-        });
-        
-        // Add total
-        row.push(locationTotal.toFixed(2));
-        csvRows.push(row.join(','));
-      });
-
-      // Create CSV content
-      const csvContent = csvRows.join('\n');
+      // Header
+      csvRows.push(keys.map(k => formatHeader(k)).join(','));
       
-      // Create download with BOM for Excel compatibility
+      // Data
+      currentResults.forEach(row => {
+        csvRows.push(keys.map(k => {
+          const value = row[k] || '';
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        }).join(','));
+      });
+      
+      // Download
+      const csvContent = csvRows.join('\n');
       const BOM = '\uFEFF';
       const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       
-      // Generate filename with date range
-      const filename = `net_sales_${currentDateRange.start}_to_${currentDateRange.end}.csv`;
+      const reportName = document.getElementById('reportName').value.trim() || 'report';
+      const filename = `${reportName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}.csv`;
       
       link.setAttribute('href', url);
       link.setAttribute('download', filename);
@@ -547,14 +2141,22 @@
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
-      // Clean up the URL
       setTimeout(() => URL.revokeObjectURL(url), 100);
     }
 
-    runBtn.addEventListener('click', runReport);
-    downloadBtn.addEventListener('click', downloadCSV);
-    loadLocations();
+    function showStatus(type, message) {
+      const status = document.getElementById('builderStatus');
+      status.className = `status ${type}`;
+      status.textContent = message;
+      status.classList.remove('hidden');
+      
+      if (type === 'success') {
+        setTimeout(() => status.classList.add('hidden'), 5000);
+      }
+    }
+
+    // Start
+    init();
   </script>
 </body>
 </html>

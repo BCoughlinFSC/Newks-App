@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 1.5rem;
+      background: #0b1020;
+      color: #f4f4f4;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #262b40;
+    }
+    .header h1 {
+      margin: 0;
+      color: #7ce38b;
+    }
+    .nav {
+      display: flex;
+      gap: 1rem;
+    }
+    .nav a {
+      color: #a0b0d0;
+      text-decoration: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .nav a:hover {
+      background: #1a1f35;
+      color: #7ce38b;
+    }
+    .nav a.active {
+      background: #2a7be4;
+      color: #f4f4f4;
+    }
+    .intro {
+      max-width: 800px;
+      margin-bottom: 2rem;
+      padding: 1.5rem;
+      background: #151a2e;
+      border-radius: 12px;
+      border-left: 4px solid #7ce38b;
+    }
+    .intro p {
+      margin: 0.5rem 0;
+      line-height: 1.6;
+      opacity: 0.9;
+    }
+    .workflow-banner {
+      background: #1a1f35;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 2rem;
+      border-left: 4px solid #2a7be4;
+    }
+    .workflow-banner .workflow-steps {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    .workflow-steps .step {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      background: #151a2e;
+      color: #a0b0d0;
+    }
+    .workflow-steps .step.current {
+      background: #2a7be4;
+      color: #f4f4f4;
+      font-weight: 600;
+    }
+    .workflow-steps .arrow {
+      color: #444b6b;
+      font-weight: bold;
+    }
+    .nav-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-top: 2rem;
+    }
+    .nav-card {
+      background: #151a2e;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+      border: 1px solid #262b40;
+      transition: all 0.2s;
+    }
+    .nav-card:hover {
+      border-color: #7ce38b;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+    .nav-card h3 {
+      margin: 0 0 0.75rem 0;
+      color: #7ce38b;
+      font-size: 1.25rem;
+    }
+    .nav-card p {
+      margin: 0 0 1rem 0;
+      opacity: 0.8;
+      line-height: 1.5;
+      font-size: 0.9rem;
+    }
+    .nav-card .step-badge {
+      display: inline-block;
+      padding: 0.25rem 0.6rem;
+      background: #2a7be4;
+      color: #f4f4f4;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+    .nav-card button {
+      width: 100%;
+      padding: 0.6rem 1rem;
+      background: #2a7be4;
+      border: none;
+      border-radius: 6px;
+      color: #f4f4f4;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .nav-card button:hover {
+      background: #1e5bb8;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Newk's Reporting Platform</h1>
+    <div class="nav">
+      <a href="/home" class="active">Home</a>
+      <a href="/">Net Sales</a>
+      <a href="/menu-sync">Menu Sync</a>
+      <a href="/report-categories">Report Categories</a>
+      <a href="/report-builder">Report Builder</a>
+    </div>
+  </div>
+
+  <div class="intro">
+    <h2 style="margin-top: 0; color: #7ce38b;">Welcome to Newk's Reporting Platform</h2>
+    <p><strong>Custom reporting on top of Toast data, with internal report categories and item mappings.</strong></p>
+    <p>This platform provides a reporting and dimension layer built on Toast's read-only APIs. Create custom report categories, map menu items to those categories, and generate enriched reports with your own business logic.</p>
+  </div>
+
+  <div class="workflow-banner">
+    <div class="workflow-steps">
+      <div class="step current">Step 1: Sync Menu</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 2: Define Categories</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 3: Map Items</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 4: Run Reports</div>
+    </div>
+  </div>
+
+  <div class="nav-cards">
+    <div class="nav-card">
+      <span class="step-badge">Step 1</span>
+      <h3>Toast Menu Sync</h3>
+      <p>Pull the latest menu structure from Toast. This syncs menu items, groups, and modifiers to enable category mapping.</p>
+      <button onclick="window.location.href='/menu-sync'">Open Menu Sync</button>
+    </div>
+
+    <div class="nav-card">
+      <span class="step-badge">Step 2</span>
+      <h3>Report Categories Management</h3>
+      <p>Create and manage your internal report categories (e.g., "Salads", "Sandwiches", "LTO"). These are Newk's-specific categories separate from Toast.</p>
+      <button onclick="window.location.href='/report-categories'">Open Categories</button>
+    </div>
+
+    <div class="nav-card">
+      <span class="step-badge">Step 3</span>
+      <h3>Report Builder (Item Mapping)</h3>
+      <p>Map Toast menu items and modifiers to your internal report categories. Use bulk selection to assign categories to multiple items at once.</p>
+      <button onclick="window.location.href='/report-builder'">Open Report Builder</button>
+    </div>
+
+    <div class="nav-card">
+      <span class="step-badge">Step 4</span>
+      <h3>Net Sales Report</h3>
+      <p>View net sales by business date and location with a pivot table view. Export to CSV for further analysis.</p>
+      <button onclick="window.location.href='/'">Open Net Sales</button>
+    </div>
+  </div>
+
+  <div style="margin-top: 3rem; padding: 1.5rem; background: #151a2e; border-radius: 12px; border-left: 4px solid #444b6b;">
+    <h3 style="margin-top: 0; color: #a0b0d0;">Quick Links</h3>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+      <a href="/menu-performance" style="color: #7ce38b; text-decoration: none; padding: 0.5rem 1rem; background: #0d1121; border-radius: 6px;">Menu Performance Report</a>
+      <a href="/configuration" style="color: #7ce38b; text-decoration: none; padding: 0.5rem 1rem; background: #0d1121; border-radius: 6px;">Legacy Configuration</a>
+    </div>
+  </div>
+</body>
+</html>
+

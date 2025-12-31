@@ -32,3 +32,6 @@ dist/
 build/
 *.egg-info/
 
+# Sensitive files
+random.txt
+

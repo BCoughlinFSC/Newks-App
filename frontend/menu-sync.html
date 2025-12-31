@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Step 1 - Sync Toast Menu - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 1.5rem;
+      background: #0b1020;
+      color: #f4f4f4;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #262b40;
+    }
+    .header h1 {
+      margin: 0;
+      color: #7ce38b;
+    }
+    .nav {
+      display: flex;
+      gap: 1rem;
+    }
+    .nav a {
+      color: #a0b0d0;
+      text-decoration: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .nav a:hover {
+      background: #1a1f35;
+      color: #7ce38b;
+    }
+    .nav a.active {
+      background: #2a7be4;
+      color: #f4f4f4;
+    }
+    .workflow-banner {
+      background: #1a1f35;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      border-left: 4px solid #7ce38b;
+    }
+    .workflow-banner .workflow-steps {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    .workflow-steps .step {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      background: #151a2e;
+      color: #a0b0d0;
+    }
+    .workflow-steps .step.current {
+      background: #7ce38b;
+      color: #0b1020;
+      font-weight: 600;
+    }
+    .workflow-steps .arrow {
+      color: #444b6b;
+      font-weight: bold;
+    }
+    .card {
+      background: #151a2e;
+      border-radius: 12px;
+      padding: 1.5rem 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    }
+    .card h2 {
+      margin-top: 0;
+      color: #7ce38b;
+    }
+    button {
+      cursor: pointer;
+      background: #2a7be4;
+      border: none;
+      font-weight: 600;
+      padding: 0.6rem 1.5rem;
+      border-radius: 6px;
+      color: #f4f4f4;
+      font-size: 1rem;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #1e5bb8;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .status {
+      font-size: 0.9rem;
+      margin-top: 1rem;
+      padding: 1rem;
+      border-radius: 8px;
+      background: #0d1121;
+      border: 1px solid #262b40;
+    }
+    .status.success {
+      border-color: #7ce38b;
+      background: rgba(124, 227, 139, 0.1);
+      color: #7ce38b;
+    }
+    .status.error {
+      border-color: #ff8080;
+      background: rgba(255, 128, 128, 0.1);
+      color: #ff8080;
+    }
+    .status.info {
+      border-color: #2a7be4;
+      background: rgba(42, 123, 228, 0.1);
+      color: #a0b0d0;
+    }
+    .last-sync {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: #0d1121;
+      border-radius: 8px;
+      border: 1px solid #262b40;
+      font-size: 0.9rem;
+    }
+    .last-sync strong {
+      color: #7ce38b;
+    }
+    .instructions {
+      background: #1a1f35;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      border-left: 4px solid #2a7be4;
+    }
+    .instructions p {
+      margin: 0.5rem 0;
+      opacity: 0.9;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Step 1 – Sync Toast Menu</h1>
+    <div class="nav">
+      <a href="/home">Home</a>
+      <a href="/">Net Sales</a>
+      <a href="/menu-sync" class="active">Menu Sync</a>
+      <a href="/report-categories">Report Categories</a>
+      <a href="/report-builder">Report Builder</a>
+    </div>
+  </div>
+
+  <div class="workflow-banner">
+    <div class="workflow-steps">
+      <div class="step current">Step 1: Sync Menu</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 2: Define Categories</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 3: Map Items</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 4: Run Reports</div>
+    </div>
+  </div>
+
+  <div class="instructions">
+    <p><strong>Use this page to pull the latest menu from Toast.</strong></p>
+    <p>This only runs when you click the Sync button; it does not auto-refresh. The menu data is cached for 5 minutes on the server to reduce API calls.</p>
+  </div>
+
+  <div class="card">
+    <h2>Sync Menu from Toast</h2>
+    <p style="opacity: 0.9; margin-bottom: 1.5rem;">Click the button below to fetch the latest menu structure from Toast. This includes menus, menu groups, menu items, and modifiers.</p>
+    
+    <button id="syncBtn">Sync Menu from Toast</button>
+    
+    <div class="status info" id="status" style="display: none;">
+      Ready to sync. Click the button above to start.
+    </div>
+    
+    <div class="last-sync" id="lastSync">
+      <strong>Last sync:</strong> <span id="lastSyncTime">Never</span>
+    </div>
+  </div>
+
+  <script>
+    const syncBtn = document.getElementById('syncBtn');
+    const statusEl = document.getElementById('status');
+    const lastSyncTimeEl = document.getElementById('lastSyncTime');
+
+    // Load last sync time from localStorage
+    function loadLastSyncTime() {
+      const lastSync = localStorage.getItem('menu_sync_last_time');
+      if (lastSync) {
+        try {
+          const date = new Date(lastSync);
+          lastSyncTimeEl.textContent = date.toLocaleString();
+        } catch (e) {
+          lastSyncTimeEl.textContent = 'Unknown';
+        }
+      } else {
+        lastSyncTimeEl.textContent = 'Never';
+      }
+    }
+
+    async function syncMenu() {
+      syncBtn.disabled = true;
+      statusEl.style.display = 'block';
+      statusEl.className = 'status info';
+      statusEl.textContent = 'Syncing menu from Toast... This may take a moment.';
+
+      try {
+        const response = await fetch('/menus?refresh=true');
+        
+        if (!response.ok) {
+          let errorText = await response.text();
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorText = errorJson.detail || errorText;
+          } catch (e) {}
+          throw new Error(errorText || `HTTP ${response.status}`);
+        }
+
+        const menuData = await response.json();
+        
+        // Save sync time
+        const now = new Date().toISOString();
+        localStorage.setItem('menu_sync_last_time', now);
+        lastSyncTimeEl.textContent = new Date(now).toLocaleString();
+        
+        // Clear any cached menu data in Report Builder
+        localStorage.removeItem('toast_menu_data');
+        localStorage.removeItem('toast_menu_data_date');
+
+        const menuCount = menuData.menus ? menuData.menus.length : 0;
+        statusEl.className = 'status success';
+        statusEl.textContent = `Successfully synced menu! Found ${menuCount} menu(s). You can now use the Report Builder to map items to categories.`;
+      } catch (error) {
+        console.error('Error syncing menu:', error);
+        statusEl.className = 'status error';
+        let errorMsg = error.message || 'Unknown error occurred';
+        if (errorMsg.length > 300) {
+          errorMsg = errorMsg.substring(0, 300) + '...';
+        }
+        statusEl.textContent = `Error syncing menu: ${errorMsg}`;
+      } finally {
+        syncBtn.disabled = false;
+      }
+    }
+
+    syncBtn.addEventListener('click', syncMenu);
+    loadLastSyncTime();
+  </script>
+</body>
+</html>
+

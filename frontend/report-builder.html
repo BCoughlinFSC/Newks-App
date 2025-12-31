@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Step 3 - Map Items to Report Categories - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 1.5rem;
+      background: #0b1020;
+      color: #f4f4f4;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #262b40;
+    }
+    .header h1 {
+      margin: 0;
+      color: #7ce38b;
+    }
+    .nav {
+      display: flex;
+      gap: 1rem;
+    }
+    .nav a {
+      color: #a0b0d0;
+      text-decoration: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .nav a:hover {
+      background: #1a1f35;
+      color: #7ce38b;
+    }
+    .nav a.active {
+      background: #2a7be4;
+      color: #f4f4f4;
+    }
+    .workflow-banner {
+      background: #1a1f35;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      border-left: 4px solid #2a7be4;
+    }
+    .workflow-banner .workflow-steps {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    .workflow-steps .step {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      background: #151a2e;
+      color: #a0b0d0;
+    }
+    .workflow-steps .step.current {
+      background: #2a7be4;
+      color: #f4f4f4;
+      font-weight: 600;
+    }
+    .workflow-steps .arrow {
+      color: #444b6b;
+      font-weight: bold;
+    }
+    .instructions {
+      background: #1a1f35;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      border-left: 4px solid #2a7be4;
+    }
+    .instructions p {
+      margin: 0.5rem 0;
+      opacity: 0.9;
+      line-height: 1.6;
+    }
+    .filter-controls {
+      margin-bottom: 1rem;
+      padding: 1rem;
+      background: #0d1121;
+      border-radius: 8px;
+      border: 1px solid #262b40;
+    }
+    .filter-controls input[type="text"],
+    .filter-controls select {
+      padding: 0.5rem;
+      border-radius: 6px;
+      border: 1px solid #444b6b;
+      background: #101426;
+      color: #f4f4f4;
+      margin-right: 1rem;
+    }
+    .card {
+      background: #151a2e;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    }
+    .menu-table-container {
+      overflow-x: auto;
+      border: 1px solid #262b40;
+      border-radius: 8px;
+      background: #0d1121;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 800px;
+    }
+    th, td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #262b40;
+      border-right: 1px solid #262b40;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+    th {
+      background: #171c32;
+      position: sticky;
+      top: 0;
+      font-weight: 600;
+      z-index: 1;
+    }
+    th:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background: #171c32;
+      min-width: 300px;
+    }
+    td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background: inherit;
+      min-width: 300px;
+    }
+    tr:hover {
+      background: #1a1f35;
+    }
+    tr:hover td:first-child {
+      background: #1a1f35;
+    }
+    .tree-row {
+      cursor: pointer;
+      user-select: none;
+    }
+    .tree-row:hover {
+      background: #1a1f35;
+    }
+    .tree-icon {
+      display: inline-block;
+      width: 28px;
+      text-align: center;
+      margin-right: 0.75rem;
+      font-size: 1rem;
+      font-weight: bold;
+      color: #7ce38b;
+    }
+    .tree-level-0 {
+      font-weight: 800;
+      font-size: 1.05rem;
+      background: #1a1f35;
+      border-left: 4px solid #2a7be4;
+      padding-left: 1rem !important;
+    }
+    .tree-level-1 {
+      padding-left: 3rem !important;
+      font-weight: 700;
+      font-size: 1rem;
+      background: #151a2e;
+      border-left: 4px solid #4a9ef5;
+    }
+    .tree-level-2 {
+      padding-left: 5.5rem !important;
+      font-weight: 600;
+      font-size: 0.95rem;
+      background: #0d1121;
+      border-left: 4px solid #6ab2f5;
+    }
+    .tree-level-3 {
+      padding-left: 8rem !important;
+      font-weight: 500;
+      font-size: 0.9rem;
+      background: #0a0e1a;
+      border-left: 4px solid #8ac5f5;
+    }
+    .tree-level-4 {
+      padding-left: 10.5rem !important;
+      font-weight: 400;
+      font-size: 0.85rem;
+      background: #080b14;
+      border-left: 4px solid #a8d8f5;
+    }
+    .tree-level-5 {
+      padding-left: 13rem !important;
+      font-weight: 400;
+      font-size: 0.8rem;
+      background: #060910;
+      border-left: 4px solid #c6e5f5;
+    }
+    .tree-level-6 {
+      padding-left: 15.5rem !important;
+      font-weight: 400;
+      font-size: 0.75rem;
+      background: #040608;
+      border-left: 4px solid #e4f0f5;
+    }
+    .tree-expanded .tree-icon::before {
+      content: '▼';
+      color: #7ce38b;
+    }
+    .tree-collapsed .tree-icon::before {
+      content: '▶';
+      color: #7ce38b;
+    }
+    .tree-leaf .tree-icon::before {
+      content: '▶';
+      opacity: 0.4;
+      color: #666;
+    }
+    .section-header {
+      font-weight: 700;
+      font-size: 0.9rem;
+      opacity: 1;
+      color: #7ce38b;
+      font-style: normal;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(42, 123, 228, 0.15) !important;
+      border-left: 4px solid #7ce38b !important;
+    }
+    .section-header .tree-icon {
+      opacity: 0;
+      width: 0;
+      margin-right: 0;
+    }
+    .tree-row:hover {
+      background: #1f2439 !important;
+    }
+    .tree-row:hover td:first-child {
+      background: #1f2439 !important;
+    }
+    .status {
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      opacity: 0.9;
+    }
+    .error {
+      color: #ff8080;
+    }
+    .success {
+      color: #7ce38b;
+    }
+    .item-tag {
+      font-size: 0.85rem;
+      opacity: 0.8;
+    }
+    .sales-category {
+      font-size: 0.85rem;
+      opacity: 0.8;
+    }
+    .report-categories {
+      font-size: 0.85rem;
+    }
+    .category-badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      margin: 0.15rem;
+      background: #2a7be4;
+      color: #f4f4f4;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .no-categories {
+      color: #666;
+      font-style: italic;
+    }
+    .row-checkbox {
+      cursor: pointer;
+    }
+    th:first-child, td:first-child {
+      width: 30px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Step 3 – Map Items to Report Categories</h1>
+    <div class="nav">
+      <a href="/home">Home</a>
+      <a href="/">Net Sales</a>
+      <a href="/menu-sync">Menu Sync</a>
+      <a href="/report-categories">Report Categories</a>
+      <a href="/report-builder" class="active">Report Builder</a>
+    </div>
+  </div>
+
+  <div class="workflow-banner">
+    <div class="workflow-steps">
+      <div class="step">Step 1: Sync Menu</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 2: Define Categories</div>
+      <span class="arrow">→</span>
+      <div class="step current">Step 3: Map Items</div>
+      <span class="arrow">→</span>
+      <div class="step">Step 4: Run Reports</div>
+    </div>
+  </div>
+
+  <div class="instructions">
+    <p><strong>Choose items from the Toast menu and assign them to internal report categories for use in your reports.</strong></p>
+    <p>Select menu items or modifier options using checkboxes, then use the bulk actions panel to assign or remove categories. Categories must be created in Step 2 before they can be assigned here.</p>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+      <h2 style="margin: 0;">Menu Structure</h2>
+      <button id="loadMenuBtn" style="padding: 0.4rem 0.9rem; background: #2a7be4; border: none; border-radius: 6px; color: #f4f4f4; cursor: pointer; font-weight: 600;">Load Menu</button>
+    </div>
+    <div class="status" id="status">Click "Load Menu" to fetch menu data from Toast. This will use cached data if available (lasts 5 minutes).</div>
+    
+    <!-- Bulk Actions Panel -->
+    <div id="bulkActions" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #0d1121; border: 1px solid #262b40; border-radius: 8px;">
+      <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <span id="selectedCount" style="font-weight: 600; color: #7ce38b;"></span>
+        <select id="categorySelector" style="padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid #444b6b; background: #101426; color: #f4f4f4; min-width: 200px;">
+          <option value="">Select category to assign...</option>
+        </select>
+        <button id="assignCategoryBtn" style="padding: 0.4rem 0.9rem; background: #2a7be4; border: none; border-radius: 6px; color: #f4f4f4; cursor: pointer; font-weight: 600;">Assign Category</button>
+        <button id="removeCategoryBtn" style="padding: 0.4rem 0.9rem; background: #e42a2a; border: none; border-radius: 6px; color: #f4f4f4; cursor: pointer; font-weight: 600;">Remove Category</button>
+        <button id="clearSelectionBtn" style="padding: 0.4rem 0.9rem; background: #444b6b; border: none; border-radius: 6px; color: #f4f4f4; cursor: pointer; font-weight: 600;">Clear Selection</button>
+      </div>
+    </div>
+
+    <div class="filter-controls" id="filterControls" style="display: none;">
+      <label>
+        Filter by name:
+        <input type="text" id="nameFilter" placeholder="Search menu items..." style="width: 200px;" />
+      </label>
+      <label>
+        Filter by category:
+        <select id="categoryFilter">
+          <option value="">All items</option>
+          <option value="uncategorized">Uncategorized items only</option>
+        </select>
+      </label>
+    </div>
+    
+    <div class="menu-table-container" id="tableContainer" style="display: none;">
+      <table id="menuTable">
+        <thead>
+          <tr>
+            <th style="width: 30px;">
+              <input type="checkbox" id="selectAllCheckbox" title="Select all" />
+            </th>
+            <th>Menu Item</th>
+            <th>Item Tag</th>
+            <th>Sales Category</th>
+            <th>PLU</th>
+            <th>Report Categories</th>
+          </tr>
+        </thead>
+        <tbody id="menuTableBody">
+          <tr>
+            <td colspan="6" style="text-align: center; padding: 2rem; opacity: 0.6;">
+              Loading menu data...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let menuData = null;
+    let expandedNodes = new Set();
+    let allCategories = [];
+    let selectedRows = new Set();
+    let itemCategories = {}; // Map of guid -> array of category IDs
+
+    // Transform Toast API menu data into flat tree structure
+    function flattenMenuData(apiData) {
+      const rows = [];
+      
+      if (!apiData || !apiData.menus) {
+        return rows;
+      }
+
+      // Get modifier group and option references from API response
+      const modifierGroupRefs = apiData.modifierGroupReferences || {};
+      const modifierOptionRefs = apiData.modifierOptionReferences || {};
+
+      apiData.menus.forEach((menu, menuIdx) => {
+        // Menu level (level 0)
+        const menuRow = {
+          id: `menu-${menu.guid}`,
+          level: 0,
+          type: 'menu',
+          name: menu.name || 'Unnamed Menu',
+          guid: menu.guid,
+          itemName: menu.name || 'Unnamed Menu',
+          itemTag: '',
+          salesCategory: '',
+          plu: '',
+          children: []
+        };
+        rows.push(menuRow);
+
+        if (!menu.menuGroups || menu.menuGroups.length === 0) {
+          return;
+        }
+
+        menu.menuGroups.forEach((group, groupIdx) => {
+          // Menu Group level (level 1)
+          const groupRow = {
+            id: `group-${group.guid}`,
+            level: 1,
+            type: 'group',
+            name: group.name || 'Unnamed Group',
+            guid: group.guid,
+            itemName: group.name || 'Unnamed Group',
+            itemTag: group.itemTags && group.itemTags.length > 0 
+              ? group.itemTags.map(t => t.name).join(', ') 
+              : '',
+            salesCategory: '',
+            plu: '',
+            children: [],
+            parent: menuRow
+          };
+          rows.push(groupRow);
+          menuRow.children.push(groupRow);
+
+          if (!group.menuItems || group.menuItems.length === 0) {
+            return;
+          }
+
+          group.menuItems.forEach((item, itemIdx) => {
+            // Menu Item level (level 2)
+            const itemRow = {
+              id: `item-${item.guid}`,
+              level: 2,
+              type: 'item',
+              name: item.name || 'Unnamed Item',
+              guid: item.guid,
+              itemName: item.name || 'Unnamed Item',
+              itemTag: item.itemTags && item.itemTags.length > 0 
+                ? item.itemTags.map(t => t.name).join(', ') 
+                : '',
+              salesCategory: item.salesCategory && item.salesCategory.name 
+                ? item.salesCategory.name 
+                : '',
+              plu: item.plu || item.pluCode || item.priceLookupCode || item.externalId || '',
+              children: [],
+              parent: groupRow
+            };
+            rows.push(itemRow);
+            groupRow.children.push(itemRow);
+
+            // Add modifier groups for this item (level 3)
+            if (item.modifierGroupReferences && item.modifierGroupReferences.length > 0) {
+              item.modifierGroupReferences.forEach((refId) => {
+                const modGroupRef = modifierGroupRefs[refId.toString()];
+                if (modGroupRef) {
+                  const modGroupRow = {
+                    id: `modgroup-${modGroupRef.guid}-${item.guid}`,
+                    level: 3,
+                    type: 'modifierGroup',
+                    name: modGroupRef.name || 'Unnamed Modifier Group',
+                    guid: modGroupRef.guid,
+                    itemName: modGroupRef.name || 'Unnamed Modifier Group',
+                    itemTag: '',
+                    salesCategory: '',
+                    plu: '',
+                    children: [],
+                    parent: itemRow
+                  };
+                  rows.push(modGroupRow);
+                  itemRow.children.push(modGroupRow);
+
+                  // Add modifier options for this modifier group (level 4)
+                  if (modGroupRef.modifierOptionReferences && modGroupRef.modifierOptionReferences.length > 0) {
+                    modGroupRef.modifierOptionReferences.forEach((optionRefId) => {
+                      const modOptionRef = modifierOptionRefs[optionRefId.toString()];
+                      if (modOptionRef) {
+                        const modOptionRow = {
+                          id: `modoption-${modOptionRef.guid}-${modGroupRef.guid}`,
+                          level: 4,
+                          type: 'modifierOption',
+                          name: modOptionRef.name || 'Unnamed Modifier Option',
+                          guid: modOptionRef.guid,
+                          itemName: modOptionRef.name || 'Unnamed Modifier Option',
+                          itemTag: modOptionRef.itemTags && modOptionRef.itemTags.length > 0 
+                            ? modOptionRef.itemTags.map(t => t.name).join(', ') 
+                            : '',
+                          salesCategory: modOptionRef.salesCategory && modOptionRef.salesCategory.name 
+                            ? modOptionRef.salesCategory.name 
+                            : '',
+                          plu: modOptionRef.plu || modOptionRef.pluCode || modOptionRef.priceLookupCode || modOptionRef.externalId || '',
+                          children: [],
+                          parent: modGroupRow
+                        };
+                        rows.push(modOptionRow);
+                        modGroupRow.children.push(modOptionRow);
+
+                        // Check if this modifier option has nested modifier groups (level 5)
+                        if (modOptionRef.modifierGroupReferences && modOptionRef.modifierGroupReferences.length > 0) {
+                          // Add nested modifier groups (level 5)
+                          modOptionRef.modifierGroupReferences.forEach((nestedRefId) => {
+                            const nestedModGroupRef = modifierGroupRefs[nestedRefId.toString()];
+                            if (nestedModGroupRef) {
+                              const nestedModGroupRow = {
+                                id: `nested-modgroup-${nestedModGroupRef.guid}-${modOptionRef.guid}`,
+                                level: 5,
+                                type: 'modifierGroup',
+                                name: nestedModGroupRef.name || 'Unnamed Nested Modifier Group',
+                                guid: nestedModGroupRef.guid,
+                                itemName: nestedModGroupRef.name || 'Unnamed Nested Modifier Group',
+                                itemTag: '',
+                                salesCategory: '',
+                                plu: '',
+                                children: [],
+                                parent: modOptionRow
+                              };
+                              rows.push(nestedModGroupRow);
+                              modOptionRow.children.push(nestedModGroupRow);
+
+                              // Add nested modifier options (level 6)
+                              if (nestedModGroupRef.modifierOptionReferences && nestedModGroupRef.modifierOptionReferences.length > 0) {
+                                nestedModGroupRef.modifierOptionReferences.forEach((nestedOptionRefId) => {
+                                  const nestedModOptionRef = modifierOptionRefs[nestedOptionRefId.toString()];
+                                  if (nestedModOptionRef) {
+                                    const nestedModOptionRow = {
+                                      id: `nested-modoption-${nestedModOptionRef.guid}-${nestedModGroupRef.guid}`,
+                                      level: 6,
+                                      type: 'modifierOption',
+                                      name: nestedModOptionRef.name || 'Unnamed Nested Modifier Option',
+                                      guid: nestedModOptionRef.guid,
+                                      itemName: nestedModOptionRef.name || 'Unnamed Nested Modifier Option',
+                                      itemTag: nestedModOptionRef.itemTags && nestedModOptionRef.itemTags.length > 0 
+                                        ? nestedModOptionRef.itemTags.map(t => t.name).join(', ') 
+                                        : '',
+                                      salesCategory: nestedModOptionRef.salesCategory && nestedModOptionRef.salesCategory.name 
+                                        ? nestedModOptionRef.salesCategory.name 
+                                        : '',
+                                      plu: nestedModOptionRef.plu || nestedModOptionRef.pluCode || nestedModOptionRef.priceLookupCode || nestedModOptionRef.externalId || '',
+                                      children: [],
+                                      parent: nestedModGroupRow
+                                    };
+                                    rows.push(nestedModOptionRow);
+                                    nestedModGroupRow.children.push(nestedModOptionRow);
+                                  }
+                                });
+                              }
+                            }
+                          });
+                        }
+                      }
+                    });
+                  }
+                }
+              });
+            }
+          });
+        });
+      });
+
+      return rows;
+    }
+
+    // Selection management functions
+    function updateSelection() {
+      const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+      selectedRows.clear();
+      checkboxes.forEach(cb => {
+        selectedRows.add(cb.dataset.id);
+      });
+
+      const count = selectedRows.size;
+      const bulkActions = document.getElementById('bulkActions');
+      const selectedCount = document.getElementById('selectedCount');
+      
+      if (count > 0) {
+        bulkActions.style.display = 'block';
+        selectedCount.textContent = `${count} item${count !== 1 ? 's' : ''} selected`;
+      } else {
+        bulkActions.style.display = 'none';
+      }
+
+      // Update select all checkbox
+      const selectAll = document.getElementById('selectAllCheckbox');
+      const allCheckboxes = document.querySelectorAll('.row-checkbox');
+      const allChecked = allCheckboxes.length > 0 && Array.from(allCheckboxes).every(cb => cb.checked);
+      selectAll.checked = allChecked;
+    }
+
+    // Load all available categories for the selector
+    async function loadAllCategories() {
+      try {
+        const response = await fetch('/api/report-categories');
+        if (response.ok) {
+          allCategories = await response.json();
+          updateCategorySelector();
+        }
+      } catch (error) {
+        console.error('Error loading categories:', error);
+      }
+    }
+
+    function updateCategorySelector() {
+      const selector = document.getElementById('categorySelector');
+      const filterSelector = document.getElementById('categoryFilter');
+      
+      // Update bulk assign selector
+      if (selector) {
+        selector.innerHTML = '<option value="">Select category to assign...</option>';
+        allCategories.forEach(cat => {
+          const option = document.createElement('option');
+          option.value = cat.id;
+          option.textContent = cat.name;
+          selector.appendChild(option);
+        });
+      }
+      
+      // Update filter dropdown
+      if (filterSelector) {
+        const currentValue = filterSelector.value;
+        filterSelector.innerHTML = '<option value="">All items</option><option value="uncategorized">Uncategorized items only</option>';
+        allCategories.forEach(cat => {
+          const option = document.createElement('option');
+          option.value = cat.id;
+          option.textContent = `Items with: ${cat.name}`;
+          filterSelector.appendChild(option);
+        });
+        // Restore selection if it was a category ID
+        if (currentValue && allCategories.find(c => c.id === currentValue)) {
+          filterSelector.value = currentValue;
+        }
+      }
+    }
+
+    // Load categories assigned to a specific item/modifier
+    // Global cache to prevent duplicate requests
+    const categoryRequestCache = new Map(); // guid -> Promise
+    const categoryRequestQueue = [];
+    let categoryRequestInProgress = false;
+    const MAX_CONCURRENT_REQUESTS = 5;
+    let activeRequests = 0;
+
+    async function loadCategoriesForItem(guid, cellElement) {
+      if (!guid) {
+        cellElement.innerHTML = '<span class="no-categories">None</span>';
+        return;
+      }
+      
+      // Prevent multiple simultaneous requests for the same item
+      if (cellElement.dataset.loading === 'true') {
+        return;
+      }
+      
+      // If we've already loaded this item (even if empty), don't reload
+      if (cellElement.dataset.loaded === 'true') {
+        return;
+      }
+      
+      // Check if this item is visible (not hidden by collapsed parent)
+      const tr = cellElement.closest('tr');
+      if (tr && tr.style.display === 'none') {
+        // Item is hidden, don't load yet - will load when expanded
+        return;
+      }
+      
+      // Check if we already have a pending request for this GUID
+      if (categoryRequestCache.has(guid)) {
+        const cachedPromise = categoryRequestCache.get(guid);
+        try {
+          const assigned = await cachedPromise;
+          itemCategories[guid] = assigned.map(c => c.id);
+          renderCategoriesInCell(cellElement, assigned);
+          cellElement.dataset.loaded = 'true';
+        } catch (error) {
+          itemCategories[guid] = [];
+          cellElement.innerHTML = '<span class="no-categories">None</span>';
+          cellElement.dataset.loaded = 'true';
+        }
+        return;
+      }
+      
+      // Add to queue if we're at max concurrent requests
+      if (activeRequests >= MAX_CONCURRENT_REQUESTS) {
+        categoryRequestQueue.push({ guid, cellElement });
+        return;
+      }
+      
+      cellElement.dataset.loading = 'true';
+      activeRequests++;
+      
+      // Create the request promise and cache it
+      const requestPromise = (async () => {
+        try {
+          const response = await fetch(`/api/item-categories/${guid}`);
+          if (response.ok) {
+            const assigned = await response.json();
+            return assigned;
+          } else {
+            return [];
+          }
+        } catch (error) {
+          console.error('Error loading categories for item:', error);
+          return [];
+        } finally {
+          activeRequests--;
+          categoryRequestCache.delete(guid); // Remove from cache after completion
+          
+          // Process next item in queue
+          if (categoryRequestQueue.length > 0 && activeRequests < MAX_CONCURRENT_REQUESTS) {
+            const next = categoryRequestQueue.shift();
+            loadCategoriesForItem(next.guid, next.cellElement);
+          }
+        }
+      })();
+      
+      categoryRequestCache.set(guid, requestPromise);
+      
+      try {
+        const assigned = await requestPromise;
+        itemCategories[guid] = assigned.map(c => c.id);
+        renderCategoriesInCell(cellElement, assigned);
+        cellElement.dataset.loaded = 'true';
+      } catch (error) {
+        itemCategories[guid] = [];
+        cellElement.innerHTML = '<span class="no-categories">None</span>';
+        cellElement.dataset.loaded = 'true';
+      } finally {
+        cellElement.dataset.loading = 'false';
+      }
+    }
+
+    // Render category badges in a cell
+    function renderCategoriesInCell(cellElement, categories) {
+      if (!categories || categories.length === 0) {
+        cellElement.innerHTML = '<span class="no-categories">None</span>';
+        return;
+      }
+      
+      const badges = categories.map(cat => 
+        `<span class="category-badge" data-category-id="${cat.id}">${escapeHtml(cat.name)}</span>`
+      ).join('');
+      cellElement.innerHTML = badges;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function renderMenuTable(data) {
+      const tbody = document.getElementById('menuTableBody');
+      tbody.innerHTML = '';
+
+      if (!data || data.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" style="text-align: center; padding: 2rem; opacity: 0.6;">
+              No menu data available
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      data.forEach(row => {
+        const tr = document.createElement('tr');
+        const hasChildren = row.children.length > 0;
+        const isSectionHeader = row.type === 'sectionHeader';
+        const isSelectable = !isSectionHeader && (row.type === 'item' || row.type === 'modifierOption');
+        
+        if (isSectionHeader) {
+          tr.className = `tree-row tree-level-${row.level} section-header tree-leaf`;
+        } else {
+          tr.className = `tree-row tree-level-${row.level} ${hasChildren ? 'tree-expanded' : 'tree-leaf'}`;
+        }
+        tr.dataset.id = row.id;
+        tr.dataset.level = row.level;
+        tr.dataset.type = row.type;
+        tr.dataset.guid = row.guid || '';
+        tr.dataset.selectable = isSelectable ? 'true' : 'false';
+
+        // Tree icon and name column
+        const treeCell = document.createElement('td');
+        if (isSectionHeader) {
+          treeCell.innerHTML = `
+            <span class="section-header" style="font-weight: 700; color: #7ce38b; text-transform: uppercase; letter-spacing: 0.5px;">${row.name}</span>
+          `;
+        } else {
+          treeCell.innerHTML = `
+            <span class="tree-icon"></span>
+            <span>${row.name}</span>
+          `;
+        }
+        tr.appendChild(treeCell);
+
+        // Checkbox column (only for items and modifier options)
+        const checkboxCell = document.createElement('td');
+        if (isSelectable) {
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'row-checkbox';
+          checkbox.dataset.id = row.id;
+          checkbox.addEventListener('change', updateSelection);
+          checkboxCell.appendChild(checkbox);
+        }
+        tr.insertBefore(checkboxCell, tr.firstChild);
+
+        // Item Tag column
+        const tagCell = document.createElement('td');
+        tagCell.className = 'item-tag';
+        tagCell.textContent = row.itemTag || '';
+        tr.appendChild(tagCell);
+
+        // Sales Category column
+        const categoryCell = document.createElement('td');
+        categoryCell.className = 'sales-category';
+        categoryCell.textContent = row.salesCategory || '';
+        tr.appendChild(categoryCell);
+
+        // PLU column
+        const pluCell = document.createElement('td');
+        pluCell.className = 'plu';
+        pluCell.textContent = row.plu || '';
+        tr.appendChild(pluCell);
+
+        // Report Categories column
+        const categoriesCell = document.createElement('td');
+        categoriesCell.className = 'report-categories';
+        categoriesCell.dataset.id = row.id;
+        categoriesCell.dataset.guid = row.guid || '';
+        if (isSelectable && row.guid) {
+          // Start with "None" - will be updated when categories load
+          // Don't load immediately - only load when item becomes visible via expansion
+          categoriesCell.innerHTML = '<span class="no-categories">Loading...</span>';
+        } else {
+          categoriesCell.innerHTML = '';
+        }
+        tr.appendChild(categoriesCell);
+
+        // Click handler for expand/collapse (skip section headers)
+        if (hasChildren && !isSectionHeader) {
+          tr.onclick = (e) => {
+            e.stopPropagation();
+            toggleNode(row.id, tr);
+          };
+        }
+
+        tbody.appendChild(tr);
+      });
+
+      // Start with everything collapsed - user can expand as needed
+      // expandedNodes starts empty, so nothing is expanded initially
+      updateVisibility();
+    }
+
+    function toggleNode(nodeId, trElement) {
+      if (expandedNodes.has(nodeId)) {
+        expandedNodes.delete(nodeId);
+        trElement.classList.remove('tree-expanded');
+        trElement.classList.add('tree-collapsed');
+      } else {
+        expandedNodes.add(nodeId);
+        trElement.classList.remove('tree-collapsed');
+        trElement.classList.add('tree-expanded');
+      }
+      updateVisibility();
+    }
+
+    function updateVisibility() {
+      if (!menuData) return;
+      
+      // Create a map of nodeId to row data for quick lookup
+      const rowMap = new Map();
+      menuData.forEach(row => {
+        rowMap.set(row.id, row);
+      });
+      
+      const rows = document.querySelectorAll('#menuTableBody tr[data-id]');
+      rows.forEach(tr => {
+        const nodeId = tr.dataset.id;
+        const rowData = rowMap.get(nodeId);
+        
+        if (!rowData) {
+          tr.style.display = 'none';
+          return;
+        }
+        
+        const level = rowData.level;
+        const type = rowData.type;
+        
+        // Always show menu level (level 0)
+        if (level === 0) {
+          tr.style.display = '';
+          return;
+        }
+        
+        // Section headers should be visible if their parent is expanded
+        if (type === 'sectionHeader') {
+          if (rowData.parent) {
+            const parentExpanded = expandedNodes.has(rowData.parent.id);
+            tr.style.display = parentExpanded ? '' : 'none';
+          } else {
+            tr.style.display = 'none';
+          }
+          return;
+        }
+        
+        // For all other rows, check if all ancestors are expanded
+        let current = rowData;
+        let allAncestorsExpanded = true;
+        
+        // Walk up the parent chain
+        while (current.parent) {
+          current = current.parent;
+          // Skip section headers when checking expansion
+          if (current.type !== 'sectionHeader' && !expandedNodes.has(current.id)) {
+            allAncestorsExpanded = false;
+            break;
+          }
+        }
+        
+        tr.style.display = allAncestorsExpanded ? '' : 'none';
+        
+        // Load categories for visible selectable items that haven't been loaded yet
+        // Only load when item is actually visible (not hidden)
+        if (allAncestorsExpanded && tr.style.display !== 'none' && rowData.type !== 'sectionHeader' && rowData.guid) {
+          const isSelectable = rowData.type === 'item' || rowData.type === 'modifierOption';
+          if (isSelectable) {
+            const categoriesCell = tr.querySelector('.report-categories');
+            if (categoriesCell && categoriesCell.dataset.loaded !== 'true' && categoriesCell.dataset.loading !== 'true') {
+              // Load immediately for visible items (no setTimeout to avoid repeated polling)
+              loadCategoriesForItem(rowData.guid, categoriesCell);
+            }
+          }
+        }
+      });
+      
+      // Update arrow icons after visibility changes
+      rows.forEach(tr => {
+        const nodeId = tr.dataset.id;
+        const rowData = rowMap.get(nodeId);
+        if (!rowData) return;
+        
+        const iconSpan = tr.querySelector('.tree-icon');
+        if (iconSpan) {
+          const hasChildren = rowData.children && rowData.children.length > 0;
+          const isExpanded = expandedNodes.has(nodeId);
+          
+          if (!hasChildren || rowData.type === 'sectionHeader') {
+            iconSpan.textContent = '';
+          } else if (isExpanded) {
+            iconSpan.textContent = '▼';
+          } else {
+            iconSpan.textContent = '▶';
+          }
+        }
+      });
+    }
+
+    // Helper function to check if menu was fetched today (for optional cache check)
+    function wasMenuFetchedToday() {
+      const CACHE_KEY = 'toast_menu_data';
+      const CACHE_DATE_KEY = 'toast_menu_data_date';
+      
+      const cachedData = localStorage.getItem(CACHE_KEY);
+      const cachedDate = localStorage.getItem(CACHE_DATE_KEY);
+      
+      if (cachedData && cachedDate) {
+        const today = new Date().toDateString();
+        if (cachedDate === today) {
+          try {
+            const apiData = JSON.parse(cachedData);
+            menuData = flattenMenuData(apiData);
+            renderMenuTable(menuData);
+            document.getElementById('filterControls').style.display = 'block';
+            document.getElementById('tableContainer').style.display = 'block';
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = `Menu loaded from cache: ${apiData.menus?.length || 0} menu(s), ${menuData.filter(r => r.type === 'item').length} items. Expand menu items to see and assign categories.`;
+            statusEl.className = 'status success';
+            return true;
+          } catch (e) {
+            console.error('Error parsing cached data:', e);
+            return false;
+          }
+        }
+      }
+      return false;
+    }
+
+    // Load menu data from API or localStorage
+    async function loadMenuData(forceRefresh = false) {
+      const statusEl = document.getElementById('status');
+      const CACHE_KEY = 'toast_menu_data';
+      const CACHE_DATE_KEY = 'toast_menu_data_date';
+      
+      try {
+        // Check localStorage first (unless forcing refresh)
+        if (!forceRefresh) {
+          if (wasMenuFetchedToday()) {
+            return; // Successfully loaded from cache (fetched today)
+          }
+        }
+        
+        // Fetch from API
+        statusEl.textContent = 'Loading menu data...';
+        statusEl.className = 'status';
+        
+        // Use refresh=true to bypass server cache when user clicks Refresh button
+        const refreshParam = forceRefresh ? '?refresh=true' : '';
+        const response = await fetch(`/menus${refreshParam}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP ${response.status}`);
+        }
+        
+        const apiData = await response.json();
+        
+        // Save to localStorage with today's date
+        localStorage.setItem(CACHE_KEY, JSON.stringify(apiData));
+        localStorage.setItem(CACHE_DATE_KEY, new Date().toDateString());
+        
+        menuData = flattenMenuData(apiData);
+        renderMenuTable(menuData);
+        
+        // Show filter controls and table
+        document.getElementById('filterControls').style.display = 'block';
+        document.getElementById('tableContainer').style.display = 'block';
+        
+        statusEl.textContent = `Menu loaded: ${apiData.menus?.length || 0} menu(s), ${menuData.filter(r => r.type === 'item').length} items. Expand menu items to see and assign categories.`;
+        statusEl.className = 'status success';
+      } catch (error) {
+        statusEl.textContent = `Error loading menu: ${error.message}`;
+        statusEl.className = 'status error';
+        console.error('Error loading menu:', error);
+        
+        const tbody = document.getElementById('menuTableBody');
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" style="text-align: center; padding: 2rem; color: #ff8080;">
+              Error: ${error.message}
+            </td>
+          </tr>
+        `;
+      }
+    }
+
+    // Add load menu button handler - only loads when clicked
+    document.getElementById('loadMenuBtn').addEventListener('click', () => {
+      loadMenuData(false); // Use cached data if available
+    });
+
+    // Filter functionality
+    const nameFilter = document.getElementById('nameFilter');
+    const categoryFilter = document.getElementById('categoryFilter');
+    
+      function applyFilters() {
+      if (!menuData) return;
+      
+      const nameQuery = nameFilter.value.toLowerCase().trim();
+      const categoryQuery = categoryFilter.value;
+      
+      const rows = document.querySelectorAll('#menuTableBody tr[data-id]');
+      rows.forEach(tr => {
+        const rowText = tr.textContent.toLowerCase();
+        const rowGuid = tr.dataset.guid;
+        const categoriesCell = tr.querySelector('.report-categories');
+        
+        let nameMatch = !nameQuery || rowText.includes(nameQuery);
+        let categoryMatch = true;
+        
+        if (categoryQuery === 'uncategorized') {
+          // Check if item has categories
+          const hasCategories = categoriesCell && 
+            categoriesCell.textContent !== 'None' && 
+            categoriesCell.textContent !== 'Loading...' && 
+            categoriesCell.querySelector('.category-badge') !== null;
+          categoryMatch = !hasCategories;
+        } else if (categoryQuery && categoryQuery !== '') {
+          // Filter by specific category
+          const badges = categoriesCell ? categoriesCell.querySelectorAll('.category-badge') : [];
+          const hasMatchingCategory = Array.from(badges).some(badge => badge.dataset.categoryId === categoryQuery);
+          categoryMatch = hasMatchingCategory;
+        }
+        
+        // Apply filter - but respect tree visibility (only filter within visible tree)
+        const rowType = tr.dataset.type;
+        const isSelectable = rowType === 'item' || rowType === 'modifierOption';
+        
+        if (isSelectable) {
+          // For selectable items, check if they match filters
+          // But only hide if they're already visible (respect tree expansion)
+          const isCurrentlyVisible = tr.style.display !== 'none';
+          if (isCurrentlyVisible) {
+            if (!nameMatch || !categoryMatch) {
+              tr.style.display = 'none';
+            }
+          }
+        }
+      });
+    }
+
+    if (nameFilter) {
+      nameFilter.addEventListener('input', applyFilters);
+    }
+    if (categoryFilter) {
+      categoryFilter.addEventListener('change', applyFilters);
+    }
+
+    // Select all checkbox
+    document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
+      const checkboxes = document.querySelectorAll('.row-checkbox');
+      checkboxes.forEach(cb => {
+        cb.checked = e.target.checked;
+      });
+      updateSelection();
+    });
+
+    // Assign category to selected items
+    document.getElementById('assignCategoryBtn').addEventListener('click', async () => {
+      const categoryId = document.getElementById('categorySelector').value;
+      if (!categoryId) {
+        alert('Please select a category');
+        return;
+      }
+
+      if (selectedRows.size === 0) {
+        alert('Please select at least one item');
+        return;
+      }
+
+      const selectedGuids = [];
+      selectedRows.forEach(rowId => {
+        const row = document.querySelector(`tr[data-id="${rowId}"]`);
+        if (row && row.dataset.guid) {
+          selectedGuids.push(row.dataset.guid);
+        }
+      });
+
+      if (selectedGuids.length === 0) {
+        alert('No valid items selected');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/item-categories/bulk-assign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuids: selectedGuids,
+            categoryId: categoryId
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+        const assignedCount = result.assigned_count || selectedGuids.length;
+
+        // Reload categories for all selected items
+        selectedGuids.forEach(guid => {
+          const cell = document.querySelector(`td.report-categories[data-guid="${guid}"]`);
+          if (cell) {
+            // Mark as not loaded so it will reload
+            cell.dataset.loaded = 'false';
+            loadCategoriesForItem(guid, cell);
+          }
+        });
+
+        // Clear selection
+        document.querySelectorAll('.row-checkbox:checked').forEach(cb => cb.checked = false);
+        updateSelection();
+        document.getElementById('categorySelector').value = '';
+
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = `✓ Category assigned to ${assignedCount} item(s)`;
+        statusEl.className = 'status success';
+        
+        // Clear success message after 5 seconds
+        setTimeout(() => {
+          if (statusEl.className === 'status success') {
+            statusEl.textContent = '';
+          }
+        }, 5000);
+      } catch (error) {
+        alert(`Error assigning category: ${error.message}`);
+      }
+    });
+
+    // Remove category from selected items
+    document.getElementById('removeCategoryBtn').addEventListener('click', async () => {
+      const categoryId = document.getElementById('categorySelector').value;
+      if (!categoryId) {
+        alert('Please select a category to remove');
+        return;
+      }
+
+      if (selectedRows.size === 0) {
+        alert('Please select at least one item');
+        return;
+      }
+
+      const selectedGuids = [];
+      selectedRows.forEach(rowId => {
+        const row = document.querySelector(`tr[data-id="${rowId}"]`);
+        if (row && row.dataset.guid) {
+          selectedGuids.push(row.dataset.guid);
+        }
+      });
+
+      if (selectedGuids.length === 0) {
+        alert('No valid items selected');
+        return;
+      }
+
+      if (!confirm(`Remove this category from ${selectedGuids.length} item(s)?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/item-categories/bulk-remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemGuids: selectedGuids,
+            categoryId: categoryId
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+        const removedCount = result.removed_count || 0;
+
+        // Reload categories for all selected items
+        selectedGuids.forEach(guid => {
+          const cell = document.querySelector(`td.report-categories[data-guid="${guid}"]`);
+          if (cell) {
+            // Mark as not loaded so it will reload
+            cell.dataset.loaded = 'false';
+            loadCategoriesForItem(guid, cell);
+          }
+        });
+
+        // Clear selection
+        document.querySelectorAll('.row-checkbox:checked').forEach(cb => cb.checked = false);
+        updateSelection();
+        document.getElementById('categorySelector').value = '';
+
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = `✓ Category removed from ${removedCount} item(s)`;
+        statusEl.className = 'status success';
+        
+        // Clear success message after 5 seconds
+        setTimeout(() => {
+          if (statusEl.className === 'status success') {
+            statusEl.textContent = '';
+          }
+        }, 5000);
+      } catch (error) {
+        alert(`Error removing category: ${error.message}`);
+      }
+    });
+
+    // Clear selection
+    document.getElementById('clearSelectionBtn').addEventListener('click', () => {
+      document.querySelectorAll('.row-checkbox:checked').forEach(cb => cb.checked = false);
+      updateSelection();
+    });
+
+    // Load categories when page loads
+    loadAllCategories();
+
+    // Do NOT auto-load menu on page load - user must click "Load Menu" button
+    // This prevents polling/timeout issues
+    const statusEl = document.getElementById('status');
+    const tbody = document.getElementById('menuTableBody');
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; padding: 2rem; opacity: 0.6;">
+          Click "Load Menu" button above to load menu data from Toast
+        </td>
+      </tr>
+    `;
+  </script>
+</body>
+</html>

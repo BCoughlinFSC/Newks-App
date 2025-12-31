@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Configuration - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 1.5rem;
+      background: #0b1020;
+      color: #f4f4f4;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #262b40;
+    }
+    .header h1 {
+      margin: 0;
+      color: #7ce38b;
+    }
+    .nav {
+      display: flex;
+      gap: 1rem;
+    }
+    .nav a {
+      color: #a0b0d0;
+      text-decoration: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .nav a:hover {
+      background: #1a1f35;
+      color: #7ce38b;
+    }
+    .nav a.active {
+      background: #2a7be4;
+      color: #f4f4f4;
+    }
+    .card {
+      background: #151a2e;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    }
+    .card h2 {
+      margin-top: 0;
+      margin-bottom: 1rem;
+      color: #7ce38b;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: #a0b0d0;
+    }
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #444b6b;
+      background: #101426;
+      color: #f4f4f4;
+      font-size: 0.9rem;
+      box-sizing: border-box;
+    }
+    .form-group textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+    button {
+      cursor: pointer;
+      background: #2a7be4;
+      border: none;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      color: #f4f4f4;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #1e5bb8;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .btn-danger {
+      background: #e42a2a;
+    }
+    .btn-danger:hover {
+      background: #b81e1e;
+    }
+    .btn-secondary {
+      background: #444b6b;
+    }
+    .btn-secondary:hover {
+      background: #555c7b;
+    }
+    .categories-list {
+      margin-top: 1rem;
+    }
+    .category-item {
+      background: #0d1121;
+      border: 1px solid #262b40;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .category-item:hover {
+      background: #101426;
+    }
+    .category-info {
+      flex: 1;
+    }
+    .category-name {
+      font-weight: 600;
+      font-size: 1rem;
+      color: #f4f4f4;
+      margin-bottom: 0.25rem;
+    }
+    .category-description {
+      font-size: 0.85rem;
+      color: #a0b0d0;
+      opacity: 0.8;
+    }
+    .category-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .status {
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      opacity: 0.9;
+    }
+    .error {
+      color: #ff8080;
+    }
+    .success {
+      color: #7ce38b;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      opacity: 0.6;
+      color: #a0b0d0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Configuration</h1>
+    <div class="nav">
+      <a href="/">Home</a>
+      <a href="/report-builder">Report Builder</a>
+      <a href="/menu-performance">Menu Performance</a>
+      <a href="/configuration" class="active">Configuration</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Report Categories</h2>
+    <div class="form-group">
+      <label for="categoryName">Category Name *</label>
+      <input type="text" id="categoryName" placeholder="e.g., Sales Reports, Menu Analysis, etc." />
+    </div>
+    <div class="form-group">
+      <label for="categoryDescription">Description</label>
+      <textarea id="categoryDescription" placeholder="Optional description for this category"></textarea>
+    </div>
+    <button id="addCategoryBtn">Add Category</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Existing Categories</h2>
+    <div class="categories-list" id="categoriesList">
+      <div class="empty-state">Loading categories...</div>
+    </div>
+  </div>
+
+  <script>
+    let categories = [];
+    let editingId = null;
+
+    // Load categories from API
+    async function loadCategories() {
+      try {
+        const response = await fetch('/api/report-categories');
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        categories = await response.json();
+        renderCategories();
+      } catch (error) {
+        console.error('Error loading categories:', error);
+        const list = document.getElementById('categoriesList');
+        list.innerHTML = `<div class="empty-state">Error loading categories: ${error.message}</div>`;
+      }
+    }
+
+    // Render categories list
+    function renderCategories() {
+      const list = document.getElementById('categoriesList');
+      
+      if (categories.length === 0) {
+        list.innerHTML = '<div class="empty-state">No categories yet. Create one above!</div>';
+        return;
+      }
+
+      list.innerHTML = categories.map(cat => `
+        <div class="category-item" data-id="${cat.id}">
+          <div class="category-info">
+            <div class="category-name">${escapeHtml(cat.name)}</div>
+            ${cat.description ? `<div class="category-description">${escapeHtml(cat.description)}</div>` : ''}
+          </div>
+          <div class="category-actions">
+            <button class="btn-secondary" onclick="editCategory('${cat.id}')">Edit</button>
+            <button class="btn-danger" onclick="deleteCategory('${cat.id}')">Delete</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Add or update category
+    async function saveCategory() {
+      const nameInput = document.getElementById('categoryName');
+      const descInput = document.getElementById('categoryDescription');
+      const statusEl = document.getElementById('status');
+      const addBtn = document.getElementById('addCategoryBtn');
+
+      const name = nameInput.value.trim();
+      const description = descInput.value.trim();
+
+      if (!name) {
+        statusEl.textContent = 'Please enter a category name';
+        statusEl.className = 'status error';
+        return;
+      }
+
+      try {
+        addBtn.disabled = true;
+        statusEl.textContent = editingId ? 'Updating category...' : 'Creating category...';
+        statusEl.className = 'status';
+
+        const url = editingId 
+          ? `/api/report-categories/${editingId}`
+          : '/api/report-categories';
+        
+        const method = editingId ? 'PUT' : 'POST';
+        const body = { name, description };
+
+        const response = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP ${response.status}`);
+        }
+
+        // Clear form
+        nameInput.value = '';
+        descInput.value = '';
+        editingId = null;
+        addBtn.textContent = 'Add Category';
+        addBtn.disabled = false;
+
+        // Reload categories
+        await loadCategories();
+        
+        statusEl.textContent = editingId ? 'Category updated successfully!' : 'Category created successfully!';
+        statusEl.className = 'status success';
+      } catch (error) {
+        statusEl.textContent = `Error: ${error.message}`;
+        statusEl.className = 'status error';
+        addBtn.disabled = false;
+      }
+    }
+
+    // Edit category
+    function editCategory(id) {
+      const category = categories.find(c => c.id === id);
+      if (!category) return;
+
+      document.getElementById('categoryName').value = category.name;
+      document.getElementById('categoryDescription').value = category.description || '';
+      editingId = id;
+      document.getElementById('addCategoryBtn').textContent = 'Update Category';
+      document.getElementById('status').textContent = '';
+      document.getElementById('status').className = 'status';
+    }
+
+    // Delete category
+    async function deleteCategory(id) {
+      if (!confirm('Are you sure you want to delete this category?')) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/report-categories/${id}`, {
+          method: 'DELETE'
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP ${response.status}`);
+        }
+
+        await loadCategories();
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = 'Category deleted successfully!';
+        statusEl.className = 'status success';
+      } catch (error) {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = `Error deleting category: ${error.message}`;
+        statusEl.className = 'status error';
+      }
+    }
+
+    // Make functions global for onclick handlers
+    window.editCategory = editCategory;
+    window.deleteCategory = deleteCategory;
+
+    // Event listeners
+    document.getElementById('addCategoryBtn').addEventListener('click', saveCategory);
+
+    // Allow Enter key to submit
+    document.getElementById('categoryName').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        saveCategory();
+      }
+    });
+
+    // Load categories on page load
+    loadCategories();
+  </script>
+</body>
+</html>
+

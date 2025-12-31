@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Menu Performance - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 1.5rem;
+      background: #0b1020;
+      color: #f4f4f4;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #262b40;
+    }
+    .header h1 {
+      margin: 0;
+      color: #7ce38b;
+    }
+    .nav {
+      display: flex;
+      gap: 1rem;
+    }
+    .nav a {
+      color: #a0b0d0;
+      text-decoration: none;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .nav a:hover {
+      background: #1a1f35;
+      color: #7ce38b;
+    }
+    .nav a.active {
+      background: #2a7be4;
+      color: #f4f4f4;
+    }
+    .card {
+      background: #151a2e;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    }
+    .card h2 {
+      margin-top: 0;
+    }
+    label {
+      display: inline-block;
+      margin-right: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    input, select, button {
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid #444b6b;
+      background: #101426;
+      color: #f4f4f4;
+    }
+    button {
+      cursor: pointer;
+      background: #2a7be4;
+      border: none;
+      font-weight: 600;
+      padding: 0.4rem 0.9rem;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .locations-list, .categories-list {
+      max-height: 10rem;
+      overflow-y: auto;
+      border-radius: 8px;
+      border: 1px solid #272c45;
+      padding: 0.4rem 0.6rem;
+      margin-top: 0.25rem;
+      background: #0d1121;
+      font-size: 0.85rem;
+    }
+    .locations-list label, .categories-list label {
+      display: flex;
+      align-items: center;
+      margin-bottom: 0.25rem;
+      margin-right: 0;
+    }
+    .locations-list input[type="checkbox"], .categories-list input[type="checkbox"] {
+      margin-right: 0.4rem;
+    }
+    .status {
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      opacity: 0.9;
+    }
+    .error {
+      color: #ff8080;
+    }
+    .success {
+      color: #7ce38b;
+    }
+    .filter-row {
+      margin-bottom: 1rem;
+    }
+    .filter-row label {
+      display: block;
+      margin-bottom: 0.25rem;
+      font-weight: 600;
+      color: #a0b0d0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+    }
+    th, td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #262b40;
+      border-right: 1px solid #262b40;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+    th {
+      background: #171c32;
+      position: sticky;
+      top: 0;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+    }
+    th:hover {
+      background: #1a1f35;
+    }
+    th.sorted-asc::after {
+      content: ' ▲';
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+    th.sorted-desc::after {
+      content: ' ▼';
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+    td {
+      white-space: nowrap;
+    }
+    td:nth-child(6), td:nth-child(7) {
+      text-align: right;
+    }
+    tr:hover {
+      background: #1a1f35;
+    }
+    .category-badge {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      margin: 0.1rem;
+      background: #2a7be4;
+      color: #f4f4f4;
+      border-radius: 4px;
+      font-size: 0.75rem;
+    }
+    .summary {
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+      opacity: 0.9;
+    }
+    select[multiple] {
+      min-height: 100px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Newk's Reporting Platform</h1>
+    <div class="nav">
+      <a href="/home">Home</a>
+      <a href="/">Net Sales</a>
+      <a href="/menu-sync">Menu Sync</a>
+      <a href="/report-categories">Report Categories</a>
+      <a href="/report-builder">Report Builder</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top: 0;">Filters</h2>
+    
+    <div class="filter-row">
+      <label>
+        Start Date:
+        <input type="date" id="startDate" />
+      </label>
+      <label>
+        End Date:
+        <input type="date" id="endDate" />
+      </label>
+      <button id="runBtn">Run Report</button>
+    </div>
+
+    <div class="filter-row">
+      <label>
+        <input type="checkbox" id="selectAllLocations" />
+        Select All Locations
+      </label>
+      <div class="locations-list" id="locationsContainer">
+        Loading locations...
+      </div>
+    </div>
+
+    <div class="filter-row">
+      <label>
+        <input type="checkbox" id="includeUncategorized" checked />
+        Include Uncategorized Items
+      </label>
+    </div>
+
+    <div class="filter-row">
+      <label>
+        Filter by Categories (optional):
+        <select id="categoriesFilter" multiple style="width: 100%; min-height: 80px;">
+          <option value="">Loading categories...</option>
+        </select>
+      </label>
+      <small style="opacity: 0.7; display: block; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple categories</small>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+      <h2 style="margin-top: 0; margin-bottom: 0;">Results</h2>
+      <button id="downloadBtn" style="display: none;">Download CSV</button>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div style="overflow-x: auto;">
+      <table id="resultsTable">
+        <thead>
+          <tr>
+            <th data-sort="businessDate">Business Date</th>
+            <th data-sort="location">Location</th>
+            <th data-sort="item">Menu Item</th>
+            <th>Toast GUID</th>
+            <th>Categories</th>
+            <th data-sort="qty" style="text-align: right;">Qty Sold</th>
+            <th data-sort="sales" style="text-align: right;">Net Sales</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody">
+          <tr>
+            <td colspan="7" style="text-align: center; padding: 2rem; opacity: 0.7;">
+              Run a report to see results.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const locationsContainer = document.getElementById('locationsContainer');
+    const categoriesFilter = document.getElementById('categoriesFilter');
+    const runBtn = document.getElementById('runBtn');
+    const statusEl = document.getElementById('status');
+    const resultsBody = document.getElementById('resultsBody');
+    const summaryEl = document.getElementById('summary');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const selectAllLocations = document.getElementById('selectAllLocations');
+    const includeUncategorized = document.getElementById('includeUncategorized');
+    
+    let currentData = [];
+    let currentSortColumn = null;
+    let currentSortDirection = 'asc';
+
+    // Load locations
+    async function loadLocations() {
+      try {
+        const resp = await fetch('/locations');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const locations = await resp.json();
+        
+        if (!Array.isArray(locations) || locations.length === 0) {
+          locationsContainer.textContent = 'No locations found.';
+          return;
+        }
+
+        locationsContainer.innerHTML = '';
+        locations.forEach(loc => {
+          const label = document.createElement('label');
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = loc.restaurantGuid;
+          checkbox.checked = true;
+          label.appendChild(checkbox);
+          label.appendChild(document.createTextNode(' ' + (loc.restaurantName || loc.restaurantGuid)));
+          locationsContainer.appendChild(label);
+        });
+
+        selectAllLocations.checked = true;
+        selectAllLocations.addEventListener('change', () => {
+          const checked = selectAllLocations.checked;
+          const boxes = locationsContainer.querySelectorAll('input[type="checkbox"]');
+          boxes.forEach(cb => cb.checked = checked);
+        });
+      } catch (err) {
+        console.error(err);
+        locationsContainer.textContent = 'Error loading locations.';
+      }
+    }
+
+    // Load categories
+    async function loadCategories() {
+      try {
+        const resp = await fetch('/api/report-categories');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const categories = await resp.json();
+        
+        categoriesFilter.innerHTML = '';
+        categories.forEach(cat => {
+          const option = document.createElement('option');
+          option.value = cat.id;
+          option.textContent = cat.name;
+          categoriesFilter.appendChild(option);
+        });
+      } catch (err) {
+        console.error(err);
+        categoriesFilter.innerHTML = '<option value="">Error loading categories</option>';
+      }
+    }
+
+    // Run report
+    async function runReport() {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      if (!start || !end) {
+        alert('Please select both start and end dates.');
+        return;
+      }
+
+      // Get selected locations
+      const locationCheckboxes = locationsContainer.querySelectorAll('input[type="checkbox"]:checked');
+      const selectedLocations = Array.from(locationCheckboxes).map(cb => cb.value).filter(v => v);
+      
+      if (selectedLocations.length === 0) {
+        statusEl.textContent = 'Error: Please select at least one location.';
+        statusEl.className = 'status error';
+        return;
+      }
+
+      // Get selected categories
+      const selectedCategories = Array.from(categoriesFilter.selectedOptions).map(opt => opt.value).filter(v => v);
+      
+      // Build query params
+      const params = new URLSearchParams();
+      params.set('start_date', start);
+      params.set('end_date', end);
+      params.set('include_uncategorized', includeUncategorized.checked);
+      selectedLocations.forEach(id => params.append('restaurant_ids', id));
+      selectedCategories.forEach(id => params.append('category_ids', id));
+
+      runBtn.disabled = true;
+      statusEl.textContent = 'Running report...';
+      statusEl.className = 'status';
+
+      const startTime = Date.now();
+
+      try {
+        const resp = await fetch('/api/menu-performance?' + params.toString());
+        if (!resp.ok) {
+          let errorText = await resp.text();
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorText = errorJson.detail || errorText;
+          } catch (e) {}
+          throw new Error(errorText || ('HTTP ' + resp.status));
+        }
+        const data = await resp.json();
+        currentData = data;
+        renderResults(data);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+        statusEl.textContent = `Report complete: ${data.length} rows in ${elapsed}s.`;
+        statusEl.className = 'status success';
+      } catch (err) {
+        console.error('Error running report:', err);
+        let errorMsg = err.message || 'Unknown error';
+        if (errorMsg.length > 300) {
+          errorMsg = errorMsg.substring(0, 300) + '...';
+        }
+        statusEl.textContent = 'Error: ' + errorMsg;
+        statusEl.className = 'status error';
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    // Render results table
+    function renderResults(rows) {
+      resultsBody.innerHTML = '';
+
+      if (!Array.isArray(rows) || rows.length === 0) {
+        resultsBody.innerHTML = `
+          <tr>
+            <td colspan="7" style="text-align: center; padding: 2rem; opacity: 0.7;">
+              No data found for that range.
+            </td>
+          </tr>
+        `;
+        summaryEl.textContent = '';
+        downloadBtn.style.display = 'none';
+        return;
+      }
+
+      downloadBtn.style.display = 'inline-block';
+
+      // Calculate totals
+      let totalQty = 0;
+      let totalSales = 0;
+      rows.forEach(row => {
+        totalQty += row.quantitySold || 0;
+        totalSales += row.netSalesAmount || 0;
+      });
+
+      // Render rows
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        
+        // Business Date
+        const dateCell = document.createElement('td');
+        dateCell.textContent = row.businessDate;
+        tr.appendChild(dateCell);
+
+        // Location
+        const locCell = document.createElement('td');
+        locCell.textContent = row.restaurantName || row.restaurantGuid;
+        tr.appendChild(locCell);
+
+        // Menu Item
+        const itemCell = document.createElement('td');
+        itemCell.textContent = row.menuItemName || row.menuItemGuid;
+        tr.appendChild(itemCell);
+
+        // Toast GUID
+        const guidCell = document.createElement('td');
+        guidCell.textContent = row.menuItemGuid;
+        guidCell.style.fontFamily = 'monospace';
+        guidCell.style.fontSize = '0.85rem';
+        guidCell.style.opacity = '0.8';
+        tr.appendChild(guidCell);
+
+        // Categories
+        const catCell = document.createElement('td');
+        if (row.categoryNames && row.categoryNames.length > 0) {
+          row.categoryNames.forEach(catName => {
+            const badge = document.createElement('span');
+            badge.className = 'category-badge';
+            badge.textContent = catName;
+            catCell.appendChild(badge);
+          });
+        } else {
+          catCell.textContent = '-';
+          catCell.style.opacity = '0.5';
+        }
+        tr.appendChild(catCell);
+
+        // Qty Sold
+        const qtyCell = document.createElement('td');
+        qtyCell.textContent = (row.quantitySold || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        qtyCell.style.textAlign = 'right';
+        tr.appendChild(qtyCell);
+
+        // Net Sales
+        const salesCell = document.createElement('td');
+        salesCell.textContent = '$' + (row.netSalesAmount || 0).toFixed(2);
+        salesCell.style.textAlign = 'right';
+        tr.appendChild(salesCell);
+
+        resultsBody.appendChild(tr);
+      });
+
+      // Update summary
+      summaryEl.textContent = `Total: ${rows.length} rows | Total Qty: ${totalQty.toLocaleString('en-US', { maximumFractionDigits: 0 })} | Total Sales: $${totalSales.toFixed(2)}`;
+    }
+
+    // Sorting
+    document.querySelectorAll('th[data-sort]').forEach(th => {
+      th.addEventListener('click', () => {
+        const sortKey = th.dataset.sort;
+        
+        // Update sort indicators
+        document.querySelectorAll('th').forEach(h => {
+          h.classList.remove('sorted-asc', 'sorted-desc');
+        });
+        
+        if (currentSortColumn === sortKey && currentSortDirection === 'asc') {
+          currentSortDirection = 'desc';
+          th.classList.add('sorted-desc');
+        } else {
+          currentSortColumn = sortKey;
+          currentSortDirection = 'asc';
+          th.classList.add('sorted-asc');
+        }
+        
+        // Sort data
+        currentData.sort((a, b) => {
+          let aVal, bVal;
+          switch (sortKey) {
+            case 'businessDate':
+              aVal = a.businessDate;
+              bVal = b.businessDate;
+              break;
+            case 'location':
+              aVal = (a.restaurantName || a.restaurantGuid || '').toLowerCase();
+              bVal = (b.restaurantName || b.restaurantGuid || '').toLowerCase();
+              break;
+            case 'item':
+              aVal = (a.menuItemName || a.menuItemGuid || '').toLowerCase();
+              bVal = (b.menuItemName || b.menuItemGuid || '').toLowerCase();
+              break;
+            case 'qty':
+              aVal = a.quantitySold || 0;
+              bVal = b.quantitySold || 0;
+              break;
+            case 'sales':
+              aVal = a.netSalesAmount || 0;
+              bVal = b.netSalesAmount || 0;
+              break;
+            default:
+              return 0;
+          }
+          
+          if (typeof aVal === 'string') {
+            return currentSortDirection === 'asc' 
+              ? aVal.localeCompare(bVal)
+              : bVal.localeCompare(aVal);
+          } else {
+            return currentSortDirection === 'asc' 
+              ? aVal - bVal
+              : bVal - aVal;
+          }
+        });
+        
+        renderResults(currentData);
+      });
+    });
+
+    // CSV Export
+    function downloadCSV() {
+      if (!currentData || currentData.length === 0) {
+        alert('No data to download. Please run a report first.');
+        return;
+      }
+
+      function escapeCSV(value) {
+        if (value === null || value === undefined) return '';
+        const str = String(value);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+      }
+
+      const csvRows = [];
+      
+      // Header
+      csvRows.push(['Business Date', 'Location', 'Menu Item', 'Toast GUID', 'Categories', 'Qty Sold', 'Net Sales'].map(escapeCSV).join(','));
+
+      // Data rows
+      currentData.forEach(row => {
+        const categories = (row.categoryNames || []).join('; ');
+        csvRows.push([
+          row.businessDate,
+          row.restaurantName || row.restaurantGuid,
+          row.menuItemName || row.menuItemGuid,
+          row.menuItemGuid,
+          categories,
+          (row.quantitySold || 0).toFixed(0),
+          (row.netSalesAmount || 0).toFixed(2)
+        ].map(escapeCSV).join(','));
+      });
+
+      const csvContent = csvRows.join('\n');
+      const BOM = '\uFEFF';
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      const filename = `menu_performance_${start}_to_${end}.csv`;
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    }
+
+    // Event listeners
+    runBtn.addEventListener('click', runReport);
+    downloadBtn.addEventListener('click', downloadCSV);
+
+    // Load data on page load
+    loadLocations();
+    loadCategories();
+  </script>
+</body>
+</html>
+

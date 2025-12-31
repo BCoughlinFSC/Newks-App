@@ -1,0 +1,18 @@
+[
+  {
+    "id": "57636ddf-7260-4095-8a2b-a0eea72928b5",
+    "name": "Net Sales by Location - Weekly",
+    "description": "Weekly net sales breakdown by location",
+    "createdBy": "System",
+    "createdAt": "2025-12-17T13:42:58.163157",
+    "lastModified": "2025-12-17T13:42:58.163171",
+    "config": {
+      "reportType": "metrics",
+      "dateRangeType": "last_7_days",
+      "customStartDate": null,
+      "customEndDate": null,
+      "restaurantIds": [],
+      "groupBy": []
+    }
+  }
+]
