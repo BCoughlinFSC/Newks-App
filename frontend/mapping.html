@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mapping Table - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='url(%23grad)'/%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='0%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%231E3A5F;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%231E3A5F;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%23ffffff;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23ffffff;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Ctext x='50' y='35' font-family='Arial' font-size='12' font-weight='600' font-style='italic' fill='white' text-anchor='middle'%3ENewk's%3C/text%3E%3Crect x='35' y='5' width='30' height='8' rx='2' fill='%23C41E3A'/%3E%3Ctext x='50' y='11' font-family='Arial' font-size='6' font-weight='600' fill='white' text-anchor='middle'%3EEATERY%3C/text%3E%3Ctext x='50' y='70' font-family='Arial' font-size='20' font-weight='700' fill='%23C41E3A' text-anchor='middle' letter-spacing='2'%3EIT%3C/text%3E%3C/svg%3E" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #F8FAFC;
+      color: #2c2c2c;
+    }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header-text { flex: 1; }
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+    .header p {
+      margin: 0.5rem 0 0 0;
+      color: rgba(255,255,255,0.9);
+      font-size: 0.9rem;
+    }
+    .home-btn {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .home-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      grid-template-rows: 1fr;
+      gap: 1.5rem;
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 1.5rem 2rem;
+      min-height: calc(100vh - 120px);
+    }
+    .left-nav {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 1.25rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+      height: fit-content;
+      position: sticky;
+      top: 1.5rem;
+    }
+    .left-nav h3 {
+      margin: 0 0 1rem 0;
+      color: #C41E3A;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .nav-link-item {
+      display: block;
+      padding: 0.5rem 0.75rem;
+      color: #2c2c2c;
+      text-decoration: none;
+      border-radius: 6px;
+      margin-bottom: 0.25rem;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+    }
+    .nav-link-item:hover {
+      background: #F0F9FF;
+      color: #C41E3A;
+    }
+    .nav-link-item.active {
+      background: #C41E3A;
+      color: #ffffff;
+    }
+    .content-area {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .mapping-card {
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    .mapping-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      background: #faf8f5;
+      border-bottom: 1px solid #e8e0d5;
+    }
+    .mapping-toolbar .search-wrap {
+      flex: 1;
+      min-width: 200px;
+      max-width: 320px;
+    }
+    .mapping-toolbar input[type="search"] {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #d4c9b8;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    .mapping-toolbar input[type="search"]:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 2px rgba(196, 30, 58, 0.15);
+    }
+    .mapping-toolbar .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .btn-primary {
+      background: #C41E3A;
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background: #A01A2E;
+    }
+    .btn-secondary {
+      background: #ffffff;
+      color: #2c2c2c;
+      border: 1px solid #d4c9b8;
+    }
+    .btn-secondary:hover {
+      background: #F0F9FF;
+      border-color: #C41E3A;
+      color: #C41E3A;
+    }
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .mapping-meta {
+      font-size: 0.85rem;
+      color: #666;
+      margin-left: auto;
+    }
+    .table-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      overflow-y: auto;
+      flex: 1;
+      min-height: 400px;
+      max-height: calc(100vh - 200px);
+    }
+    .mapping-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    .mapping-table th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #1E3A5F;
+      color: #ffffff;
+      padding: 0.65rem 0.85rem;
+      text-align: left;
+      font-weight: 600;
+      white-space: nowrap;
+      border-bottom: 2px solid #A01A2E;
+    }
+    .mapping-table th.sortable {
+      cursor: pointer;
+      user-select: none;
+      padding-right: 1.5rem;
+    }
+    .mapping-table th.sortable:hover {
+      background: #2a4a6f;
+    }
+    .mapping-table th .sort-icon {
+      margin-left: 0.35rem;
+      opacity: 0.7;
+      font-size: 0.75em;
+    }
+    .mapping-table th.sorted-asc .sort-icon,
+    .mapping-table th.sorted-desc .sort-icon {
+      opacity: 1;
+    }
+    .mapping-table td {
+      padding: 0.5rem 0.85rem;
+      border-bottom: 1px solid #e8e0d5;
+      vertical-align: middle;
+    }
+    .mapping-table tbody tr:hover {
+      background: #f8fafc;
+    }
+    .mapping-table tbody tr.edited {
+      background: #FEF3C7;
+    }
+    .mapping-table .cell-display {
+      min-height: 1.5em;
+      cursor: text;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 2px 4px;
+      margin: -2px -4px;
+    }
+    .mapping-table .cell-display:hover {
+      background: #f0f9ff;
+      border-color: #e0e7ef;
+    }
+    .mapping-table .cell-edit {
+      width: 100%;
+      min-width: 80px;
+      padding: 0.35rem 0.5rem;
+      border: 1px solid #C41E3A;
+      border-radius: 4px;
+      font-size: inherit;
+      font-family: inherit;
+      background: #fff;
+    }
+    .mapping-table .cell-edit:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(196, 30, 58, 0.25);
+    }
+    .loading-state, .error-state {
+      padding: 3rem 2rem;
+      text-align: center;
+      color: #666;
+    }
+    .error-state {
+      color: #B91C1C;
+      background: #FEE2E2;
+      margin: 1rem;
+      border-radius: 8px;
+    }
+    .save-status {
+      font-size: 0.85rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      margin-left: 0.5rem;
+    }
+    .save-status.success { background: #D1FAE5; color: #065F46; }
+    .save-status.error { background: #FEE2E2; color: #B91C1C; }
+    .save-status.saving { background: #FEF3C7; color: #92400E; }
+    .row-count {
+      font-weight: 600;
+      color: #2c2c2c;
+    }
+    .hidden {
+      display: none !important;
+    }
+    /* ── Content tabs (Mapping Table / Audit) ── */
+    .content-tabs { display: flex; gap: 0; margin-bottom: 1.25rem; border-radius: 8px; overflow: hidden; border: 1px solid #d4c9b8; width: fit-content; }
+    .ctab { padding: 0.5rem 1.25rem; border: none; background: #f1f5f9; color: #64748b; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    .ctab:hover { background: #e2e8f0; }
+    .ctab.active { background: #1E3A5F; color: #fff; }
+    /* ── Audit card and sections ── */
+    .audit-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e0d5; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
+    .audit-section { border: 1px solid #e8e0d5; border-radius: 8px; overflow: hidden; }
+    .audit-section-head { background: #faf8f5; padding: 1rem 1.25rem; border-bottom: 1px solid #e8e0d5; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .audit-section-head h3 { margin: 0; font-size: 1rem; color: #1E3A5F; font-weight: 700; }
+    .audit-section-body { padding: 1.25rem; }
+    /* ── Summary badges ── */
+    .summary-badges { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1rem; }
+    .sbadge { padding: 0.3rem 0.75rem; border-radius: 20px; font-size: 0.82rem; font-weight: 700; white-space: nowrap; }
+    .sbadge-total  { background: #E2E8F0; color: #1E3A5F; }
+    .sbadge-ok     { background: #D1FAE5; color: #065F46; }
+    .sbadge-warn   { background: #FEF9C3; color: #854D0E; }
+    .sbadge-danger { background: #FEE2E2; color: #991B1B; }
+    .sbadge-info   { background: #DBEAFE; color: #1E40AF; }
+    /* ── Audit result buckets ── */
+    .bucket { margin-top: 1.25rem; }
+    .bucket-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+    .bucket-label { font-size: 0.88rem; font-weight: 700; }
+    .bucket-label.ok     { color: #059669; }
+    .bucket-label.warn   { color: #D97706; }
+    .bucket-label.danger { color: #DC2626; }
+    .bucket-label.info   { color: #2563EB; }
+    .audit-tbl { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .audit-tbl th { background: #EFF6FF; color: #1E3A5F; font-weight: 700; padding: 0.45rem 0.75rem; text-align: left; border-bottom: 2px solid #BFDBFE; white-space: nowrap; }
+    .audit-tbl td { padding: 0.4rem 0.75rem; border-bottom: 1px solid #F0F0F0; }
+    .audit-tbl tbody tr:nth-child(even) td { background: #F8FAFF; }
+    .audit-tbl-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; border: 1px solid #e8e0d5; border-radius: 6px; }
+    .no-data { text-align: center; padding: 1.25rem; color: #6B7280; font-size: 0.88rem; background: #F9FAFB; border-radius: 6px; border: 1px dashed #D1D5DB; }
+    /* ── DBF drop zone ── */
+    .dbf-drop { border: 2px dashed #CBD5E1; border-radius: 8px; padding: 1.75rem; text-align: center; cursor: pointer; transition: all 0.2s; color: #64748B; }
+    .dbf-drop:hover, .dbf-drop.dragover { border-color: #C41E3A; background: #FFF1F2; color: #C41E3A; }
+    /* ── YoY Config tab ── */
+    .yoy-config-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e0d5; overflow: hidden; }
+    .yoy-config-section { border-bottom: 1px solid #e8e0d5; }
+    .yoy-config-section:last-child { border-bottom: none; }
+    .yoy-section-head { background: #faf8f5; padding: 1rem 1.25rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; cursor: pointer; user-select: none; }
+    .yoy-section-head:hover { background: #f1f5f9; }
+    .yoy-section-head h3 { margin: 0; font-size: 1rem; color: #1E3A5F; font-weight: 700; flex: 1; }
+    .yoy-section-body { padding: 1.25rem; }
+    .yoy-config-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .yoy-badge { padding: 0.25rem 0.65rem; border-radius: 16px; font-size: 0.8rem; font-weight: 700; }
+    .yoy-badge-ok   { background: #D1FAE5; color: #065F46; }
+    .yoy-badge-warn { background: #FEF3C7; color: #92400E; }
+    .yoy-badge-info { background: #DBEAFE; color: #1E40AF; }
+    .loc-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .loc-table th { background: #1E3A5F; color: #fff; padding: 0.55rem 0.75rem; text-align: left; font-weight: 600; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+    .loc-table td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #e8e0d5; vertical-align: middle; }
+    .loc-table tbody tr:nth-child(even) td { background: #F8FAFC; }
+    .loc-table tbody tr:hover td { background: #EFF6FF; }
+    .loc-table .store-input { width: 90px; padding: 0.3rem 0.5rem; border: 1px solid #d4c9b8; border-radius: 4px; font-size: 0.85rem; font-family: monospace; text-align: center; }
+    .loc-table .store-input:focus { outline: none; border-color: #C41E3A; box-shadow: 0 0 0 2px rgba(196,30,58,0.15); }
+    .loc-table .store-input.changed { border-color: #F59E0B; background: #FFFBEB; }
+    .loc-table .mapped-chip { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.78rem; font-weight: 700; }
+    .loc-table .mapped-chip.yes { background: #D1FAE5; color: #065F46; }
+    .loc-table .mapped-chip.no  { background: #FEE2E2; color: #991B1B; }
+    .loc-table-wrap { overflow-y: auto; max-height: 480px; border: 1px solid #e8e0d5; border-radius: 6px; }
+    .om-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .om-table th { background: #1E3A5F; color: #fff; padding: 0.55rem 0.75rem; text-align: left; font-weight: 600; white-space: nowrap; }
+    .om-table td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #e8e0d5; vertical-align: middle; }
+    .om-table tbody tr:nth-child(even) td { background: #F8FAFC; }
+    .om-select { padding: 0.35rem 0.5rem; border: 1px solid #d4c9b8; border-radius: 4px; font-size: 0.85rem; min-width: 160px; }
+    .om-select:focus { outline: none; border-color: #C41E3A; box-shadow: 0 0 0 2px rgba(196,30,58,0.15); }
+    .om-select.changed { border-color: #F59E0B; background: #FFFBEB; }
+    .yoy-loc-search { padding: 0.45rem 0.75rem; border: 1px solid #d4c9b8; border-radius: 6px; font-size: 0.875rem; width: 100%; max-width: 300px; margin-bottom: 0.75rem; }
+    .yoy-loc-search:focus { outline: none; border-color: #C41E3A; box-shadow: 0 0 0 2px rgba(196,30,58,0.15); }
+    .chevron { transition: transform 0.2s; display: inline-block; margin-left: auto; }
+    .chevron.open { transform: rotate(180deg); }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div class="header-text">
+        <div style="display: flex; align-items: center;">
+          <div class="logo" style="display: inline-flex; align-items: center; gap: 0.5rem; margin-right: 1rem;">
+            <div class="logo-circle" style="width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(to bottom, #1E3A5F 0%, #1E3A5F 50%, #ffffff 50%, #ffffff 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 2px; position: relative;">
+              <div style="width: 100%; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.65rem; font-weight: 600; font-style: italic;">Newk's</div>
+              <div style="position: absolute; top: 12px; background: #C41E3A; color: white; padding: 1px 3px; font-size: 0.45rem; border-radius: 2px; font-weight: 600;">EATERY</div>
+              <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: #C41E3A; font-size: 1rem; font-weight: 700;">IT</div>
+            </div>
+          </div>
+          <div>
+            <h1>Mapping Table</h1>
+            <p>Toast–Aloha consolidated mapping for sales and historical data. For <strong>item tag filtering</strong> in menu reports: use the <strong>Tag</strong> column (or ReportTag / GuestCountTag) and set it to the <em>exact</em> tag you select in the report (e.g. <code>PepperoniMushroom</code>). ConsolidatedCat is used when that tag is selected; if you filter by a different tag, the row must have that tag in the Tag column to appear.</p>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="/" class="home-btn" title="Home">🏠 Home</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="main-layout">
+    <nav class="left-nav">
+      <h3>Navigation</h3>
+      <a href="/" class="nav-link-item">🏠 Home</a>
+      <a href="/mapping.html" class="nav-link-item active">🗂 Mapping Table</a>
+      <a href="/legacy.html" class="nav-link-item">📋 Reports V1</a>
+    </nav>
+
+    <main class="content-area">
+
+      <!-- Tab switcher -->
+      <div class="content-tabs">
+        <button class="ctab active" id="ctabMapping">🗂 Mapping Table</button>
+        <button class="ctab"        id="ctabAudit">🔍 Audit</button>
+        <button class="ctab"        id="ctabYoyConfig">🗺 YoY Config</button>
+      </div>
+
+      <!-- ── Mapping Table Panel ── -->
+      <div id="panelMapping">
+      <div class="mapping-card">
+        <div class="mapping-toolbar">
+          <div class="search-wrap">
+            <input type="search" id="searchInput" placeholder="Search all columns..." aria-label="Search table" />
+          </div>
+          <button type="button" class="btn btn-secondary" id="btnRefresh" title="Reload from file">↻ Refresh</button>
+          <button type="button" class="btn btn-secondary" id="btnAddRow" title="Add a new row to the mapping table" disabled>➕ Add row</button>
+          <button type="button" class="btn btn-primary" id="btnSave" title="Save changes to file" disabled>💾 Save changes</button>
+          <span class="save-status hidden" id="saveStatus"></span>
+          <span class="mapping-meta">
+            Source: <span id="sourcePath">—</span> · <span class="row-count" id="rowCount">0 rows</span>
+          </span>
+        </div>
+
+        <div id="tableContainer" class="table-container">
+          <div class="loading-state" id="loadingState">Loading mapping table…</div>
+          <div class="error-state hidden" id="errorState"></div>
+          <div class="table-wrap hidden" id="tableWrap">
+            <table class="mapping-table" id="mappingTable">
+              <thead id="tableHead"></thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      </div><!-- /panelMapping -->
+
+      <!-- ── Audit Panel ── -->
+      <div id="panelAudit" class="hidden">
+        <div class="audit-card">
+
+          <!-- Toast Menu Audit -->
+          <div class="audit-section">
+            <div class="audit-section-head">
+              <h3>🍞 Toast Menu Audit</h3>
+              <button type="button" class="btn btn-primary" id="btnToastAudit">Poll Toast Menu</button>
+              <button type="button" class="btn btn-secondary" id="btnExportToastAudit" style="display:none;">⬇ Export CSV</button>
+              <span id="toastAuditStatus" style="font-size:0.85rem;color:#666;"></span>
+            </div>
+            <div class="audit-section-body" id="toastAuditBody">
+              <p style="color:#6B7280;font-size:0.88rem;margin:0;">
+                Click <strong>Poll Toast Menu</strong> to fetch every item currently on your live
+                Toast menu and check it against <code>Toast_Item_Name</code> in the mapping table.
+                Unmapped items can be bulk-added to the table in one click.
+              </p>
+            </div>
+          </div>
+
+          <!-- Aloha DBF Audit -->
+          <div class="audit-section">
+            <div class="audit-section-head">
+              <h3>🗄 Aloha DBF Audit</h3>
+              <button type="button" class="btn btn-secondary" id="btnExportAlohaAudit" style="display:none;">⬇ Export CSV</button>
+              <span id="alohaAuditStatus" style="font-size:0.85rem;color:#666;"></span>
+            </div>
+            <div class="audit-section-body">
+              <div class="dbf-drop" id="dbfDrop" tabindex="0" role="button" aria-label="Upload ITM.DBF">
+                <input type="file" id="dbfFile" accept=".dbf,.DBF" style="display:none;" />
+                <div>📂 Drop <strong>ITM.DBF</strong> here or click to upload</div>
+                <div style="font-size:0.8rem;margin-top:0.35rem;opacity:0.75;">
+                  Aloha item master — matches <code>LONGNAME</code> → <code>AlohaItemName</code>
+                  and checks <code>ID</code> → <code>AlohaPLU</code>
+                </div>
+              </div>
+              <div id="alohaAuditBody" style="margin-top:1rem;"></div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /panelAudit -->
+
+      <!-- ── YoY Config Panel ── -->
+      <div id="panelYoyConfig" class="hidden">
+        <div class="yoy-config-card">
+
+          <!-- Section 1: Location Mapping -->
+          <div class="yoy-config-section" id="secLocation">
+            <div class="yoy-section-head" id="secLocationHead">
+              <h3>📍 Location Mapping <small style="font-weight:400;color:#64748B;font-size:0.85rem;">Toast restaurant → Aloha store ID</small></h3>
+              <button type="button" class="btn btn-primary" id="btnLoadLocations" style="font-size:0.85rem;padding:0.4rem 0.9rem;">↻ Load Locations</button>
+              <button type="button" class="btn btn-primary" id="btnSaveLocations" style="font-size:0.85rem;padding:0.4rem 0.9rem;" disabled>💾 Save Mapping</button>
+              <span id="locSaveStatus" style="font-size:0.83rem;"></span>
+              <span class="chevron open" id="locChevron">▼</span>
+            </div>
+            <div class="yoy-section-body" id="locBody">
+              <p style="color:#64748B;font-size:0.875rem;margin:0 0 0.75rem 0;">
+                Maps each Toast restaurant GUID to its Aloha store number (e.g. <code>1042</code>).
+                The mapping is auto-generated by <code>build_location_mapping.py</code> — use this table to
+                review or correct any mismatches. Changes are saved to
+                <code>backend/data/aloha/aloha_location_mapping.json</code>.
+              </p>
+              <div id="locBadges" class="yoy-config-badges"></div>
+              <input type="search" id="locSearch" class="yoy-loc-search" placeholder="Filter by name or store ID…" />
+              <div class="loc-table-wrap" id="locTableWrap">
+                <div style="padding:2rem;text-align:center;color:#6B7280;">Click <strong>Load Locations</strong> to fetch restaurant list.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Order Mode Mapping -->
+          <div class="yoy-config-section" id="secOrderMode">
+            <div class="yoy-section-head" id="secOrderModeHead">
+              <h3>🔀 Order Mode Mapping <small style="font-weight:400;color:#64748B;font-size:0.85rem;">Aloha order mode → reporting channel</small></h3>
+              <button type="button" class="btn btn-primary" id="btnLoadOrderModes" style="font-size:0.85rem;padding:0.4rem 0.9rem;">↻ Load Order Modes</button>
+              <button type="button" class="btn btn-primary" id="btnSaveOrderModes" style="font-size:0.85rem;padding:0.4rem 0.9rem;" disabled>💾 Save Mapping</button>
+              <span id="omSaveStatus" style="font-size:0.83rem;"></span>
+              <span class="chevron open" id="omChevron">▼</span>
+            </div>
+            <div class="yoy-section-body" id="omBody">
+              <p style="color:#64748B;font-size:0.875rem;margin:0 0 0.75rem 0;">
+                Defines how Aloha <code>OrderMode_PrintName</code> values map to reporting channels
+                used in YoY comparisons. <em>Dine In</em>, <em>To Go</em>, <em>Delivery</em>, etc. from
+                Aloha are matched to their Toast equivalents so per-channel reporting is consistent.
+              </p>
+              <div id="omBadges" class="yoy-config-badges"></div>
+
+              <!-- Channel Manager -->
+              <div id="channelManager" style="margin:0 0 1rem 0;padding:0.75rem 1rem;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;">
+                <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem;">
+                  <strong style="font-size:0.85rem;color:#374151;">Toast Channel Labels</strong>
+                  <span style="font-size:0.78rem;color:#9CA3AF;">&nbsp;— the right-side options in the mapping table below</span>
+                </div>
+                <div id="channelChips" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.6rem;min-height:2rem;"></div>
+                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                  <input id="newChannelInput" type="text" placeholder="New channel name…"
+                    style="padding:0.35rem 0.6rem;font-size:0.83rem;border:1px solid #D1D5DB;border-radius:5px;width:180px;outline:none;" />
+                  <button id="btnAddChannel" type="button"
+                    style="padding:0.35rem 0.75rem;font-size:0.83rem;background:#2563EB;color:#fff;border:none;border-radius:5px;cursor:pointer;">+ Add</button>
+                  <button id="btnSaveChannels" type="button" disabled
+                    style="padding:0.35rem 0.75rem;font-size:0.83rem;background:#059669;color:#fff;border:none;border-radius:5px;cursor:pointer;opacity:0.5;">💾 Save Channels</button>
+                  <span id="chSaveStatus" style="font-size:0.8rem;"></span>
+                </div>
+              </div>
+
+              <div id="omTableWrap">
+                <div style="padding:2rem;text-align:center;color:#6B7280;">Click <strong>Load Order Modes</strong> to scan Aloha CSV files.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /panelYoyConfig -->
+
+    </main>
+  </div>
+
+  <script>
+    // Admin-only page — redirect non-admin users back to home
+    (function checkAdminAccess() {
+      const token = localStorage.getItem('auth_token');
+      const userStr = localStorage.getItem('user');
+      if (!token || !userStr) { window.location.href = '/'; return; }
+      try {
+        const user = JSON.parse(userStr);
+        if (user.role !== 'admin') { window.location.href = '/'; }
+      } catch (e) { window.location.href = '/'; }
+    })();
+
+    (function() {
+      const API_BASE = '';
+      let columns = [];
+      let rows = [];
+      let filteredRows = [];
+      let dirty = false;
+      let sortColumn = null;
+      let sortDir = 1;
+      const searchInput = document.getElementById('searchInput');
+      const btnRefresh = document.getElementById('btnRefresh');
+      const btnAddRow = document.getElementById('btnAddRow');
+      const btnSave = document.getElementById('btnSave');
+      const saveStatus = document.getElementById('saveStatus');
+      const sourcePath = document.getElementById('sourcePath');
+      const rowCount = document.getElementById('rowCount');
+      const loadingState = document.getElementById('loadingState');
+      const errorState = document.getElementById('errorState');
+      const tableWrap = document.getElementById('tableWrap');
+      const tableHead = document.getElementById('tableHead');
+      const tableBody = document.getElementById('tableBody');
+
+      function showLoading(show) {
+        loadingState.classList.toggle('hidden', !show);
+        if (show) {
+          errorState.classList.add('hidden');
+          tableWrap.classList.add('hidden');
+        }
+      }
+
+      function showError(msg) {
+        loadingState.classList.add('hidden');
+        tableWrap.classList.add('hidden');
+        errorState.textContent = msg;
+        errorState.classList.remove('hidden');
+      }
+
+      function showTable() {
+        loadingState.classList.add('hidden');
+        errorState.classList.add('hidden');
+        tableWrap.classList.remove('hidden');
+      }
+
+      function setSaveStatus(type, text) {
+        saveStatus.textContent = text;
+        saveStatus.className = 'save-status ' + type;
+        saveStatus.classList.remove('hidden');
+        if (type !== 'saving') {
+          setTimeout(function() { saveStatus.classList.add('hidden'); }, 4000);
+        }
+      }
+
+      function applyFilter() {
+        const q = (searchInput.value || '').trim().toLowerCase();
+        if (!q) {
+          filteredRows = rows.map(function(r, i) { return { row: r, index: i }; });
+        } else {
+          filteredRows = [];
+          rows.forEach(function(r, i) {
+            const combined = columns.map(function(c) { return String(r[c] || ''); }).join(' ').toLowerCase();
+            if (combined.indexOf(q) !== -1) filteredRows.push({ row: r, index: i });
+          });
+        }
+        if (sortColumn && columns.indexOf(sortColumn) !== -1) {
+          filteredRows.sort(function(a, b) {
+            const va = String(a.row[sortColumn] || '').toLowerCase();
+            const vb = String(b.row[sortColumn] || '').toLowerCase();
+            const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+            return sortDir * cmp;
+          });
+        }
+        rowCount.textContent = filteredRows.length + ' row' + (filteredRows.length !== 1 ? 's' : '') + (q ? ' (filtered)' : '');
+        renderTableBody();
+      }
+
+      function renderTableHead() {
+        tableHead.innerHTML = '<tr>' + columns.map(function(col) {
+          var icon = '';
+          var cls = 'sortable';
+          if (sortColumn === col) {
+            cls += sortDir === 1 ? ' sorted-asc' : ' sorted-desc';
+            icon = '<span class="sort-icon">' + (sortDir === 1 ? '▲' : '▼') + '</span>';
+          } else {
+            icon = '<span class="sort-icon" aria-hidden="true">↕</span>';
+          }
+          return '<th class="' + cls + '" data-col="' + escapeHtml(col) + '" role="button" tabindex="0" title="Sort by ' + escapeHtml(col) + '">' + escapeHtml(col) + icon + '</th>';
+        }).join('') + '</tr>';
+        tableHead.querySelectorAll('th.sortable').forEach(function(th) {
+          th.addEventListener('click', function() {
+            var col = th.dataset.col;
+            if (sortColumn === col) sortDir = -sortDir; else { sortColumn = col; sortDir = 1; }
+            renderTableHead();
+            applyFilter();
+          });
+          th.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); th.click(); }
+          });
+        });
+      }
+
+      function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+      }
+
+      function cellDisplay(rowIndex, colKey, value) {
+        const val = value == null ? '' : String(value);
+        return '<td data-row="' + rowIndex + '" data-col="' + escapeHtml(colKey) + '">' +
+          '<div class="cell-display" data-value="' + escapeHtml(val) + '">' + escapeHtml(val || '\u00A0') + '</div></td>';
+      }
+
+      function cellEdit(rowIndex, colKey, value, el) {
+        const val = value == null ? '' : String(value);
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'cell-edit';
+        input.value = val;
+        input.dataset.row = String(rowIndex);
+        input.dataset.col = colKey;
+        function commit() {
+          const newVal = input.value;
+          const row = rows[rowIndex];
+          if (row && row[colKey] !== newVal) {
+            row[colKey] = newVal;
+            dirty = true;
+            btnSave.disabled = false;
+            el.closest('tr').classList.add('edited');
+          }
+          const display = document.createElement('div');
+          display.className = 'cell-display';
+          display.textContent = newVal || '\u00A0';
+          display.dataset.value = newVal;
+          el.parentNode.replaceChild(display, input);
+          display.addEventListener('click', onCellClick);
+        }
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+          if (e.key === 'Escape') { input.value = val; input.blur(); }
+        });
+        el.parentNode.replaceChild(input, el);
+        input.focus();
+        input.select();
+      }
+
+      function onCellClick(ev) {
+        const target = ev.target;
+        if (!target.classList.contains('cell-display')) return;
+        const td = target.closest('td');
+        if (!td) return;
+        const rowIndex = parseInt(td.dataset.row, 10);
+        const colKey = td.dataset.col;
+        if (isNaN(rowIndex) || !colKey) return;
+        cellEdit(rowIndex, colKey, rows[rowIndex][colKey], target);
+      }
+
+      function renderTableBody() {
+        tableBody.innerHTML = filteredRows.map(function(item) {
+          const r = item.row;
+          const i = item.index;
+          return '<tr>' + columns.map(function(col) {
+            return cellDisplay(i, col, r[col]);
+          }).join('') + '</tr>';
+        }).join('');
+        tableBody.querySelectorAll('.cell-display').forEach(function(display) {
+          display.addEventListener('click', onCellClick);
+        });
+      }
+
+      function addNewRow() {
+        if (!columns.length) return;
+        var newRow = {};
+        columns.forEach(function(c) { newRow[c] = ''; });
+        rows.push(newRow);
+        dirty = true;
+        btnSave.disabled = false;
+        searchInput.value = '';
+        sortColumn = null;
+        sortDir = 1;
+        renderTableHead();
+        applyFilter();
+        tableWrap.scrollTop = tableWrap.scrollHeight;
+        var lastTr = tableBody.querySelector('tr:last-child');
+        if (lastTr) {
+          var firstCell = lastTr.querySelector('.cell-display');
+          if (firstCell) firstCell.click();
+        }
+      }
+
+      function loadTable() {
+        showLoading(true);
+        fetch(API_BASE + '/api/mapping-table')
+          .then(function(res) {
+            if (!res.ok) throw new Error(res.status === 404 ? 'Mapping file not found. Add Updated Mapping Table.xlsx (or Fallback) to the project root.' : 'Failed to load mapping table: ' + res.status);
+            return res.json();
+          })
+          .then(function(data) {
+            columns = data.columns || [];
+            rows = (data.rows || []).map(function(r) {
+              const out = {};
+              columns.forEach(function(c) { out[c] = r[c] == null ? '' : String(r[c]); });
+              return out;
+            });
+            dirty = false;
+            btnSave.disabled = true;
+            sourcePath.textContent = (data.source || '').split(/[/\\]/).pop() || '—';
+            btnAddRow.disabled = false;
+            renderTableHead();
+            applyFilter();
+            showTable();
+          })
+          .catch(function(err) {
+            showError(err.message || 'Could not load mapping table.');
+          });
+      }
+
+      function saveTable() {
+        if (!dirty || !columns.length) return;
+        btnSave.disabled = true;
+        setSaveStatus('saving', 'Saving…');
+        fetch(API_BASE + '/api/mapping-table', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ columns: columns, rows: rows })
+        })
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Save failed'); });
+            return res.json();
+          })
+          .then(function() {
+            dirty = false;
+            setSaveStatus('success', 'Saved. Reports & YoY comparisons will use this table on next run.');
+            tableBody.querySelectorAll('tr.edited').forEach(function(tr) { tr.classList.remove('edited'); });
+          })
+          .catch(function(err) {
+            setSaveStatus('error', err.message || 'Save failed.');
+            btnSave.disabled = true;
+          });
+      }
+
+      searchInput.addEventListener('input', applyFilter);
+      searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') { searchInput.value = ''; applyFilter(); searchInput.blur(); }
+      });
+      btnRefresh.addEventListener('click', function() {
+        if (dirty && !confirm('You have unsaved changes. Reload anyway?')) return;
+        loadTable();
+      });
+      btnAddRow.addEventListener('click', addNewRow);
+      btnSave.addEventListener('click', saveTable);
+
+      loadTable();
+
+      // ── Tab switching ───────────────────────────────────────────────────
+      var ctabMapping = document.getElementById('ctabMapping');
+      var ctabAudit   = document.getElementById('ctabAudit');
+      var panelMapping = document.getElementById('panelMapping');
+      var panelAudit   = document.getElementById('panelAudit');
+
+      var panelYoyConfig = document.getElementById('panelYoyConfig');
+      var ctabYoyConfig  = document.getElementById('ctabYoyConfig');
+
+      function switchTab(tab) {
+        // Reset all
+        ctabMapping.classList.remove('active');
+        ctabAudit.classList.remove('active');
+        ctabYoyConfig.classList.remove('active');
+        panelMapping.classList.add('hidden');
+        panelAudit.classList.add('hidden');
+        panelYoyConfig.classList.add('hidden');
+        // Activate the chosen tab
+        if (tab === 'audit') {
+          ctabAudit.classList.add('active');
+          panelAudit.classList.remove('hidden');
+        } else if (tab === 'yoy') {
+          ctabYoyConfig.classList.add('active');
+          panelYoyConfig.classList.remove('hidden');
+        } else {
+          ctabMapping.classList.add('active');
+          panelMapping.classList.remove('hidden');
+        }
+      }
+      ctabMapping.addEventListener('click',   function() { switchTab('mapping'); });
+      ctabAudit.addEventListener('click',     function() { switchTab('audit'); });
+      ctabYoyConfig.addEventListener('click', function() { switchTab('yoy'); });
+
+      // ── Shared audit helpers ─────────────────────────────────────────────
+      var lastToastAuditData = null;
+      var lastAlohaAuditData = null;
+
+      function auditToCsv(rows, colDefs) {
+        var lines = [colDefs.map(function(c) { return '"' + c.label.replace(/"/g, '""') + '"'; }).join(',')];
+        rows.forEach(function(row) {
+          lines.push(colDefs.map(function(c) {
+            var val = typeof c.val === 'function' ? c.val(row) : (row[c.key] == null ? '' : row[c.key]);
+            return '"' + String(val).replace(/"/g, '""') + '"';
+          }).join(','));
+        });
+        return lines.join('\r\n');
+      }
+
+      function downloadAuditCsv(filename, rows, colDefs) {
+        if (!rows || !rows.length) { alert('No data to export.'); return; }
+        var csv = auditToCsv(rows, colDefs);
+        var blob = new Blob([csv], { type: 'text/csv' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a'); a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      }
+
+      function auditEsc(s) {
+        var d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+      }
+
+      function renderAuditTable(items, colDefs, showCheckbox) {
+        if (!items || !items.length) return '<div class="no-data">None — all clear! 🎉</div>';
+        var html = '<div class="audit-tbl-wrap"><table class="audit-tbl"><thead><tr>';
+        if (showCheckbox) html += '<th><input type="checkbox" id="chkAll" title="Select all" /></th>';
+        colDefs.forEach(function(c) { html += '<th>' + auditEsc(c.label) + '</th>'; });
+        html += '</tr></thead><tbody>';
+        items.forEach(function(item, idx) {
+          html += '<tr>';
+          if (showCheckbox) html += '<td><input type="checkbox" class="item-chk" data-idx="' + idx + '" /></td>';
+          colDefs.forEach(function(c) {
+            var val = typeof c.val === 'function' ? c.val(item) : (item[c.key] == null ? '' : item[c.key]);
+            html += '<td>' + auditEsc(String(val)) + '</td>';
+          });
+          html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+        return html;
+      }
+
+      function collapsibleBucket(label, cls, count, tableHtml, collapsed) {
+        var id = 'bkt_' + Math.random().toString(36).slice(2);
+        var html = '<div class="bucket"><div class="bucket-head">';
+        html += '<span class="bucket-label ' + cls + '">' + label + ' (' + count + ')</span>';
+        if (count > 0) {
+          html += '<button type="button" class="btn btn-secondary" '
+                + 'onclick="var p=document.getElementById(\'' + id + '\');p.style.display=p.style.display===\'none\'?\'block\':\'none\'" '
+                + 'style="font-size:0.78rem;padding:0.3rem 0.7rem;">Toggle ▾</button>';
+        }
+        html += '</div>';
+        html += '<div id="' + id + '" style="display:' + (collapsed ? 'none' : 'block') + ';">' + tableHtml + '</div>';
+        html += '</div>';
+        return html;
+      }
+
+      // ── Toast Menu Audit ─────────────────────────────────────────────────
+      function renderToastSummary(s) {
+        var html = '<div class="summary-badges">'
+          + '<span class="sbadge sbadge-total">📍 ' + (s.locationCount || '?') + ' locations polled</span>'
+          + '<span class="sbadge sbadge-total">🍞 ' + s.toastItemCount + ' unique items</span>'
+          + '<span class="sbadge sbadge-total">🗂 ' + s.mappingToastRowCount + ' mapped</span>'
+          + '<span class="sbadge sbadge-danger">❌ ' + s.unmappedCount + ' unmapped</span>'
+          + '<span class="sbadge sbadge-info">🔀 '  + (s.nameDriftedCount || 0) + ' name drifted</span>'
+          + '<span class="sbadge sbadge-warn">⚠️ '  + s.staleCount    + ' truly stale</span>'
+          + '<span class="sbadge sbadge-ok">✅ '    + s.okCount       + ' matched</span>'
+          + '</div>';
+        if (s.errors && s.errors.length) {
+          html += '<div class="error-state" style="margin:0.5rem 0;font-size:0.82rem;">'
+               + '⚠️ Some locations failed to poll: ' + auditEsc(s.errors.join(' | ')) + '</div>';
+        }
+        return html;
+      }
+
+      function renderToastAuditResults(data) {
+        lastToastAuditData = data;
+        var exportBtn = document.getElementById('btnExportToastAudit');
+        exportBtn.style.display = '';
+        exportBtn.onclick = function() {
+          var toastColDefs = [
+            {label: 'Status',    val: function(r) { return r._bucket; }},
+            {label: 'Item Name', key: 'name'},
+            {label: 'Menu',      key: 'menu'},
+            {label: 'Group',     key: 'group'},
+            {label: 'Item GUID',   key: 'guid'},
+            {label: 'MLI',         key: 'mli'},
+            {label: 'PLU',         key: 'plu'},
+            {label: 'Tags',        val: function(r) { return (r.tags || []).join(', '); }},
+            {label: '# Locations', key: 'locationCount'},
+            {label: 'Toast_Item_Name (mapping)', val: function(r) { return r.Toast_Item_Name || r.mappedAs || ''; }},
+            {label: 'AlohaItemName',             val: function(r) { return r.AlohaItemName || ''; }},
+            {label: 'ConsolidatedCat',           val: function(r) { return r.ConsolidatedCat || ''; }},
+          ];
+          var allRows = []
+            .concat(data.unmapped.map(function(r) { return Object.assign({}, r, {_bucket: 'Unmapped'}); }))
+            .concat(data.stale.map(function(r)    { return Object.assign({}, r, {_bucket: 'Stale'}); }))
+            .concat(data.ok.map(function(r)       { return Object.assign({}, r, {_bucket: 'Matched'}); }));
+          downloadAuditCsv('Toast_Menu_Audit.csv', allRows, toastColDefs);
+        };
+        var html = renderToastSummary(data.summary);
+
+        // Unmapped bucket (has checkboxes + Add button)
+        html += '<div class="bucket"><div class="bucket-head">';
+        html += '<span class="bucket-label danger">❌ Unmapped Toast Items (' + data.unmapped.length + ')</span>';
+        if (data.unmapped.length > 0) {
+          html += '<button type="button" class="btn btn-primary" id="btnAddSelected" disabled '
+               + 'style="font-size:0.82rem;padding:0.35rem 0.85rem;">➕ Add Selected to Mapping</button>';
+        }
+        html += '</div>';
+        html += renderAuditTable(data.unmapped, [
+          {label: 'Item Name',   key: 'name'},
+          {label: 'Item GUID',   key: 'guid'},
+          {label: 'MLI',         key: 'mli'},
+          {label: 'PLU',         key: 'plu'},
+          {label: 'Menu',        key: 'menu'},
+          {label: 'Group',       key: 'group'},
+          {label: 'Tags',        val: function(r) { return (r.tags || []).join(', '); }},
+          {label: '# Locations', key: 'locationCount'},
+        ], true);
+        html += '</div>';
+
+        // Stale bucket — with Remove button + MLI/PLU columns for verification
+        var staleId = 'bkt_stale_' + Math.random().toString(36).slice(2);
+        var staleTable = renderAuditTable(data.stale, [
+          {label: 'Toast_Item_Name', key: 'Toast_Item_Name'},
+          {label: 'ToastPLU',        key: 'ToastPLU'},
+          {label: 'MLI',             key: 'MultiLocationId'},
+          {label: 'AlohaItemName',   key: 'AlohaItemName'},
+          {label: 'ConsolidatedCat', key: 'ConsolidatedCat'},
+        ], false);
+        var staleHead = '<div class="bucket"><div class="bucket-head">'
+          + '<span class="bucket-label warn">⚠️ Stale — in mapping but not on Toast menu (' + data.stale.length + ')</span>';
+        if (data.stale.length > 0) {
+          staleHead += '<button type="button" class="btn btn-danger" id="btnRemoveStale" '
+            + 'style="font-size:0.82rem;padding:0.35rem 0.85rem;background:#DC2626;border-color:#DC2626;">'
+            + '🗑 Remove All Stale from Mapping</button>';
+          staleHead += '<button type="button" class="btn btn-secondary" '
+            + 'onclick="var p=document.getElementById(\'' + staleId + '\');p.style.display=p.style.display===\'none\'?\'block\':\'none\'" '
+            + 'style="font-size:0.78rem;padding:0.3rem 0.7rem;">Toggle ▾</button>';
+        }
+        staleHead += '</div><div id="' + staleId + '">' + staleTable + '</div></div>';
+        html += staleHead;
+
+        // Name Drifted bucket — found by MLI/PLU match but name has changed
+        var driftItems = data.nameDrifted || [];
+        var driftBktId = 'bkt_drift_' + Math.random().toString(36).slice(2);
+        var driftTableHtml = '';
+        if (!driftItems.length) {
+          driftTableHtml = '<div class="no-data">None — all clear! 🎉</div>';
+        } else {
+          driftTableHtml = '<div class="audit-tbl-wrap"><table class="audit-tbl"><thead><tr>'
+            + '<th>Mapping Name (old)</th><th>Current Toast Name</th><th>Match Via</th>'
+            + '<th>MLI</th><th>Toast PLU</th><th>Menu / Group</th><th>Fix Name</th>'
+            + '</tr></thead><tbody>';
+          driftItems.forEach(function(r, idx) {
+            driftTableHtml += '<tr>'
+              + '<td style="color:#991B1B;">' + auditEsc(r.mappingName) + '</td>'
+              + '<td style="color:#166534;font-weight:600;">' + auditEsc(r.currentName) + '</td>'
+              + '<td><span style="font-size:0.78rem;background:#DBEAFE;color:#1E40AF;padding:0.1rem 0.4rem;border-radius:4px;">'
+              + auditEsc(r.matchMethod) + '</span></td>'
+              + '<td style="font-family:monospace;font-size:0.78rem;">' + auditEsc(r.mli) + '</td>'
+              + '<td style="font-family:monospace;font-size:0.78rem;">' + auditEsc(r.toastPLU) + '</td>'
+              + '<td style="font-size:0.78rem;">' + auditEsc(r.menu) + ' › ' + auditEsc(r.group) + '</td>'
+              + '<td><button type="button" class="btn btn-secondary drift-fix-btn" data-idx="' + idx + '" '
+              + 'style="font-size:0.75rem;padding:0.2rem 0.6rem;">Fix Name</button></td>'
+              + '</tr>';
+          });
+          driftTableHtml += '</tbody></table></div>';
+        }
+        var driftHead = '<div class="bucket"><div class="bucket-head">'
+          + '<span class="bucket-label info">🔀 Name Drifted — found by MLI/PLU, name changed (' + driftItems.length + ')</span>';
+        if (driftItems.length > 0) {
+          driftHead += '<button type="button" class="btn btn-primary" id="btnFixAllDrift" '
+            + 'style="font-size:0.82rem;padding:0.35rem 0.85rem;">⚡ Fix All Names</button>';
+          driftHead += '<button type="button" class="btn btn-secondary" '
+            + 'onclick="var p=document.getElementById(\'' + driftBktId + '\');p.style.display=p.style.display===\'none\'?\'block\':\'none\'" '
+            + 'style="font-size:0.78rem;padding:0.3rem 0.7rem;">Toggle ▾</button>';
+        }
+        driftHead += '</div><div id="' + driftBktId + '">' + driftTableHtml + '</div></div>';
+        html += driftHead;
+
+        html += collapsibleBucket('✅ Matched', 'ok', data.ok.length,
+          renderAuditTable(data.ok, [
+            {label: 'Item Name',   key: 'name'},
+            {label: 'Item GUID',   key: 'guid'},
+            {label: 'MLI',         key: 'mli'},
+            {label: 'PLU',         key: 'plu'},
+            {label: 'Menu',        key: 'menu'},
+            {label: 'Group',       key: 'group'},
+            {label: '# Locations', key: 'locationCount'},
+          ], false), true);  // collapsed by default
+
+        document.getElementById('toastAuditBody').innerHTML = html;
+
+        // Wire Name Drift fix buttons
+        if (driftItems.length) {
+          var btnFixAllDrift = document.getElementById('btnFixAllDrift');
+          if (btnFixAllDrift) {
+            btnFixAllDrift.addEventListener('click', function() {
+              var n = fixToastItemNames(driftItems);
+              if (n > 0) { this.textContent = '✅ Fixed ' + n + ' names'; this.disabled = true; }
+              document.querySelectorAll('.drift-fix-btn').forEach(function(b) { b.disabled = true; b.textContent = '✅'; });
+            });
+          }
+          document.querySelectorAll('.drift-fix-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var idx = parseInt(this.dataset.idx, 10);
+              var n = fixToastItemNames([driftItems[idx]]);
+              if (n > 0) { this.textContent = '✅ Fixed'; this.disabled = true; }
+              else { this.textContent = '⚠ Not found'; }
+            });
+          });
+        }
+
+        // Wire Remove Stale button
+        var btnRemoveStale = document.getElementById('btnRemoveStale');
+        if (btnRemoveStale) {
+          btnRemoveStale.addEventListener('click', function() {
+            var n = removeStaleToastRows(data.stale);
+            if (n > 0) {
+              this.textContent = '✅ Removed ' + n + ' rows';
+              this.disabled = true;
+              switchTab('mapping');
+            }
+          });
+        }
+
+        // Wire up select-all + Add Selected button
+        if (data.unmapped.length > 0) {
+          var chkAll  = document.getElementById('chkAll');
+          var btnAdd  = document.getElementById('btnAddSelected');
+
+          function refreshAddBtn() {
+            var n = document.querySelectorAll('.item-chk:checked').length;
+            btnAdd.disabled   = n === 0;
+            btnAdd.textContent = n > 0 ? '➕ Add ' + n + ' to Mapping' : '➕ Add Selected to Mapping';
+          }
+
+          if (chkAll) {
+            chkAll.addEventListener('change', function() {
+              document.querySelectorAll('.item-chk').forEach(function(c) { c.checked = chkAll.checked; });
+              refreshAddBtn();
+            });
+          }
+          document.querySelectorAll('.item-chk').forEach(function(c) {
+            c.addEventListener('change', refreshAddBtn);
+          });
+          btnAdd.addEventListener('click', function() {
+            var selected = [];
+            document.querySelectorAll('.item-chk:checked').forEach(function(c) {
+              var i = parseInt(c.dataset.idx, 10);
+              if (!isNaN(i) && lastToastAuditData.unmapped[i]) selected.push(lastToastAuditData.unmapped[i]);
+            });
+            if (selected.length) addUnmappedToMapping(selected);
+          });
+        }
+      }
+
+      function addUnmappedToMapping(toastItems) {
+        if (!columns.length) {
+          alert('Mapping table not loaded. Please load it first (Mapping Table tab).');
+          return;
+        }
+        toastItems.forEach(function(item) {
+          var newRow = {};
+          columns.forEach(function(c) { newRow[c] = ''; });
+          if (columns.indexOf('Toast_Item_Name') !== -1) newRow['Toast_Item_Name'] = item.name;
+          rows.push(newRow);
+        });
+        dirty = true;
+        btnSave.disabled = false;
+        switchTab('mapping');
+        searchInput.value = '';
+        sortColumn = null; sortDir = 1;
+        renderTableHead();
+        applyFilter();
+        setTimeout(function() { tableWrap.scrollTop = tableWrap.scrollHeight; }, 100);
+        setSaveStatus('saving', toastItems.length + ' item(s) added — review and save when ready.');
+        setTimeout(function() { saveStatus.classList.add('hidden'); }, 8000);
+      }
+
+      document.getElementById('btnToastAudit').addEventListener('click', function() {
+        var statusEl = document.getElementById('toastAuditStatus');
+        var bodyEl   = document.getElementById('toastAuditBody');
+        this.disabled = true;
+        statusEl.textContent = 'Polling Toast menu…';
+        bodyEl.innerHTML = '';
+        fetch(API_BASE + '/api/audit/toast-vs-mapping')
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Audit failed'); });
+            return res.json();
+          })
+          .then(function(data) {
+            statusEl.textContent = 'Last polled: ' + new Date().toLocaleTimeString();
+            renderToastAuditResults(data);
+          })
+          .catch(function(err) {
+            statusEl.textContent = '';
+            bodyEl.innerHTML = '<div class="error-state" style="margin:0;">' + auditEsc(err.message || 'Audit failed') + '</div>';
+          })
+          .finally(function() { document.getElementById('btnToastAudit').disabled = false; });
+      });
+
+      // ── Aloha DBF Audit ──────────────────────────────────────────────────
+      function renderAlohaSummary(s) {
+        return '<div class="summary-badges">'
+          + '<span class="sbadge sbadge-total">🗄 '  + s.dbfItemCount         + ' DBF items</span>'
+          + '<span class="sbadge sbadge-total">🗂 '  + s.mappingAlohaRowCount + ' mapped</span>'
+          + '<span class="sbadge sbadge-danger">❌ '  + s.unmappedCount        + ' unmapped</span>'
+          + '<span class="sbadge sbadge-warn">⚠️ '   + s.staleCount           + ' stale</span>'
+          + '<span class="sbadge sbadge-info">🔢 '   + s.pluMismatchCount     + ' PLU mismatches</span>'
+          + '<span class="sbadge sbadge-ok">✅ '     + s.okCount              + ' matched</span>'
+          + '</div>';
+      }
+
+      function renderAlohaAuditResults(data) {
+        lastAlohaAuditData = data;
+        var exportBtn = document.getElementById('btnExportAlohaAudit');
+        exportBtn.style.display = '';
+        exportBtn.onclick = function() {
+          var alohaColDefs = [
+            {label: 'Status',          val: function(r) { return r._bucket; }},
+            {label: 'LONGNAME',        val: function(r) { return r.longname || r.AlohaItemName || ''; }},
+            {label: 'SHORTNAME',       key: 'shortname'},
+            {label: 'Aloha ID (DBF)',  key: 'id'},
+            {label: 'AlohaItemName',   val: function(r) { return r.AlohaItemName || (r.mappingRow && r.mappingRow.AlohaItemName) || ''; }},
+            {label: 'Toast_Item_Name', val: function(r) { return r.Toast_Item_Name || (r.mappingRow && r.mappingRow.Toast_Item_Name) || ''; }},
+            {label: 'ConsolidatedCat', val: function(r) { return r.ConsolidatedCat || (r.mappingRow && r.mappingRow.ConsolidatedCat) || ''; }},
+            {label: 'Mapped AlohaPLU', key: 'mappingAlohaPLU'},
+            {label: 'DBF PLU',         key: 'dbfPLU'},
+          ];
+          var allRows = []
+            .concat(data.unmappedAloha.map(function(r)  { return Object.assign({}, r, {_bucket: 'Unmapped (Aloha)'}); }))
+            .concat(data.pluMismatches.map(function(r)  { return Object.assign({}, r, {_bucket: 'PLU Mismatch'}); }))
+            .concat(data.stale.map(function(r)          { return Object.assign({}, r, {_bucket: 'Stale (Mapping)'}); }))
+            .concat(data.ok.map(function(r)             { return Object.assign({}, r, {_bucket: 'Matched'}); }));
+          downloadAuditCsv('Aloha_DBF_Audit.csv', allRows, alohaColDefs);
+        };
+        var html = renderAlohaSummary(data.summary);
+
+        html += collapsibleBucket('❌ Aloha Items Not in Mapping', 'danger', data.unmappedAloha.length,
+          renderAuditTable(data.unmappedAloha, [
+            {label: 'LONGNAME',  key: 'longname'},
+            {label: 'SHORTNAME', key: 'shortname'},
+            {label: 'Aloha ID',  key: 'id'},
+          ], false), false);
+
+        // PLU mismatch bucket with Fix All + per-row Fix buttons
+        var pluBktId = 'bkt_plu_' + Math.random().toString(36).slice(2);
+        var pluRows = data.pluMismatches;
+        var pluTableHtml = '';
+        if (!pluRows.length) {
+          pluTableHtml = '<div class="no-data">None — all clear! 🎉</div>';
+        } else {
+          pluTableHtml = '<div class="audit-tbl-wrap"><table class="audit-tbl"><thead><tr>'
+            + '<th>LONGNAME</th><th>DBF ID (correct)</th><th>Mapped AlohaPLU (wrong)</th><th>Fix</th>'
+            + '</tr></thead><tbody>';
+          pluRows.forEach(function(r, idx) {
+            pluTableHtml += '<tr>'
+              + '<td>' + auditEsc(r.longname) + '</td>'
+              + '<td style="color:#166534;font-weight:600;">' + auditEsc(r.dbfPLU) + '</td>'
+              + '<td style="color:#991B1B;">' + auditEsc(r.mappingAlohaPLU) + '</td>'
+              + '<td><button type="button" class="btn btn-secondary plu-fix-btn" data-idx="' + idx + '" '
+              + 'style="font-size:0.75rem;padding:0.2rem 0.6rem;">Fix</button></td>'
+              + '</tr>';
+          });
+          pluTableHtml += '</tbody></table></div>';
+        }
+        var pluHead = '<div class="bucket"><div class="bucket-head">'
+          + '<span class="bucket-label info">🔢 PLU Mismatches — same name, different ID (' + pluRows.length + ')</span>';
+        if (pluRows.length > 0) {
+          pluHead += '<button type="button" class="btn btn-primary" id="btnFixAllPlu" '
+            + 'style="font-size:0.82rem;padding:0.35rem 0.85rem;">⚡ Fix All PLU Mismatches</button>';
+          pluHead += '<button type="button" class="btn btn-secondary" '
+            + 'onclick="var p=document.getElementById(\'' + pluBktId + '\');p.style.display=p.style.display===\'none\'?\'block\':\'none\'" '
+            + 'style="font-size:0.78rem;padding:0.3rem 0.7rem;">Toggle ▾</button>';
+        }
+        pluHead += '</div><div id="' + pluBktId + '">' + pluTableHtml + '</div></div>';
+        html += pluHead;
+
+        html += collapsibleBucket('⚠️ Stale Aloha Rows — not in DBF', 'warn', data.stale.length,
+          renderAuditTable(data.stale, [
+            {label: 'AlohaItemName',   key: 'AlohaItemName'},
+            {label: 'Toast_Item_Name', key: 'Toast_Item_Name'},
+            {label: 'ConsolidatedCat', key: 'ConsolidatedCat'},
+            {label: 'AlohaPLU',        key: 'AlohaPLU'},
+          ], false), false);
+
+        html += collapsibleBucket('✅ Matched', 'ok', data.ok.length,
+          renderAuditTable(data.ok, [
+            {label: 'LONGNAME',        key: 'longname'},
+            {label: 'AlohaItemName',   val: function(r) { return r.mappingRow ? r.mappingRow.AlohaItemName   : ''; }},
+            {label: 'Toast_Item_Name', val: function(r) { return r.mappingRow ? r.mappingRow.Toast_Item_Name : ''; }},
+            {label: 'ConsolidatedCat', val: function(r) { return r.mappingRow ? r.mappingRow.ConsolidatedCat : ''; }},
+          ], false), true);  // collapsed
+
+        document.getElementById('alohaAuditBody').innerHTML = html;
+
+        // Wire PLU fix buttons
+        if (pluRows.length) {
+          document.getElementById('btnFixAllPlu').addEventListener('click', function() {
+            var n = fixAlohaPluBatch(pluRows);
+            if (n > 0) this.textContent = '✅ Fixed ' + n + ' PLUs';
+            this.disabled = true;
+            document.querySelectorAll('.plu-fix-btn').forEach(function(b) { b.disabled = true; b.textContent = '✅'; });
+          });
+          document.querySelectorAll('.plu-fix-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var idx = parseInt(this.dataset.idx, 10);
+              var n = fixAlohaPluBatch([pluRows[idx]]);
+              if (n > 0) { this.textContent = '✅ Fixed'; this.disabled = true; }
+              else { this.textContent = '⚠ Not found'; }
+            });
+          });
+        }
+      }
+
+      // ── Mapping table fix helpers ────────────────────────────────────────
+
+      function _normForFix(s) {
+        return (s || '').toLowerCase().replace(/&/g, 'and').replace(/\s+/g, ' ').trim();
+      }
+
+      function fixToastItemNames(driftItems) {
+        if (!columns.length) {
+          alert('Load the mapping table first (Mapping Table tab → Load button).');
+          return 0;
+        }
+        var fixed = 0;
+        driftItems.forEach(function(item) {
+          var target = _normForFix(item.mappingName);
+          for (var i = 0; i < rows.length; i++) {
+            if (_normForFix(rows[i]['Toast_Item_Name']) === target) {
+              rows[i]['Toast_Item_Name'] = item.currentName;
+              fixed++;
+              break;
+            }
+          }
+        });
+        if (fixed > 0) {
+          dirty = true;
+          btnSave.disabled = false;
+          renderTableHead();
+          applyFilter();
+          setSaveStatus('saving', fixed + ' Toast_Item_Name(s) updated to current names — review and save.');
+          setTimeout(function() { saveStatus.classList.add('hidden'); }, 8000);
+        } else {
+          alert('No matching rows found in the mapping table. Make sure the table is loaded.');
+        }
+        return fixed;
+      }
+
+      function fixAlohaPluBatch(items) {
+        if (!columns.length) {
+          alert('Load the mapping table first (Mapping Table tab → Load button).');
+          return 0;
+        }
+        var fixed = 0;
+        items.forEach(function(item) {
+          var target = _normForFix(item.longname);
+          for (var i = 0; i < rows.length; i++) {
+            if (_normForFix(rows[i]['AlohaItemName']) === target) {
+              rows[i]['AlohaPLU'] = item.dbfPLU;
+              fixed++;
+              break;
+            }
+          }
+        });
+        if (fixed > 0) {
+          dirty = true;
+          btnSave.disabled = false;
+          renderTableHead();
+          applyFilter();
+          setSaveStatus('saving', fixed + ' AlohaPLU(s) updated — review and save.');
+          setTimeout(function() { saveStatus.classList.add('hidden'); }, 8000);
+        } else {
+          alert('No matching rows found in the mapping table. Make sure the table is loaded.');
+        }
+        return fixed;
+      }
+
+      function removeStaleToastRows(staleItems) {
+        if (!columns.length) {
+          alert('Load the mapping table first (Mapping Table tab → Load button).');
+          return 0;
+        }
+        if (!confirm('Remove ' + staleItems.length + ' stale row(s) from the mapping table?\n\nThis will mark the table as unsaved — click Cancel and save first if you want a backup.')) {
+          return 0;
+        }
+        var removed = 0;
+        staleItems.forEach(function(item) {
+          var target = _normForFix(item.Toast_Item_Name);
+          for (var i = rows.length - 1; i >= 0; i--) {
+            if (_normForFix(rows[i]['Toast_Item_Name']) === target) {
+              rows.splice(i, 1);
+              removed++;
+              break;
+            }
+          }
+        });
+        if (removed > 0) {
+          dirty = true;
+          btnSave.disabled = false;
+          renderTableHead();
+          applyFilter();
+          setSaveStatus('saving', removed + ' stale row(s) removed — review and save.');
+          setTimeout(function() { saveStatus.classList.add('hidden'); }, 8000);
+        }
+        return removed;
+      }
+
+      // ── Location Mapping ─────────────────────────────────────────────────
+      var locData = [];       // [{restaurantGuid, restaurantName, externalId, alohaStoreId}]
+      var locDirty = false;
+      var locSearchVal = '';
+
+      var btnLoadLocations  = document.getElementById('btnLoadLocations');
+      var btnSaveLocations  = document.getElementById('btnSaveLocations');
+      var locSaveStatus     = document.getElementById('locSaveStatus');
+      var locTableWrap      = document.getElementById('locTableWrap');
+      var locBadges         = document.getElementById('locBadges');
+      var locSearchInput    = document.getElementById('locSearch');
+
+      function setLocStatus(type, msg) {
+        locSaveStatus.textContent = msg;
+        locSaveStatus.style.color = type === 'ok' ? '#065F46' : type === 'err' ? '#991B1B' : '#92400E';
+        if (type !== 'saving') setTimeout(function() { locSaveStatus.textContent = ''; }, 5000);
+      }
+
+      function renderLocBadges(total, mapped) {
+        locBadges.innerHTML =
+          '<span class="yoy-badge yoy-badge-info">📍 ' + total + ' restaurants</span>' +
+          '<span class="yoy-badge ' + (mapped === total ? 'yoy-badge-ok' : 'yoy-badge-warn') + '">✅ ' + mapped + ' mapped</span>' +
+          (total - mapped > 0 ? '<span class="yoy-badge yoy-badge-warn">⚠ ' + (total - mapped) + ' unmapped</span>' : '');
+      }
+
+      function renderLocTable() {
+        var q = locSearchVal.toLowerCase();
+        var visible = locData.filter(function(r) {
+          return !q || r.restaurantName.toLowerCase().indexOf(q) !== -1
+                    || r.alohaStoreId.toLowerCase().indexOf(q) !== -1
+                    || r.externalId.toLowerCase().indexOf(q) !== -1;
+        });
+        if (!visible.length) {
+          locTableWrap.innerHTML = '<div style="padding:1.5rem;text-align:center;color:#6B7280;">No results match your filter.</div>';
+          return;
+        }
+        var html = '<table class="loc-table"><thead><tr>'
+          + '<th>#</th><th>Restaurant Name</th><th>External ID</th><th>Aloha Store ID</th><th>Status</th>'
+          + '</tr></thead><tbody>';
+        visible.forEach(function(r, idx) {
+          var mapped = r.alohaStoreId ? 'yes' : 'no';
+          html += '<tr>'
+            + '<td style="color:#94A3B8;font-size:0.78rem;">' + (idx + 1) + '</td>'
+            + '<td>' + auditEsc(r.restaurantName) + '</td>'
+            + '<td style="font-family:monospace;font-size:0.8rem;color:#64748B;">' + auditEsc(r.externalId || '—') + '</td>'
+            + '<td><input type="text" class="store-input" data-guid="' + auditEsc(r.restaurantGuid) + '" '
+            +      'value="' + auditEsc(r.alohaStoreId) + '" placeholder="e.g. 1042" '
+            +      'title="Enter the numeric Aloha store ID for this restaurant" /></td>'
+            + '<td><span class="mapped-chip ' + mapped + '">' + (mapped === 'yes' ? '✓ Mapped' : '✗ Unmapped') + '</span></td>'
+            + '</tr>';
+        });
+        html += '</tbody></table>';
+        locTableWrap.innerHTML = '<div class="loc-table-wrap">' + html + '</div>';
+
+        locTableWrap.querySelectorAll('.store-input').forEach(function(inp) {
+          inp.addEventListener('input', function() {
+            var guid = this.dataset.guid;
+            var newVal = this.value.trim();
+            inp.classList.toggle('changed', true);
+            for (var i = 0; i < locData.length; i++) {
+              if (locData[i].restaurantGuid === guid) {
+                locData[i].alohaStoreId = newVal;
+                break;
+              }
+            }
+            locDirty = true;
+            btnSaveLocations.disabled = false;
+          });
+        });
+      }
+
+      function loadLocations() {
+        locTableWrap.innerHTML = '<div style="padding:2rem;text-align:center;color:#6B7280;">Loading restaurants…</div>';
+        locBadges.innerHTML = '';
+        btnLoadLocations.disabled = true;
+        fetch(API_BASE + '/api/aloha/location-mapping')
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Failed to load'); });
+            return res.json();
+          })
+          .then(function(data) {
+            locData = data.rows || [];
+            locDirty = false;
+            btnSaveLocations.disabled = true;
+            renderLocBadges(data.total, data.mapped);
+            renderLocTable();
+          })
+          .catch(function(err) {
+            locTableWrap.innerHTML = '<div style="padding:1.5rem;color:#991B1B;background:#FEE2E2;border-radius:6px;">' + auditEsc(err.message) + '</div>';
+          })
+          .finally(function() { btnLoadLocations.disabled = false; });
+      }
+
+      function saveLocations() {
+        if (!locDirty) return;
+        btnSaveLocations.disabled = true;
+        setLocStatus('saving', 'Saving…');
+        var mapping = {};
+        locData.forEach(function(r) {
+          if (r.alohaStoreId) mapping[r.restaurantGuid] = r.alohaStoreId;
+        });
+        fetch(API_BASE + '/api/aloha/location-mapping', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mapping: mapping })
+        })
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Save failed'); });
+            return res.json();
+          })
+          .then(function(data) {
+            locDirty = false;
+            var mapped = locData.filter(function(r) { return r.alohaStoreId; }).length;
+            renderLocBadges(locData.length, mapped);
+            renderLocTable();
+            setLocStatus('ok', 'Saved ' + data.saved + ' mappings.');
+          })
+          .catch(function(err) {
+            setLocStatus('err', err.message || 'Save failed');
+            btnSaveLocations.disabled = false;
+          });
+      }
+
+      btnLoadLocations.addEventListener('click', loadLocations);
+      btnSaveLocations.addEventListener('click', saveLocations);
+      locSearchInput.addEventListener('input', function() {
+        locSearchVal = this.value;
+        renderLocTable();
+      });
+
+      // Collapsible section heads
+      document.getElementById('secLocationHead').addEventListener('click', function(e) {
+        if (e.target.tagName === 'BUTTON') return;
+        var body = document.getElementById('locBody');
+        var chev = document.getElementById('locChevron');
+        var hidden = body.style.display === 'none';
+        body.style.display = hidden ? '' : 'none';
+        chev.classList.toggle('open', hidden);
+        chev.textContent = hidden ? '▼' : '▶';
+      });
+
+      // ── Order Mode Mapping ───────────────────────────────────────────────
+      var omData = { aloha_order_modes: [], mapping: {} };
+      var omDirty = false;
+
+      var btnLoadOrderModes = document.getElementById('btnLoadOrderModes');
+      var btnSaveOrderModes = document.getElementById('btnSaveOrderModes');
+      var omSaveStatus      = document.getElementById('omSaveStatus');
+      var omTableWrap       = document.getElementById('omTableWrap');
+      var omBadges          = document.getElementById('omBadges');
+
+      // ── Toast Channel Manager ──────────────────────────────────────────────
+      var TOAST_CHANNELS = []; // populated from API
+      var chDirty = false;
+      var channelChips    = document.getElementById('channelChips');
+      var newChannelInput = document.getElementById('newChannelInput');
+      var btnAddChannel   = document.getElementById('btnAddChannel');
+      var btnSaveChannels = document.getElementById('btnSaveChannels');
+      var chSaveStatus    = document.getElementById('chSaveStatus');
+
+      function renderChannelChips() {
+        channelChips.innerHTML = TOAST_CHANNELS.map(function(ch, i) {
+          return '<span style="display:inline-flex;align-items:center;gap:0.25rem;padding:0.25rem 0.55rem;'
+            + 'background:#EFF6FF;border:1px solid #BFDBFE;border-radius:20px;font-size:0.82rem;color:#1E40AF;">'
+            + auditEsc(ch)
+            + '<button type="button" data-idx="' + i + '" title="Remove" '
+            + 'style="background:none;border:none;cursor:pointer;color:#6B7280;font-size:0.85rem;'
+            + 'line-height:1;padding:0 0 0 2px;margin:0;" class="ch-del-btn">×</button>'
+            + '</span>';
+        }).join('');
+        channelChips.querySelectorAll('.ch-del-btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            var idx = parseInt(this.dataset.idx, 10);
+            TOAST_CHANNELS.splice(idx, 1);
+            chDirty = true;
+            btnSaveChannels.disabled = false;
+            btnSaveChannels.style.opacity = '1';
+            renderChannelChips();
+            renderOmTable(); // refresh dropdowns
+          });
+        });
+      }
+
+      function setChStatus(type, msg) {
+        chSaveStatus.textContent = msg;
+        chSaveStatus.style.color = type === 'ok' ? '#065F46' : type === 'err' ? '#991B1B' : '#92400E';
+        if (type !== 'saving') setTimeout(function() { chSaveStatus.textContent = ''; }, 4000);
+      }
+
+      function saveChannels() {
+        if (!chDirty) return;
+        btnSaveChannels.disabled = true;
+        btnSaveChannels.style.opacity = '0.5';
+        setChStatus('saving', 'Saving…');
+        fetch(API_BASE + '/api/aloha/toast-channels', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channels: TOAST_CHANNELS })
+        })
+          .then(function(r) { return r.ok ? r.json() : r.json().then(function(j) { throw new Error(j.detail || 'Save failed'); }); })
+          .then(function(d) { chDirty = false; setChStatus('ok', 'Saved ' + d.saved + ' channels.'); })
+          .catch(function(e) {
+            setChStatus('err', e.message || 'Save failed');
+            btnSaveChannels.disabled = false;
+            btnSaveChannels.style.opacity = '1';
+          });
+      }
+
+      function loadChannels() {
+        return fetch(API_BASE + '/api/aloha/toast-channels')
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            TOAST_CHANNELS = d.channels || [];
+            renderChannelChips();
+          })
+          .catch(function() {
+            TOAST_CHANNELS = ['Dine In','Take Out','Delivery','OLO / Online','Catering','Drive Thru','Other'];
+            renderChannelChips();
+          });
+      }
+
+      btnAddChannel.addEventListener('click', function() {
+        var val = newChannelInput.value.trim();
+        if (!val) return;
+        if (TOAST_CHANNELS.indexOf(val) !== -1) { newChannelInput.select(); return; }
+        TOAST_CHANNELS.push(val);
+        newChannelInput.value = '';
+        chDirty = true;
+        btnSaveChannels.disabled = false;
+        btnSaveChannels.style.opacity = '1';
+        renderChannelChips();
+        renderOmTable();
+      });
+      newChannelInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') btnAddChannel.click();
+      });
+      btnSaveChannels.addEventListener('click', saveChannels);
+
+      // Load channels immediately on page load
+      loadChannels();
+
+      function setOmStatus(type, msg) {
+        omSaveStatus.textContent = msg;
+        omSaveStatus.style.color = type === 'ok' ? '#065F46' : type === 'err' ? '#991B1B' : '#92400E';
+        if (type !== 'saving') setTimeout(function() { omSaveStatus.textContent = ''; }, 5000);
+      }
+
+      function renderOmBadges() {
+        var total = omData.aloha_order_modes.length;
+        var mapped = Object.keys(omData.mapping).filter(function(k) { return omData.mapping[k]; }).length;
+        omBadges.innerHTML =
+          '<span class="yoy-badge yoy-badge-info">🔀 ' + total + ' Aloha order modes detected</span>' +
+          '<span class="yoy-badge ' + (mapped >= total && total > 0 ? 'yoy-badge-ok' : 'yoy-badge-warn') + '">✅ ' + mapped + ' mapped</span>' +
+          (total - mapped > 0 ? '<span class="yoy-badge yoy-badge-warn">⚠ ' + (total - mapped) + ' unmapped</span>' : '');
+      }
+
+      function renderOmTable() {
+        var modes = omData.aloha_order_modes;
+        if (!modes.length) {
+          omTableWrap.innerHTML = '<div style="padding:1.5rem;text-align:center;color:#6B7280;">No Aloha OrderMode data found in CSV files. Re-import with --overwrite to populate OrderMode column.</div>';
+          return;
+        }
+        var html = '<table class="om-table"><thead><tr>'
+          + '<th>Aloha Order Mode</th><th>Maps to Toast Channel →</th><th>Notes</th>'
+          + '</tr></thead><tbody>';
+        modes.forEach(function(mode) {
+          var current = omData.mapping[mode] || '';
+          var allOpts = [''].concat(TOAST_CHANNELS);
+          var opts = allOpts.map(function(ch) {
+            return '<option value="' + auditEsc(ch) + '"' + (ch === current ? ' selected' : '') + '>' + (ch || '— Not mapped —') + '</option>';
+          }).join('');
+          html += '<tr>'
+            + '<td style="font-weight:600;">' + auditEsc(mode) + '</td>'
+            + '<td><select class="om-select" data-mode="' + auditEsc(mode) + '">' + opts + '</select></td>'
+            + '<td style="font-size:0.8rem;color:#64748B;">'
+            +   (mode === 'Unknown' ? 'Orders with no order mode assigned in Aloha' : '') + '</td>'
+            + '</tr>';
+        });
+        html += '</tbody></table>';
+        omTableWrap.innerHTML = html;
+
+        omTableWrap.querySelectorAll('.om-select').forEach(function(sel) {
+          sel.addEventListener('change', function() {
+            var mode = this.dataset.mode;
+            omData.mapping[mode] = this.value;
+            sel.classList.add('changed');
+            omDirty = true;
+            btnSaveOrderModes.disabled = false;
+            renderOmBadges();
+          });
+        });
+      }
+
+      function loadOrderModes() {
+        omTableWrap.innerHTML = '<div style="padding:2rem;text-align:center;color:#6B7280;">Scanning Aloha CSV files…</div>';
+        omBadges.innerHTML = '';
+        btnLoadOrderModes.disabled = true;
+        fetch(API_BASE + '/api/aloha/order-modes')
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Failed to load'); });
+            return res.json();
+          })
+          .then(function(data) {
+            omData = data;
+            omDirty = false;
+            btnSaveOrderModes.disabled = true;
+            renderOmBadges();
+            renderOmTable();
+          })
+          .catch(function(err) {
+            omTableWrap.innerHTML = '<div style="padding:1.5rem;color:#991B1B;background:#FEE2E2;border-radius:6px;">' + auditEsc(err.message) + '</div>';
+          })
+          .finally(function() { btnLoadOrderModes.disabled = false; });
+      }
+
+      function saveOrderModes() {
+        if (!omDirty) return;
+        btnSaveOrderModes.disabled = true;
+        setOmStatus('saving', 'Saving…');
+        fetch(API_BASE + '/api/aloha/order-mode-mapping', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mapping: omData.mapping })
+        })
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Save failed'); });
+            return res.json();
+          })
+          .then(function(data) {
+            omDirty = false;
+            setOmStatus('ok', 'Saved ' + data.saved + ' order mode mappings.');
+            omTableWrap.querySelectorAll('.om-select').forEach(function(s) { s.classList.remove('changed'); });
+          })
+          .catch(function(err) {
+            setOmStatus('err', err.message || 'Save failed');
+            btnSaveOrderModes.disabled = false;
+          });
+      }
+
+      btnLoadOrderModes.addEventListener('click', loadOrderModes);
+      btnSaveOrderModes.addEventListener('click', saveOrderModes);
+
+      document.getElementById('secOrderModeHead').addEventListener('click', function(e) {
+        if (e.target.tagName === 'BUTTON') return;
+        var body = document.getElementById('omBody');
+        var chev = document.getElementById('omChevron');
+        var hidden = body.style.display === 'none';
+        body.style.display = hidden ? '' : 'none';
+        chev.classList.toggle('open', hidden);
+        chev.textContent = hidden ? '▼' : '▶';
+      });
+
+      // ── DBF drag-and-drop + file input wiring ───────────────────────────
+      var dbfDrop = document.getElementById('dbfDrop');
+      var dbfFile = document.getElementById('dbfFile');
+
+      dbfDrop.addEventListener('click', function() { dbfFile.click(); });
+      dbfDrop.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dbfFile.click(); }
+      });
+      dbfDrop.addEventListener('dragover',  function(e) { e.preventDefault(); dbfDrop.classList.add('dragover'); });
+      dbfDrop.addEventListener('dragleave', function()  { dbfDrop.classList.remove('dragover'); });
+      dbfDrop.addEventListener('drop', function(e) {
+        e.preventDefault(); dbfDrop.classList.remove('dragover');
+        var f = e.dataTransfer.files[0];
+        if (f) runAlohaAudit(f);
+      });
+      dbfFile.addEventListener('change', function() {
+        if (dbfFile.files[0]) runAlohaAudit(dbfFile.files[0]);
+      });
+
+      function runAlohaAudit(file) {
+        var statusEl = document.getElementById('alohaAuditStatus');
+        var bodyEl   = document.getElementById('alohaAuditBody');
+        statusEl.textContent = 'Parsing ' + file.name + '…';
+        bodyEl.innerHTML = '';
+        var fd = new FormData();
+        fd.append('file', file);
+        fetch(API_BASE + '/api/audit/aloha-vs-mapping', { method: 'POST', body: fd })
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Audit failed'); });
+            return res.json();
+          })
+          .then(function(data) {
+            statusEl.textContent = file.name + ' — ' + new Date().toLocaleTimeString();
+            renderAlohaAuditResults(data);
+          })
+          .catch(function(err) {
+            statusEl.textContent = '';
+            bodyEl.innerHTML = '<div class="error-state" style="margin:0;">' + auditEsc(err.message || 'Audit failed') + '</div>';
+          });
+      }
+
+    })();
+  </script>
+</body>
+</html>

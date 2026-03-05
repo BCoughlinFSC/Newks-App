@@ -12,6 +12,16 @@ A streamlined custom reporting tool for Newk's Restaurant Group built on Toast's
 - **CSV Export** - Download any report for analysis in Excel/Google Sheets
 - **Date Range Options** - Last 7/30/90 days or custom range
 
+### Net Sales by Location (Weekly)
+
+The **Net Sales by Location - Weekly** report is the default saved report. To open it:
+
+1. Go to **Reports V1** (legacy report builder).
+2. In the left sidebar, under **Saved Reports**, click **Net Sales by Location - Weekly**.
+3. Click **Run Report**.
+
+The report shows **Toast net sales** (from Toast’s metrics API) and **Newk's net sales** (Toast net sales minus any service charge that goes to the house). Today, “service charge to the house” is not provided by Toast’s metrics API, so Newk's net sales equals Toast net sales until we add a source (e.g. Orders API or manual input). The UI and CSV export include both columns so you can see the split once that data is available.
+
 ## 🚀 Quick Start
 
 **Just double-click `START_APP.bat`** - handles everything automatically!
@@ -50,12 +60,33 @@ TOAST_STANDARD_API_CLIENT_ID=your_standard_api_client_id
 TOAST_STANDARD_API_CLIENT_SECRET=your_standard_api_client_secret
 ```
 
-Start server:
+Start server (from the `backend` folder):
 ```bash
+cd backend
 uvicorn main:app --reload
 ```
 
 Visit: `http://localhost:8000/`
+
+## 🧾 Newk's Kiosk
+
+The kiosk app lives in `rooted-kiosk` and can be served from the same FastAPI backend.
+
+### Run kiosk locally (dev)
+```bash
+cd rooted-kiosk
+npm install
+npm run dev:server
+npm run dev
+```
+
+### Build + serve kiosk from FastAPI
+```bash
+cd rooted-kiosk
+npm run build:kiosk
+```
+
+Then open: `http://localhost:8000/kiosk`
 
 ## 📊 How to Use
 
@@ -176,7 +207,93 @@ Ready to add:
 - **Toast API Docs**: https://doc.toasttab.com/
 - **FastAPI Docs**: http://localhost:8000/docs (when server is running)
 
-## 🤝 Sharing with Team
+## 🌐 Deploying to Cloudways (Team Access)
+
+Deploy the app to Cloudways so all colleagues can access it from a browser — no VPN or local setup needed.
+
+### New files added for deployment:
+| File | Purpose |
+|------|---------|
+| `start.sh` | Startup script for the Linux server |
+| `supervisor.conf` | Keeps the app running 24/7 via Supervisor |
+| `backend/.env.production` | Template for production environment variables |
+
+### Step 1 – Upload the project to the server
+
+**Option A – SFTP (simplest):** Use [FileZilla](https://filezilla-project.org/) or WinSCP.
+- Connect to your Cloudways server using the SFTP credentials from the Cloudways dashboard
+- Upload the entire project folder to `/home/master/applications/newks/`
+
+**Option B – Git (recommended for future updates):**
+- Push the repo to GitHub (excluding `.env`, `venv/`, `__pycache__/`)
+- SSH into the server and run: `git clone https://github.com/YOUR_ORG/YOUR_REPO.git /home/master/applications/newks/`
+
+### Step 2 – One-time server setup (SSH)
+
+Get SSH credentials from: Cloudways Dashboard → Server → Master Credentials.
+
+```bash
+# Install Python (if not already available)
+sudo apt-get update && sudo apt-get install -y python3 python3-pip python3-venv
+
+# Create Python virtual environment and install dependencies
+cd /home/master/applications/newks/backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Set up environment variables
+cp .env.production .env
+nano .env    # Fill in Toast API credentials, JWT secret, super admin info
+
+# Set up Supervisor to keep the app running
+sudo cp /home/master/applications/newks/supervisor.conf /etc/supervisor/conf.d/newks_app.conf
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start newks_app
+
+# Verify the app started
+curl http://localhost:8000/health
+# Should return: {"status":"ok"}
+```
+
+### Step 3 – Configure Nginx in Cloudways Dashboard
+
+1. Go to **Cloudways Dashboard → Application → Application Management → Nginx Settings**
+2. Add this to the custom Nginx config:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+3. Enable **Free SSL (Let's Encrypt)** in the Cloudways dashboard for HTTPS.
+
+### Step 4 – Share the URL
+
+Share `https://your-cloudways-domain.com/` with colleagues. They log in with their credentials (managed in the Admin Panel).
+
+### Updating the app after code changes
+
+```bash
+# SSH into server, then:
+cd /home/master/applications/newks
+git pull                              # if using Git
+sudo supervisorctl restart newks_app  # restart the app
+```
+
+### ⚠️ Known limitation: Year-Over-Year (YOY) comparisons
+
+The YOY feature connects to the internal Aloha SQL Server (`sql-prod`), which is not reachable from a cloud server. Leave the `ALOHA_SQL_*` variables blank in `.env` — all other features work normally. Contact IT to set up a VPN tunnel if YOY access is needed from the cloud.
+
+---
+
+## 🤝 Sharing with Team (Local Copy)
 
 ### Via GitHub (Recommended):
 1. Create GitHub repository
@@ -227,3 +344,24 @@ For Toast API issues, contact Toast support. For this app, check:
 ---
 
 **Built for Newk's Restaurant Group** | Powered by Toast APIs
+
+
+
+python import_aloha_data.py "C:\Users\kaylesworth\Downloads\myReport (2).csv" 2024-11-01
+
+curl POST http://localhost:8000/api/yoy/compare \
+  -H "Content-Type: application/json" \
+  -d "{\"toast_start_date\":\"2025-11-01\",\"toast_end_date\":\"2025-11-30\",\"aloha_date\":\"2024-11-01\"}"
+
+  try {
+  Invoke-RestMethod -Uri "http://localhost:8000/api/yoy/compare" `
+    -Method POST `
+    -ContentType "application/json" `
+    -Body '{"toast_start_date":"2025-11-01","toast_end_date":"2025-11-01","aloha_date":"2024-11-01"}'
+} catch {
+  $_.Exception.Response | % {
+    $stream = $_.GetResponseStream()
+    $reader = New-Object System.IO.StreamReader($stream)
+    $reader.ReadToEnd()
+  }
+}

@@ -34,4 +34,30 @@ build/
 
 # Sensitive files
 random.txt
+backend/.env.production
+backend/users.json
+backend/main.py.bak
+.claude/settings.local.json
+*.LNK
+*.lnk
+
+# Kiosk project dependencies (auto-generated, never commit)
+newks-kiosk/node_modules/
+newks-kiosk/dist/
+
+# Claude worktrees (local dev artifacts)
+.claude/worktrees/
+
+# Live user database — never overwrite production data via git pull
+backend/users.json
+
+# Production data directory
+backend/data/
+
+# Large data / temp files (would exceed GitHub's 100MB file limit)
+*.zip
+*.csv
+*.xlsx
+*.xls
+response.txt
 

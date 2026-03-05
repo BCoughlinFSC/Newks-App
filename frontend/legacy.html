@@ -1,0 +1,3057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reports V1 – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #F8FAFC;
+      color: #2c2c2c;
+      min-height: 100vh;
+    }
+
+    /* ─── Header ─────────────────────────────────────── */
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #ffffff; font-size: 1.5rem; font-weight: 700; }
+    .header p  { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.5); }
+    .nav-link-item {
+      display: block; padding: 0.5rem 0.75rem;
+      color: #2c2c2c; text-decoration: none;
+      border-radius: 6px; margin-bottom: 0.25rem; font-size: 0.9rem; transition: all 0.2s;
+    }
+    .nav-link-item:hover { background: #F0F9FF; color: #C41E3A; }
+    .nav-link-item.active { background: #C41E3A; color: #fff; }
+    .nav-section-label {
+      font-size: 0.7rem; font-weight: 600; color: #666;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 0.25rem 0.5rem; margin-bottom: 0.25rem;
+    }
+
+    /* ─── Layout ────────────────────────────────────── */
+    .container {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 2rem;
+      max-width: 1700px;
+      margin: 0 auto;
+    }
+    @media (max-width: 900px) {
+      .container { grid-template-columns: 1fr; }
+    }
+
+    /* ─── Cards ─────────────────────────────────────── */
+    .card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      border: 1px solid #e8e0d5;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .card h2 {
+      margin: 0 0 1.25rem 0;
+      color: #C41E3A;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    /* ─── Sidebar ───────────────────────────────────── */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .sidebar-card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 1.25rem;
+      border: 1px solid #e8e0d5;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .saved-reports-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      max-height: 420px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+    .saved-reports-list::-webkit-scrollbar { width: 6px; }
+    .saved-reports-list::-webkit-scrollbar-track { background: #F8FAFC; border-radius: 4px; }
+    .saved-reports-list::-webkit-scrollbar-thumb { background: #d4c9b8; border-radius: 4px; }
+    .report-item {
+      background: #F8FAFC;
+      border: 1px solid #e8e0d5;
+      border-radius: 8px;
+      padding: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .report-item:hover  { background: #F0F9FF; border-color: #C41E3A; }
+    .report-item.active { background: #F0F9FF; border-color: #C41E3A; border-width: 2px; }
+    .report-item-name   { font-weight: 600; color: #2c2c2c; font-size: 0.9rem; margin-bottom: 0.2rem; }
+    .report-item-creator { font-size: 0.75rem; color: #666; }
+
+    /* ─── User profile in sidebar ──────────────────── */
+    .sidebar-footer {
+      margin-top: auto;
+      padding-top: 1rem;
+      border-top: 1px solid #e8e0d5;
+    }
+    .user-profile-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #F0F9FF;
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+    }
+    .user-avatar {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      background: #C41E3A;
+      color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.85rem; flex-shrink: 0;
+    }
+    .user-name  { font-weight: 600; font-size: 0.9rem; color: #2c2c2c; }
+    .user-role  { font-size: 0.75rem; color: #666; text-transform: capitalize; }
+    .user-profile-actions { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    /* ─── Form elements ─────────────────────────────── */
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block;
+      margin-bottom: 0.4rem;
+      font-weight: 600;
+      color: #374151;
+      font-size: 0.875rem;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #D1D5DB;
+      background: #ffffff;
+      color: #2c2c2c;
+      font-size: 0.875rem;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196,30,58,0.1);
+    }
+    .form-group textarea { min-height: 80px; resize: vertical; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+    /* ─── Locations / Tags grid ─────────────────────── */
+    .scroll-grid {
+      max-height: 160px;
+      overflow-y: auto;
+      padding: 0.6rem 0.75rem;
+      background: #F8FAFC;
+      border-radius: 6px;
+      border: 1px solid #D1D5DB;
+    }
+    .scroll-grid::-webkit-scrollbar { width: 6px; }
+    .scroll-grid::-webkit-scrollbar-track { background: #F8FAFC; border-radius: 4px; }
+    .scroll-grid::-webkit-scrollbar-thumb { background: #d4c9b8; border-radius: 4px; }
+    .scroll-grid label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.3rem 0;
+      font-weight: normal;
+      margin: 0;
+      color: #374151;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .scroll-grid label:hover { color: #C41E3A; }
+    .scroll-grid input[type="checkbox"] {
+      width: 15px; height: 15px;
+      cursor: pointer;
+      accent-color: #C41E3A;
+      flex-shrink: 0;
+    }
+    .count-badge {
+      font-size: 0.8rem;
+      font-weight: normal;
+      color: #C41E3A;
+    }
+    .select-all-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.4rem;
+    }
+    .select-all-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: #374151;
+      font-weight: 600;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .select-all-label input[type="checkbox"] {
+      width: 15px; height: 15px;
+      accent-color: #C41E3A;
+    }
+
+    /* ─── Buttons ───────────────────────────────────── */
+    button {
+      padding: 0.55rem 1.1rem;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.875rem;
+      font-family: inherit;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; }
+
+    .btn-primary { background: #C41E3A; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; transform: translateY(-1px); }
+
+    .btn-green { background: #C41E3A; color: #fff; }
+    .btn-green:hover:not(:disabled) { background: #A01A2E; transform: translateY(-1px); }
+    .zero-sales-option {
+      margin-top: 0.75rem; padding: 0.75rem;
+      background: #F8FAFC; border-radius: 6px; border: 1px solid #e8e0d5;
+    }
+    .zero-sales-hint { font-size: 0.78rem; color: #555c7b; margin-top: 0.25rem; margin-left: 1.5rem; }
+    .aloha-range-warning {
+      margin-top: 0.5rem; padding: 0.5rem 0.75rem;
+      background: #fef3c7; border: 1px solid #e8c547; border-radius: 6px;
+      font-size: 0.82rem; color: #92400e;
+    }
+    .aloha-import-help { margin-top: 0.5rem; font-size: 0.82rem; color: #555c7b; }
+    .aloha-import-help summary { cursor: pointer; color: #C41E3A; }
+    .aloha-import-help pre, .aloha-import-help code { background: #F8FAFC; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.8rem; }
+    .aloha-import-help pre { padding: 0.5rem; margin: 0.35rem 0; overflow-x: auto; }
+
+    .btn-blue { background: #1E3A5F; color: #fff; }
+    .btn-blue:hover:not(:disabled) { background: #162e4a; transform: translateY(-1px); }
+
+    .btn-secondary { background: #6B7280; color: #fff; }
+    .btn-secondary:hover:not(:disabled) { background: #4B5563; }
+
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+
+    .btn-outline {
+      background: transparent;
+      color: #C41E3A;
+      border: 1px solid #C41E3A;
+    }
+    .btn-outline:hover:not(:disabled) { background: rgba(196,30,58,0.08); }
+
+    .btn-full { width: 100%; margin-bottom: 0.5rem; }
+    .btn-group { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.25rem; }
+
+    /* ─── Status messages ───────────────────────────── */
+    .status {
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      margin-top: 0.75rem;
+      font-size: 0.875rem;
+    }
+    .status.info    { background: #EFF6FF; border: 1px solid #93c5fd; color: #1d4ed8; }
+    .status.success { background: #f0fdf4; border: 1px solid #86efac; color: #15803d; }
+    .status.error   { background: #FEF2F2; border: 1px solid #fca5a5; color: #dc2626; }
+    .status.warning { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+    .hidden { display: none !important; }
+
+    /* ─── Results area ──────────────────────────────── */
+    .main-content { display: flex; flex-direction: column; gap: 1.5rem; }
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .results-header h2 { margin: 0; color: #C41E3A; font-size: 1.1rem; }
+    .results-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .results-summary { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
+    .table-wrap { overflow-x: auto; border-radius: 6px; }
+
+    /* Toast column visibility toggle */
+    .toast-cols-hidden .toast-col { display: none; }
+
+    /* Labor KPI cards */
+    .kpi-card { background: #fff; border: 1px solid #E5E7EB; border-radius: 0.5rem; padding: 1rem; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+    .kpi-label { font-size: 0.8rem; color: #6B7280; font-weight: 600; margin-bottom: 0.35rem; }
+    .kpi-value { font-size: 1.6rem; font-weight: 700; color: #1E3A5F; }
+    .kpi-sub   { font-size: 0.72rem; color: #9CA3AF; margin-top: 0.2rem; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th {
+      background: #1E3A5F;
+      color: #ffffff;
+      font-weight: 600;
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 2px solid #162e4a;
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td {
+      padding: 0.55rem 0.75rem;
+      border-bottom: 1px solid #E5E7EB;
+      color: #2c2c2c;
+    }
+    tr:hover td { background: #F0F9FF; }
+    .empty-state { text-align: center; padding: 3rem 1rem; color: #9ca3af; font-size: 0.9rem; }
+
+    /* Inline table overrides – light theme */
+    table th[style*="background: #1E40AF"],
+    table th[style*="background:#1E40AF"] {
+      background: #1E3A5F !important;
+    }
+    table th[style*="background: #059669"],
+    table th[style*="background:#059669"] {
+      background: #065f46 !important;
+    }
+    table tr[style*="background: #EFF6FF"],
+    table tr[style*="background:#EFF6FF"] {
+      background: #F0F9FF !important;
+    }
+    table tr[style*="background: white"],
+    table tr[style*="background:white"] {
+      background: #ffffff !important;
+    }
+    table th[style*="background: #EFF6FF"],
+    table th[style*="background:#EFF6FF"] {
+      background: #F0F9FF !important;
+      color: #374151 !important;
+    }
+
+    /* Sortable headers */
+    .sortable-header { cursor: pointer; user-select: none; position: relative; padding-right: 1.5rem !important; }
+    .sortable-header:hover { opacity: 0.85; }
+    .sortable-header::after { content: '⇅'; position: absolute; right: 0.5rem; opacity: 0.5; font-size: 0.75rem; }
+    .sortable-header.sort-asc::after  { content: '↑'; opacity: 1; }
+    .sortable-header.sort-desc::after { content: '↓'; opacity: 1; }
+
+    /* ─── Loading overlay ───────────────────────────── */
+    .loading-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      z-index: 9999; gap: 1rem;
+    }
+    .loading-overlay.hidden { display: none !important; }
+    .loading-spinner {
+      width: 56px; height: 56px;
+      border: 5px solid #e8e0d5;
+      border-top: 5px solid #C41E3A;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    .loading-text { color: #ffffff; font-size: 1rem; font-weight: 600; text-align: center; }
+    @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+
+    /* ─── Modal overlay ─────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex; justify-content: center; align-items: center;
+      z-index: 10000;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 2rem;
+      max-width: 560px;
+      width: 92%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+      border: 1px solid #e8e0d5;
+    }
+    .modal-wide { max-width: 860px; }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #E5E7EB;
+    }
+    .modal-header h2 { margin: 0; color: #C41E3A; font-size: 1.3rem; }
+    .modal-close {
+      background: none; border: none;
+      font-size: 1.4rem; cursor: pointer;
+      color: #6B7280; padding: 0;
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 4px;
+    }
+    .modal-close:hover { background: #F3F4F6; color: #C41E3A; }
+    .modal-form-group { margin-bottom: 1.1rem; }
+    .modal-form-group label {
+      display: block; margin-bottom: 0.4rem;
+      font-weight: 600; color: #374151; font-size: 0.875rem;
+    }
+    .modal-form-group input,
+    .modal-form-group textarea,
+    .modal-form-group select {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #D1D5DB;
+      background: #ffffff;
+      color: #2c2c2c;
+      font-size: 0.875rem;
+      font-family: inherit;
+    }
+    .modal-form-group input:focus,
+    .modal-form-group textarea:focus,
+    .modal-form-group select:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196,30,58,0.1);
+    }
+    .modal-form-group textarea { min-height: 110px; resize: vertical; }
+    .modal-actions {
+      display: flex; gap: 0.75rem; justify-content: flex-end;
+      margin-top: 1.5rem; padding-top: 1.25rem;
+      border-top: 2px solid #E5E7EB;
+    }
+
+    /* Admin panel table */
+    .admin-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .admin-table th {
+      background: #1E3A5F; color: #ffffff;
+      padding: 0.6rem 0.75rem;
+      text-align: left; border-bottom: 2px solid #162e4a;
+      position: static;
+    }
+    .admin-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #E5E7EB; color: #2c2c2c; }
+    .admin-table tr:hover td { background: #F0F9FF; }
+    .role-badge {
+      padding: 0.2rem 0.5rem; border-radius: 4px;
+      font-size: 0.8rem; font-weight: 600; color: #fff;
+    }
+
+    /* Breakdown popup (Toast Items / Aloha Items) – theme match */
+    #alohaDetailsPopup,
+    .breakdown-popup {
+      background: #ffffff;
+      border: 1px solid #e8e0d5;
+      color: #2c2c2c;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .breakdown-popup-title {
+      font-weight: 600; margin-bottom: 0.5rem; color: #C41E3A; font-size: 0.9rem;
+    }
+    .breakdown-popup-row {
+      display: flex; justify-content: space-between; gap: 1rem; font-size: 0.85rem; padding: 0.2rem 0;
+    }
+    .breakdown-popup-name { color: #374151; }
+    .breakdown-popup-qty { color: #2c2c2c; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .breakdown-popup-empty { font-size: 0.85rem; color: #6B7280; }
+
+    /* Filter bar */
+    .filter-bar {
+      display: flex; align-items: center; gap: 0.75rem;
+      margin-bottom: 0.75rem; flex-wrap: wrap;
+    }
+    .filter-bar label { font-size: 0.85rem; color: #374151; }
+    .filter-bar input {
+      padding: 0.35rem 0.65rem;
+      border: 1px solid #D1D5DB;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #2c2c2c;
+      font-size: 0.85rem;
+      min-width: 220px;
+    }
+    .filter-bar input:focus { outline: none; border-color: #C41E3A; box-shadow: 0 0 0 3px rgba(196,30,58,0.1); }
+
+    /* Diagnostic banner */
+    .diag-banner {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      color: #92400e;
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    }
+    .diag-banner a { color: #C41E3A; text-decoration: underline; }
+
+    /* Debug info */
+    .debug-info { font-size: 0.78rem; color: #9ca3af; margin-bottom: 0.5rem; font-family: monospace; }
+
+    /* Floating help button */
+    .help-fab {
+      position: fixed; bottom: 2rem; right: 2rem;
+      background: #C41E3A; color: #fff;
+      border: none; border-radius: 50px;
+      padding: 0.85rem 1.4rem;
+      font-weight: 600; font-size: 0.9rem;
+      cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+      z-index: 1000; display: flex; align-items: center; gap: 0.5rem;
+      transition: all 0.2s;
+    }
+    .help-fab:hover { background: #A01A2E; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.25); }
+
+    /* YoY section */
+    .yoy-inner {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      padding: 0.75rem; background: #F8FAFC;
+      border-radius: 6px; border: 1px solid #e8e0d5;
+    }
+    .yoy-toggle-label {
+      display: flex; align-items: center; gap: 0.5rem;
+      cursor: pointer; color: #374151; font-size: 0.875rem;
+    }
+    .yoy-toggle-label input[type="checkbox"] { width: 15px; height: 15px; accent-color: #C41E3A; }
+    .yoy-sub { margin-left: 1.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
+    .yoy-sub label { font-size: 0.82rem; color: #666; }
+    .yoy-sub select {
+      padding: 0.4rem 0.65rem;
+      border-radius: 6px; border: 1px solid #D1D5DB;
+      background: #ffffff; color: #2c2c2c; font-size: 0.85rem;
+    }
+    .yoy-sub select:disabled { opacity: 0.5; }
+    .yoy-hint { font-size: 0.78rem; color: #9ca3af; margin-left: 1.5rem; }
+
+    /* Debug tag mapping */
+    #debugTagMappingSection { margin-bottom: 0.75rem; }
+    #debugTagMappingSection textarea {
+      width: 100%; height: 160px; font-size: 0.75rem;
+      font-family: monospace; padding: 0.5rem;
+      border: 1px solid #D1D5DB; border-radius: 4px;
+      background: #F8FAFC; color: #2c2c2c; resize: vertical;
+    }
+  </style>
+  <!-- xlsx-js-style: SheetJS + free cell-level styling for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+</head>
+<body>
+
+  <!-- ─── Header ──────────────────────────────────────────── -->
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Reports V1</h1>
+        <p>Report Builder – Legacy reporting with full customization</p>
+      </div>
+      <a href="/" class="home-btn">&#127968; Home</a>
+    </div>
+  </div>
+
+  <!-- ─── Main layout ─────────────────────────────────────── -->
+  <div class="container">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+
+      <!-- Navigation -->
+      <div class="sidebar-card" style="flex: none;">
+        <h3 style="margin: 0 0 0.75rem 0; color: #C41E3A; font-size: 0.95rem; font-weight: 700;">Navigation</h3>
+        <div class="nav-section-label">Reports</div>
+        <a href="/legacy.html" class="nav-link-item active">📋 Reports V1</a>
+        <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink">📱 Digital Orders by Platform (OLO)</a>
+        <a href="/pick3.html" class="nav-link-item">📊 Pick 3 Report</a>
+        <div class="nav-section-label hidden" id="dataNavSection" style="margin-top: 0.5rem;">Data</div>
+        <a href="/mapping.html" class="nav-link-item hidden" id="mappingNavLink">🗂 Mapping Table</a>
+      </div>
+
+      <div class="sidebar-card">
+        <h2>Saved Reports</h2>
+        <button class="btn-primary btn-full" id="newReportBtn">+ New Report</button>
+
+        <div style="margin-top: 0.75rem;">
+          <div class="saved-reports-list" id="savedReportsList">
+            <div class="empty-state">Loading...</div>
+          </div>
+        </div>
+
+        <button class="btn-secondary btn-full hidden" style="margin-top: 0.75rem;" id="toastPricingExportBtn">
+          📊 Toast Pricing Export
+        </button>
+
+        <!-- User Profile -->
+        <div class="sidebar-footer hidden" id="userProfileSection">
+          <div class="user-profile-info">
+            <div class="user-avatar" id="userAvatar">U</div>
+            <div>
+              <div class="user-name" id="userProfileName">User</div>
+              <div class="user-role" id="userProfileRole">user</div>
+            </div>
+          </div>
+          <div class="user-profile-actions">
+            <button class="btn-blue btn-full hidden" id="userAdminBtn">⚙ Admin Panel</button>
+            <button class="btn-secondary btn-full hidden" id="myRestaurantsBtn">🏪 My Restaurants</button>
+            <button class="btn-secondary btn-full" id="userLogoutBtn">Logout</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main content -->
+    <div class="main-content">
+
+      <!-- Report Builder card -->
+      <div class="card">
+        <h2 id="builderTitle">Report Builder</h2>
+
+        <div class="form-group">
+          <label>Report Name</label>
+          <input type="text" id="reportName" placeholder="e.g., Net Sales by Location – Weekly" />
+        </div>
+
+        <div class="form-group">
+          <label>Description <span style="font-weight:normal;color:#555c7b;">(optional)</span></label>
+          <input type="text" id="reportDescription" placeholder="Brief description of this report" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Report Type</label>
+            <select id="reportType">
+              <option value="metrics">Metrics Report (Sales, Guest Count, etc.)</option>
+              <option value="menu">Menu Performance (Item-level Sales)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Date Range</label>
+            <select id="dateRangeType">
+              <option value="last_7_days">Last 7 Days</option>
+              <option value="last_30_days">Last 30 Days</option>
+              <option value="last_90_days">Last 90 Days</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row hidden" id="customDateRange">
+          <div class="form-group">
+            <label>Start Date</label>
+            <input type="date" id="customStartDate" />
+          </div>
+          <div class="form-group">
+            <label>End Date</label>
+            <input type="date" id="customEndDate" />
+          </div>
+        </div>
+
+        <!-- Locations -->
+        <div class="form-group">
+          <div class="select-all-row">
+            <label class="select-all-label">
+              <input type="checkbox" id="selectAllLocations" checked />
+              Select All Locations
+            </label>
+            <span class="count-badge" id="locationCount"></span>
+          </div>
+          <div class="scroll-grid" id="locationsGrid">
+            <div style="padding: 0.25rem; color: #555c7b; font-size: 0.85rem;">Loading locations...</div>
+          </div>
+          <!-- Locations error / retry -->
+          <div id="locationsDiag" class="hidden" style="margin-top: 0.5rem;">
+            <div class="diag-banner">
+              <span>⚠ Could not load locations.</span>
+              <button class="btn-outline" style="padding: 0.3rem 0.75rem; font-size: 0.8rem;" id="retryLocationsBtn">Retry</button>
+              <a href="/api/v2/health/detailed" target="_blank">Check API health ↗</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filter by -->
+        <div class="form-group">
+          <label>Filter By</label>
+          <select id="filterByType">
+            <option value="">None</option>
+            <option value="itemTags">Item Tags</option>
+          </select>
+        </div>
+
+        <!-- Item Tags section -->
+        <div class="form-group hidden" id="itemTagsSection">
+          <div class="select-all-row" style="margin-bottom: 0.4rem;">
+            <label style="font-weight:600; color:#a0b0d0; font-size:0.875rem;">Item Tags</label>
+            <span class="count-badge" id="tagCount"></span>
+          </div>
+          <div style="font-size: 0.8rem; color: #555c7b; margin-bottom: 0.5rem;">
+            Select tags to filter menu items. Includes items, modifiers, and nested modifiers.
+          </div>
+          <div id="itemTagsLoadingStatus" style="padding: 0.5rem; color: #a0b0d0; font-size: 0.85rem;">
+            Select Menu Performance to load item tags...
+          </div>
+          <div class="scroll-grid hidden" id="itemTagsGrid" style="max-height: 200px;"></div>
+          <div class="zero-sales-option">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem;">
+              <input type="checkbox" id="includeZeroSales" style="width: 15px; height: 15px; accent-color: #C41E3A;" />
+              Include items with 0 sales in breakdown
+            </label>
+            <div class="zero-sales-hint">
+              When enabled, shows all items with selected tags, even if they had no sales in the date range
+            </div>
+          </div>
+        </div>
+
+        <!-- YoY / Aloha section -->
+        <div class="form-group hidden" id="yoySection">
+          <label>Year-over-Year (Aloha)</label>
+          <div class="yoy-inner">
+            <label class="yoy-toggle-label">
+              <input type="checkbox" id="enableYoY" />
+              Show Aloha Qty column in menu report
+            </label>
+            <div class="yoy-hint">Compares to the same date range, 1 year prior (from your imported Aloha data).</div>
+            <div id="alohaRangeWarning" class="aloha-range-warning hidden"></div>
+            <details class="aloha-import-help">
+              <summary>How do I import more Aloha data?</summary>
+              <p>From the <code>backend</code> folder, run:</p>
+              <pre>python import_aloha_data.py --sql --sql-start YYYY-MM-DD --sql-end YYYY-MM-DD</pre>
+              <p>Or for the last 90 days: <code>python import_aloha_data.py --sql-last-days 90</code></p>
+              <p>Configure <code>ALOHA_SQL_*</code> in <code>backend/.env</code> first (see Backend README → “Importing Aloha data”).</p>
+              <p><strong>All stores:</strong> The query runs against your Aloha DB and can return every location (no store filter in the query).</p>
+              <p><strong>By store:</strong> To break down by store in YoY reports, include a <strong>Location</strong> column in your SQL (e.g. <code>StoreId AS Location</code>). Then add <code>backend/data/aloha/aloha_location_mapping.json</code> mapping Toast restaurant GUIDs to Aloha store IDs so the app can filter Aloha data by the locations you select.</p>
+            </details>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="btn-group">
+          <button class="btn-primary" id="runReportBtn">▶ Run Report</button>
+          <button class="btn-primary" id="saveReportBtn">💾 Save Report</button>
+          <button class="btn-blue hidden" id="updateReportBtn">↻ Update Report</button>
+          <button class="btn-danger hidden" id="deleteReportBtn">🗑 Delete Report</button>
+        </div>
+
+        <div style="margin-top: 0.65rem;">
+          <label style="font-size: 0.82rem; color: #555c7b; cursor: pointer; display: flex; align-items: center; gap: 0.4rem;">
+            <input type="checkbox" id="debugTagMapping" style="margin: 0;" />
+            Include tag/mapping debug (for troubleshooting – run report then copy debug from Results)
+          </label>
+        </div>
+
+        <div class="status hidden" id="builderStatus"></div>
+      </div>
+
+      <!-- Results card -->
+      <div class="card">
+        <div class="results-header">
+          <h2>Results</h2>
+          <div class="results-actions">
+            <button class="btn-secondary hidden" id="toggleToastColumnsBtn">Show Toast Columns</button>
+            <button class="btn-secondary hidden" id="toggleDailyColumnsBtn">Show Daily Columns</button>
+            <button class="btn-primary hidden" id="exportBtn">⬇ Download Excel</button>
+          </div>
+        </div>
+
+        <div class="results-summary" id="resultsSummary"></div>
+
+        <!-- Labor KPI Panel — shown only for metrics (net sales) reports -->
+        <div id="laborKpiPanel" class="hidden" style="margin: 0.5rem 0 1rem;">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;">
+            <div class="kpi-card">
+              <div class="kpi-label">💼 Labor Cost</div>
+              <div class="kpi-value" id="kpiLaborCostVal">—</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">🥗 Newk's Net Sales</div>
+              <div class="kpi-value" id="kpiNetSalesVal">—</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">📊 Labor %</div>
+              <div class="kpi-value" id="kpiLaborPctVal">—</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">⚡ SPLH</div>
+              <div class="kpi-value" id="kpiSplhVal">—</div>
+              <div class="kpi-sub">Sales Per Labor Hour</div>
+            </div>
+          </div>
+          <div id="laborKpiNote" style="font-size:0.73rem;color:#6B7280;margin-top:0.4rem;display:none;">
+            ⚠ Salaried employees excluded from labor cost. Overtime calculated at 1.5×.
+          </div>
+        </div>
+
+        <div class="filter-bar hidden" id="menuItemFilterWrap">
+          <label for="menuItemFilterInput">Filter items</label>
+          <input id="menuItemFilterInput" type="text" placeholder="Type to filter menu items..." />
+          <button class="btn-secondary" id="menuItemFilterClear" style="padding: 0.35rem 0.75rem;">Clear</button>
+        </div>
+
+        <div class="debug-info" id="debugInfo"></div>
+        <div id="debugTagMappingSection" style="display: none;"></div>
+
+        <div class="table-wrap">
+          <table id="resultsTable">
+            <thead id="resultsHead"></thead>
+            <tbody id="resultsBody">
+              <tr><td colspan="100" class="empty-state">Run a report to see results</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /main-content -->
+  </div><!-- /container -->
+
+  <!-- ─── Loading Overlay ──────────────────────────────────── -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Running report…<br><span style="font-size:0.85rem;font-weight:normal;opacity:0.8;">This may take a moment</span></div>
+  </div>
+
+  <!-- ─── My Restaurants Modal ────────────────────────────── -->
+  <div id="myRestaurantsModal" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>🏪 My Restaurants</h2>
+        <button class="modal-close" id="closeMyRestaurantsModal">&times;</button>
+      </div>
+      <p style="margin:0 0 1rem;color:#6B7280;font-size:0.875rem;">
+        Select the locations you work with. These will be the only ones shown in your reporting options.<br>
+        <em>Leave all unchecked to see every location.</em>
+      </p>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:600;font-size:0.875rem;cursor:pointer;">
+          <input type="checkbox" id="selectAllMyRestaurants" style="width:15px;height:15px;accent-color:#C41E3A;" />
+          Select All
+        </label>
+        <span id="myRestaurantsCount" style="font-size:0.82rem;color:#6B7280;"></span>
+      </div>
+      <div style="max-height:340px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px;padding:0.5rem;">
+        <div id="myRestaurantsGrid" style="display:flex;flex-direction:column;gap:0.25rem;">
+          <div style="padding:1rem;text-align:center;color:#6B7280;">Loading locations…</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="cancelMyRestaurantsBtn">Cancel</button>
+        <button type="button" class="btn-primary" id="saveMyRestaurantsBtn">Save My Restaurants</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Auth Modal ───────────────────────────────────────── -->
+  <div id="authModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Login to Newk's Reporting</h2>
+        <button class="modal-close" id="closeAuthModal">&times;</button>
+      </div>
+      <form id="authForm">
+        <div class="modal-form-group">
+          <label for="authEmail">Email *</label>
+          <input type="email" id="authEmail" required placeholder="your.email@example.com" />
+        </div>
+        <div class="modal-form-group">
+          <label for="authPassword">Password *</label>
+          <input type="password" id="authPassword" required placeholder="Enter your password" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancelAuthBtn">Cancel</button>
+          <button type="submit" class="btn-primary" id="authSubmitBtn">Login</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ─── Help Modal ───────────────────────────────────────── -->
+  <div id="helpModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Request Help</h2>
+        <button class="modal-close" id="closeHelpModal">&times;</button>
+      </div>
+      <form id="helpForm">
+        <div class="modal-form-group">
+          <label for="helpName">Your Name *</label>
+          <input type="text" id="helpName" required placeholder="Enter your name" />
+        </div>
+        <div class="modal-form-group">
+          <label for="helpEmail">Your Email *</label>
+          <input type="email" id="helpEmail" required placeholder="your.email@example.com" />
+        </div>
+        <div class="modal-form-group">
+          <label for="helpSubject">Subject *</label>
+          <input type="text" id="helpSubject" required placeholder="Brief description of your issue" />
+        </div>
+        <div class="modal-form-group">
+          <label for="helpPriority">Priority</label>
+          <select id="helpPriority">
+            <option value="1">Low</option>
+            <option value="2" selected>Medium</option>
+            <option value="3">High</option>
+            <option value="4">Urgent</option>
+          </select>
+        </div>
+        <div class="modal-form-group">
+          <label for="helpDescription">Description *</label>
+          <textarea id="helpDescription" required placeholder="Please provide details about what you need help with…"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancelHelpBtn">Cancel</button>
+          <button type="submit" class="btn-primary">Submit Ticket</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ─── Floating Help Button ────────────────────────────── -->
+  <button class="help-fab" id="helpBtn">💬 I Need Help</button>
+
+  <script>
+    // ──────────────────────────────────────────────────────────
+    // State
+    // ──────────────────────────────────────────────────────────
+    let locations = [];
+    let savedReports = [];
+    let currentReportId = null;
+    let currentResults = null;
+    let reportTypeOptions = {};
+    let menuItems = null;
+    let allItemTags = [];
+    let currentItemBreakdown = null;
+    let currentSortColumn = null;
+    let currentSortDirection = null;
+    let currentReportConfig = null;
+    let showDailyColumns = false;
+    let showToastColumns = false;
+    let toggleBtn = null;
+    let currentMenuMixSortDirection = 'desc';
+    let currentMenuMixSortColumn = 'qty';
+    let availableAlohaDates = [];
+    let currentMenuItemFilter = '';
+    let authToken = null;
+    let currentUser = null;
+    let lastReportConfig = null;   // stored for labor KPI panel
+    let lastLaborData    = null;   // stored for Excel export Summary sheet
+
+    // ──────────────────────────────────────────────────────────
+    // Auth helpers
+    // ──────────────────────────────────────────────────────────
+    function getAuthHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+      return headers;
+    }
+
+    function clearAuth() {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      authToken = null;
+      currentUser = null;
+      updateUIForAuth();
+      showAuthModal();
+    }
+
+    function showAuthModal() {
+      document.getElementById('authModal').classList.remove('hidden');
+    }
+
+    async function checkAuth() {
+      authToken = localStorage.getItem('auth_token');
+      const userStr = localStorage.getItem('user');
+      if (authToken && userStr) {
+        try {
+          currentUser = JSON.parse(userStr);
+          // Refresh from server
+          try {
+            const resp = await fetch('/api/auth/me', { headers: getAuthHeaders() });
+            if (resp.ok) {
+              const serverUser = await resp.json();
+              currentUser = serverUser;
+              localStorage.setItem('user', JSON.stringify(serverUser));
+            } else if (resp.status === 401) {
+              clearAuth();
+              return false;
+            }
+          } catch (err) {
+            console.warn('Could not refresh user info:', err);
+          }
+          updateUIForAuth();
+          document.getElementById('authModal').classList.add('hidden');
+          return true;
+        } catch (e) {
+          clearAuth();
+        }
+      }
+      showAuthModal();
+      return false;
+    }
+
+    function updateUIForAuth() {
+      if (currentUser) {
+        const isAdmin = currentUser.role === 'admin';
+        const section = document.getElementById('userProfileSection');
+        const adminBtn = document.getElementById('userAdminBtn');
+        const myRestBtn = document.getElementById('myRestaurantsBtn');
+        if (section) section.classList.remove('hidden');
+        if (document.getElementById('userProfileName')) document.getElementById('userProfileName').textContent = currentUser.name;
+        if (document.getElementById('userProfileRole')) document.getElementById('userProfileRole').textContent = currentUser.role || 'user';
+        if (document.getElementById('userAvatar')) {
+          document.getElementById('userAvatar').textContent = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        }
+        if (adminBtn) adminBtn.classList.toggle('hidden', !isAdmin);
+        if (myRestBtn) myRestBtn.classList.toggle('hidden', isAdmin);
+        // Admin-only nav links and buttons
+        document.getElementById('oloNavLink')?.classList.toggle('hidden', !isAdmin);
+        document.getElementById('dataNavSection')?.classList.toggle('hidden', !isAdmin);
+        document.getElementById('mappingNavLink')?.classList.toggle('hidden', !isAdmin);
+        document.getElementById('toastPricingExportBtn')?.classList.toggle('hidden', !isAdmin);
+        document.getElementById('authModal').classList.add('hidden');
+      } else {
+        const section = document.getElementById('userProfileSection');
+        if (section) section.classList.add('hidden');
+        document.getElementById('userAdminBtn')?.classList.add('hidden');
+        document.getElementById('myRestaurantsBtn')?.classList.add('hidden');
+        // Keep nav links hidden until role is known
+        document.getElementById('oloNavLink')?.classList.add('hidden');
+        document.getElementById('dataNavSection')?.classList.add('hidden');
+        document.getElementById('mappingNavLink')?.classList.add('hidden');
+      }
+    }
+
+    async function handleAuth(e) {
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      if (!email || !password) { showStatus('error', 'Please fill in all required fields'); return; }
+      const btn = document.getElementById('authSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Logging in…';
+      try {
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        if (!resp.ok) {
+          const error = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(error.detail || error.message || 'Authentication failed');
+        }
+        const data = await resp.json();
+        localStorage.setItem('auth_token', data.access_token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        authToken = data.access_token;
+        currentUser = data.user;
+        updateUIForAuth();
+        showStatus('success', `Welcome, ${data.user.name}!`);
+        await loadLocations();
+        await loadReportTypes();
+        await loadSavedReports();
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Login';
+      }
+    }
+
+    function logout() {
+      clearAuth();
+      showStatus('success', 'Logged out successfully');
+      loadSavedReports();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Locations
+    // ──────────────────────────────────────────────────────────
+    async function loadLocations() {
+      const grid = document.getElementById('locationsGrid');
+      const diagEl = document.getElementById('locationsDiag');
+      if (grid) grid.innerHTML = '<div style="padding: 0.25rem; color: #555c7b; font-size: 0.85rem;">Loading locations…</div>';
+      if (diagEl) diagEl.classList.add('hidden');
+      try {
+        const resp = await fetch('/locations', { headers: authToken ? getAuthHeaders() : {} });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        locations = await resp.json();
+        renderLocations();
+        // Show a "filtered" note if the user has assigned restaurants
+        if (currentUser?.role !== 'admin' && currentUser?.assignedRestaurants?.length > 0) {
+          const el = document.getElementById('locationCount');
+          if (el) el.textContent = `${locations.length} location(s) — filtered`;
+        }
+      } catch (err) {
+        console.error('Error loading locations:', err);
+        if (grid) grid.innerHTML = `<div style="padding:0.35rem; color:#ff8080; font-size:0.82rem;">Failed to load locations: ${err.message}</div>`;
+        if (diagEl) diagEl.classList.remove('hidden');
+        showStatus('warning', `⚠ Locations could not be loaded (${err.message}). Check API health or retry.`);
+      }
+    }
+
+    function renderLocations() {
+      const grid = document.getElementById('locationsGrid');
+      if (locations.length === 0) {
+        grid.innerHTML = '<div style="padding:0.35rem; color:#555c7b; font-size:0.82rem;">No locations found</div>';
+        return;
+      }
+      grid.innerHTML = locations.map(loc => `
+        <label>
+          <input type="checkbox" class="location-checkbox" value="${loc.restaurantGuid}" checked />
+          ${loc.restaurantName}
+        </label>
+      `).join('');
+      document.querySelectorAll('.location-checkbox').forEach(cb => cb.addEventListener('change', updateLocationCount));
+      updateLocationCount();
+    }
+
+    function updateLocationCount() {
+      const total = locations.length;
+      const selected = document.querySelectorAll('.location-checkbox:checked').length;
+      const el = document.getElementById('locationCount');
+      if (el) el.textContent = `${selected} of ${total} selected`;
+    }
+
+    function toggleAllLocations() {
+      const checked = document.getElementById('selectAllLocations').checked;
+      document.querySelectorAll('.location-checkbox').forEach(cb => cb.checked = checked);
+      updateLocationCount();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // My Restaurants (per-user location filter)
+    // ──────────────────────────────────────────────────────────
+    let _myRestAllLocs = [];  // full unfiltered location list for the picker
+
+    async function openMyRestaurantsModal() {
+      const grid = document.getElementById('myRestaurantsGrid');
+      grid.innerHTML = '<div style="padding:1rem;text-align:center;color:#6B7280;">Loading…</div>';
+      document.getElementById('myRestaurantsModal').classList.remove('hidden');
+      try {
+        // Always fetch the full list (no auth = no server-side filter)
+        const resp = await fetch('/locations');
+        _myRestAllLocs = await resp.json();
+        const assigned = new Set(currentUser?.assignedRestaurants ?? []);
+        grid.innerHTML = _myRestAllLocs.map(loc => `
+          <label style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.5rem;border-radius:6px;cursor:pointer;font-size:0.875rem;">
+            <input type="checkbox" class="my-rest-cb" value="${loc.restaurantGuid}"
+              ${assigned.has(loc.restaurantGuid) ? 'checked' : ''}
+              style="width:15px;height:15px;accent-color:#C41E3A;flex-shrink:0;" />
+            ${loc.restaurantName}
+          </label>`).join('');
+        document.querySelectorAll('.my-rest-cb').forEach(cb => cb.addEventListener('change', updateMyRestaurantsCount));
+        updateMyRestaurantsCount();
+      } catch (err) {
+        grid.innerHTML = `<div style="padding:1rem;text-align:center;color:#DC2626;">Failed to load locations: ${err.message}</div>`;
+      }
+    }
+
+    function closeMyRestaurantsModal() {
+      document.getElementById('myRestaurantsModal').classList.add('hidden');
+    }
+
+    function updateMyRestaurantsCount() {
+      const total = _myRestAllLocs.length;
+      const checked = document.querySelectorAll('.my-rest-cb:checked').length;
+      const el = document.getElementById('myRestaurantsCount');
+      if (el) el.textContent = checked === 0 ? 'None selected (will show all)' : `${checked} of ${total} selected`;
+      // Sync select-all checkbox state
+      const selectAll = document.getElementById('selectAllMyRestaurants');
+      if (selectAll) selectAll.checked = checked > 0 && checked === total;
+    }
+
+    function toggleAllMyRestaurants() {
+      const checked = document.getElementById('selectAllMyRestaurants').checked;
+      document.querySelectorAll('.my-rest-cb').forEach(cb => cb.checked = checked);
+      updateMyRestaurantsCount();
+    }
+
+    async function saveMyRestaurants() {
+      const ids = Array.from(document.querySelectorAll('.my-rest-cb:checked')).map(cb => cb.value);
+      const saveBtn = document.getElementById('saveMyRestaurantsBtn');
+      const origText = saveBtn.textContent;
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      try {
+        const resp = await fetch('/api/users/me/restaurants', {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ restaurantIds: ids })
+        });
+        if (!resp.ok) {
+          const e = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(e.detail || 'Failed to save');
+        }
+        const updatedUser = await resp.json();
+        currentUser.assignedRestaurants = updatedUser.assignedRestaurants;
+        localStorage.setItem('user', JSON.stringify(currentUser));
+        closeMyRestaurantsModal();
+        showStatus('success', ids.length
+          ? `Filtered to ${ids.length} location(s)`
+          : 'Showing all locations (no filter)');
+        await loadLocations();
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      } finally {
+        saveBtn.disabled = false; saveBtn.textContent = origText;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Report types
+    // ──────────────────────────────────────────────────────────
+    async function loadReportTypes() {
+      try {
+        const resp = await fetch('/api/report-types');
+        reportTypeOptions = await resp.json();
+        updateFilterByOptions();
+      } catch (err) {
+        console.error('Error loading report types:', err);
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Saved reports
+    // ──────────────────────────────────────────────────────────
+    async function loadSavedReports() {
+      const list = document.getElementById('savedReportsList');
+      if (!authToken) {
+        if (list) list.innerHTML = '<div class="empty-state">Login to view saved reports</div>';
+        return;
+      }
+      if (list) list.innerHTML = '<div style="padding: 0.5rem; color: #555c7b; font-size:0.85rem;">Loading…</div>';
+      try {
+        const resp = await fetch('/api/saved-reports', { headers: getAuthHeaders() });
+        if (resp.status === 401) { clearAuth(); return; }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        savedReports = await resp.json();
+        renderSavedReports();
+      } catch (err) {
+        console.error('Error loading saved reports:', err);
+        if (list) list.innerHTML = `<div style="padding:0.4rem; color:#ff8080; font-size:0.82rem;">Error loading reports: ${err.message}</div>`;
+        if (err.message.includes('401')) clearAuth();
+      }
+    }
+
+    function renderSavedReports() {
+      const list = document.getElementById('savedReportsList');
+      if (savedReports.length === 0) {
+        list.innerHTML = '<div class="empty-state">No saved reports yet</div>';
+        return;
+      }
+      list.innerHTML = savedReports.map(r => `
+        <div class="report-item" data-id="${r.id}">
+          <div class="report-item-name">${r.name}</div>
+          <div class="report-item-creator">Created ${new Date(r.createdAt).toLocaleDateString()}</div>
+        </div>
+      `).join('');
+      document.querySelectorAll('.report-item').forEach(item => {
+        item.addEventListener('click', () => loadReport(item.dataset.id));
+      });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Aloha / YoY
+    // ──────────────────────────────────────────────────────────
+    /** Return effective report start/end in YYYY-MM-DD from current form. */
+    function getEffectiveReportStartEnd() {
+      const type = document.getElementById('dateRangeType')?.value;
+      const customStart = document.getElementById('customStartDate')?.value;
+      const customEnd = document.getElementById('customEndDate')?.value;
+      if (type === 'custom' && customStart && customEnd) {
+        return { start: customStart, end: customEnd };
+      }
+      const today = new Date();
+      const end = today.toISOString().slice(0, 10);
+      let start;
+      if (type === 'last_7_days') { start = new Date(today); start.setDate(start.getDate() - 6); start = start.toISOString().slice(0, 10); }
+      else if (type === 'last_30_days') { start = new Date(today); start.setDate(start.getDate() - 29); start = start.toISOString().slice(0, 10); }
+      else if (type === 'last_90_days') { start = new Date(today); start.setDate(start.getDate() - 89); start = start.toISOString().slice(0, 10); }
+      else { start = end; }
+      return { start, end };
+    }
+
+    /** YoY uses same date range 1 year prior. Return that range in YYYY-MM-DD. */
+    function getYoYAlohaRange() {
+      const { start, end } = getEffectiveReportStartEnd();
+      if (!start || !end) return null;
+      const s = new Date(start);
+      const e = new Date(end);
+      s.setFullYear(s.getFullYear() - 1);
+      e.setFullYear(e.getFullYear() - 1);
+      return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
+    }
+
+    async function loadAlohaDates() {
+      try {
+        const resp = await fetch('/api/yoy/aloha-dates');
+        if (!resp.ok) throw new Error('Failed to load Aloha dates');
+        const data = await resp.json();
+        availableAlohaDates = data.available_dates || [];
+        updateAlohaRangeWarning();
+      } catch (err) {
+        console.error('Error loading Aloha dates:', err);
+      }
+    }
+
+    function updateAlohaRangeWarning() {
+      const warnEl = document.getElementById('alohaRangeWarning');
+      const enableYoY = document.getElementById('enableYoY');
+      if (!warnEl || !enableYoY) return;
+      if (!enableYoY.checked) {
+        warnEl.classList.add('hidden');
+        warnEl.textContent = '';
+        return;
+      }
+      if (availableAlohaDates.length === 0) {
+        warnEl.textContent = 'No Aloha data imported yet. Import data first (see "How do I import more Aloha data?" below) or disable Year-over-Year.';
+        warnEl.classList.remove('hidden');
+        return;
+      }
+      const range = getYoYAlohaRange();
+      if (!range) {
+        warnEl.classList.add('hidden');
+        return;
+      }
+      const availableSet = new Set(availableAlohaDates);
+      let missing = 0;
+      const d = new Date(range.start);
+      const end = new Date(range.end);
+      while (d <= end) {
+        if (!availableSet.has(d.toISOString().slice(0, 10))) missing++;
+        d.setDate(d.getDate() + 1);
+      }
+      if (missing > 0) {
+        warnEl.textContent = `Report compares to ${range.start}–${range.end} (1 year prior). Some dates in that range may not have Aloha data loaded; comparison column could be incomplete.`;
+        warnEl.classList.remove('hidden');
+      } else {
+        warnEl.classList.add('hidden');
+        warnEl.textContent = '';
+      }
+    }
+
+    function updateYoYControls() {
+      const enableYoY = document.getElementById('enableYoY');
+      if (!enableYoY) return;
+      updateAlohaRangeWarning();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Item tags
+    // ──────────────────────────────────────────────────────────
+    async function loadMenuItems() {
+      const statusEl = document.getElementById('itemTagsLoadingStatus');
+      statusEl.textContent = 'Loading item tags…';
+      statusEl.classList.remove('hidden');
+      try {
+        const resp = await fetch('/api/menu-items');
+        if (!resp.ok) throw new Error('Failed to load menu items');
+        const data = await resp.json();
+        menuItems = data.items;
+        allItemTags = data.allTags;
+        renderItemTags();
+        statusEl.classList.add('hidden');
+      } catch (err) {
+        console.error('Error loading menu items:', err);
+        statusEl.textContent = 'Error loading item tags. Please try again.';
+        statusEl.style.color = '#ff8080';
+      }
+    }
+
+    function renderItemTags() {
+      const grid = document.getElementById('itemTagsGrid');
+      if (!allItemTags || allItemTags.length === 0) {
+        grid.innerHTML = '<div style="padding: 0.35rem; color: #555c7b;">No item tags found in menu</div>';
+        grid.classList.remove('hidden');
+        return;
+      }
+      grid.innerHTML = allItemTags.map(tag => `
+        <label>
+          <input type="checkbox" class="itemtag-checkbox" value="${tag}" />
+          ${tag}
+        </label>
+      `).join('');
+      grid.classList.remove('hidden');
+      document.querySelectorAll('.itemtag-checkbox').forEach(cb => cb.addEventListener('change', updateItemTagCount));
+      updateItemTagCount();
+    }
+
+    function updateItemTagCount() {
+      const total = allItemTags.length;
+      const selected = document.querySelectorAll('.itemtag-checkbox:checked').length;
+      const el = document.getElementById('tagCount');
+      if (el) el.textContent = selected === 0 ? 'All items' : `${selected} of ${total} tags selected`;
+    }
+
+    function updateFilterByOptions() {
+      const reportType = document.getElementById('reportType').value;
+      const filterByType = document.getElementById('filterByType').value;
+      const reportTypeConfig = reportTypeOptions.reportTypes?.find(t => t.id === reportType);
+      const itemTagsSection = document.getElementById('itemTagsSection');
+      const yoySection = document.getElementById('yoySection');
+
+      if (reportType === 'menu' && filterByType === 'itemTags' && reportTypeConfig?.supportsItemTagFilters) {
+        itemTagsSection.classList.remove('hidden');
+        if (!menuItems) loadMenuItems();
+      } else {
+        itemTagsSection.classList.add('hidden');
+      }
+
+      if (yoySection) {
+        if (reportType === 'menu') {
+          yoySection.classList.remove('hidden');
+          if (availableAlohaDates.length === 0) loadAlohaDates();
+        } else {
+          yoySection.classList.add('hidden');
+          const enableYoY = document.getElementById('enableYoY');
+          if (enableYoY) enableYoY.checked = false;
+        }
+        updateYoYControls();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Report CRUD
+    // ──────────────────────────────────────────────────────────
+    function newReport() {
+      currentReportId = null;
+      document.getElementById('builderTitle').textContent = 'Report Builder – New Report';
+      document.getElementById('reportName').value = '';
+      document.getElementById('reportDescription').value = '';
+      document.getElementById('reportType').value = 'metrics';
+      document.getElementById('dateRangeType').value = 'last_7_days';
+      document.getElementById('selectAllLocations').checked = true;
+      toggleAllLocations();
+      updateFilterByOptions();
+      toggleCustomDateRange();
+      const enableYoY = document.getElementById('enableYoY');
+      if (enableYoY) enableYoY.checked = false;
+      updateYoYControls();
+      document.getElementById('saveReportBtn').classList.remove('hidden');
+      document.getElementById('updateReportBtn').classList.add('hidden');
+      document.getElementById('deleteReportBtn').classList.add('hidden');
+      document.querySelectorAll('.report-item').forEach(i => i.classList.remove('active'));
+      showStatus('info', 'Creating new report');
+      updateLocationCount();
+    }
+
+    function loadReport(reportId) {
+      const report = savedReports.find(r => r.id === reportId);
+      if (!report) return;
+      currentReportId = reportId;
+      document.getElementById('builderTitle').textContent = `Report Builder – ${report.name}`;
+      document.getElementById('reportName').value = report.name;
+      document.getElementById('reportDescription').value = report.description || '';
+      document.getElementById('reportType').value = report.config.reportType;
+      document.getElementById('dateRangeType').value = report.config.dateRangeType;
+      if (report.config.customStartDate) document.getElementById('customStartDate').value = report.config.customStartDate;
+      if (report.config.customEndDate) document.getElementById('customEndDate').value = report.config.customEndDate;
+      updateFilterByOptions();
+      toggleCustomDateRange();
+
+      if (report.config.restaurantIds && report.config.restaurantIds.length > 0) {
+        document.getElementById('selectAllLocations').checked = false;
+        document.querySelectorAll('.location-checkbox').forEach(cb => {
+          cb.checked = report.config.restaurantIds.includes(cb.value);
+        });
+      } else {
+        document.getElementById('selectAllLocations').checked = true;
+        toggleAllLocations();
+      }
+      updateLocationCount();
+
+      setTimeout(() => {
+        if (report.config.reportType === 'menu' && report.config.itemTags && report.config.itemTags.length > 0) {
+          document.getElementById('filterByType').value = 'itemTags';
+          updateFilterByOptions();
+        } else {
+          document.getElementById('filterByType').value = '';
+          updateFilterByOptions();
+        }
+        if (report.config.reportType === 'menu' && report.config.itemTags) {
+          document.querySelectorAll('.itemtag-checkbox').forEach(cb => {
+            cb.checked = report.config.itemTags.includes(cb.value);
+          });
+          updateItemTagCount();
+        }
+        if (report.config.reportType === 'menu') {
+          const enableYoY = document.getElementById('enableYoY');
+          if (enableYoY) enableYoY.checked = !!report.config.yoyEnabled;
+          updateYoYControls();
+        }
+      }, 100);
+
+      document.getElementById('saveReportBtn').classList.add('hidden');
+      document.getElementById('updateReportBtn').classList.remove('hidden');
+      document.getElementById('deleteReportBtn').classList.remove('hidden');
+      document.querySelectorAll('.report-item').forEach(i => i.classList.toggle('active', i.dataset.id === reportId));
+      showStatus('success', `Loaded report: ${report.name}`);
+    }
+
+    function getReportConfig() {
+      const selectedLocations = Array.from(document.querySelectorAll('.location-checkbox:checked')).map(cb => cb.value);
+      const selectedItemTags = Array.from(document.querySelectorAll('.itemtag-checkbox:checked')).map(cb => cb.value);
+      return {
+        reportType: document.getElementById('reportType').value,
+        dateRangeType: document.getElementById('dateRangeType').value,
+        customStartDate: document.getElementById('customStartDate').value || null,
+        customEndDate: document.getElementById('customEndDate').value || null,
+        restaurantIds: selectedLocations,
+        groupBy: [],
+        itemTags: selectedItemTags,
+        includeZeroSales: document.getElementById('includeZeroSales')?.checked || false,
+        yoyEnabled: document.getElementById('enableYoY')?.checked || false,
+        debug: document.getElementById('debugTagMapping')?.checked || false
+      };
+    }
+
+    function validateConfig(config) {
+      if (config.dateRangeType === 'custom' && (!config.customStartDate || !config.customEndDate)) {
+        showStatus('error', 'Please select custom date range'); return false;
+      }
+      if (config.restaurantIds.length === 0) {
+        showStatus('error', 'Please select at least one location'); return false;
+      }
+      if (config.reportType === 'menu' && config.yoyEnabled && availableAlohaDates.length === 0) {
+        showStatus('error', 'No Aloha data imported yet. Import data first or disable Year-over-Year comparison.'); return false;
+      }
+      return true;
+    }
+
+    async function runReport() {
+      const config = getReportConfig();
+      if (!validateConfig(config)) return;
+      currentReportConfig = config;
+      showDailyColumns = false;
+      showToastColumns = false;
+      currentMenuMixSortColumn = 'qty';
+      currentMenuMixSortDirection = 'desc';
+      document.getElementById('loadingOverlay').classList.remove('hidden');
+      showStatus('info', 'Running report…');
+      document.getElementById('runReportBtn').disabled = true;
+      try {
+        const resp = await fetch('/api/reports/run', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(config)
+        });
+        const backendVersion = resp.headers.get('X-Backend-Version');
+        const reportTypeReceived = resp.headers.get('X-Report-Type-Received');
+        const itemTagsCount = resp.headers.get('X-ItemTags-Count');
+        const menuPath = resp.headers.get('X-Menu-Path');
+        if (!resp.ok) { const error = await resp.text(); throw new Error(error); }
+        currentResults = await resp.json();
+        lastReportConfig = config;   // store for labor KPI panel
+        updateDebugInfo(currentResults, config, backendVersion, reportTypeReceived, itemTagsCount, menuPath);
+        renderResults(currentResults, config);
+        const rowCount = Array.isArray(currentResults)
+          ? currentResults.length
+          : (currentResults.pivotTable?.length || 0) + (currentResults.totals?.length || 0);
+        showStatus('success', `Report complete: ${rowCount} rows`);
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      } finally {
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('runReportBtn').disabled = false;
+      }
+    }
+
+    async function saveReport() {
+      if (!authToken) { showStatus('error', 'Please login to save reports'); showAuthModal(); return; }
+      const name = document.getElementById('reportName').value.trim();
+      if (!name) { showStatus('error', 'Please enter a report name'); return; }
+      const config = getReportConfig();
+      try {
+        const resp = await fetch('/api/saved-reports', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ name, description: document.getElementById('reportDescription').value.trim(), config })
+        });
+        if (!resp.ok) { const error = await resp.text(); throw new Error(error); }
+        await loadSavedReports();
+        showStatus('success', 'Report saved successfully!');
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
+
+    async function updateReport() {
+      if (!currentReportId || !authToken) { showStatus('error', 'Please login to update reports'); return; }
+      const name = document.getElementById('reportName').value.trim();
+      if (!name) { showStatus('error', 'Please enter a report name'); return; }
+      const config = getReportConfig();
+      try {
+        const resp = await fetch(`/api/saved-reports/${currentReportId}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ name, description: document.getElementById('reportDescription').value.trim(), config })
+        });
+        if (!resp.ok) { const error = await resp.text(); throw new Error(error); }
+        await loadSavedReports();
+        showStatus('success', 'Report updated successfully!');
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
+
+    async function deleteReport() {
+      if (!currentReportId || !authToken) return;
+      if (!confirm('Are you sure you want to delete this report?')) return;
+      try {
+        const resp = await fetch(`/api/saved-reports/${currentReportId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        if (!resp.ok) { const error = await resp.text(); throw new Error(error); }
+        await loadSavedReports();
+        newReport();
+        showStatus('success', 'Report deleted');
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Help ticket
+    // ──────────────────────────────────────────────────────────
+    async function submitHelpTicket(e) {
+      e.preventDefault();
+      const name = document.getElementById('helpName').value.trim();
+      const email = document.getElementById('helpEmail').value.trim();
+      const subject = document.getElementById('helpSubject').value.trim();
+      const priority = parseInt(document.getElementById('helpPriority').value);
+      const description = document.getElementById('helpDescription').value.trim();
+      if (!name || !email || !subject || !description) { showStatus('error', 'Please fill in all required fields'); return; }
+      const btn = e.target.querySelector('button[type="submit"]');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Submitting…';
+      try {
+        const resp = await fetch('/api/help/ticket', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, subject, priority, description })
+        });
+        if (!resp.ok) { const error = await resp.text(); throw new Error(error); }
+        const result = await resp.json();
+        showStatus('success', `Help ticket submitted! Ticket ID: ${result.ticketId || 'N/A'}`);
+        document.getElementById('helpForm').reset();
+        document.getElementById('helpModal').classList.add('hidden');
+      } catch (err) { showStatus('error', `Error: ${err.message}`); }
+      finally { btn.disabled = false; btn.textContent = orig; }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Toast pricing export
+    // ──────────────────────────────────────────────────────────
+    async function exportToastPricing() {
+      const btn = document.getElementById('toastPricingExportBtn');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Exporting…';
+      try {
+        const url = new URL('/api/toast-pricing-export', window.location.origin);
+        url.searchParams.set('group_by_tier', 'true');
+        const resp = await fetch(url.toString(), { headers: getAuthHeaders() });
+        if (!resp.ok) {
+          let errorText = await resp.text();
+          try { const j = JSON.parse(errorText); errorText = j.detail || j.message || errorText; } catch(e) {}
+          throw new Error(errorText || `HTTP ${resp.status}`);
+        }
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `toast_pricing_export_${new Date().toISOString().split('T')[0]}.csv`;
+        a.style.visibility = 'hidden';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 100);
+        showStatus('success', 'Toast pricing export downloaded.');
+      } catch (err) { showStatus('error', `Toast pricing export failed: ${err.message}`); }
+      finally { btn.disabled = false; btn.textContent = orig; }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // UI helpers
+    // ──────────────────────────────────────────────────────────
+    function toggleCustomDateRange() {
+      const type = document.getElementById('dateRangeType').value;
+      document.getElementById('customDateRange').classList.toggle('hidden', type !== 'custom');
+    }
+
+    function showStatus(type, message) {
+      const el = document.getElementById('builderStatus');
+      el.className = `status ${type}`;
+      el.textContent = message;
+      el.classList.remove('hidden');
+      if (type === 'success') setTimeout(() => el.classList.add('hidden'), 5000);
+    }
+
+    function toggleDailyColumns() {
+      showDailyColumns = !showDailyColumns;
+      if (currentResults) renderResults(currentResults, currentReportConfig || {});
+    }
+
+    function applyToastColVisibility() {
+      const table = document.getElementById('resultsTable');
+      if (table) table.classList.toggle('toast-cols-hidden', !showToastColumns);
+      const btn = document.getElementById('toggleToastColumnsBtn');
+      if (btn) btn.textContent = showToastColumns ? 'Hide Toast Columns' : 'Show Toast Columns';
+    }
+
+    function toggleToastColumns() {
+      showToastColumns = !showToastColumns;
+      applyToastColVisibility();
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Rendering helpers
+    // ──────────────────────────────────────────────────────────
+    function formatDateHeader(dateStr) {
+      if (/^\d{8}$/.test(dateStr)) {
+        const y = dateStr.substring(0,4), m = dateStr.substring(4,6), d = dateStr.substring(6,8);
+        return `${m}/${d}/${y.substring(2)}`;
+      }
+      return dateStr;
+    }
+
+    function formatHeader(key) {
+      return key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
+    }
+
+    function formatCell(key, value) {
+      if (key.includes('Amount') || key.includes('Sales')) return `$${parseFloat(value || 0).toFixed(2)}`;
+      if (key === 'businessDate') return value;
+      if (key === 'quantity' || key.includes('Qty') || key.includes('quantity')) return typeof value === 'number' ? value.toLocaleString() : (value || '0');
+      return value || '';
+    }
+
+    function updateDebugInfo(results, config, backendVersion, reportTypeReceived, itemTagsCount, menuPath) {
+      const debugEl = document.getElementById('debugInfo');
+      if (!debugEl) return;
+      const parts = [
+        `reportType=${config?.reportType || 'unknown'}`,
+        `itemTags=${config?.itemTags?.length || 0}`,
+        `resultType=${Array.isArray(results) ? 'array' : typeof results}`,
+        backendVersion ? `backend=${backendVersion}` : 'backend=unknown'
+      ];
+      if (reportTypeReceived) parts.push(`backendReportType=${reportTypeReceived}`);
+      if (itemTagsCount != null) parts.push(`backendItemTags=${itemTagsCount}`);
+      if (menuPath) parts.push(`menuPath=${menuPath}`);
+      if (Array.isArray(results)) { parts.push(`rows=${results.length}`); }
+      else if (results && typeof results === 'object') {
+        parts.push(`keys=${Object.keys(results).join('|')}`);
+        if (results.yoyInfo?.debug) {
+          const y = results.yoyInfo.debug;
+          parts.push(`yoy(alohaNonZero=${y.alohaNonZeroItems??'n/a'} matchedTotal=${y.matchedTotal??'n/a'})`);
+          const sd = y.splitDebug;
+          if (sd) {
+            const entered = sd.blockEntered ? '✅entered' : '❌skipped';
+            const oloM  = sd.oloModes?.length  ?? '?';
+            const insM  = sd.instoreModes?.length ?? '?';
+            const oloR  = sd.oloAlohaRows  ?? '?';
+            const insR  = sd.instoreAlohaRows ?? '?';
+            const oloMtch = sd.oloMatchedCount ?? '?';
+            const insMtch = sd.instoreMatchedCount ?? '?';
+            parts.push(`split(${entered} oloModes=${oloM} inModes=${insM} oloAlohaRows=${oloR} inAlohaRows=${insR} oloMatched=${oloMtch} inMatched=${insMtch})`);
+          }
+        }
+      }
+      debugEl.textContent = `Debug: ${parts.join(' • ')}`;
+
+      const tagDebugSection = document.getElementById('debugTagMappingSection');
+      if (tagDebugSection && results?.debugInfo?.tagMappingDebug) {
+        const d = results.debugInfo.tagMappingDebug;
+        tagDebugSection.style.display = 'block';
+        let html = '<div style="border:1px solid #444b6b;border-radius:8px;padding:0.75rem;background:#0d1121;">';
+        html += '<div style="font-weight:600;margin-bottom:0.5rem;color:#a0b0d0;">Tag / mapping debug (share to troubleshoot)</div>';
+        html += `<p style="margin:0 0 0.5rem;font-size:0.82rem;color:#a0b0d0;">Fallback hits: ${d.consolidatedFallbackHits??'n/a'} • Rows from Toast: ${d.totalAnalyticsRows??'n/a'} • Rows included: ${d.totalFilteredRows??'n/a'}</p>`;
+        if (d.targetItems?.length) {
+          html += '<div style="margin-bottom:0.5rem;font-size:0.82rem;color:#a0b0d0;"><strong>Target items:</strong><ul style="margin:0.25rem 0 0 1rem;">';
+          d.targetItems.forEach(t => {
+            html += `<li>${t.name||''} → inAnalytics: ${t.inAnalyticsRows}, inFiltered: ${t.inFilteredRows}, tagFromMap: ${t.tagFromMappingTable||'null'}</li>`;
+          });
+          html += '</ul></div>';
+        }
+        html += '<textarea id="debugTagMappingJson" readonly></textarea>';
+        html += '<button type="button" id="copyTagMappingDebugBtn" style="margin-top:0.35rem;padding:0.35rem 0.75rem;font-size:0.82rem;cursor:pointer;background:#444b6b;border:none;color:#f4f4f4;border-radius:4px;">Copy debug to clipboard</button>';
+        html += '</div>';
+        tagDebugSection.innerHTML = html;
+        const ta = document.getElementById('debugTagMappingJson');
+        if (ta) ta.value = JSON.stringify(d, null, 2);
+        document.getElementById('copyTagMappingDebugBtn').onclick = () => {
+          const t = document.getElementById('debugTagMappingJson');
+          if (t) { t.select(); document.execCommand('copy'); showStatus('success', 'Debug info copied'); }
+        };
+      } else if (tagDebugSection) {
+        tagDebugSection.style.display = 'none';
+        tagDebugSection.innerHTML = '';
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Aloha details popup
+    // ──────────────────────────────────────────────────────────
+    function renderAlohaDetailsPopup(details, anchorEl, title = 'Aloha Items') {
+      const existing = document.getElementById('alohaDetailsPopup');
+      if (existing) existing.remove();
+      const popup = document.createElement('div');
+      popup.id = 'alohaDetailsPopup';
+      popup.className = 'breakdown-popup';
+      popup.style.cssText = 'position:absolute;border-radius:8px;padding:0.75rem;z-index:9999;min-width:200px;';
+      const rows = Array.isArray(details) ? details : [];
+      if (rows.length === 0) {
+        popup.innerHTML = '<div class="breakdown-popup-empty">No Aloha items matched.</div>';
+      } else {
+        popup.innerHTML = `<div class="breakdown-popup-title">${title}</div>` +
+          rows.map(item => `<div class="breakdown-popup-row">
+            <span class="breakdown-popup-name">${item?.name||'Unknown'}</span>
+            <span class="breakdown-popup-qty">${formatCell('quantity', item?.qty??0)}</span>
+          </div>`).join('');
+      }
+      document.body.appendChild(popup);
+      const rect = anchorEl.getBoundingClientRect();
+      popup.style.top = `${rect.bottom + window.scrollY + 6}px`;
+      popup.style.left = `${rect.left + window.scrollX}px`;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Aloha grouping helper
+    // ──────────────────────────────────────────────────────────
+    function groupItemsByAloha(items, dateColumns) {
+      const grouped = new Map();
+      items.forEach(item => {
+        const alohaName = item.alohaItemName || item?.alohaDetails?.[0]?.name || '';
+        const key = alohaName ? `aloha:${alohaName}` : `toast:${item.menuItemGuid||item.menuItemName||''}`;
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            menuItemGuid: item.menuItemGuid, menuItemName: alohaName || item.menuItemName,
+            totalQty: 0, daily: {}, alohaQty: item.alohaQty || 0,
+            alohaItemName: alohaName || undefined, alohaDetails: item.alohaDetails || [], toastDetails: []
+          });
+        }
+        const entry = grouped.get(key);
+        entry.totalQty += item.totalQty || 0;
+        entry.toastDetails.push({ name: item.menuItemName||'Unknown Item', qty: item.totalQty||0 });
+        if (item.daily && dateColumns?.length > 0) {
+          dateColumns.forEach(d => { entry.daily[d] = (entry.daily[d]||0) + (item.daily?.[d]||0); });
+        }
+        if (item.alohaQty) entry.alohaQty = item.alohaQty;
+        if (!entry.alohaDetails?.length) entry.alohaDetails = item.alohaDetails||[];
+      });
+      return Array.from(grouped.values());
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Render item breakdown (sortable)
+    // ──────────────────────────────────────────────────────────
+    function renderItemBreakdown() {
+      if (!currentItemBreakdown?.length) return;
+      const body = document.getElementById('resultsBody');
+      const existingHtml = body.innerHTML;
+      const breakdownStart = existingHtml.indexOf('<tr><th colspan="3" style="background: #059669');
+      if (breakdownStart === -1) return;
+      const beforeBreakdown = existingHtml.substring(0, breakdownStart);
+      let html = '<tr><td colspan="100" style="height:16px;border:none;"></td></tr>';
+      html += '<tr><th colspan="3" style="background: #059669; color: white; text-align: center; font-weight: 700;">ITEM BREAKDOWN BY TAG</th></tr>';
+      const scT = currentSortColumn==='tag' ? 'sort-'+currentSortDirection : '';
+      const scN = currentSortColumn==='name' ? 'sort-'+currentSortDirection : '';
+      const scQ = currentSortColumn==='qty' ? 'sort-'+currentSortDirection : '';
+      html += `<tr>
+        <th class="sortable-header ${scT}" data-sort="tag" style="background:#059669;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #047857;cursor:pointer;">Item Tag Name</th>
+        <th class="sortable-header ${scN}" data-sort="name" style="background:#059669;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #047857;cursor:pointer;">Item Name</th>
+        <th class="sortable-header ${scQ}" data-sort="qty" style="background:#059669;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;cursor:pointer;">Total Qty</th>
+      </tr>`;
+      let sorted = [...currentItemBreakdown];
+      if (currentSortColumn) {
+        sorted.sort((a, b) => {
+          let aV, bV;
+          if (currentSortColumn==='tag') { aV=(a.itemTagName||'').toLowerCase(); bV=(b.itemTagName||'').toLowerCase(); }
+          else if (currentSortColumn==='name') { aV=(a.menuItemName||'').toLowerCase(); bV=(b.menuItemName||'').toLowerCase(); }
+          else { aV=parseFloat(a.totalQty||0); bV=parseFloat(b.totalQty||0); }
+          if (aV<bV) return currentSortDirection==='asc'?-1:1;
+          if (aV>bV) return currentSortDirection==='asc'?1:-1;
+          return 0;
+        });
+      }
+      sorted.forEach(item => {
+        html += `<tr>
+          <td><strong>${item.itemTagName||''}</strong></td>
+          <td>${item.menuItemName||'Unknown Item'}</td>
+          <td style="text-align:right;">${formatCell('quantity', item.totalQty||0)}</td>
+        </tr>`;
+      });
+      body.innerHTML = beforeBreakdown + html;
+      setTimeout(() => {
+        body.querySelectorAll('.sortable-header').forEach(h => {
+          const nh = h.cloneNode(true); h.parentNode.replaceChild(nh, h);
+          nh.addEventListener('click', function() {
+            const col = this.getAttribute('data-sort');
+            if (currentSortColumn === col) currentSortDirection = currentSortDirection==='asc'?'desc':'asc';
+            else { currentSortColumn = col; currentSortDirection = 'asc'; }
+            renderItemBreakdown();
+          });
+        });
+      }, 50);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Labor KPI Panel
+    // ──────────────────────────────────────────────────────────
+    function formatKpiCurrency(val) {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val || 0);
+    }
+
+    async function showLaborKpi(results, config) {
+      const panel = document.getElementById('laborKpiPanel');
+      if (!panel) return;
+
+      // 1. Compute Newk's Net Sales from totals already in the report response
+      const totals = results.totals || [];
+      const newksTotal = totals.reduce(
+        (sum, t) => sum + (t.totalNetSalesNewks != null ? t.totalNetSalesNewks : (t.totalNetSales || 0)), 0
+      );
+
+      // 2. Show panel with loading state; Newk's net sales is available immediately
+      ['kpiLaborCostVal', 'kpiLaborPctVal', 'kpiSplhVal'].forEach(id => {
+        document.getElementById(id).textContent = '…';
+      });
+      document.getElementById('kpiNetSalesVal').textContent = formatKpiCurrency(newksTotal);
+      document.getElementById('laborKpiNote').style.display = 'none';
+      panel.classList.remove('hidden');
+
+      // 3. Resolve date range from config
+      let startDate = config.customStartDate;
+      let endDate   = config.customEndDate;
+      if (config.dateRangeType !== 'custom') {
+        const today = new Date();
+        const daysMap = { last_7_days: 7, last_30_days: 30, last_90_days: 90 };
+        const days = daysMap[config.dateRangeType] || 7;
+        endDate   = today.toISOString().split('T')[0];
+        startDate = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+      }
+
+      // 4. Fetch labor data from backend
+      let laborData;
+      try {
+        const resp = await fetch('/api/labor-summary', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ restaurantIds: config.restaurantIds, startDate, endDate })
+        });
+        if (!resp.ok) {
+          let errText = await resp.text();
+          try { const j = JSON.parse(errText); errText = j.detail || errText; } catch(e) {}
+          throw new Error(errText || `HTTP ${resp.status}`);
+        }
+        laborData = await resp.json();
+      } catch (err) {
+        ['kpiLaborCostVal', 'kpiLaborPctVal', 'kpiSplhVal'].forEach(id => {
+          document.getElementById(id).textContent = 'N/A';
+        });
+        const noteEl = document.getElementById('laborKpiNote');
+        noteEl.textContent = `⚠ Labor data unavailable: ${err.message}`;
+        noteEl.style.display = 'block';
+        return;
+      }
+
+      // 5. Calculate and display KPIs
+      const laborCost  = laborData.totalLaborCost || 0;
+      const totalHours = laborData.totalHours || 0;
+      const laborPct   = newksTotal > 0 ? (laborCost / newksTotal * 100) : 0;
+      const splh       = totalHours > 0 ? (newksTotal / totalHours) : 0;
+
+      document.getElementById('kpiLaborCostVal').textContent = formatKpiCurrency(laborCost);
+      document.getElementById('kpiLaborPctVal').textContent  = `${laborPct.toFixed(1)}%`;
+      document.getElementById('kpiSplhVal').textContent      = formatKpiCurrency(splh);
+
+      // Store for Excel export Summary sheet
+      lastLaborData = { newksTotal, laborCost, totalHours, laborPct, splh, startDate, endDate };
+
+      if ((laborData.errors && laborData.errors.length > 0) || laborData.totalOvertimeHours > 0) {
+        const noteEl = document.getElementById('laborKpiNote');
+        if (laborData.errors && laborData.errors.length > 0) {
+          noteEl.textContent = `⚠ Some locations unavailable. Salaried employees excluded. Overtime at 1.5×.`;
+        }
+        noteEl.style.display = 'block';
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // renderResults  (entry point)
+    // ──────────────────────────────────────────────────────────
+    function renderResults(results, config) {
+      // Always hide labor KPI panel and Toast toggle until a metrics report re-shows them
+      lastLaborData = null;   // clear stale labor data for export
+      const kpiPanel = document.getElementById('laborKpiPanel');
+      if (kpiPanel) kpiPanel.classList.add('hidden');
+      document.getElementById('toggleToastColumnsBtn')?.classList.add('hidden');
+
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      toggleBtn = document.getElementById('toggleDailyColumnsBtn');
+      if (toggleBtn) toggleBtn.classList.add('hidden');
+      if (results && typeof results==='object' && !Array.isArray(results) &&
+          results.hasOwnProperty('pivotTable') && results.hasOwnProperty('totals')) {
+        renderPivotResults(results, config);
+        return;
+      }
+      if (!results || !Array.isArray(results) || results.length===0) {
+        head.innerHTML=''; body.innerHTML='<tr><td colspan="100" class="empty-state">No data found</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        return;
+      }
+      const keys = Object.keys(results[0]);
+      head.innerHTML = `<tr>${keys.map(k=>`<th>${formatHeader(k)}</th>`).join('')}</tr>`;
+      body.innerHTML = results.map(row=>`<tr>${keys.map(k=>`<td>${formatCell(k,row[k])}</td>`).join('')}</tr>`).join('');
+      document.getElementById('exportBtn').classList.remove('hidden');
+      document.getElementById('resultsSummary').textContent = `${results.length} rows`;
+    }
+
+    function renderPivotResults(results, config) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      const pivotTable = results.pivotTable || [];
+      const totals = results.totals || [];
+      const itemBreakdownDaily = results.itemBreakdownDaily || [];
+      const dateColumns = results.dateColumns || [];
+      let itemTotals = results.itemTotals || [];
+      const hasAloha = itemBreakdownDaily.some(i=>Object.prototype.hasOwnProperty.call(i,'alohaQty')) ||
+        itemTotals.some(i=>Object.prototype.hasOwnProperty.call(i,'alohaQty'));
+      const collapseAloha = !!(currentReportConfig?.yoyEnabled && hasAloha);
+
+      const menuItemFilterWrap = document.getElementById('menuItemFilterWrap');
+      const menuItemFilterInput = document.getElementById('menuItemFilterInput');
+      if (config.reportType === 'menu') { menuItemFilterWrap.classList.remove('hidden'); menuItemFilterWrap.style.display = 'flex'; }
+      else { menuItemFilterWrap.classList.add('hidden'); menuItemFilterWrap.style.display='none'; currentMenuItemFilter=''; menuItemFilterInput.value=''; }
+
+      const filterText = (currentMenuItemFilter||'').trim().toLowerCase();
+      const filterTerms = filterText ? filterText.split(',').map(t=>t.trim()).filter(Boolean) : [];
+      const filterActive = filterTerms.length > 0;
+      const matchesFilter = name => !filterActive || filterTerms.some(t=>(name||'').toLowerCase().includes(t));
+      const filteredItemBreakdownDaily = itemBreakdownDaily.filter(i=>matchesFilter(i.menuItemName));
+
+      if (itemTotals.length===0 && results.itemBreakdown?.length>0) {
+        const map = {};
+        results.itemBreakdown.forEach(item => {
+          if (!matchesFilter(item.menuItemName)) return;
+          const guid = item.menuItemGuid||item.menuItemName||'';
+          if (!map[guid]) map[guid] = { menuItemGuid: item.menuItemGuid||'', menuItemName: item.menuItemName||'Unknown Item', totalQty: 0 };
+          map[guid].totalQty += item.totalQty||0;
+        });
+        itemTotals = Object.values(map).sort((a,b)=>{
+          const d=(b.totalQty||0)-(a.totalQty||0); if(d!==0) return d;
+          return (a.menuItemName||'').localeCompare(b.menuItemName||'');
+        });
+      } else if (filterActive && itemTotals.length>0) {
+        itemTotals = itemTotals.filter(i=>matchesFilter(i.menuItemName));
+      }
+
+      if (pivotTable.length===0 && totals.length===0) {
+        head.innerHTML=''; body.innerHTML='<tr><td colspan="100" class="empty-state">No data found</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        document.getElementById('resultsSummary').textContent='0 rows';
+        return;
+      }
+
+      const isMetricsReport = pivotTable.length>0 && totals.length>0 && totals[0].hasOwnProperty('date') && totals[0].hasOwnProperty('totalNetSales');
+      const columnNames = pivotTable.length>0 ? Object.keys(pivotTable[0]).filter(k=>k!=='restaurantName') : [];
+      const hasNewks = isMetricsReport && totals.length>0 && totals[0].hasOwnProperty('totalNetSalesNewks');
+      const dateOnlyColumns = columnNames.filter(k=>/^\d{8}$/.test(k));
+      const sortedDatesMain = dateOnlyColumns.length>0 ? [...dateOnlyColumns].sort((a,b)=>a.localeCompare(b)) : [];
+      const sortedColumns = isMetricsReport
+        ? (hasNewks && sortedDatesMain.length>0 ? sortedDatesMain : columnNames.filter(k=>!k.endsWith('_newks')).sort((a,b)=>a.localeCompare(b)))
+        : columnNames.sort();
+
+      let html = '';
+
+      // ── Menu performance with daily columns ──
+      if (!isMetricsReport && filteredItemBreakdownDaily.length>0 && dateColumns.length>0) {
+        const sortedDates = [...dateColumns].sort();
+        const showDaily = showDailyColumns;
+        if (toggleBtn) { toggleBtn.classList.remove('hidden'); toggleBtn.textContent = showDaily ? 'Hide Daily Columns' : 'Show Daily Columns'; }
+        const breakdownByTag = {};
+        filteredItemBreakdownDaily.forEach(item => {
+          const tag = item.itemTagName||'All Items';
+          if (!breakdownByTag[tag]) breakdownByTag[tag] = [];
+          breakdownByTag[tag].push(item);
+        });
+        const sortedTags = Object.keys(breakdownByTag).sort();
+        sortedTags.forEach((tagName, tagIndex) => {
+          if (tagIndex>0) html += '<tr><td colspan="100" style="height:16px;border:none;"></td></tr>';
+          html += `<tr>
+            <th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">${tagName}</th>
+            <th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Total for Time Frame</th>`;
+          if (hasAloha) html += '<th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Aloha Qty</th>';
+          if (showDaily) sortedDates.forEach(d => { html += `<th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">${formatDateHeader(d)}</th>`; });
+          html += '</tr>';
+
+          const mixNameSortClass = currentMenuMixSortColumn==='name' ? `sort-${currentMenuMixSortDirection}` : '';
+          html += `<tr>
+            <th class="sortable-header menu-mix-sort ${mixNameSortClass}" data-sort="mix-name" style="background:#EFF6FF;color:#1F2937;text-align:left;font-weight:600;padding:0.5rem;border:1px solid #E5E7EB;cursor:pointer;">Menu Item Name</th>
+            <th style="background:#EFF6FF;color:#1F2937;text-align:right;font-weight:600;padding:0.5rem;border:1px solid #E5E7EB;">Qty Sold</th>`;
+          if (hasAloha) html += '<th style="background:#EFF6FF;color:#1F2937;text-align:right;font-weight:600;padding:0.5rem;border:1px solid #E5E7EB;">Aloha Qty</th>';
+          if (showDaily) sortedDates.forEach(() => { html += '<th style="background:#EFF6FF;color:#1F2937;text-align:right;font-weight:600;padding:0.5rem;border:1px solid #E5E7EB;">Qty Sold</th>'; });
+          html += '</tr>';
+
+          const tagItems = collapseAloha ? groupItemsByAloha(breakdownByTag[tagName], sortedDates) : breakdownByTag[tagName];
+          tagItems.sort((a,b) => {
+            if (currentMenuMixSortColumn==='name') {
+              const an=(a.menuItemName||'').toLowerCase(), bn=(b.menuItemName||'').toLowerCase();
+              if (an<bn) return currentMenuMixSortDirection==='asc'?-1:1;
+              if (an>bn) return currentMenuMixSortDirection==='asc'?1:-1;
+              return 0;
+            }
+            return (b.totalQty||0)-(a.totalQty||0);
+          }).forEach(item => {
+            html += '<tr>';
+            html += `<td style="padding:0.5rem 0.75rem;border:1px solid #E5E7EB;">${item.menuItemName||'Unknown Item'}</td>`;
+            const td = encodeURIComponent(JSON.stringify(item.toastDetails||[{name:item.menuItemName||'Unknown Item',qty:item.totalQty||0}]));
+            html += `<td class="toast-detail-cell" data-toast-details="${td}" style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;cursor:pointer;">${formatCell('quantity',item.totalQty||0)}</td>`;
+            if (hasAloha) {
+              const ad = encodeURIComponent(JSON.stringify(item.alohaDetails||[]));
+              html += `<td class="aloha-detail-cell" data-aloha-details="${ad}" style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;cursor:pointer;">${formatCell('quantity',item.alohaQty||0)}</td>`;
+            }
+            if (showDaily) sortedDates.forEach(d => {
+              html += `<td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;">${formatCell('quantity',item.daily?.[d]||0)}</td>`;
+            });
+            html += '</tr>';
+          });
+        });
+
+        // ── OLO/In-Store Split Debug Panel (built now, injected after body.innerHTML below) ─────
+        let _splitDebugHtml = '';
+        if (results.yoyInfo?.debug?.splitDebug) {
+          const sd = results.yoyInfo.debug.splitDebug;
+          const bc = sd.blockConditions || {};
+          const pill = (ok, label) => `<span style="display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:700;background:${ok?'#DCFCE7':'#FEE2E2'};color:${ok?'#166534':'#991B1B'};margin:2px;">${label}</span>`;
+          let dbHtml = `<div id="splitDebugPanel" style="margin:12px 0;border:1.5px dashed #CBD5E1;border-radius:8px;background:#F8FAFC;overflow:hidden;">`;
+          dbHtml += `<div onclick="const b=document.getElementById('splitDebugBody');b.style.display=b.style.display==='none'?'block':'none';" style="padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#475569;user-select:none;">`;
+          dbHtml += `🔍 OLO/In-Store Split Debug <span style="font-weight:400;color:#94A3B8;">(click to toggle)</span></div>`;
+          dbHtml += `<div id="splitDebugBody" style="display:none;padding:10px 14px;font-size:11.5px;line-height:1.7;color:#334155;border-top:1px solid #E2E8F0;">`;
+
+          // Gate conditions
+          dbHtml += `<div style="margin-bottom:8px;"><strong>Block conditions:</strong> `;
+          dbHtml += pill(bc.hasOrderModeSplit,  `orderModeSplit in result: ${bc.hasOrderModeSplit}`);
+          dbHtml += pill(bc.hasOrderModeColumn, `OrderMode column in Aloha: ${bc.hasOrderModeColumn}`);
+          dbHtml += pill(!bc.omFilterActive,    `om_filter inactive: ${!bc.omFilterActive}`);
+          dbHtml += pill(sd.blockEntered,       `block entered: ${sd.blockEntered}`);
+          dbHtml += `</div>`;
+
+          if (sd.skippedReasons?.length) {
+            dbHtml += `<div style="color:#B91C1C;margin-bottom:6px;"><strong>⛔ Skipped because:</strong> ${sd.skippedReasons.join('; ')}</div>`;
+          }
+
+          // Aloha order modes in the data
+          if (bc.distinctOrderModesInAloha?.length) {
+            dbHtml += `<div style="margin-bottom:6px;"><strong>Distinct order modes in Aloha data (${(bc.alohaRowCount||0).toLocaleString()} rows):</strong><br>`;
+            dbHtml += bc.distinctOrderModesInAloha.map(m=>`<code style="background:#E2E8F0;padding:1px 5px;border-radius:4px;margin:2px;display:inline-block;">${m||'(blank)'}</code>`).join(' ');
+            dbHtml += `</div>`;
+          }
+
+          // Mapping info
+          if (sd.blockEntered) {
+            dbHtml += pill(sd.omMappingFound, `order mode mapping found: ${sd.omMappingFound} (${sd.omMappingCount} entries)`);
+            dbHtml += `<br>`;
+          }
+
+          if (sd.oloModes !== undefined) {
+            dbHtml += `<div style="margin-top:8px;"><strong>OLO channels looked for:</strong> ${(sd.oloChannelLabels||[]).map(c=>`<em>${c}</em>`).join(', ')}<br>`;
+            dbHtml += `<strong>Aloha modes mapped → OLO (${sd.oloModes.length}):</strong> `;
+            dbHtml += sd.oloModes.length ? sd.oloModes.map(m=>`<code style="background:#FEF9C3;padding:1px 5px;border-radius:4px;">${m}</code>`).join(' ') : '<span style="color:#B91C1C">none — nothing is mapped to OLO channels!</span>';
+            dbHtml += `</div>`;
+            dbHtml += `<div><strong>Aloha rows matching OLO modes:</strong> ${pill((sd.oloAlohaRows||0)>0, `${sd.oloAlohaRows||0} rows / ${sd.oloAlohaItems||0} distinct items`)}</div>`;
+          }
+          if (sd.oloSkipped) dbHtml += `<div style="color:#B91C1C">⛔ OLO enrichment skipped: ${sd.oloSkipped}</div>`;
+
+          if (sd.instoreModes !== undefined) {
+            dbHtml += `<div style="margin-top:6px;"><strong>In-Store channels looked for:</strong> ${(sd.instoreChannelLabels||[]).map(c=>`<em>${c}</em>`).join(', ')}<br>`;
+            dbHtml += `<strong>Aloha modes mapped → In-Store (${sd.instoreModes.length}):</strong> `;
+            dbHtml += sd.instoreModes.length ? sd.instoreModes.map(m=>`<code style="background:#DBEAFE;padding:1px 5px;border-radius:4px;">${m}</code>`).join(' ') : '<span style="color:#B91C1C">none — nothing is mapped to In-Store channels!</span>';
+            dbHtml += `</div>`;
+            dbHtml += `<div><strong>Aloha rows matching In-Store modes:</strong> ${pill((sd.instoreAlohaRows||0)>0, `${sd.instoreAlohaRows||0} rows / ${sd.instoreAlohaItems||0} distinct items`)}</div>`;
+          }
+          if (sd.instoreSkipped) dbHtml += `<div style="color:#B91C1C">⛔ In-Store enrichment skipped: ${sd.instoreSkipped}</div>`;
+
+          // Post-enrichment item counts
+          if (sd.oloItemCount !== undefined) {
+            dbHtml += `<div style="margin-top:8px;border-top:1px solid #E2E8F0;padding-top:6px;">`;
+            dbHtml += `<strong>After enrichment — OLO items:</strong> ${sd.oloItemCount} total, `;
+            dbHtml += pill(sd.oloMatchedCount > 0, `${sd.oloMatchedCount} matched Aloha qty`);
+            dbHtml += `<br><strong>After enrichment — In-Store items:</strong> ${sd.instoreItemCount} total, `;
+            dbHtml += pill(sd.instoreMatchedCount > 0, `${sd.instoreMatchedCount} matched Aloha qty`);
+            dbHtml += `</div>`;
+          }
+
+          // Sample rows table
+          const renderSample = (label, items) => {
+            if (!items?.length) return '';
+            let s = `<div style="margin-top:8px;"><strong>${label} (first ${items.length}):</strong><table style="width:100%;border-collapse:collapse;font-size:10.5px;margin-top:4px;">`;
+            s += `<tr style="background:#E2E8F0;"><th style="padding:2px 6px;text-align:left;">Name</th><th style="padding:2px 6px;text-align:left;">GUID(8)</th><th style="padding:2px 6px;text-align:right;">alohaQty</th><th style="padding:2px 6px;text-align:left;">alohaName</th><th style="padding:2px 6px;text-align:left;">matchSrc</th></tr>`;
+            items.forEach(r => {
+              const ok = r.alohaQty > 0;
+              s += `<tr style="background:${ok?'#F0FDF4':'#FFF7F7'};">`;
+              s += `<td style="padding:2px 6px;">${r.name||'?'}</td>`;
+              s += `<td style="padding:2px 6px;font-family:monospace;">${r.guid||''}</td>`;
+              s += `<td style="padding:2px 6px;text-align:right;font-weight:${ok?700:400};color:${ok?'#166534':'#9CA3AF'};">${r.alohaQty??0}</td>`;
+              s += `<td style="padding:2px 6px;">${r.alohaName||'—'}</td>`;
+              s += `<td style="padding:2px 6px;color:#6B7280;">${r.matchSrc||'—'}</td>`;
+              s += `</tr>`;
+            });
+            s += `</table></div>`;
+            return s;
+          };
+          dbHtml += renderSample('OLO sample items', sd.oloSample);
+          dbHtml += renderSample('In-Store sample items', sd.instoreSample);
+
+          // Raw JSON toggle
+          const rawJson = JSON.stringify(sd, null, 2).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          dbHtml += `<div style="margin-top:8px;"><a href="#" onclick="event.preventDefault();const el=document.getElementById('splitRawJson');el.style.display=el.style.display==='none'?'block':'none';" style="font-size:10.5px;color:#6366F1;">▶ show raw splitDebug JSON</a>`;
+          dbHtml += `<pre id="splitRawJson" style="display:none;font-size:10px;background:#1e293b;color:#e2e8f0;padding:8px;border-radius:6px;overflow:auto;max-height:300px;">${rawJson}</pre></div>`;
+
+          dbHtml += `</div></div>`;
+          _splitDebugHtml = dbHtml;   // will be injected after body.innerHTML is set below
+        }
+
+        // ── Order Mode Split: In-Store vs OLO ──────────────────────────────────
+        const orderModeSplit = results.orderModeSplit;
+        if (orderModeSplit) {
+          const inStoreItems = (orderModeSplit.inStore?.itemBreakdownDaily || []).filter(i => matchesFilter(i.menuItemName));
+          const oloItems    = (orderModeSplit.olo?.itemBreakdownDaily    || []).filter(i => matchesFilter(i.menuItemName));
+
+          const buildModeSection = (modeItems, label, accentBg, accentBorder, subBg, modeInfo) => {
+            let mHtml = '';
+            mHtml += '<tr><td colspan="100" style="height:24px;border:none;background:#f8fafc;"></td></tr>';
+            mHtml += `<tr><td colspan="100" style="padding:0.6rem 0.75rem;background:${accentBg};color:white;font-size:0.95rem;font-weight:700;border:none;">${label}</td></tr>`;
+
+            // ── Aloha order modes pill row ──────────────────────────────────
+            if (modeInfo && modeInfo.modes && modeInfo.modes.length > 0) {
+              const pillBg   = modeInfo.pillBg   || '#E2E8F0';
+              const pillText = modeInfo.pillText || '#1E293B';
+              const labelCol = modeInfo.labelCol || '#475569';
+              const rowsBg   = modeInfo.rowsBg   || '#F8FAFC';
+              const rowCount = modeInfo.rowCount  || 0;
+              const modesPresent = modeInfo.modesPresent || [];  // modes actually in this date range's Aloha data
+
+              // Split into "present" (found in data) vs "configured but absent"
+              const presentSet = new Set(modesPresent);
+              const present  = modeInfo.modes.filter(m => presentSet.has(m));
+              const absent   = modeInfo.modes.filter(m => !presentSet.has(m));
+
+              const makePill = (m, active) => {
+                const bg  = active ? pillBg  : '#F1F5F9';
+                const col = active ? pillText : '#94A3B8';
+                const style = `background:${bg};color:${col};padding:1px 7px;border-radius:9999px;font-size:0.68rem;font-family:monospace;white-space:nowrap;display:inline-block;margin:2px 2px;`;
+                return `<span style="${style}">${m}</span>`;
+              };
+
+              mHtml += `<tr><td colspan="100" style="padding:0.3rem 0.75rem 0.35rem;background:${rowsBg};border-bottom:1px solid ${accentBorder}20;">`;
+              mHtml += `<span style="font-size:0.68rem;color:${labelCol};font-weight:700;text-transform:uppercase;letter-spacing:0.05em;vertical-align:middle;">Aloha order modes</span>`;
+              mHtml += `<span style="font-size:0.68rem;color:${labelCol};margin-left:4px;vertical-align:middle;">(${rowCount.toLocaleString()} prior-year rows):</span> `;
+              present.forEach(m  => { mHtml += makePill(m, true);  });
+              absent.forEach(m   => { mHtml += makePill(m, false); });
+              if (absent.length > 0) {
+                mHtml += `<span style="font-size:0.65rem;color:#94A3B8;margin-left:4px;vertical-align:middle;font-style:italic;">(${absent.length} configured mode${absent.length>1?'s':''} not in this date range)</span>`;
+              }
+              mHtml += `</td></tr>`;
+            }
+
+            if (modeItems.length === 0) {
+              mHtml += `<tr><td colspan="100" style="padding:0.75rem;color:#9ca3af;font-style:italic;border:1px solid #E5E7EB;">No items for this order mode in the selected date range.</td></tr>`;
+              return mHtml;
+            }
+            // Detect whether Aloha data is present on these rows (same logic as main section)
+            const modeHasAloha = modeItems.some(i => Object.prototype.hasOwnProperty.call(i, 'alohaQty'));
+            const modeCollapseAloha = !!(currentReportConfig?.yoyEnabled && modeHasAloha);
+            const byTag = {};
+            modeItems.forEach(item => {
+              const tag = item.itemTagName || 'All Items';
+              if (!byTag[tag]) byTag[tag] = [];
+              byTag[tag].push(item);
+            });
+            Object.keys(byTag).sort().forEach((tagName, tIdx) => {
+              if (tIdx > 0) mHtml += '<tr><td colspan="100" style="height:8px;border:none;"></td></tr>';
+              mHtml += `<tr>
+                <th style="background:${accentBg};color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid ${accentBorder};">${tagName}</th>
+                <th style="background:${accentBg};color:white;text-align:right;font-weight:700;padding:0.6rem 0.75rem;border:1px solid ${accentBorder};">Total</th>`;
+              if (modeHasAloha) mHtml += `<th style="background:${accentBg};color:white;text-align:right;font-weight:700;padding:0.6rem 0.75rem;border:1px solid ${accentBorder};">Aloha Qty</th>`;
+              if (showDaily) sortedDates.forEach(d => {
+                mHtml += `<th style="background:${accentBg};color:white;text-align:right;font-weight:700;padding:0.6rem 0.75rem;border:1px solid ${accentBorder};">${formatDateHeader(d)}</th>`;
+              });
+              mHtml += '</tr>';
+              mHtml += `<tr>
+                <th style="background:${subBg};color:#1F2937;text-align:left;font-weight:600;padding:0.45rem 0.5rem;border:1px solid #E5E7EB;">Menu Item Name</th>
+                <th style="background:${subBg};color:#1F2937;text-align:right;font-weight:600;padding:0.45rem 0.5rem;border:1px solid #E5E7EB;">Qty Sold</th>`;
+              if (modeHasAloha) mHtml += `<th style="background:${subBg};color:#1F2937;text-align:right;font-weight:600;padding:0.45rem 0.5rem;border:1px solid #E5E7EB;">Aloha Qty</th>`;
+              if (showDaily) sortedDates.forEach(() => {
+                mHtml += `<th style="background:${subBg};color:#1F2937;text-align:right;font-weight:600;padding:0.45rem 0.5rem;border:1px solid #E5E7EB;">Qty Sold</th>`;
+              });
+              mHtml += '</tr>';
+              const tagItems = modeCollapseAloha ? groupItemsByAloha(byTag[tagName], sortedDates) : byTag[tagName];
+              [...tagItems].sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0)).forEach(item => {
+                mHtml += `<tr>
+                  <td style="padding:0.45rem 0.75rem;border:1px solid #E5E7EB;">${item.menuItemName || 'Unknown Item'}</td>`;
+                const td = encodeURIComponent(JSON.stringify(item.toastDetails || [{name: item.menuItemName || 'Unknown Item', qty: item.totalQty || 0}]));
+                mHtml += `<td class="toast-detail-cell" data-toast-details="${td}" style="padding:0.45rem 0.75rem;text-align:right;border:1px solid #E5E7EB;cursor:pointer;">${formatCell('quantity', item.totalQty || 0)}</td>`;
+                if (modeHasAloha) {
+                  const ad = encodeURIComponent(JSON.stringify(item.alohaDetails || []));
+                  mHtml += `<td class="aloha-detail-cell" data-aloha-details="${ad}" style="padding:0.45rem 0.75rem;text-align:right;border:1px solid #E5E7EB;cursor:pointer;">${formatCell('quantity', item.alohaQty || 0)}</td>`;
+                }
+                if (showDaily) sortedDates.forEach(d => {
+                  mHtml += `<td style="padding:0.45rem 0.75rem;text-align:right;border:1px solid #E5E7EB;">${formatCell('quantity', item.daily?.[d] || 0)}</td>`;
+                });
+                mHtml += '</tr>';
+              });
+            });
+            return mHtml;
+          };
+
+          // Build modeInfo objects from splitDebug so each section shows which Aloha order modes are counted
+          const _sd = results.yoyInfo?.debug?.splitDebug;
+          const _distinctInData = new Set(_sd?.blockConditions?.distinctOrderModesInAloha || []);
+
+          const instoreModeInfo = _sd ? {
+            modes:        _sd.instoreModes  || [],
+            modesPresent: (_sd.instoreModes  || []).filter(m => _distinctInData.has(m)),
+            rowCount:     _sd.instoreAlohaRows || 0,
+            pillBg:   '#A7F3D0', pillText: '#065F46',
+            labelCol: '#065F46', rowsBg:   '#ECFDF5',
+          } : null;
+
+          const oloModeInfo = _sd ? {
+            modes:        _sd.oloModes  || [],
+            modesPresent: (_sd.oloModes  || []).filter(m => _distinctInData.has(m)),
+            rowCount:     _sd.oloAlohaRows || 0,
+            pillBg:   '#FED7AA', pillText: '#7C2D12',
+            labelCol: '#92400E', rowsBg:   '#FFF7ED',
+          } : null;
+
+          html += buildModeSection(inStoreItems, '&#127978; In-Store', '#065F46', '#047857', '#ECFDF5', instoreModeInfo);
+          html += buildModeSection(oloItems, '&#128241; Online Ordering (OLO)', '#7C2D12', '#92400E', '#FFF7ED', oloModeInfo);
+        }
+
+        // ── Per-Store / Per-Day Weighted (EE Item Equivalents) ─────────────────
+        const psdw = results.perStoreDayWeighted;
+        if (psdw && psdw.rows && psdw.rows.length > 0) {
+          const wDates = [...(psdw.dateColumns || sortedDates)].sort();
+
+          html += '<tr><td colspan="100" style="height:24px;border:none;background:#f8fafc;"></td></tr>';
+          html += `<tr><td colspan="100" style="padding:0.6rem 0.75rem;background:#1E3A5F;color:white;font-size:0.95rem;font-weight:700;border:none;">&#9878;&#65039; Per Store / Per Day — Item Equivalents (EE Weighted)</td></tr>`;
+
+          if (psdw.missingEETags && psdw.missingEETags.length > 0) {
+            const missingList = psdw.missingEETags.map(n => `<em>${n.replace(/</g,'&lt;')}</em>`).join(', ');
+            html += `<tr><td colspan="100" style="padding:0.6rem 0.75rem;background:#FEF3C7;color:#92400E;border:1px solid #FCD34D;font-size:0.83rem;">
+              &#9888;&#65039; <strong>Missing EE tag</strong> — the following items have no EE weight tag and are excluded from item equivalent counts: ${missingList}
+            </td></tr>`;
+          }
+
+          html += `<tr>
+            <th style="background:#1E3A5F;color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">Store</th>
+            <th style="background:#1E3A5F;color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">Tag</th>
+            <th style="background:#1E3A5F;color:white;text-align:right;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">Total (EE)</th>`;
+          wDates.forEach(d => {
+            html += `<th style="background:#1E3A5F;color:white;text-align:right;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">${formatDateHeader(d)}</th>`;
+          });
+          html += '</tr>';
+
+          let lastStoreName = null;
+          psdw.rows.forEach(row => {
+            const isNewStore = row.restaurantName !== lastStoreName;
+            lastStoreName = row.restaurantName;
+            const rowBg = isNewStore ? '#EFF6FF' : 'white';
+            html += `<tr>
+              <td style="padding:0.45rem 0.75rem;border:1px solid #E5E7EB;background:${rowBg};font-weight:${isNewStore ? '600' : 'normal'};">${isNewStore ? (row.restaurantName || '') : ''}</td>
+              <td style="padding:0.45rem 0.75rem;border:1px solid #E5E7EB;">${row.itemTagName || ''}</td>
+              <td style="padding:0.45rem 0.75rem;text-align:right;border:1px solid #E5E7EB;font-variant-numeric:tabular-nums;">${(row.totalWeightedQty ?? 0).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:2})}</td>`;
+            wDates.forEach(d => {
+              const v = row.daily?.[d] ?? 0;
+              html += `<td style="padding:0.45rem 0.75rem;text-align:right;border:1px solid #E5E7EB;font-variant-numeric:tabular-nums;">${v ? v.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:2}) : ''}</td>`;
+            });
+            html += '</tr>';
+          });
+        }
+
+        head.innerHTML=''; body.innerHTML=html;
+        // Inject split debug panel outside the <table> (can't put a <div> inside <tbody>)
+        if (_splitDebugHtml) {
+          const _tbl = body.closest('table');
+          if (_tbl) _tbl.insertAdjacentHTML('afterend', _splitDebugHtml);
+        }
+        setTimeout(() => {
+          body.querySelectorAll('.menu-mix-sort').forEach(h => {
+            h.addEventListener('click', function(e) {
+              e.preventDefault(); e.stopPropagation();
+              if (currentMenuMixSortColumn==='name') currentMenuMixSortDirection=currentMenuMixSortDirection==='asc'?'desc':'asc';
+              else { currentMenuMixSortColumn='name'; currentMenuMixSortDirection='asc'; }
+              renderResults(currentResults, currentReportConfig||{});
+            });
+          });
+        }, 0);
+        document.getElementById('exportBtn').classList.remove('hidden');
+        const cnt = filterActive ? filteredItemBreakdownDaily.length : itemBreakdownDaily.length;
+        const _hasModeData = !!(results.orderModeSplit && (
+          (results.orderModeSplit.inStore?.itemBreakdownDaily?.length > 0) ||
+          (results.orderModeSplit.olo?.itemBreakdownDaily?.length > 0)));
+        const _hasEEData = !!(results.perStoreDayWeighted?.rows?.length > 0);
+        const _missingEE = results.perStoreDayWeighted?.missingEETags?.length || 0;
+        let _summaryParts = [`${cnt} items across ${sortedTags.length} tags`];
+        if (!showDaily) _summaryParts.push('daily columns hidden');
+        if (filterActive) _summaryParts.push('filtered');
+        if (_hasModeData) _summaryParts.push('order mode split below');
+        if (_hasEEData) _summaryParts.push(`EE weighted below${_missingEE > 0 ? ` (${_missingEE} items missing EE tag)` : ''}`);
+        document.getElementById('resultsSummary').textContent = _summaryParts.join(' • ');
+        return;
+      }
+
+      // ── Compact menu view: item totals ──
+      if (!isMetricsReport && itemTotals.length>0) {
+        if (collapseAloha) itemTotals = groupItemsByAloha(itemTotals, []);
+        html += `<tr>
+          <th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Item Name</th>
+          <th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Total Qty</th>`;
+        if (hasAloha) html += '<th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Aloha Qty</th>';
+        html += '</tr>';
+        itemTotals.forEach(item => {
+          const td = encodeURIComponent(JSON.stringify(item.toastDetails||[{name:item.menuItemName||'Unknown Item',qty:item.totalQty||0}]));
+          html += `<tr>
+            <td style="padding:0.75rem;border:1px solid #E5E7EB;">${item.menuItemName||'Unknown Item'}</td>
+            <td class="toast-detail-cell" data-toast-details="${td}" style="padding:0.75rem;text-align:right;border:1px solid #E5E7EB;cursor:pointer;">${formatCell('quantity',item.totalQty||0)}</td>`;
+          if (hasAloha) {
+            const ad = encodeURIComponent(JSON.stringify(item.alohaDetails||[]));
+            html += `<td class="aloha-detail-cell" data-aloha-details="${ad}" style="padding:0.75rem;text-align:right;border:1px solid #E5E7EB;cursor:pointer;">${formatCell('quantity',item.alohaQty||0)}</td>`;
+          }
+          html += '</tr>';
+        });
+        head.innerHTML=''; body.innerHTML=html;
+        document.getElementById('exportBtn').classList.remove('hidden');
+        document.getElementById('resultsSummary').textContent = `${itemTotals.length} items (totals across date range)${filterActive?' (filtered)':''}`;
+        return;
+      }
+
+      // ── Pivot with expandable locations ──
+      if (totals.length>0 && pivotTable.length>0) {
+        const expandId = 'expand-locations-' + Date.now();
+        if (isMetricsReport) {
+          // Toast = navy blue (#1E40AF), Newk's = Newk's green (#065F46)
+          const thToast  = 'background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
+          const thNewks  = 'background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;';
+          const tdToastTotal = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
+          const tdNewksTotal = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #A7F3D0;background:#ECFDF5;';
+          const tdToastRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F8FBFF;';
+          const tdNewksRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;';
+
+          html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Location</th>';
+          sortedColumns.forEach(col => {
+            if (hasNewks) {
+              html += `<th class="toast-col" style="${thToast}">🍞 ${formatDateHeader(col)}</th>`;
+              html += `<th style="${thNewks}">🥗 ${formatDateHeader(col)}</th>`;
+            } else {
+              html += `<th class="toast-col" style="${thToast}">${formatDateHeader(col)}</th>`;
+            }
+          });
+          // Legend row
+          if (hasNewks) {
+            html += '</tr><tr>';
+            html += '<th style="background:#F8FAFC;border:1px solid #E2E8F0;padding:0.25rem 0.75rem;"></th>';
+            sortedColumns.forEach(() => {
+              html += `<th class="toast-col" style="background:#EFF6FF;color:#1E40AF;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #BFDBFE;">Toast Net Sales</th>`;
+              html += `<th style="background:#ECFDF5;color:#065F46;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #A7F3D0;">Newk's Net Sales</th>`;
+            });
+          }
+          html += '</tr>';
+          html += `<tr class="expandable-header" data-expand-id="${expandId}" style="cursor:pointer;background:#EFF6FF;border:1px solid #BFDBFE;">
+            <td style="padding:0.75rem;font-weight:700;border:1px solid #BFDBFE;"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations Totals:</td>`;
+          sortedColumns.forEach(col => {
+            const t = totals.find(t=>t.date===col);
+            const tv = t ? t.totalNetSales : 0;
+            const nv = t && t.totalNetSalesNewks!==undefined ? t.totalNetSalesNewks : tv;
+            if (hasNewks) {
+              html += `<td class="toast-col" style="${tdToastTotal}">${formatCell('Sales',tv)}</td>`;
+              html += `<td style="${tdNewksTotal}">${formatCell('Sales',nv)}</td>`;
+            } else {
+              html += `<td class="toast-col" style="${tdToastTotal}">${formatCell('Sales',tv)}</td>`;
+            }
+          });
+          html += '</tr>';
+          pivotTable.forEach(row => {
+            html += `<tr class="location-row" data-expand-id="${expandId}" style="display:none;">
+              <td style="padding:0.5rem 0.75rem 0.5rem 2.5rem;border:1px solid #E5E7EB;">${row.restaurantName||''}</td>`;
+            sortedColumns.forEach(col => {
+              const tv = row[col]??0;
+              const nv = row[col+'_newks']??tv;
+              if (hasNewks) {
+                html += `<td class="toast-col" style="${tdToastRow}">${formatCell('Sales',tv)}</td>`;
+                html += `<td style="${tdNewksRow}">${formatCell('Sales',nv)}</td>`;
+              } else {
+                html += `<td class="toast-col" style="${tdToastRow}">${formatCell('Sales',tv)}</td>`;
+              }
+            });
+            html += '</tr>';
+          });
+        } else {
+          html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Location</th>';
+          sortedColumns.forEach(col => { html += `<th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">${col}</th>`; });
+          html += '</tr>';
+          const tagTotals = {};
+          sortedColumns.forEach(t => { tagTotals[t] = totals.find(r=>r.itemTagName===t)?.totalQty||0; });
+          html += `<tr class="expandable-header" data-expand-id="${expandId}" style="cursor:pointer;background:#EFF6FF;border:1px solid #BFDBFE;">
+            <td style="padding:0.75rem;font-weight:700;border:1px solid #BFDBFE;"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations Totals:</td>`;
+          sortedColumns.forEach(t => { html += `<td style="text-align:right;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;">${formatCell('quantity',tagTotals[t])}</td>`; });
+          html += '</tr>';
+          pivotTable.forEach(row => {
+            html += `<tr class="location-row" data-expand-id="${expandId}" style="display:none;background:white;">
+              <td style="padding:0.5rem 0.75rem 0.5rem 2.5rem;border:1px solid #E5E7EB;">${row.restaurantName||''}</td>`;
+            sortedColumns.forEach(t => { html += `<td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;">${formatCell('quantity',row[t]??0)}</td>`; });
+            html += '</tr>';
+          });
+        }
+      } else if (totals.length>0) {
+        if (isMetricsReport) {
+          const showNewksCol = totals[0]?.hasOwnProperty('totalNetSalesNewks');
+          html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;">Date</th>';
+          html += '<th class="toast-col" style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;">🍞 Toast Net Sales</th>';
+          if (showNewksCol) html += '<th style="background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;">🥗 Newk\'s Net Sales</th>';
+          html += '</tr>';
+          totals.forEach(row => {
+            html += `<tr>
+              <td style="padding:0.75rem;border:1px solid #E5E7EB;"><strong>${formatDateHeader(row.date||'')}</strong></td>
+              <td class="toast-col" style="padding:0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F8FBFF;">${formatCell('Sales',row.totalNetSales||0)}</td>`;
+            if (showNewksCol) html += `<td style="padding:0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;">${formatCell('Sales',row.totalNetSalesNewks!=null?row.totalNetSalesNewks:row.totalNetSales||0)}</td>`;
+            html += '</tr>';
+          });
+        } else {
+          html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;">Item Tag Name</th>';
+          html += '<th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;">Total Qty</th></tr>';
+          totals.forEach(row => {
+            html += `<tr>
+              <td style="padding:0.75rem;border:1px solid #E5E7EB;"><strong>${row.itemTagName||''}</strong></td>
+              <td style="padding:0.75rem;text-align:right;border:1px solid #E5E7EB;">${formatCell('quantity',row.totalQty||0)}</td>
+            </tr>`;
+          });
+        }
+      }
+
+      // ── Item breakdown by tag ──
+      if (!isMetricsReport && results.itemBreakdown?.length>0) {
+        currentItemBreakdown = results.itemBreakdown;
+        const scT = currentSortColumn==='tag'?'sort-'+currentSortDirection:'';
+        const scN = currentSortColumn==='name'?'sort-'+currentSortDirection:'';
+        const scQ = currentSortColumn==='qty'?'sort-'+currentSortDirection:'';
+        html += '<tr><td colspan="100" style="height:20px;border:none;"></td></tr>';
+        html += '<tr><th colspan="3" style="background:#059669;color:white;text-align:center;font-weight:700;">ITEM BREAKDOWN BY TAG</th></tr>';
+        html += `<tr>
+          <th class="sortable-header ${scT}" data-sort="tag" style="background:#059669;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #047857;cursor:pointer;">Item Tag Name</th>
+          <th class="sortable-header ${scN}" data-sort="name" style="background:#059669;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #047857;cursor:pointer;">Item Name</th>
+          <th class="sortable-header ${scQ}" data-sort="qty" style="background:#059669;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;cursor:pointer;">Total Qty</th>
+        </tr>`;
+        let sorted = [...results.itemBreakdown];
+        if (currentSortColumn) {
+          sorted.sort((a,b) => {
+            let aV, bV;
+            if (currentSortColumn==='tag') { aV=(a.itemTagName||'').toLowerCase(); bV=(b.itemTagName||'').toLowerCase(); }
+            else if (currentSortColumn==='name') { aV=(a.menuItemName||'').toLowerCase(); bV=(b.menuItemName||'').toLowerCase(); }
+            else { aV=parseFloat(a.totalQty||0); bV=parseFloat(b.totalQty||0); }
+            if (aV<bV) return currentSortDirection==='asc'?-1:1;
+            if (aV>bV) return currentSortDirection==='asc'?1:-1; return 0;
+          });
+        }
+        sorted.forEach(item => {
+          html += `<tr>
+            <td><strong>${item.itemTagName||''}</strong></td>
+            <td>${item.menuItemName||'Unknown Item'}</td>
+            <td style="text-align:right;">${formatCell('quantity',item.totalQty||0)}</td>
+          </tr>`;
+        });
+      }
+
+      head.innerHTML=''; body.innerHTML=html;
+
+      // Sort handlers
+      setTimeout(() => {
+        const b = document.getElementById('resultsBody');
+        b.addEventListener('click', function(e) {
+          const h = e.target.closest('.sortable-header');
+          if (!h) return;
+          e.preventDefault(); e.stopPropagation();
+          const col = h.getAttribute('data-sort');
+          if (currentSortColumn===col) currentSortDirection=currentSortDirection==='asc'?'desc':'asc';
+          else { currentSortColumn=col; currentSortDirection='asc'; }
+          if (currentItemBreakdown?.length) renderItemBreakdown();
+        });
+      }, 100);
+
+      // Expandable row handlers
+      setTimeout(() => {
+        const b = document.getElementById('resultsBody');
+        b.querySelectorAll('.expandable-header').forEach(header => {
+          header.addEventListener('click', function() {
+            const id = this.getAttribute('data-expand-id');
+            const rows = b.querySelectorAll(`.location-row[data-expand-id="${id}"]`);
+            const icon = this.querySelector('.expand-icon');
+            const isExpanded = rows[0] && rows[0].style.display !== 'none';
+            rows.forEach(r => r.style.display = isExpanded ? 'none' : 'table-row');
+            icon.textContent = isExpanded ? '▶' : '▼';
+          });
+        });
+      }, 100);
+
+      document.getElementById('exportBtn').classList.remove('hidden');
+      if (isMetricsReport) {
+        document.getElementById('resultsSummary').textContent = `${pivotTable.length} restaurants, ${totals.length} date totals`;
+        // Show toast column toggle and apply current visibility state
+        const toastToggleBtn = document.getElementById('toggleToastColumnsBtn');
+        if (toastToggleBtn && hasNewks) {
+          toastToggleBtn.classList.remove('hidden');
+          applyToastColVisibility();
+        }
+        // Fire-and-forget: fetch labor data and populate KPI panel
+        if (lastReportConfig) showLaborKpi(results, lastReportConfig);
+      } else {
+        document.getElementById('resultsSummary').textContent = `${pivotTable.length} restaurants, ${totals.length} tag totals`;
+        document.getElementById('toggleToastColumnsBtn')?.classList.add('hidden');
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Excel Export (xlsx-js-style – multi-sheet, fully styled)
+    // ──────────────────────────────────────────────────────────
+    function exportExcel() {
+      if (!currentResults) return;
+      if (typeof XLSX === 'undefined') {
+        showStatus('error', 'Excel library not loaded — check your internet connection and refresh.');
+        return;
+      }
+
+      const WB = XLSX.utils.book_new();
+      const reportName = document.getElementById('reportName').value.trim() || 'Report';
+      const dateStr = new Date().toISOString().split('T')[0];
+
+      // ── Style palette ──────────────────────────────────────────────────────
+      const navy   = '1E3A5F', navyBdr  = '162d4a';
+      const blue   = '1E40AF', blueBdr  = '1E3A8A';
+      const lBlue  = 'DBEAFE';
+      const green  = '065F46', greenBdr = '047857', lGreen = 'D1FAE5';
+      const orange = '7C2D12', orangBdr = '92400E', lOrang = 'FED7AA';
+      const warn   = 'FEF3C7', warnTxt  = '92400E';
+      const alt    = 'F3F4F6';
+
+      const mkS = (bgHex, fgHex, bold, right, wrap) => ({
+        font:      { bold: !!bold, color: { rgb: fgHex || '1F2937' }, sz: 10 },
+        fill:      bgHex ? { patternType: 'solid', fgColor: { rgb: bgHex } } : undefined,
+        alignment: { horizontal: right ? 'right' : 'left', vertical: 'center', wrapText: !!wrap },
+        border: {
+          top:    { style: 'thin', color: { rgb: 'D1D5DB' } },
+          bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+          left:   { style: 'thin', color: { rgb: 'D1D5DB' } },
+          right:  { style: 'thin', color: { rgb: 'D1D5DB' } },
+        }
+      });
+
+      const S = {
+        // Dark header rows (section labels)
+        navyL:   mkS(navy,  'FFFFFF', true,  false),
+        navyR:   mkS(navy,  'FFFFFF', true,  true),
+        blueL:   mkS(blue,  'FFFFFF', true,  false),
+        blueR:   mkS(blue,  'FFFFFF', true,  true),
+        greenL:  mkS(green, 'FFFFFF', true,  false),
+        greenR:  mkS(green, 'FFFFFF', true,  true),
+        orangeL: mkS(orange,'FFFFFF', true,  false),
+        orangeR: mkS(orange,'FFFFFF', true,  true),
+        // Light sub-header rows (column names)
+        lBlueL:  mkS(lBlue,  '1E3A8A', true, false),
+        lBlueR:  mkS(lBlue,  '1E3A8A', true, true),
+        lGreenL: mkS(lGreen, '065F46', true, false),
+        lGreenR: mkS(lGreen, '065F46', true, true),
+        lOrangL: mkS(lOrang, '7C2D12', true, false),
+        lOrangR: mkS(lOrang, '7C2D12', true, true),
+        // Data cells
+        dL:    mkS(null,  '1F2937', false, false),
+        dR:    mkS(null,  '1F2937', false, true),
+        dLalt: mkS(alt,   '1F2937', false, false),
+        dRalt: mkS(alt,   '1F2937', false, true),
+        dLbld: mkS(null,  '1F2937', true,  false),
+        dRbld: mkS(null,  '1F2937', true,  true),
+        // Warning
+        warnL: mkS(warn,  warnTxt, true, false, true),
+      };
+
+      // ── Cell constructors ──────────────────────────────────────────────────
+      const c  = (v, s) => ({ v: v ?? '', t: 's', s });
+      const n  = (v, s) => ({ v: typeof v === 'number' ? v : (parseFloat(v) || 0), t: 'n', s });
+      const blank = () => ({ v: '', t: 's', s: S.dL });
+
+      // ── Build worksheet from 2-D cell array ────────────────────────────────
+      function makeWS(rows) {
+        const ws = {};
+        let maxC = 0;
+        rows.forEach((row, ri) => {
+          row.forEach((cell, ci) => {
+            if (cell == null) return;
+            ws[XLSX.utils.encode_cell({ r: ri, c: ci })] = cell;
+            if (ci > maxC) maxC = ci;
+          });
+        });
+        ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: maxC } });
+        // Auto column widths
+        const widths = Array(maxC + 1).fill(0);
+        rows.forEach(row => row.forEach((cell, ci) => {
+          const len = String(cell?.v ?? '').length;
+          if (len > widths[ci]) widths[ci] = len;
+        }));
+        ws['!cols'] = widths.map(w => ({ wch: Math.min(Math.max(w + 2, 8), 42) }));
+        return ws;
+      }
+
+      function addWS(wb, rows, name) {
+        XLSX.utils.book_append_sheet(wb, makeWS(rows), name.substring(0, 31));
+      }
+
+      // ── Helper: build one "breakdown by tag" sheet ─────────────────────────
+      function buildBreakdownSheet(items, sortedDates, hasAloha, collapseAloha,
+                                   hdrL, hdrR, subL, subR) {
+        const rows = [];
+        const byTag = {};
+        items.forEach(item => {
+          const tag = item.itemTagName || 'All Items';
+          if (!byTag[tag]) byTag[tag] = [];
+          byTag[tag].push(item);
+        });
+        Object.keys(byTag).sort().forEach((tagName, tIdx) => {
+          if (tIdx > 0) rows.push([blank()]);
+          // Tag header row
+          const tagHdr = [c(tagName, hdrL), c('Total', hdrR)];
+          if (hasAloha) tagHdr.push(c('Aloha Qty', hdrR));
+          sortedDates.forEach(d => tagHdr.push(c(formatDateHeader(d), hdrR)));
+          rows.push(tagHdr);
+          // Sub-header
+          const sub = [c('Menu Item Name', subL), c('Qty Sold', subR)];
+          if (hasAloha) sub.push(c('Aloha Qty', subR));
+          sortedDates.forEach(() => sub.push(c('Qty Sold', subR)));
+          rows.push(sub);
+          // Items
+          const tagItems = collapseAloha ? groupItemsByAloha(byTag[tagName], sortedDates) : byTag[tagName];
+          tagItems.slice().sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0)).forEach((item, idx) => {
+            const alt = idx % 2 === 1;
+            const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+            const row = [c(item.menuItemName || 'Unknown', dL), n(item.totalQty || 0, dR)];
+            if (hasAloha) row.push(n(item.alohaQty || 0, dR));
+            sortedDates.forEach(d => row.push(n(item.daily?.[d] || 0, dR)));
+            rows.push(row);
+          });
+        });
+        return rows;
+      }
+
+      // ── Route by result shape ──────────────────────────────────────────────
+      if (currentResults.pivotTable !== undefined) {
+        const pivotTable        = currentResults.pivotTable || [];
+        const totals            = currentResults.totals || [];
+        const itemBreakdownDaily= currentResults.itemBreakdownDaily || [];
+        const dateColumns       = currentResults.dateColumns || [];
+        let   itemTotals        = currentResults.itemTotals || [];
+        const hasAloha  = itemBreakdownDaily.some(i => Object.prototype.hasOwnProperty.call(i, 'alohaQty')) ||
+                          itemTotals.some(i => Object.prototype.hasOwnProperty.call(i, 'alohaQty'));
+        const collapseAloha = !!(currentReportConfig?.yoyEnabled && hasAloha);
+        const isMetrics = totals.length > 0 && totals[0].hasOwnProperty('date') && totals[0].hasOwnProperty('totalNetSales');
+
+        if (itemTotals.length === 0 && currentResults.itemBreakdown?.length > 0) {
+          const map = {};
+          currentResults.itemBreakdown.forEach(item => {
+            const g = item.menuItemGuid || item.menuItemName || '';
+            if (!map[g]) map[g] = { menuItemGuid: item.menuItemGuid || '', menuItemName: item.menuItemName || 'Unknown', totalQty: 0 };
+            map[g].totalQty += item.totalQty || 0;
+          });
+          itemTotals = Object.values(map).sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0));
+        }
+
+        // ── Menu with daily breakdown ──────────────────────────────────────
+        if (itemBreakdownDaily.length > 0 && dateColumns.length > 0 && !isMetrics) {
+          const sortedDates = [...dateColumns].sort();
+
+          // Sheet: All Items
+          addWS(WB, buildBreakdownSheet(itemBreakdownDaily, sortedDates, hasAloha, collapseAloha,
+            S.blueL, S.blueR, S.lBlueL, S.lBlueR), 'All Items');
+
+          // Sheet: In-Store
+          const inStoreItems = currentResults.orderModeSplit?.inStore?.itemBreakdownDaily || [];
+          if (inStoreItems.length > 0)
+            addWS(WB, buildBreakdownSheet(inStoreItems, sortedDates, hasAloha, collapseAloha,
+              S.greenL, S.greenR, S.lGreenL, S.lGreenR), 'In-Store');
+
+          // Sheet: OLO
+          const oloItems = currentResults.orderModeSplit?.olo?.itemBreakdownDaily || [];
+          if (oloItems.length > 0)
+            addWS(WB, buildBreakdownSheet(oloItems, sortedDates, hasAloha, collapseAloha,
+              S.orangeL, S.orangeR, S.lOrangL, S.lOrangR), 'OLO');
+
+          // Sheet: EE Weighted
+          const psdw = currentResults.perStoreDayWeighted;
+          if (psdw?.rows?.length > 0) {
+            const wDates = [...(psdw.dateColumns || sortedDates)].sort();
+            const wRows = [];
+            if (psdw.missingEETags?.length > 0) {
+              wRows.push([c(`⚠ Missing EE tag — excluded from weighted counts: ${psdw.missingEETags.join(', ')}`, S.warnL)]);
+              wRows.push([blank()]);
+            }
+            const wHdr = [c('Store', S.navyL), c('Tag', S.navyL), c('Total (EE)', S.navyR)];
+            wDates.forEach(d => wHdr.push(c(formatDateHeader(d), S.navyR)));
+            wRows.push(wHdr);
+            let lastStore = null;
+            psdw.rows.forEach((row, idx) => {
+              const alt = idx % 2 === 1;
+              const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+              const isNew = row.restaurantName !== lastStore;
+              if (isNew) lastStore = row.restaurantName;
+              const r = [
+                c(isNew ? row.restaurantName || '' : '', isNew ? S.dLbld : dL),
+                c(row.itemTagName || '', dL),
+                n(row.totalWeightedQty || 0, dR),
+              ];
+              wDates.forEach(d => r.push(n(row.daily?.[d] || 0, dR)));
+              wRows.push(r);
+            });
+            addWS(WB, wRows, 'EE Weighted');
+          }
+
+        // ── Compact item totals ────────────────────────────────────────────
+        } else if (itemTotals.length > 0 && !isMetrics) {
+          if (collapseAloha) itemTotals = groupItemsByAloha(itemTotals, []);
+          const rows = [];
+          const hdr = [c('Item Name', S.navyL), c('Total Qty', S.navyR)];
+          if (hasAloha) hdr.push(c('Aloha Qty', S.navyR));
+          rows.push(hdr);
+          itemTotals.forEach((item, idx) => {
+            const alt = idx % 2 === 1;
+            const r = [c(item.menuItemName || 'Unknown', alt ? S.dLalt : S.dL),
+                       n(item.totalQty || 0, alt ? S.dRalt : S.dR)];
+            if (hasAloha) r.push(n(item.alohaQty || 0, alt ? S.dRalt : S.dR));
+            rows.push(r);
+          });
+          addWS(WB, rows, 'Items');
+
+        // ── Pivot / Metrics ────────────────────────────────────────────────
+        } else if (pivotTable.length > 0) {
+          const colNames    = Object.keys(pivotTable[0]).filter(k => k !== 'restaurantName').sort();
+          const hasNewks    = isMetrics && totals.length > 0 && totals[0].hasOwnProperty('totalNetSalesNewks');
+          const dateCols    = isMetrics ? colNames.filter(k => /^\d{8}$/.test(k)).sort() : [];
+          const dc          = hasNewks ? dateCols : colNames.filter(k => !k.endsWith('_newks'));
+          const rows = [];
+
+          if (isMetrics) {
+            // Newk's Net Sales only (Toast columns removed) + TOTAL column at right
+            const hdr = [c("Restaurant Location", S.navyL)];
+            dc.forEach(col => hdr.push(c(formatDateHeader(col), S.navyR)));
+            hdr.push(c('TOTAL', S.navyR));
+            rows.push(hdr);
+            pivotTable.forEach((row, idx) => {
+              const alt = idx % 2 === 1;
+              const r = [c(row.restaurantName || '', alt ? S.dLalt : S.dL)];
+              let rowTotal = 0;
+              dc.forEach(col => {
+                const val = hasNewks ? (row[col + '_newks'] ?? row[col] ?? 0) : (row[col] ?? 0);
+                rowTotal += val;
+                r.push(n(val, alt ? S.dRalt : S.dR));
+              });
+              r.push(n(rowTotal, alt ? S.dRalt : S.dR));
+              rows.push(r);
+            });
+            const totRow = [c('TOTALS', S.navyL)];
+            let grandTotal = 0;
+            dc.forEach(col => {
+              const t = totals.find(t => t.date === col);
+              const val = hasNewks ? (t?.totalNetSalesNewks ?? 0) : (t?.totalNetSales ?? 0);
+              grandTotal += val;
+              totRow.push(n(val, S.navyR));
+            });
+            totRow.push(n(grandTotal, S.navyR));
+            rows.push(totRow);
+          } else {
+            const hdr = [c('Restaurant Location', S.navyL), ...colNames.map(n2 => c(n2, S.navyR))];
+            rows.push(hdr);
+            pivotTable.forEach((row, idx) => {
+              const alt = idx % 2 === 1;
+              rows.push([c(row.restaurantName || '', alt ? S.dLalt : S.dL),
+                         ...colNames.map(col => n(row[col] ?? 0, alt ? S.dRalt : S.dR))]);
+            });
+            const totRow = [c('TOTALS', S.navyL),
+              ...colNames.map(col => { const t = totals.find(t => t.itemTagName === col); return n(t?.totalQty ?? 0, S.navyR); })];
+            rows.push(totRow);
+          }
+          addWS(WB, rows, isMetrics ? 'Sales' : 'Summary');
+
+          // ── Performance Summary sheet (metrics reports only) ──────────────
+          if (isMetrics) {
+            const fmtDollar = v => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v || 0);
+            const fmtNum    = (v, d) => (v || 0).toFixed(d ?? 1);
+            // Compute Newk's net total directly from the report data
+            const exportNewksTotal = totals.reduce(
+              (sum, t) => sum + (t.totalNetSalesNewks != null ? t.totalNetSalesNewks : (t.totalNetSales || 0)), 0
+            );
+            const drStart = dc.length ? formatDateHeader(dc[0])              : '–';
+            const drEnd   = dc.length ? formatDateHeader(dc[dc.length - 1])  : '–';
+
+            const sumRows = [];
+            // Title row
+            sumRows.push([c('Performance Summary', S.navyL), c('', S.navyL)]);
+            sumRows.push([blank(), blank()]);
+            // Meta
+            sumRows.push([c('Date Range',  S.dLbld), c(`${drStart}  →  ${drEnd}`, S.dL)]);
+            sumRows.push([c('Locations',   S.dLbld), c(`${pivotTable.length}`,     S.dL)]);
+            sumRows.push([blank(), blank()]);
+            // Sales
+            sumRows.push([c('SALES', S.navyL), c('', S.navyL)]);
+            sumRows.push([c("Newk's Net Sales", S.dLbld), c(fmtDollar(exportNewksTotal), S.dR)]);
+            sumRows.push([blank(), blank()]);
+            // Labor — populated if KPI panel loaded, otherwise note
+            sumRows.push([c('LABOR', S.navyL), c('', S.navyL)]);
+            if (lastLaborData) {
+              sumRows.push([c('Total Labor Cost',            S.dLbld), c(fmtDollar(lastLaborData.laborCost),  S.dR)]);
+              sumRows.push([c('Total Labor Hours',           S.dLbld), c(`${fmtNum(lastLaborData.totalHours)} hrs`, S.dL)]);
+              sumRows.push([c('Labor % of Sales',            S.dLbld), c(`${fmtNum(lastLaborData.laborPct)}%`, S.dL)]);
+              sumRows.push([c('SPLH (Sales Per Labor Hour)', S.dLbld), c(fmtDollar(lastLaborData.splh),       S.dR)]);
+            } else {
+              sumRows.push([c('Labor data not available', mkS(warn, warnTxt, false, false)),
+                            c('Labor panel had not finished loading when this export was created.', mkS(warn, warnTxt, false, false))]);
+            }
+            addWS(WB, sumRows, 'Summary');
+          }
+        }
+
+      // ── Flat array results ────────────────────────────────────────────────
+      } else if (Array.isArray(currentResults) && currentResults.length > 0) {
+        const keys = Object.keys(currentResults[0]);
+        const rows = [keys.map(k => c(formatHeader(k), S.navyL))];
+        currentResults.forEach((row, idx) => {
+          const alt = idx % 2 === 1;
+          rows.push(keys.map(k => {
+            const v = row[k];
+            return typeof v === 'number' ? n(v, alt ? S.dRalt : S.dR) : c(String(v ?? ''), alt ? S.dLalt : S.dL);
+          }));
+        });
+        addWS(WB, rows, 'Data');
+      }
+
+      if (WB.SheetNames.length === 0) { showStatus('error', 'Nothing to export.'); return; }
+      const safeName = reportName.replace(/[^a-z0-9\s]/gi, '').trim().replace(/\s+/g, '_').toLowerCase();
+      XLSX.writeFile(WB, `${safeName}_${dateStr}.xlsx`);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Setup event listeners
+    // ──────────────────────────────────────────────────────────
+    function setupEventListeners() {
+      document.getElementById('closeAuthModal').addEventListener('click', () => document.getElementById('authModal').classList.add('hidden'));
+      document.getElementById('cancelAuthBtn').addEventListener('click', () => document.getElementById('authModal').classList.add('hidden'));
+      document.getElementById('authForm').addEventListener('submit', handleAuth);
+      document.getElementById('userLogoutBtn').addEventListener('click', logout);
+      document.getElementById('userAdminBtn').addEventListener('click', () => { window.location.href = '/admin.html'; });
+      document.getElementById('myRestaurantsBtn').addEventListener('click', openMyRestaurantsModal);
+      document.getElementById('closeMyRestaurantsModal').addEventListener('click', closeMyRestaurantsModal);
+      document.getElementById('cancelMyRestaurantsBtn').addEventListener('click', closeMyRestaurantsModal);
+      document.getElementById('saveMyRestaurantsBtn').addEventListener('click', saveMyRestaurants);
+      document.getElementById('selectAllMyRestaurants').addEventListener('change', toggleAllMyRestaurants);
+      document.getElementById('helpBtn').addEventListener('click', () => document.getElementById('helpModal').classList.remove('hidden'));
+      document.getElementById('closeHelpModal').addEventListener('click', () => document.getElementById('helpModal').classList.add('hidden'));
+      document.getElementById('cancelHelpBtn').addEventListener('click', () => document.getElementById('helpModal').classList.add('hidden'));
+      document.getElementById('helpForm').addEventListener('submit', submitHelpTicket);
+      document.getElementById('newReportBtn').addEventListener('click', newReport);
+      document.getElementById('runReportBtn').addEventListener('click', runReport);
+      document.getElementById('saveReportBtn').addEventListener('click', saveReport);
+      document.getElementById('updateReportBtn').addEventListener('click', updateReport);
+      document.getElementById('deleteReportBtn').addEventListener('click', deleteReport);
+      document.getElementById('exportBtn').addEventListener('click', exportExcel);
+      document.getElementById('toastPricingExportBtn').addEventListener('click', exportToastPricing);
+      document.getElementById('toggleToastColumnsBtn').addEventListener('click', toggleToastColumns);
+      document.getElementById('toggleDailyColumnsBtn').addEventListener('click', toggleDailyColumns);
+      document.getElementById('reportType').addEventListener('change', updateFilterByOptions);
+      document.getElementById('filterByType').addEventListener('change', updateFilterByOptions);
+      document.getElementById('dateRangeType').addEventListener('change', () => {
+        toggleCustomDateRange();
+        updateAlohaRangeWarning();
+      });
+      document.getElementById('customStartDate').addEventListener('change', updateAlohaRangeWarning);
+      document.getElementById('customEndDate').addEventListener('change', updateAlohaRangeWarning);
+      document.getElementById('selectAllLocations').addEventListener('change', toggleAllLocations);
+      document.getElementById('enableYoY').addEventListener('change', updateYoYControls);
+      document.getElementById('retryLocationsBtn').addEventListener('click', loadLocations);
+
+      const menuItemFilterInput = document.getElementById('menuItemFilterInput');
+      menuItemFilterInput.addEventListener('input', () => {
+        currentMenuItemFilter = menuItemFilterInput.value||'';
+        if (currentResults) renderResults(currentResults, currentReportConfig||{});
+      });
+      document.getElementById('menuItemFilterClear').addEventListener('click', () => {
+        currentMenuItemFilter=''; menuItemFilterInput.value='';
+        if (currentResults) renderResults(currentResults, currentReportConfig||{});
+      });
+
+      // Aloha details popup – click delegation
+      document.addEventListener('click', (e) => {
+        const alohaCell = e.target?.closest?.('.aloha-detail-cell');
+        const toastCell = e.target?.closest?.('.toast-detail-cell');
+        const existingPopup = document.getElementById('alohaDetailsPopup');
+        if (!alohaCell && !toastCell) { if (existingPopup) existingPopup.remove(); return; }
+        e.preventDefault(); e.stopPropagation();
+        const cell = alohaCell||toastCell;
+        const encoded = cell.getAttribute(alohaCell ? 'data-aloha-details' : 'data-toast-details')||'';
+        let details = [];
+        try { details = JSON.parse(decodeURIComponent(encoded)); } catch(ex) { details=[]; }
+        renderAlohaDetailsPopup(details, cell, alohaCell ? 'Aloha Items' : 'Toast Items');
+      });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Init
+    // ──────────────────────────────────────────────────────────
+    async function init() {
+      setupEventListeners();
+      // Auth check FIRST — sets authToken + currentUser so loadLocations
+      // can send auth headers and receive the user's filtered location list
+      let isAuth = false;
+      try {
+        isAuth = await checkAuth();
+      } catch (err) {
+        console.error('Error during auth check:', err);
+      }
+      // Now load locations (with auth token in place) and report types
+      try {
+        await loadLocations();
+        await loadReportTypes();
+      } catch (err) {
+        console.error('Error loading base data:', err);
+        showStatus('warning', 'Could not load locations or report types. You can still try running a report after logging in.');
+      }
+      // Load saved reports if authenticated
+      try {
+        if (isAuth) {
+          await loadSavedReports();
+        } else {
+          const list = document.getElementById('savedReportsList');
+          if (list) list.innerHTML = '<div class="empty-state">Login to view your saved reports</div>';
+        }
+      } catch (err) {
+        console.error('Error loading saved reports:', err);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -130,12 +130,46 @@ Response:
 ]
 ```
 
+### `GET /api/toast-pricing-export`
+
+Exports menu pricing to CSV. Supports location grouping and tier grouping.
+
+Query parameters (optional):
+- `group_by_tier=true` — use `backend/price_tier_mapping.csv` to aggregate by pricing tier.
+- `per_location=true` — export by location (default behavior when `group_by_tier=false`).
+
+Example:
+```bash
+curl "http://localhost:8000/api/toast-pricing-export?group_by_tier=true"
+```
+
+### `GET /api/toast-pricing-export?group_by_tier=true&diagnostics=true`
+
+Returns JSON diagnostics for tier mapping and (optionally) item-level price traces.
+
+Optional:
+- `diagnostics_item=Chicken%20Bacon%20Club` (name contains match) or item GUID.
+
+Example:
+```bash
+curl "http://localhost:8000/api/toast-pricing-export?group_by_tier=true&diagnostics=true&diagnostics_item=Chicken%20Bacon%20Club"
+```
+
 The backend internally:
 
 1. Converts `start_date` / `end_date` to Toast `businessDate` format (`YYYYMMDD`).
 2. Calls `POST /eras/v1/metrics` to request a report.
 3. Polls `GET /era/v1/metrics/{reportRequestGuid}` until the report is ready.
 4. Normalizes the rows to `NetSalesRow` and returns them.
+
+### `POST /api/menu/export-missing-consolidated`
+
+Exports menu items and modifiers with sales in the last 90 days that do **not**
+match a ConsolidatedCat in the mapping sheets. Writes an Excel file to:
+
+- `Missing_ConsolidatedCat_Items.xlsx` (repo root)
+
+Response includes output path and counts.
 
 ### `GET /api/menu-performance`
 
@@ -343,3 +377,101 @@ If you get errors:
 
 If you want to change how the metrics are requested (e.g. groupBy, revenue centers),
 look at `request_metrics_report()` in `main.py`. That is the main customization point.
+
+## 7. Importing Aloha data (SQL)
+
+YoY and menu-comparison reports can use historical Aloha data stored under `backend/data/aloha/`. You already have a small subset (e.g. Jan 2024). To **import more** from your Aloha SQL Server:
+
+### 1. Configure environment
+
+In `backend/.env` (copy from `.env.example` if needed), set:
+
+- `ALOHA_SQL_SERVER` — SQL Server host
+- `ALOHA_SQL_DATABASE` — Database name
+- `ALOHA_SQL_USERNAME` / `ALOHA_SQL_PASSWORD` — Or use `ALOHA_SQL_TRUSTED_CONNECTION=true` on Windows
+- `ALOHA_SQL_QUERY` — Query template with `{start_date}` and `{end_date}` (YYYY-MM-DD). It must return columns that map to: **Item**, **Quantity**, **Sales**, **BusinessDate** (column names are matched case-insensitively). You can optionally include **Location** (or Store, Restaurant, etc.) to keep data per location.
+
+**All locations (single total per item per day):**
+
+```env
+ALOHA_SQL_QUERY=SELECT Item, Quantity, Sales, BusinessDate FROM AlohaSales WHERE BusinessDate >= '{start_date}' AND BusinessDate <= '{end_date}'
+```
+
+**Per-location (so YoY can filter by selected Toast locations):**
+
+```env
+ALOHA_SQL_QUERY=SELECT Item, Quantity, Sales, BusinessDate, StoreId AS Location FROM AlohaSales WHERE BusinessDate >= '{start_date}' AND BusinessDate <= '{end_date}'
+```
+
+**Order mode (channel breakdown):** The importer recognizes **OrderMode** (or name-style columns like OrderMode_PrintName, OrderTypeName) and **FKOrderModeId** / OrderModeId. If your query returns only `FKOrderModeId`, it is mapped to OrderMode and stored as the numeric ID (e.g. "1", "2"). To store human-readable names instead, JOIN to your Aloha OrderMode lookup table and return the name as `OrderMode`, e.g.:
+
+```sql
+SELECT m.Item, m.Quantity, m.Sales, m.DateOfBusiness AS BusinessDate,
+       om.PrintName AS OrderMode
+FROM dbo.MenuMix m
+LEFT JOIN dbo.OrderMode om ON om.Id = m.FKOrderModeId
+WHERE m.DateOfBusiness >= '{start_date}' AND m.DateOfBusiness <= '{end_date}'
+```
+
+(Adjust table/column names to match your schema; run `python schema_discovery.py` to list columns.)
+
+If your query returns a **Location** (or Store, Restaurant, etc.) column, the importer keeps it. Each day’s CSV will then have one row per (Location, Item) with Quantity and Sales. The app can then filter Aloha data by location when you run a report for specific Toast restaurants (see **Location mapping** below).
+
+### 2. Run the importer from the backend folder
+
+**Custom date range** (e.g. more of 2024, or a new year):
+
+```bash
+cd backend
+python import_aloha_data.py --sql --sql-start 2024-02-01 --sql-end 2024-12-31
+```
+
+**Last N days** (e.g. last 90 days from today):
+
+```bash
+python import_aloha_data.py --sql-last-days 90
+```
+
+**Overwrite existing dates** (re-import and replace files you already have):
+
+```bash
+python import_aloha_data.py --sql --sql-start 2024-01-01 --sql-end 2024-01-31 --overwrite
+```
+
+**Larger batches** (if the default 31-day batches are slow or timing out):
+
+```bash
+python import_aloha_data.py --sql --sql-start 2024-01-01 --sql-end 2024-06-30 --batch-days 14
+```
+
+### 3. Where data goes
+
+- One CSV per day: `backend/data/aloha/aloha_YYYY-MM-DD.csv` (columns: Item, Quantity, Sales; or Item, Quantity, Sales, Location if your query includes location).
+- Index: `backend/data/aloha/index.json` (updated automatically).
+
+The app uses these files when you run menu reports with YoY enabled and select an “Aloha date” for comparison.
+
+### 4. Separating by location
+
+- **Does the import pull data for every location?**  
+  Yes. Your SQL query can return all locations (e.g. no `WHERE` on store), and the importer writes one row per (Location, Item) per day when you include a Location column.
+
+- **How do I separate Aloha data by location in reports?**  
+  1. **Include Location in your SQL query** (e.g. `StoreId AS Location` or your Aloha location column). Re-import the date range so the CSVs have the Location column.  
+  2. **Add a mapping** from Toast restaurant GUID to Aloha location ID: create `backend/data/aloha/aloha_location_mapping.json` (copy from `aloha_location_mapping.example.json`). Format:
+     ```json
+     {
+       "toast-restaurant-guid-from-toast": "aloha_store_id_or_name",
+       "another-toast-guid": "2"
+     }
+     ```
+     Use the same Toast location GUIDs you see when selecting locations in the report (or from the Toast API). Use the same Location values that appear in your Aloha SQL/CSV (e.g. store number or name).  
+  3. When you run a menu report with YoY and select specific **locations**, the app will use only Aloha rows whose Location matches the mapping for those Toast locations. If no mapping file exists (or a location has no mapping), Aloha data is used for all locations combined.
+
+
+
+
+
+
+
+  runas /netonly /user:NEWKS\kaylesworth "cmd /k cd /d `"C:\Users\KimAylesworth\OneDrive - Newk's Eatery\Desktop\Kim\toast_net_sales_app\backend`" && python import_aloha_data.py --sql --sql-start 2024-01-01 --sql-end 2025-01-01"

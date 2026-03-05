@@ -1,0 +1,1630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Operational Intelligence (v2) - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='url(%23grad)'/%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='0%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%231E3A5F;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%231E3A5F;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%23ffffff;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23ffffff;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Ctext x='50' y='35' font-family='Arial' font-size='12' font-weight='600' font-style='italic' fill='white' text-anchor='middle'%3ENewk's%3C/text%3E%3Crect x='35' y='5' width='30' height='8' rx='2' fill='%23C41E3A'/%3E%3Ctext x='50' y='11' font-family='Arial' font-size='6' font-weight='600' fill='white' text-anchor='middle'%3EEATERY%3C/text%3E%3Ctext x='50' y='70' font-family='Arial' font-size='20' font-weight='700' fill='%23C41E3A' text-anchor='middle' letter-spacing='2'%3EIT%3C/text%3E%3C/svg%3E" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #F8FAFC;
+      color: #2c2c2c;
+    }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header-text {
+      flex: 1;
+    }
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+    .header p {
+      margin: 0.5rem 0 0 0;
+      color: #fff;
+      opacity: 0.9;
+      font-size: 0.9rem;
+    }
+    .header-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .home-btn {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .home-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: #ffffff;
+      font-size: 0.9rem;
+    }
+    .user-name {
+      font-weight: 600;
+    }
+    .logout-btn, .help-btn, .admin-btn {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .logout-btn:hover, .help-btn:hover, .admin-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+    .help-btn {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      background: #C41E3A;
+      color: #ffffff;
+      border: none;
+      padding: 1rem 1.5rem;
+      border-radius: 50px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .help-btn:hover {
+      background: #A01A2E;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+    }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      gap: 1.5rem;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .left-nav {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+      height: fit-content;
+      position: sticky;
+      top: 2rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .left-nav-content {
+      flex: 1;
+    }
+    .left-nav-footer {
+      margin-top: auto;
+      padding-top: 1.5rem;
+      border-top: 1px solid #e8e0d5;
+    }
+    .user-profile {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .user-profile-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #F0F9FF;
+      border-radius: 8px;
+    }
+    .user-profile-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #C41E3A;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .user-profile-details {
+      flex: 1;
+    }
+    .user-profile-name {
+      font-weight: 600;
+      color: #2c2c2c;
+      font-size: 0.9rem;
+    }
+    .user-profile-role {
+      font-size: 0.75rem;
+      color: #666;
+      text-transform: capitalize;
+    }
+    .user-profile-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .user-profile-btn {
+      width: 100%;
+      padding: 0.5rem;
+      border-radius: 6px;
+      border: 1px solid #d4c9b8;
+      background: white;
+      color: #2c2c2c;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .user-profile-btn:hover {
+      background: #F0F9FF;
+      border-color: #C41E3A;
+      color: #C41E3A;
+    }
+    .user-profile-btn.admin {
+      background: #C41E3A;
+      color: white;
+      border-color: #C41E3A;
+    }
+    .user-profile-btn.admin:hover {
+      background: #A01A2E;
+    }
+    .left-nav h3 {
+      margin: 0 0 1rem 0;
+      color: #C41E3A;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .nav-category {
+      margin-bottom: 1.5rem;
+    }
+    .nav-category-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 0.5rem;
+    }
+    .nav-link-item {
+      display: block;
+      padding: 0.5rem 0.75rem;
+      color: #2c2c2c;
+      text-decoration: none;
+      border-radius: 6px;
+      margin-bottom: 0.25rem;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+    }
+    .nav-link-item:hover {
+      background: #F0F9FF;
+      color: #C41E3A;
+    }
+    .nav-link-item.active {
+      background: #C41E3A;
+      color: #ffffff;
+    }
+    .search-box {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #d4c9b8;
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+    }
+    .search-box:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.1);
+    }
+    .container {
+      max-width: 100%;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 {
+      margin: 0 0 1rem 0;
+      color: #C41E3A;
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: #2c2c2c;
+      font-size: 0.9rem;
+    }
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #d4c9b8;
+      background: #ffffff;
+      color: #2c2c2c;
+      font-size: 0.9rem;
+    }
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.1);
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    .preset-buttons {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .preset-btn {
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      border: 1px solid #d4c9b8;
+      background: #ffffff;
+      color: #2c2c2c;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .preset-btn:hover {
+      background: #F0F9FF;
+      border-color: #C41E3A;
+    }
+    .preset-btn.active {
+      background: #C41E3A;
+      color: #ffffff;
+      border-color: #C41E3A;
+    }
+    .locations-grid {
+      max-height: 150px;
+      overflow-y: auto;
+      padding: 0.75rem;
+      background: #faf8f5;
+      border-radius: 6px;
+      border: 1px solid #e8e0d5;
+    }
+    .locations-grid label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0;
+      font-weight: normal;
+      margin: 0;
+      color: #2c2c2c;
+      font-size: 0.85rem;
+    }
+    .locations-grid input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      accent-color: #C41E3A;
+    }
+    .btn-group {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-top: 1rem;
+    }
+    button {
+      padding: 0.6rem 1.25rem;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+    }
+    .btn-primary {
+      background: #C41E3A;
+      color: #ffffff;
+      box-shadow: 0 2px 4px rgba(196, 30, 58, 0.2);
+    }
+    .btn-primary:hover {
+      background: #A01A2E;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(196, 30, 58, 0.3);
+    }
+    .btn-secondary {
+      background: #1E40AF;
+      color: #ffffff;
+    }
+    .btn-secondary:hover {
+      background: #1E3A8A;
+    }
+    .btn-success {
+      background: #059669;
+      color: #ffffff;
+    }
+    .btn-success:hover {
+      background: #047857;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+    .status {
+      padding: 0.75rem;
+      border-radius: 8px;
+      margin-top: 0.75rem;
+      font-size: 0.9rem;
+    }
+    .status.info {
+      background: #DBEAFE;
+      border: 1px solid #60A5FA;
+      color: #1E40AF;
+    }
+    .status.success {
+      background: #D1FAE5;
+      border: 1px solid #34D399;
+      color: #065F46;
+    }
+    .status.error {
+      background: #FEE2E2;
+      border: 1px solid #F87171;
+      color: #991B1B;
+    }
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .view-toggle {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .view-btn {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      border: 1px solid #d4c9b8;
+      background: #ffffff;
+      color: #2c2c2c;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .view-btn.active {
+      background: #C41E3A;
+      color: #ffffff;
+      border-color: #C41E3A;
+    }
+    .chart-container {
+      position: relative;
+      height: 400px;
+      margin-bottom: 2rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+    }
+    th, td {
+      padding: 0.75rem;
+      border-bottom: 1px solid #e8e0d5;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+    th {
+      background: #faf8f5;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      color: #2c2c2c;
+    }
+    tr:hover {
+      background: #F0F9FF;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: #999;
+    }
+    .hidden {
+      display: none;
+    }
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      gap: 1rem;
+    }
+    .loading-overlay.hidden {
+      display: none !important;
+    }
+    .loading-spinner {
+      width: 60px;
+      height: 60px;
+      border: 6px solid #F0F9FF;
+      border-top: 6px solid #C41E3A;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    .loading-text {
+      color: white;
+      font-size: 1.1rem;
+      font-weight: 600;
+      text-align: center;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .comparison-card {
+      background: #faf8f5;
+      border: 1px solid #e8e0d5;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .comparison-card h3 {
+      margin: 0 0 0.5rem 0;
+      color: #C41E3A;
+      font-size: 1rem;
+    }
+    .metric-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #2c2c2c;
+    }
+    .metric-label {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 0.25rem;
+    }
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+    }
+    .modal-overlay.hidden {
+      display: none;
+    }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      max-width: 600px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #E5E7EB;
+    }
+    .modal-header h2 {
+      margin: 0;
+      color: #C41E3A;
+      font-size: 1.5rem;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: #6B7280;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+    .modal-close:hover {
+      background: #F3F4F6;
+      color: #C41E3A;
+    }
+    .modal-form-group {
+      margin-bottom: 1.25rem;
+    }
+    .modal-form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: #374151;
+      font-size: 0.9rem;
+    }
+    .modal-form-group input,
+    .modal-form-group textarea,
+    .modal-form-group select {
+      width: 100%;
+      padding: 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #D1D5DB;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    .modal-form-group textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    .modal-form-group input:focus,
+    .modal-form-group textarea:focus,
+    .modal-form-group select:focus {
+      outline: none;
+      border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.1);
+    }
+    .modal-actions {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 2px solid #E5E7EB;
+    }
+    .btn-primary {
+      background: #C41E3A;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary:hover {
+      background: #A01A2E;
+    }
+    .btn-secondary {
+      background: #6B7280;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover {
+      background: #4B5563;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div class="header-text">
+        <div style="display: flex; align-items: center;">
+          <div class="logo" style="display: inline-flex; align-items: center; gap: 0.5rem; margin-right: 1rem;">
+            <div class="logo-circle" style="width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(to bottom, #1E3A5F 0%, #1E3A5F 50%, #ffffff 50%, #ffffff 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); position: relative; overflow: visible; padding: 2px;">
+              <div style="width: 100%; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.65rem; font-weight: 600; font-style: italic; padding-top: 2px; line-height: 1; margin-bottom: 2px;">Newk's</div>
+              <div style="position: absolute; top: 12px; background: #C41E3A; color: white; padding: 1px 3px; font-size: 0.45rem; border-radius: 2px; font-weight: 600; line-height: 1;">EATERY</div>
+              <div style="flex: 1; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; color: #C41E3A; font-size: 1rem; font-weight: 700; letter-spacing: 1px; padding-bottom: 2px; line-height: 1;">IT</div>
+            </div>
+          </div>
+          <div>
+            <h1 style="margin: 0;">Operational Intelligence (v2)</h1>
+            <p style="margin: 0.5rem 0 0 0;">Store comparisons, trend analysis, and performance insights</p>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="/" class="home-btn" title="Home">🏠 Home</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="main-layout">
+    <!-- Left Navigation -->
+    <div class="left-nav">
+      <h3>Navigation</h3>
+      <input type="text" class="search-box" id="searchBox" placeholder="Search..." />
+      <div class="nav-category">
+        <div class="nav-category-header collapsed" style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; font-size: 0.75rem; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; border-radius: 6px; transition: background 0.2s;" data-category="tools">
+          <span>TOOLS</span>
+          <span class="toggle-icon">▶</span>
+        </div>
+        <div class="nav-category-items" style="max-height: 0; overflow: hidden; opacity: 0; margin-top: 0; transition: max-height 0.3s ease, opacity 0.3s ease;">
+          <a href="/legacy.html" class="nav-link-item">📋 Legacy Reports</a>
+          <a href="/" class="nav-link-item">🏠 Home</a>
+        </div>
+      </div>
+
+      <!-- User Profile Section at Bottom -->
+      <div class="left-nav-footer hidden" id="userProfileSection">
+        <div class="user-profile">
+          <div class="user-profile-info">
+            <div class="user-profile-avatar" id="userAvatar">U</div>
+            <div class="user-profile-details">
+              <div class="user-profile-name" id="userProfileName">User</div>
+              <div class="user-profile-role" id="userProfileRole">user</div>
+            </div>
+          </div>
+          <div class="user-profile-actions">
+            <button class="user-profile-btn admin hidden" id="userAdminBtn">Admin Panel</button>
+            <button class="user-profile-btn" id="userLogoutBtn">Logout</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Help Button -->
+    <button class="help-btn" id="helpBtn">💬 I Need Help</button>
+
+    <div class="container">
+    <!-- Controls -->
+    <div class="card">
+      <h2>Report Configuration</h2>
+      
+      <div class="form-group">
+        <label>Quick Presets</label>
+        <div class="preset-buttons">
+          <button class="preset-btn" data-preset="last_7_days">Last 7 Days</button>
+          <button class="preset-btn" data-preset="last_30_days">Last 30 Days</button>
+          <button class="preset-btn" data-preset="last_90_days">Last 90 Days</button>
+          <button class="preset-btn" data-preset="wow">Week over Week</button>
+          <button class="preset-btn" data-preset="mom">Month over Month</button>
+          <button class="preset-btn" data-preset="custom">Custom Range</button>
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label>Date Range</label>
+          <select id="dateRangeType">
+            <option value="last_7_days">Last 7 Days</option>
+            <option value="last_30_days" selected>Last 30 Days</option>
+            <option value="last_90_days">Last 90 Days</option>
+            <option value="custom">Custom Range</option>
+          </select>
+        </div>
+        <div class="form-group hidden" id="customDateRange">
+          <label>Start Date</label>
+          <input type="date" id="customStartDate" />
+        </div>
+        <div class="form-group hidden" id="customEndDateGroup">
+          <label>End Date</label>
+          <input type="date" id="customEndDate" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label style="display: flex; justify-content: space-between; align-items: center;">
+          <span>
+            <input type="checkbox" id="selectAllLocations" checked style="margin-right: 0.5rem; width: 16px; height: 16px; accent-color: #C41E3A;" /> 
+            Select All Locations
+          </span>
+          <span id="locationCount" style="font-size: 0.85rem; font-weight: normal; color: #666;"></span>
+        </label>
+        <div class="locations-grid" id="locationsGrid">
+          <div>Loading locations...</div>
+        </div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn-primary" id="topMoversBtn">Top Movers</button>
+        <button class="btn-primary" id="storeVarianceBtn">Store Variance</button>
+        <button class="btn-primary" id="itemPerformanceBtn">Item Performance</button>
+        <button class="btn-primary" id="storeRollupsBtn">Store Rollups</button>
+        <button class="btn-primary" id="trendDeltasBtn">Trend Deltas</button>
+        <button class="btn-primary" id="anomalyFlagsBtn">Anomaly Flags</button>
+      </div>
+
+      <div class="status hidden" id="status"></div>
+    </div>
+
+    <!-- Results -->
+    <div class="card">
+      <div class="results-header">
+        <h2>Results</h2>
+        <div>
+          <button class="btn-secondary" id="exportCSVBtn">Export CSV</button>
+          <button class="btn-secondary" id="exportJSONBtn">Export JSON</button>
+          <button class="btn-success" id="exportExcelBtn">Export Excel</button>
+        </div>
+      </div>
+      
+      <div class="status hidden" id="insightExplanation" style="background: #EFF6FF; border: 1px solid #60A5FA; color: #1E40AF; margin-bottom: 1rem;"></div>
+      
+      <div class="view-toggle hidden" id="viewToggle">
+        <button class="view-btn active" data-view="table">Table</button>
+        <button class="view-btn" data-view="chart">Chart</button>
+        <button class="view-btn" data-view="comparison">Comparison</button>
+      </div>
+      
+      <div id="chartContainer" class="chart-container hidden"></div>
+      <div id="comparisonContainer" class="comparison-grid hidden"></div>
+      
+      <div style="overflow-x: auto;">
+        <table id="resultsTable">
+          <thead id="resultsHead"></thead>
+          <tbody id="resultsBody">
+            <tr>
+              <td colspan="100" class="empty-state">Select an insight type and click a button to see results</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Loading insights...<br><span style="font-size: 0.9rem; font-weight: normal; opacity: 0.9;">This may take a moment</span></div>
+  </div>
+
+  <script>
+    let locations = [];
+    let currentResults = null;
+    let currentEndpoint = null;
+    let currentChart = null;
+
+    // Initialize
+    async function init() {
+      await loadLocations();
+      setupEventListeners();
+      setupPresetButtons();
+    }
+
+    async function loadLocations() {
+      try {
+        const resp = await fetch('/locations');
+        locations = await resp.json();
+        renderLocations();
+      } catch (err) {
+        console.error('Error loading locations:', err);
+        const grid = document.getElementById('locationsGrid');
+        grid.innerHTML = '<div style="padding: 1rem; text-align: center; color: #DC2626;">Error loading locations. Please refresh the page.</div>';
+      }
+    }
+
+    function renderLocations() {
+      const grid = document.getElementById('locationsGrid');
+      if (locations.length === 0) {
+        grid.innerHTML = '<div>No locations found</div>';
+        return;
+      }
+      
+      grid.innerHTML = locations.map(loc => `
+        <label>
+          <input type="checkbox" class="location-checkbox" value="${loc.restaurantGuid}" checked />
+          ${loc.restaurantName}
+        </label>
+      `).join('');
+      
+      document.querySelectorAll('.location-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateLocationCount);
+      });
+      
+      updateLocationCount();
+    }
+
+    function updateLocationCount() {
+      const total = locations.length;
+      const selected = document.querySelectorAll('.location-checkbox:checked').length;
+      document.getElementById('locationCount').textContent = `${selected} of ${total} selected`;
+    }
+
+    function setupPresetButtons() {
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const preset = btn.dataset.preset;
+          document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          
+          if (preset === 'wow') {
+            // Week over week: last 7 days vs previous 7 days
+            const end = new Date();
+            const start = new Date(end);
+            start.setDate(start.getDate() - 7);
+            document.getElementById('dateRangeType').value = 'custom';
+            document.getElementById('customStartDate').value = start.toISOString().split('T')[0];
+            document.getElementById('customEndDate').value = end.toISOString().split('T')[0];
+            toggleCustomDateRange();
+          } else if (preset === 'mom') {
+            // Month over month: last 30 days vs previous 30 days
+            const end = new Date();
+            const start = new Date(end);
+            start.setDate(start.getDate() - 30);
+            document.getElementById('dateRangeType').value = 'custom';
+            document.getElementById('customStartDate').value = start.toISOString().split('T')[0];
+            document.getElementById('customEndDate').value = end.toISOString().split('T')[0];
+            toggleCustomDateRange();
+          } else {
+            document.getElementById('dateRangeType').value = preset;
+            toggleCustomDateRange();
+          }
+        });
+      });
+    }
+
+    function setupEventListeners() {
+      document.getElementById('dateRangeType').addEventListener('change', toggleCustomDateRange);
+      document.getElementById('selectAllLocations').addEventListener('change', toggleAllLocations);
+      document.getElementById('topMoversBtn').addEventListener('click', () => runInsight('top-movers'));
+      document.getElementById('storeVarianceBtn').addEventListener('click', () => runInsight('store-variance'));
+      document.getElementById('itemPerformanceBtn').addEventListener('click', () => runInsight('item-performance'));
+      document.getElementById('storeRollupsBtn').addEventListener('click', () => runInsight('store-rollups'));
+      document.getElementById('trendDeltasBtn').addEventListener('click', () => runInsight('trend-deltas'));
+      document.getElementById('anomalyFlagsBtn').addEventListener('click', () => runInsight('anomaly-flags'));
+      document.getElementById('exportCSVBtn').addEventListener('click', () => exportCSV());
+      document.getElementById('exportJSONBtn').addEventListener('click', () => exportJSON());
+      document.getElementById('exportExcelBtn').addEventListener('click', () => exportExcel());
+      
+      // Navigation links
+      document.querySelectorAll('.insight-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          const insight = link.dataset.insight;
+          // Scroll to buttons and highlight
+          const btnId = `${insight}Btn`;
+          const btn = document.getElementById(btnId);
+          if (btn) {
+            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Highlight button briefly
+            btn.style.transform = 'scale(1.05)';
+            setTimeout(() => btn.style.transform = '', 500);
+          }
+          // Update active nav
+          document.querySelectorAll('.nav-link-item').forEach(l => l.classList.remove('active'));
+          link.classList.add('active');
+        });
+      });
+      
+      // Search functionality
+      const searchBox = document.getElementById('searchBox');
+      if (searchBox) {
+        searchBox.addEventListener('input', (e) => {
+          const query = e.target.value.toLowerCase();
+          if (query.length < 2) {
+            document.querySelectorAll('.nav-link-item').forEach(l => l.style.display = '');
+            return;
+          }
+          
+          document.querySelectorAll('.nav-link-item').forEach(link => {
+            const text = link.textContent.toLowerCase();
+            link.style.display = text.includes(query) ? '' : 'none';
+          });
+        });
+      }
+      
+      // View toggle
+      document.querySelectorAll('.view-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const view = btn.dataset.view;
+          document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          switchView(view);
+        });
+      });
+    }
+
+    function toggleCustomDateRange() {
+      const type = document.getElementById('dateRangeType').value;
+      const isCustom = type === 'custom';
+      document.getElementById('customDateRange').classList.toggle('hidden', !isCustom);
+      document.getElementById('customEndDateGroup').classList.toggle('hidden', !isCustom);
+    }
+
+    function toggleAllLocations() {
+      const checked = document.getElementById('selectAllLocations').checked;
+      document.querySelectorAll('.location-checkbox').forEach(cb => cb.checked = checked);
+      updateLocationCount();
+    }
+
+    function getRequestConfig() {
+      const selectedLocations = Array.from(document.querySelectorAll('.location-checkbox:checked')).map(cb => cb.value);
+      const dateRangeType = document.getElementById('dateRangeType').value;
+      
+      const config = {
+        dateRangeType: dateRangeType,
+        restaurantIds: selectedLocations
+      };
+      
+      if (dateRangeType === 'custom') {
+        config.customStartDate = document.getElementById('customStartDate').value;
+        config.customEndDate = document.getElementById('customEndDate').value;
+      }
+      
+      return config;
+    }
+
+    async function runInsight(endpoint) {
+      const config = getRequestConfig();
+      
+      if (config.restaurantIds.length === 0) {
+        showStatus('error', 'Please select at least one location');
+        return;
+      }
+      
+      if (config.dateRangeType === 'custom' && (!config.customStartDate || !config.customEndDate)) {
+        showStatus('error', 'Please select custom date range');
+        return;
+      }
+      
+      document.getElementById('loadingOverlay').classList.remove('hidden');
+      showStatus('info', 'Loading insights...');
+      currentEndpoint = endpoint;
+      
+      try {
+        const resp = await fetch(`/api/v2/insights/${endpoint}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(config)
+        });
+        
+        if (!resp.ok) {
+          const error = await resp.text();
+          throw new Error(error);
+        }
+        
+        currentResults = await resp.json();
+        renderResults(currentResults);
+        showInsightExplanation(endpoint);
+        showStatus('success', `Loaded ${currentResults.length} results`);
+        document.getElementById('viewToggle').classList.remove('hidden');
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+        renderResults([]);
+      } finally {
+        document.getElementById('loadingOverlay').classList.add('hidden');
+      }
+    }
+
+    function switchView(view) {
+      // Hide all views first
+      document.getElementById('chartContainer').classList.add('hidden');
+      document.getElementById('comparisonContainer').classList.add('hidden');
+      const tableParent = document.getElementById('resultsTable').parentElement;
+      
+      if (view === 'table') {
+        tableParent.style.display = 'block';
+      } else if (view === 'chart' && currentResults && currentResults.length > 0) {
+        tableParent.style.display = 'none';
+        renderChart();
+      } else if (view === 'comparison' && currentResults && currentResults.length > 0) {
+        tableParent.style.display = 'none';
+        renderComparison();
+      } else {
+        // Fallback to table if no data
+        tableParent.style.display = 'block';
+      }
+    }
+
+    function renderChart() {
+      if (currentChart) {
+        currentChart.destroy();
+      }
+      
+      const container = document.getElementById('chartContainer');
+      container.classList.remove('hidden');
+      document.getElementById('resultsTable').parentElement.style.display = 'none';
+      
+      const ctx = document.createElement('canvas');
+      container.innerHTML = '';
+      container.appendChild(ctx);
+      
+      // Determine chart type based on endpoint
+      if (currentEndpoint === 'store-rollups' || currentEndpoint === 'store-variance') {
+        // Bar chart for store data
+        const labels = currentResults.map(r => r.storeName || r.itemName);
+        const data = currentResults.map(r => {
+          if (r.netSales !== undefined) return r.netSales;
+          if (r.value !== undefined) return r.value;
+          return 0;
+        });
+        
+        currentChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Value',
+              data: data,
+              backgroundColor: 'rgba(196, 30, 58, 0.6)',
+              borderColor: 'rgba(196, 30, 58, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true
+              }
+            }
+          }
+        });
+      } else if (currentEndpoint === 'trend-deltas') {
+        // Line chart for trends
+        const labels = currentResults.map(r => r.metric);
+        const p1Data = currentResults.map(r => r.period1Value);
+        const p2Data = currentResults.map(r => r.period2Value);
+        
+        currentChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Period 1',
+              data: p1Data,
+              borderColor: 'rgba(107, 114, 128, 1)',
+              backgroundColor: 'rgba(107, 114, 128, 0.1)',
+              tension: 0.1
+            }, {
+              label: 'Period 2',
+              data: p2Data,
+              borderColor: 'rgba(196, 30, 58, 1)',
+              backgroundColor: 'rgba(196, 30, 58, 0.1)',
+              tension: 0.1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false
+          }
+        });
+      } else {
+        // Default bar chart
+        const labels = currentResults.slice(0, 20).map(r => r.itemName || r.storeName || 'Item');
+        const data = currentResults.slice(0, 20).map(r => {
+          if (r.sales !== undefined) return r.sales;
+          if (r.value !== undefined) return r.value;
+          if (r.changePercent !== undefined) return Math.abs(r.changePercent);
+          return 0;
+        });
+        
+        currentChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Value',
+              data: data,
+              backgroundColor: 'rgba(196, 30, 58, 0.6)',
+              borderColor: 'rgba(196, 30, 58, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true
+              }
+            }
+          }
+        });
+      }
+    }
+
+    function renderComparison() {
+      const container = document.getElementById('comparisonContainer');
+      container.classList.remove('hidden');
+      document.getElementById('resultsTable').parentElement.style.display = 'none';
+      
+      if (currentEndpoint === 'store-rollups') {
+        container.innerHTML = currentResults.map(store => `
+          <div class="comparison-card">
+            <h3>${store.storeName}</h3>
+            <div class="metric-value">$${store.netSales.toLocaleString()}</div>
+            <div class="metric-label">Net Sales</div>
+            <div class="metric-value" style="font-size: 1.2rem; margin-top: 0.5rem;">${store.guestCount.toLocaleString()}</div>
+            <div class="metric-label">Guests</div>
+            <div class="metric-value" style="font-size: 1.2rem; margin-top: 0.5rem;">$${store.avgTicket.toFixed(2)}</div>
+            <div class="metric-label">Avg Ticket</div>
+          </div>
+        `).join('');
+      } else if (currentEndpoint === 'trend-deltas') {
+        container.innerHTML = currentResults.map(trend => `
+          <div class="comparison-card">
+            <h3>${trend.metric}</h3>
+            <div class="metric-value">${trend.deltaPercent > 0 ? '+' : ''}${trend.deltaPercent.toFixed(2)}%</div>
+            <div class="metric-label">Change</div>
+            <div style="margin-top: 0.5rem; font-size: 0.9rem;">
+              <div>Period 1: ${trend.period1Value.toLocaleString()}</div>
+              <div>Period 2: ${trend.period2Value.toLocaleString()}</div>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        container.innerHTML = '<div class="empty-state">Comparison view not available for this insight type</div>';
+      }
+    }
+
+    function renderResults(results) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      
+      if (currentChart) {
+        currentChart.destroy();
+        currentChart = null;
+      }
+      
+      if (!results || results.length === 0) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td colspan="100" class="empty-state">No data found</td></tr>';
+        document.getElementById('viewToggle').classList.add('hidden');
+        return;
+      }
+      
+      // Build table headers from first result object
+      const keys = Object.keys(results[0]);
+      head.innerHTML = `<tr>${keys.map(k => `<th>${formatHeader(k)}</th>`).join('')}</tr>`;
+      
+      // Build table rows
+      body.innerHTML = results.map(row => `
+        <tr>
+          ${keys.map(k => `<td>${formatCell(k, row[k])}</td>`).join('')}
+        </tr>
+      `).join('');
+    }
+
+    function formatHeader(key) {
+      return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+    }
+
+    function formatCell(key, value) {
+      // Get the current row to check metric type (for trend-deltas)
+      let currentRow = null;
+      if (currentResults && currentResults.length > 0) {
+        // Try to find row containing this value
+        currentRow = currentResults.find(r => {
+          return Object.values(r).includes(value) || 
+                 (r.period1Value === value) || (r.period2Value === value) ||
+                 (r.delta === value) || (r.deltaPercent === value);
+        });
+      }
+      
+      // Special handling for trend deltas
+      if (currentEndpoint === 'trend-deltas') {
+        if (key === 'period1Value' || key === 'period2Value') {
+          if (currentRow && (currentRow.metric === 'guestCount' || currentRow.metric === 'itemCount')) {
+            return typeof value === 'number' ? value.toLocaleString() : (value || '0');
+          }
+          if (currentRow && currentRow.metric === 'netSales') {
+            return `$${parseFloat(value || 0).toFixed(2)}`;
+          }
+        }
+        if (key === 'delta') {
+          if (currentRow && (currentRow.metric === 'guestCount' || currentRow.metric === 'itemCount')) {
+            return typeof value === 'number' ? value.toLocaleString() : (value || '0');
+          }
+          if (currentRow && currentRow.metric === 'netSales') {
+            return `$${parseFloat(value || 0).toFixed(2)}`;
+          }
+        }
+      }
+      
+      // Currency formatting (but exclude count fields)
+      if ((key.includes('Amount') || key.includes('Sales') || 
+           (key.includes('Value') && !key.includes('Count') && !key.includes('Delta'))) &&
+          !key.includes('guestCount') && !key.includes('itemCount')) {
+        return `$${parseFloat(value || 0).toFixed(2)}`;
+      }
+      
+      // Percentage formatting
+      if (key.includes('Percent') || key.includes('Variance') || (key.includes('Delta') && key.includes('Percent'))) {
+        return typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%` : value;
+      }
+      
+      // Count/Quantity formatting
+      if (key === 'quantity' || key.includes('Qty') || key.includes('Count') || 
+          key.includes('guestCount') || key.includes('itemCount')) {
+        return typeof value === 'number' ? value.toLocaleString() : (value || '0');
+      }
+      
+      // Deviation (standard deviations)
+      if (key === 'deviation') {
+        return typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}σ` : value;
+      }
+      
+      return value || '';
+    }
+
+    function exportCSV() {
+      if (!currentResults || currentResults.length === 0) return;
+      
+      const keys = Object.keys(currentResults[0]);
+      const csvRows = [];
+      
+      csvRows.push(keys.map(k => formatHeader(k)).join(','));
+      
+      currentResults.forEach(row => {
+        csvRows.push(keys.map(k => {
+          const value = row[k] || '';
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        }).join(','));
+      });
+      
+      const csvContent = csvRows.join('\n');
+      const BOM = '\uFEFF';
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+      downloadFile(blob, `${currentEndpoint}_${new Date().toISOString().split('T')[0]}.csv`);
+    }
+
+    function exportJSON() {
+      if (!currentResults || currentResults.length === 0) return;
+      
+      const jsonContent = JSON.stringify(currentResults, null, 2);
+      const blob = new Blob([jsonContent], { type: 'application/json' });
+      downloadFile(blob, `${currentEndpoint}_${new Date().toISOString().split('T')[0]}.json`);
+    }
+
+    function exportExcel() {
+      if (!currentResults || currentResults.length === 0) return;
+      
+      try {
+        const keys = Object.keys(currentResults[0]);
+        const wsData = [
+          keys.map(k => formatHeader(k)),
+          ...currentResults.map(row => keys.map(k => row[k] || ''))
+        ];
+        
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Data');
+        
+        XLSX.writeFile(wb, `${currentEndpoint}_${new Date().toISOString().split('T')[0]}.xlsx`);
+      } catch (err) {
+        showStatus('error', `Error exporting Excel: ${err.message}`);
+      }
+    }
+
+    function downloadFile(blob, filename) {
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    }
+
+    function showInsightExplanation(endpoint) {
+      const explanations = {
+        'top-movers': '📊 <strong>Top Movers</strong> shows menu items with the largest sales changes between two periods. Positive % = sales increased, Negative % = sales decreased. This helps identify trending items.',
+        'store-variance': '📊 <strong>Store Variance</strong> compares each store\'s performance against the average of all selected stores. Positive variance = above average, Negative = below average. Helps identify over/under-performing locations.',
+        'item-performance': '📊 <strong>Item Performance</strong> shows detailed sales data for each menu item by store and date. Use this to analyze which items sell best at which locations.',
+        'store-rollups': '📊 <strong>Store Rollups</strong> provides aggregated metrics (sales, guests, items, avg ticket) for each store over the selected period. Great for overall store performance overview.',
+        'trend-deltas': '📊 <strong>Trend Deltas</strong> compares key metrics (net sales, guest count, item count) between two time periods. Shows period-over-period changes to identify trends. <strong>Delta</strong> = absolute change, <strong>Delta %</strong> = percentage change. <strong>Direction</strong> = up/down/neutral.',
+        'anomaly-flags': '📊 <strong>Anomaly Flags</strong> uses statistical analysis to identify stores with unusual performance (outliers). Flags stores that are more than 2 standard deviations from the average. <strong>Severity</strong> = how unusual (high/medium), <strong>Flag Type</strong> = spike (above) or drop (below).'
+      };
+      
+      const explanationEl = document.getElementById('insightExplanation');
+      if (explanations[endpoint]) {
+        explanationEl.innerHTML = explanations[endpoint];
+        explanationEl.classList.remove('hidden');
+      } else {
+        explanationEl.classList.add('hidden');
+      }
+    }
+
+    function showStatus(type, message) {
+      const status = document.getElementById('status');
+      status.className = `status ${type}`;
+      status.textContent = message;
+      status.classList.remove('hidden');
+      
+      if (type === 'success') {
+        setTimeout(() => status.classList.add('hidden'), 5000);
+      }
+    }
+
+    // Auth functions (shared with other pages)
+    let authToken = localStorage.getItem('auth_token');
+    let currentUser = null;
+
+    function getAuthHeaders() {
+      return {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json'
+      };
+    }
+
+    async function checkAuth() {
+      const userStr = localStorage.getItem('user');
+      if (authToken && userStr) {
+        try {
+          currentUser = JSON.parse(userStr);
+          updateUIForAuth();
+          return true;
+        } catch (e) {
+          console.error('Error parsing user data:', e);
+        }
+      }
+      updateUIForAuth();
+      return false;
+    }
+
+    function updateUIForAuth() {
+      const userProfileSection = document.getElementById('userProfileSection');
+      const userProfileName = document.getElementById('userProfileName');
+      const userProfileRole = document.getElementById('userProfileRole');
+      const userAvatar = document.getElementById('userAvatar');
+      const userAdminBtn = document.getElementById('userAdminBtn');
+      
+      if (currentUser) {
+        // Update user profile in sidebar
+        if (userProfileName) userProfileName.textContent = currentUser.name;
+        if (userProfileRole) userProfileRole.textContent = currentUser.role || 'user';
+        if (userAvatar) {
+          // Get initials for avatar
+          const initials = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+          userAvatar.textContent = initials;
+        }
+        if (userProfileSection) userProfileSection.classList.remove('hidden');
+        
+        // Show admin button if user is admin
+        if (userAdminBtn) {
+          if (currentUser.role === 'admin') {
+            userAdminBtn.classList.remove('hidden');
+          } else {
+            userAdminBtn.classList.add('hidden');
+          }
+        }
+      } else {
+        if (userProfileSection) userProfileSection.classList.add('hidden');
+        if (userAdminBtn) userAdminBtn.classList.add('hidden');
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      authToken = null;
+      currentUser = null;
+      updateUIForAuth();
+      window.location.href = '/';
+    }
+
+    // Navigation dropdowns
+    function setupNavigation() {
+      document.querySelectorAll('.nav-category-header').forEach(header => {
+        header.addEventListener('click', () => {
+          const isCollapsed = header.classList.contains('collapsed');
+          const items = header.nextElementSibling;
+          const icon = header.querySelector('.toggle-icon');
+          
+          if (isCollapsed) {
+            header.classList.remove('collapsed');
+            items.style.maxHeight = '500px';
+            items.style.opacity = '1';
+            items.style.marginTop = '0.5rem';
+            icon.textContent = '▼';
+          } else {
+            header.classList.add('collapsed');
+            items.style.maxHeight = '0';
+            items.style.opacity = '0';
+            items.style.marginTop = '0';
+            icon.textContent = '▶';
+          }
+        });
+      });
+    }
+
+    // Initialize on page load
+    async function initAll() {
+      await checkAuth();
+      await init();
+      setupNavigation();
+      
+      // Setup sidebar user profile event listeners
+      const userLogoutBtn = document.getElementById('userLogoutBtn');
+      const helpBtn = document.getElementById('helpBtn');
+      const userAdminBtn = document.getElementById('userAdminBtn');
+      
+      if (userLogoutBtn) userLogoutBtn.addEventListener('click', logout);
+      if (helpBtn) {
+        // Create help modal if it doesn't exist
+        let helpModal = document.getElementById('helpModal');
+        if (!helpModal) {
+          helpModal = document.createElement('div');
+          helpModal.id = 'helpModal';
+          helpModal.className = 'modal-overlay hidden';
+          helpModal.innerHTML = `
+            <div class="modal">
+              <div class="modal-header">
+                <h2>Request Help</h2>
+                <button class="modal-close" id="closeHelpModal">&times;</button>
+              </div>
+              <form id="helpForm">
+                <div class="modal-form-group">
+                  <label for="helpName">Your Name *</label>
+                  <input type="text" id="helpName" required placeholder="Enter your name" />
+                </div>
+                <div class="modal-form-group">
+                  <label for="helpEmail">Your Email *</label>
+                  <input type="email" id="helpEmail" required placeholder="your.email@example.com" />
+                </div>
+                <div class="modal-form-group">
+                  <label for="helpSubject">Subject *</label>
+                  <input type="text" id="helpSubject" required placeholder="Brief description of your issue" />
+                </div>
+                <div class="modal-form-group">
+                  <label for="helpPriority">Priority</label>
+                  <select id="helpPriority">
+                    <option value="1">Low</option>
+                    <option value="2" selected>Medium</option>
+                    <option value="3">High</option>
+                    <option value="4">Urgent</option>
+                  </select>
+                </div>
+                <div class="modal-form-group">
+                  <label for="helpDescription">Description *</label>
+                  <textarea id="helpDescription" required placeholder="Please provide details about what you need help with..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid #D1D5DB; font-size: 0.9rem; font-family: inherit; min-height: 120px; resize: vertical;"></textarea>
+                </div>
+                <div class="modal-actions" style="margin-top: 2rem; padding-top: 1.5rem; border-top: 2px solid #E5E7EB;">
+                  <button type="button" class="btn-secondary" id="cancelHelpBtn">Cancel</button>
+                  <button type="submit" class="btn-primary">Submit Ticket</button>
+                </div>
+              </form>
+            </div>
+          `;
+          document.body.appendChild(helpModal);
+          
+          document.getElementById('closeHelpModal').addEventListener('click', () => {
+            helpModal.classList.add('hidden');
+          });
+          document.getElementById('cancelHelpBtn').addEventListener('click', () => {
+            helpModal.classList.add('hidden');
+          });
+          document.getElementById('helpForm').addEventListener('submit', submitHelpTicket);
+        }
+        
+        helpBtn.addEventListener('click', () => {
+          helpModal.classList.remove('hidden');
+        });
+      }
+      
+      async function submitHelpTicket(e) {
+        e.preventDefault();
+        
+        const name = document.getElementById('helpName').value.trim();
+        const email = document.getElementById('helpEmail').value.trim();
+        const subject = document.getElementById('helpSubject').value.trim();
+        const priority = document.getElementById('helpPriority').value;
+        const description = document.getElementById('helpDescription').value.trim();
+        
+        if (!name || !email || !subject || !description) {
+          alert('Please fill in all required fields');
+          return;
+        }
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+        
+        try {
+          const resp = await fetch('/api/help/ticket', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              name,
+              email,
+              subject,
+              priority: parseInt(priority),
+              description
+            })
+          });
+          
+          const responseData = await resp.json().catch(() => ({ detail: resp.statusText }));
+          
+          if (resp.ok) {
+            const result = responseData;
+            alert(`Help ticket submitted successfully! Ticket ID: ${result.ticketId || 'N/A'}\n\n${result.message || 'Our team will respond soon!'}`);
+            document.getElementById('helpForm').reset();
+            document.getElementById('helpModal').classList.add('hidden');
+          } else {
+            const errorMsg = responseData.detail || responseData.message || 'Failed to submit ticket';
+            console.error('Help ticket submission error:', errorMsg);
+            alert(`Error submitting ticket: ${errorMsg}\n\nPlease check that SLACK_WEBHOOK_URL is configured in the backend.`);
+          }
+        } catch (err) {
+          console.error('Help ticket submission error:', err);
+          alert(`Error submitting ticket: ${err.message}\n\nPlease check the browser console for details.`);
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+        }
+      }
+      if (userAdminBtn) userAdminBtn.addEventListener('click', () => {
+        window.location.href = '/admin.html';
+      });
+    }
+
+    initAll();
+  </script>
+</body>
+</html>

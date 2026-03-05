@@ -1,17 +1,20 @@
 from datetime import date, datetime, timedelta
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 import time
 import sys
 import json
 import uuid
 import hashlib
+import csv
+import io
+import re
 
 import asyncio
 import os
 
 import httpx
 from httpx import HTTPStatusError
-from fastapi import FastAPI, HTTPException, Query, Body, Depends, status
+from fastapi import FastAPI, HTTPException, Query, Body, Depends, status, APIRouter, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -19,8 +22,28 @@ from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from jose import JWTError, jwt
 import bcrypt
+import pandas as pd
 
 load_dotenv()
+
+from pick3_reports import router as pick3_router, Pick3ReportRequest, Pick3DrillDownOrdersRequest, Pick3DrillDownAllStoresRequest
+
+# Allow importing root-level modules (sales_consolidator, hierarchical_reports)
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from sales_consolidator import SalesConsolidator
+from hierarchical_reports import HierarchicalReportGenerator
+from aloha_sql_importer import import_aloha_sql_range, import_aloha_sql_last_days
+import aloha_db
+from olo_client import (
+    list_order_batches,
+    download_batch_zip,
+    extract_orders_from_zip,
+    aggregate_digital_orders_by_platform,
+    filter_batches_by_date_range,
+)
 
 # ------------------
 # Config
@@ -34,9 +57,746 @@ TOAST_API_TOKEN = os.getenv("TOAST_API_TOKEN")
 TOAST_STANDARD_API_CLIENT_ID = os.getenv("TOAST_STANDARD_API_CLIENT_ID")
 TOAST_STANDARD_API_CLIENT_SECRET = os.getenv("TOAST_STANDARD_API_CLIENT_SECRET")
 TOAST_STANDARD_API_BASE_URL = os.getenv("TOAST_STANDARD_API_BASE_URL", "https://ws-api.toasttab.com")
+TOAST_ORDERS_API_BASE_URL = os.getenv("TOAST_ORDERS_API_BASE_URL", TOAST_STANDARD_API_BASE_URL)
+TOAST_MENU_TAGS_PRIORITY_EXTERNAL_ID = os.getenv("TOAST_MENU_TAGS_PRIORITY_EXTERNAL_ID")
+TOAST_MENU_TAGS_PRIORITY_NAME = os.getenv("TOAST_MENU_TAGS_PRIORITY_NAME")
 
 # Slack webhook configuration
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")  # Slack incoming webhook URL
+
+# YoY storage configuration
+YOY_DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "aloha")
+YOY_INDEX_FILE = os.path.join(YOY_DATA_DIR, "index.json")
+ALOHA_LOCATION_MAPPING_FILE = os.path.join(YOY_DATA_DIR, "aloha_location_mapping.json")
+ALOHA_ORDER_MODE_MAPPING_FILE = os.path.join(YOY_DATA_DIR, "aloha_order_mode_mapping.json")
+TOAST_CHANNELS_FILE = os.path.join(YOY_DATA_DIR, "toast_channels.json")
+
+_DEFAULT_TOAST_CHANNELS = ["Dine In", "Take Out", "Delivery", "OLO / Online", "Catering", "Drive Thru", "Other"]
+
+
+def get_toast_channels() -> list:
+    """Load Toast channel list from file, falling back to defaults."""
+    if os.path.exists(TOAST_CHANNELS_FILE):
+        try:
+            with open(TOAST_CHANNELS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return [str(c).strip() for c in data if str(c).strip()]
+        except Exception:
+            pass
+    return list(_DEFAULT_TOAST_CHANNELS)
+
+MAPPING_FILE = os.path.join(ROOT_DIR, "Updated Mapping Table.xlsx")
+FALLBACK_MAPPING_FILE = os.path.join(ROOT_DIR, "Fallback Updated Mapping.xlsx")
+
+_consolidated_cat_cache: Dict[str, Dict[str, str]] = {}
+
+
+def _normalize_item_name(value: str) -> str:
+    return " ".join(str(value or "").lower().replace("&", "and").split())
+
+
+def _mapping_lookup_keys(normalized_name: str) -> List[str]:
+    """
+    Return candidate keys for looking up consolidated/report_tag map.
+    Tries full normalized name first, then base name with trailing " (xxx)" stripped.
+    Also adds variant with " and " collapsed to "and" so mapping "Pepperoni&Mushroom..."
+    (stored as pepperoniandmushroom...) matches Toast "Pepperoni & Mushroom..." (and vice versa).
+    """
+    if not normalized_name or not normalized_name.strip():
+        return []
+    keys = [normalized_name]
+    # So Excel "Pepperoni&Mushroom Pizza" and Toast "Pepperoni & Mushroom Pizza" both match
+    alt = normalized_name.replace(" and ", "and")
+    if alt != normalized_name and alt not in keys:
+        keys.append(alt)
+    match = re.match(r"^(.+?)\s+\([^)]+\)\s*$", normalized_name)
+    if match:
+        base = match.group(1).strip()
+        if base and base not in keys:
+            keys.append(base)
+        if base:
+            base_alt = base.replace(" and ", "and")
+            if base_alt not in keys:
+                keys.append(base_alt)
+    return keys
+
+
+def _get_tag_from_mapping(
+    normalized_name: str,
+    report_tag_map: Dict[str, str],
+    consolidated_cat_map: Dict[str, str],
+    consolidated_override: Dict[str, str],
+    guid: str,
+) -> Optional[str]:
+    """First try override by GUID, then try each lookup key in report_tag_map and consolidated_cat_map."""
+    tag = consolidated_override.get(guid)
+    if tag:
+        return tag
+    for key in _mapping_lookup_keys(normalized_name):
+        tag = report_tag_map.get(key) or consolidated_cat_map.get(key)
+        if tag:
+            return tag
+    return None
+
+
+def _normalize_tag_name(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if text.startswith("*"):
+        text = text.lstrip("*").strip()
+    return text
+
+
+def _parse_ee_weight(tag_name: str) -> Optional[float]:
+    """Parse item-equivalent weight from an EE tag name.
+
+    Examples: 'EE 1' -> 1.0, 'EE .5' -> 0.5, 'EE 0.5' -> 0.5, 'EE 12' -> 12.0
+    Returns None if the tag name does not match the EE weight pattern.
+    """
+    m = re.match(r'^EE\s+(\d*\.?\d+)\s*$', str(tag_name or "").strip(), re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _is_olo_item(item_name: str) -> bool:
+    """Returns True when the Toast item name contains 'OLO' (case-insensitive),
+    indicating the item was sold through the online-ordering channel."""
+    return "olo" in (item_name or "").lower()
+
+
+def _humanize_item_name(normalized_name: str) -> str:
+    """Turn normalized name (e.g. 'pepperoni and portabella pizza (entree)') into display form."""
+    if not normalized_name:
+        return normalized_name
+    s = normalized_name.replace(" and ", " & ").strip()
+    return s.title() if s else s
+
+
+def get_consolidated_category_map() -> Dict[str, str]:
+    """Toast_Item_Name (normalized) -> ConsolidatedCat. Uses cache."""
+    _ensure_consolidated_maps()
+    return _consolidated_cat_cache.get("data", {}).get("map", {})
+
+
+def get_report_tag_map() -> Dict[str, str]:
+    """
+    Toast_Item_Name (normalized) -> tag used for report filtering.
+    Uses column 'Tag' or 'ReportTag' if present, else ConsolidatedCat.
+    Used so mapping table can assign report tags (e.g. PepperoniMushroom) to items/modifiers.
+    """
+    _ensure_consolidated_maps()
+    return _consolidated_cat_cache.get("data", {}).get("report_tag_map", {})
+
+
+def get_consolidated_guid_map() -> Dict[str, str]:
+    """
+    Toast menu item/modifier GUID -> tag (for report filtering).
+    Built from optional column 'item_guid', 'Toast_GUID', or 'GUID' in the mapping table.
+    When present, lookup by GUID is tried first so items count even if name doesn't match.
+    """
+    _ensure_consolidated_maps()
+    return _consolidated_cat_cache.get("data", {}).get("guid_to_tag", {})
+
+
+def _ensure_consolidated_maps() -> None:
+    """Load mapping file once and populate consolidated map + report_tag_map in cache."""
+    mapping_files = [MAPPING_FILE, FALLBACK_MAPPING_FILE]
+    missing = [path for path in mapping_files if not os.path.exists(path)]
+    if len(missing) == len(mapping_files):
+        logger.warning(f"Mapping files missing for consolidated categories: {missing}")
+        return
+
+    mtimes = {path: os.path.getmtime(path) for path in mapping_files if os.path.exists(path)}
+    cache = _consolidated_cat_cache.get("data")
+    if cache and cache.get("mtimes") == mtimes:
+        return
+
+    name_col = "Toast_Item_Name"
+    cat_col = "ConsolidatedCat"
+    mapping: Dict[str, str] = {}
+    report_tag_map: Dict[str, str] = {}
+
+    for path in mapping_files:
+        if not os.path.exists(path):
+            logger.warning(f"Mapping file missing for consolidated categories: {path}")
+            continue
+        try:
+            df = pd.read_excel(path)
+        except Exception as exc:
+            logger.warning(f"Failed to read mapping file for consolidated categories: {path} ({exc})")
+            continue
+
+        if name_col not in df.columns or cat_col not in df.columns:
+            logger.warning(f"Mapping file missing required columns for consolidated categories: {path} ({name_col}, {cat_col})")
+            continue
+
+        tag_col = None
+        for c in ["Tag", "ReportTag", "GuestCountTag"]:
+            if c in df.columns:
+                tag_col = c
+                break
+
+        for _, row in df.iterrows():
+            name = _normalize_item_name(row.get(name_col))
+            if not name:
+                continue
+            cat = str(row.get(cat_col)).strip() if pd.notna(row.get(cat_col)) else ""
+            tag_val = ""
+            if tag_col and pd.notna(row.get(tag_col)):
+                tag_val = str(row.get(tag_col)).strip()
+            if not tag_val:
+                tag_val = cat
+            # Only store base key (e.g. "pepperoni and portabella pizza") when the row has NO parenthetical,
+            # so we don't apply "(Entree)" mapping to "(OLO Pairing Choice)" or other variants.
+            name_has_paren = "(" in name
+            for key in _mapping_lookup_keys(name):
+                is_base_key = key != name
+                if is_base_key and name_has_paren:
+                    continue
+                if key not in mapping and cat:
+                    mapping[key] = cat
+                if tag_val and key not in report_tag_map:
+                    report_tag_map[key] = tag_val
+
+    _consolidated_cat_cache["data"] = {"mtimes": mtimes, "map": mapping, "report_tag_map": report_tag_map}
+
+
+def get_consolidated_override_map() -> Dict[str, str]:
+    return {
+        "81c4867f-b73c-41e3-abe8-a89f9e180919": "Consolidated Pizza",
+        "ac99345a-f79d-4083-bb01-f56f0e44cf64": "Consolidated Pizza"
+    }
+
+
+async def _fetch_menu_rows_for_range(
+    client: httpx.AsyncClient,
+    restaurant_ids: List[str],
+    start_date: date,
+    end_date: date,
+    group_by: List[str]
+) -> List[Dict]:
+    report_guid = await request_toast_report(
+        client,
+        start_date,
+        end_date,
+        restaurant_ids,
+        "menu",
+        group_by
+    )
+    return await fetch_toast_report(client, report_guid, "menu")
+
+
+def _aggregate_missing_consolidated_rows(
+    rows: List[Dict],
+    source_type: str,
+    consolidated_map: Dict[str, str]
+) -> Dict[str, Dict]:
+    aggregated: Dict[str, Dict] = {}
+    for row in rows:
+        guid = row.get("menuItemGuid") or ""
+        name = row.get("menuItemName") or ""
+        if not guid or not name:
+            continue
+        norm_name = _normalize_item_name(name)
+        if norm_name and consolidated_map.get(norm_name):
+            continue
+        key = f"{guid}|{name}"
+        if key not in aggregated:
+            aggregated[key] = {
+                "menuItemGuid": guid,
+                "menuItemName": name,
+                "totalQty": 0,
+                "sourceType": source_type
+            }
+        aggregated[key]["totalQty"] += row.get("quantitySold", 0) or 0
+    return aggregated
+
+
+def _aggregate_all_rows(
+    rows: List[Dict],
+    source_type: str,
+    consolidated_map: Dict[str, str]
+) -> Dict[str, Dict]:
+    aggregated: Dict[str, Dict] = {}
+    for row in rows:
+        guid = row.get("menuItemGuid") or ""
+        name = row.get("menuItemName") or ""
+        if not guid or not name:
+            continue
+        norm_name = _normalize_item_name(name)
+        consolidated_cat = consolidated_map.get(norm_name)
+        key = f"{guid}|{name}"
+        if key not in aggregated:
+            aggregated[key] = {
+                "menuItemGuid": guid,
+                "menuItemName": name,
+                "normalizedName": norm_name,
+                "consolidatedCat": consolidated_cat or "",
+                "totalQty": 0,
+                "sourceType": source_type
+            }
+        aggregated[key]["totalQty"] += row.get("quantitySold", 0) or 0
+    return aggregated
+
+
+def _safe_write_excel(df: pd.DataFrame, target_path: str) -> str:
+    try:
+        df.to_excel(target_path, index=False)
+        return target_path
+    except PermissionError:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base, ext = os.path.splitext(target_path)
+        fallback_path = f"{base}_{timestamp}{ext}"
+        df.to_excel(fallback_path, index=False)
+        return fallback_path
+
+def ensure_yoy_storage():
+    os.makedirs(YOY_DATA_DIR, exist_ok=True)
+    if not os.path.exists(YOY_INDEX_FILE):
+        with open(YOY_INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump({"files": {}}, f)
+
+def load_yoy_index() -> Dict:
+    ensure_yoy_storage()
+    with open(YOY_INDEX_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_yoy_index(data: Dict) -> None:
+    ensure_yoy_storage()
+    with open(YOY_INDEX_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+def get_yoy_consolidator() -> SalesConsolidator:
+    if not os.path.exists(MAPPING_FILE):
+        raise HTTPException(status_code=500, detail=f"Missing mapping file: {MAPPING_FILE}")
+    return SalesConsolidator(MAPPING_FILE)
+
+def get_aloha_location_mapping() -> Dict[str, str]:
+    """
+    Load Toast restaurant GUID -> Aloha Location ID mapping from
+    backend/data/aloha/aloha_location_mapping.json (optional).
+    Format: {"toast_restaurant_guid": "aloha_location_id", ...}
+    """
+    if not os.path.exists(ALOHA_LOCATION_MAPPING_FILE):
+        return {}
+    try:
+        with open(ALOHA_LOCATION_MAPPING_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): str(v) for k, v in data.items()}
+    except Exception as e:
+        logger.warning(f"Could not load Aloha location mapping: {e}")
+        return {}
+
+
+def get_aloha_order_mode_mapping() -> Dict[str, str]:
+    """
+    Load Aloha OrderMode -> Toast channel mapping from
+    backend/data/aloha/aloha_order_mode_mapping.json (optional).
+    Format: {"Dine In": "Dine In", "Delivery": "Delivery", ...}
+    Returns empty dict if file not found.
+    """
+    if not os.path.exists(ALOHA_ORDER_MODE_MAPPING_FILE):
+        return {}
+    try:
+        with open(ALOHA_ORDER_MODE_MAPPING_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): str(v) for k, v in data.items()}
+    except Exception as e:
+        logger.warning(f"Could not load Aloha order mode mapping: {e}")
+        return {}
+
+
+def get_aloha_file_path(business_date: str) -> str:
+    index = load_yoy_index()
+    file_entry = index.get("files", {}).get(business_date)
+    if not file_entry:
+        raise HTTPException(status_code=404, detail=f"No Aloha data found for {business_date}")
+    file_path = file_entry.get("path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"Aloha file missing for {business_date}")
+    return file_path
+
+def get_aloha_file_path_if_exists(business_date: str) -> Optional[str]:
+    """Return path to Aloha file for the given date if it exists, else None."""
+    index = load_yoy_index()
+    file_entry = index.get("files", {}).get(business_date)
+    if not file_entry:
+        return None
+    file_path = file_entry.get("path")
+    if not file_path or not os.path.exists(file_path):
+        return None
+    return file_path
+
+async def apply_yoy_aloha_quantities(
+    result: dict,
+    report_config: "ReportConfig",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> dict:
+    if not result or report_config.reportType != "menu" or not report_config.yoyEnabled:
+        return result
+
+    consolidator = get_yoy_consolidator()
+    aloha_df = None
+    aloha_start = None
+    aloha_end = None
+
+    if start_date is not None and end_date is not None:
+        # YoY: use same date range as report, 1 year prior
+        aloha_start = start_date - timedelta(days=365)
+        aloha_end = end_date - timedelta(days=365)
+
+        # ── Resolve location and order-mode filters BEFORE the query ──────────
+        loc_filter: Optional[List[str]] = None
+        if getattr(report_config, "restaurantIds", None):
+            loc_mapping = get_aloha_location_mapping()
+            if loc_mapping:
+                allowed_aloha = [loc_mapping[rid] for rid in report_config.restaurantIds if rid in loc_mapping]
+                if allowed_aloha:
+                    loc_filter = allowed_aloha
+
+        om_filter: Optional[List[str]] = None
+        report_channel = getattr(report_config, "orderModeFilter", None)
+        if report_channel:
+            om_mapping = get_aloha_order_mode_mapping()
+            if om_mapping:
+                allowed_modes = [k for k, v in om_mapping.items() if v == report_channel]
+                if allowed_modes:
+                    om_filter = allowed_modes
+
+        # ── Primary path: SQLite (single query, no per-file loop) ─────────────
+        if aloha_db.db_available():
+            try:
+                aloha_df = await asyncio.to_thread(
+                    aloha_db.query_date_range,
+                    aloha_start.isoformat(),
+                    aloha_end.isoformat(),
+                    loc_filter,
+                    om_filter,
+                )
+            except Exception as exc:
+                logger.warning(f"SQLite YoY query failed, falling back to CSV: {exc}")
+                aloha_df = None
+
+        # ── Fallback path: per-date CSV loop (legacy / pre-SQLite data) ───────
+        if aloha_df is None or aloha_df.empty:
+            dfs = []
+            d = aloha_start
+            while d <= aloha_end:
+                path = get_aloha_file_path_if_exists(d.isoformat())
+                if path:
+                    try:
+                        df = await asyncio.to_thread(consolidator.load_aloha_data, path)
+                        if not df.empty:
+                            dfs.append(df)
+                    except Exception as e:
+                        logger.warning(f"Could not load Aloha file for {d}: {e}")
+                d += timedelta(days=1)
+            if dfs:
+                aloha_df = pd.concat(dfs, ignore_index=True)
+                # Apply filters that SQLite would have applied automatically
+                if loc_filter and "Location" in aloha_df.columns:
+                    aloha_df = aloha_df[aloha_df["Location"].astype(str).str.strip().isin(set(loc_filter))].copy()
+                if om_filter and "OrderMode" in aloha_df.columns:
+                    aloha_df = aloha_df[aloha_df["OrderMode"].astype(str).str.strip().isin(set(om_filter))].copy()
+
+        if aloha_df is None or aloha_df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No Aloha data found for YoY range {aloha_start.isoformat()} to {aloha_end.isoformat()}. Import data for that range first."
+            )
+
+    elif report_config.alohaDate:
+        # Legacy: single date
+        try:
+            aloha_date_obj = date.fromisoformat(report_config.alohaDate)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="alohaDate must be YYYY-MM-DD")
+        aloha_start = aloha_end = aloha_date_obj
+
+        # Try SQLite first
+        if aloha_db.db_available():
+            try:
+                aloha_df = await asyncio.to_thread(
+                    aloha_db.query_date_range,
+                    aloha_date_obj.isoformat(),
+                    aloha_date_obj.isoformat(),
+                )
+            except Exception:
+                aloha_df = None
+
+        # Fallback to CSV
+        if aloha_df is None or aloha_df.empty:
+            aloha_file_path = get_aloha_file_path(aloha_date_obj.isoformat())
+            aloha_df = await asyncio.to_thread(consolidator.load_aloha_data, aloha_file_path)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Year-over-Year comparison requires the report date range (Aloha range is computed as same range, 1 year prior)."
+        )
+
+    if aloha_df is None or aloha_df.empty:
+        return result
+
+    aloha_qty_by_name = (
+        aloha_df.groupby("AlohaItem", dropna=False)["Quantity"].sum().to_dict()
+    )
+    aloha_qty_by_name_norm = {
+        consolidator.normalize_name(name): qty
+        for name, qty in aloha_qty_by_name.items()
+        if consolidator.normalize_name(name)
+    }
+    aloha_name_by_norm = {
+        consolidator.normalize_name(name): name
+        for name in aloha_qty_by_name.keys()
+        if consolidator.normalize_name(name)
+    }
+    toast_to_aloha = consolidator.toast_to_aloha_map
+    toast_name_to_aloha = consolidator.toast_name_to_aloha_map
+    match_stats = {
+        "matchedByGuid": 0,
+        "matchedByToastName": 0,
+        "matchedByAlohaName": 0,
+        "matchedTotal": 0
+    }
+
+    def lookup_aloha_qty(menu_item_guid: str, menu_item_name: str) -> Tuple[float, Optional[str], Optional[str]]:
+        if menu_item_guid:
+            aloha_name = toast_to_aloha.get(menu_item_guid)
+            if aloha_name:
+                qty = float(aloha_qty_by_name.get(aloha_name, 0))
+                if qty:
+                    match_stats["matchedByGuid"] += 1
+                    match_stats["matchedTotal"] += 1
+                return qty, aloha_name, "guid"
+        if menu_item_name:
+            normalized = consolidator.normalize_name(menu_item_name)
+            aloha_name = toast_name_to_aloha.get(normalized)
+            if aloha_name:
+                qty = float(aloha_qty_by_name.get(aloha_name, 0))
+                if qty:
+                    match_stats["matchedByToastName"] += 1
+                    match_stats["matchedTotal"] += 1
+                return qty, aloha_name, "toastName"
+            if normalized in aloha_qty_by_name_norm:
+                qty = float(aloha_qty_by_name_norm.get(normalized, 0))
+                if qty:
+                    match_stats["matchedByAlohaName"] += 1
+                    match_stats["matchedTotal"] += 1
+                return qty, aloha_name_by_norm.get(normalized), "alohaName"
+        return 0.0, None, None
+
+    def enrich_rows(rows: list) -> None:
+        for row in rows:
+            guid = row.get("menuItemGuid")
+            name = row.get("menuItemName")
+            aloha_qty, aloha_name, source = lookup_aloha_qty(guid, name)
+            row["alohaQty"] = aloha_qty
+            if aloha_name:
+                row["alohaItemName"] = aloha_name
+                row["alohaDetails"] = [{"name": aloha_name, "qty": aloha_qty}]
+            elif aloha_qty:
+                row["alohaDetails"] = [{"name": "Matched Aloha Item", "qty": aloha_qty}]
+            if source:
+                row["alohaMatchSource"] = source
+
+    enrich_rows(result.get("itemBreakdownDaily", []))
+    enrich_rows(result.get("itemBreakdown", []))
+    enrich_rows(result.get("itemTotals", []))
+
+    # ── Per-channel YoY enrichment for OLO / In-Store split ─────────────────
+    # The rows in orderModeSplit share the same objects as itemBreakdownDaily,
+    # so the main enrich_rows above already stamped them with *total* Aloha qty
+    # (all order modes combined).  Re-enrich each channel's rows with Aloha data
+    # filtered to just that channel's order modes, so OLO and In-Store show the
+    # correct channel-specific prior-year quantities instead of the same total.
+    _split_debug: dict = {}
+    _order_mode_split = result.get("orderModeSplit")
+
+    # ── Diagnose why the block might be skipped ──────────────────────────────
+    _sd_has_split    = bool(_order_mode_split)
+    _sd_has_om_col   = "OrderMode" in aloha_df.columns
+    _sd_om_filter    = om_filter  # None means no filter → block runs
+    _sd_distinct_om  = sorted(aloha_df["OrderMode"].dropna().unique().tolist()) if _sd_has_om_col else []
+
+    _split_debug["blockConditions"] = {
+        "hasOrderModeSplit":   _sd_has_split,
+        "hasOrderModeColumn":  _sd_has_om_col,
+        "omFilterActive":      bool(_sd_om_filter),
+        "omFilterValue":       _sd_om_filter,
+        "distinctOrderModesInAloha": _sd_distinct_om,
+        "alohaRowCount": int(len(aloha_df)),
+    }
+
+    if _sd_has_split and _sd_has_om_col and not _sd_om_filter:
+        _split_debug["blockEntered"] = True
+        _om_mapping = get_aloha_order_mode_mapping()
+        _split_debug["omMappingFound"]  = bool(_om_mapping)
+        _split_debug["omMappingCount"]  = len(_om_mapping) if _om_mapping else 0
+        _split_debug["omMappingSample"] = dict(list(_om_mapping.items())[:15]) if _om_mapping else {}
+
+        if _om_mapping:
+            _OLO_CHANNELS     = {"OLO / Online", "Delivery"}
+            # "In Store" is the label used in aloha_order_mode_mapping.json for Dine-In,
+            # To Go, Curbside, Drive Thru, Call-In, POS 2, etc.
+            # The legacy labels ("Dine In", "Take Out", etc.) are kept for any older
+            # mapping files that may use them.
+            _INSTORE_CHANNELS = {"In Store", "Dine In", "Take Out", "Drive Thru", "Catering", "Other"}
+
+            _olo_modes     = {k for k, v in _om_mapping.items() if v in _OLO_CHANNELS}
+            _instore_modes = {k for k, v in _om_mapping.items() if v in _INSTORE_CHANNELS}
+
+            _split_debug["oloChannelLabels"]     = sorted(_OLO_CHANNELS)
+            _split_debug["instoreChannelLabels"] = sorted(_INSTORE_CHANNELS)
+            _split_debug["oloModes"]             = sorted(_olo_modes)
+            _split_debug["instoreModes"]         = sorted(_instore_modes)
+
+            def _make_split_lookup(df_split):
+                _qty   = df_split.groupby("AlohaItem", dropna=False)["Quantity"].sum().to_dict()
+                _qnorm = {consolidator.normalize_name(n): q for n, q in _qty.items() if consolidator.normalize_name(n)}
+                _nnorm = {consolidator.normalize_name(n): n for n in _qty if consolidator.normalize_name(n)}
+                def _look(guid, name):
+                    if guid:
+                        an = toast_to_aloha.get(guid)
+                        if an:
+                            return float(_qty.get(an, 0)), an, "guid"
+                    if name:
+                        norm = consolidator.normalize_name(name)
+                        an = toast_name_to_aloha.get(norm)
+                        if an:
+                            return float(_qty.get(an, 0)), an, "toastName"
+                        if norm in _qnorm:
+                            return float(_qnorm.get(norm, 0)), _nnorm.get(norm), "alohaName"
+                    return 0.0, None, None
+                return _look
+
+            def _enrich_split(rows, lkp):
+                for row in rows:
+                    aq, an, src = lkp(row.get("menuItemGuid"), row.get("menuItemName"))
+                    row["alohaQty"] = aq
+                    if an:
+                        row["alohaItemName"] = an
+                        row["alohaDetails"] = [{"name": an, "qty": aq}]
+                    elif aq:
+                        row["alohaDetails"] = [{"name": "Matched Aloha Item", "qty": aq}]
+                    if src:
+                        row["alohaMatchSource"] = src
+
+            # ── Save combined Aloha quantities before split enrichment ────────
+            # The split rows share the same dict objects as the combined
+            # itemBreakdown / itemTotals rows.  _enrich_split mutates them
+            # in-place, so we snapshot the combined values here (keyed by
+            # object id) and restore them afterwards so the top-level combined
+            # view continues to show the all-channel Aloha total.
+            _combined_rows = result.get("itemBreakdown", []) + result.get("itemTotals", [])
+            _saved_combined: dict = {}
+            for _row in _combined_rows:
+                _saved_combined[id(_row)] = {
+                    "alohaQty":        _row.get("alohaQty", 0),
+                    "alohaItemName":   _row.get("alohaItemName"),
+                    "alohaDetails":    _row.get("alohaDetails"),
+                    "alohaMatchSource": _row.get("alohaMatchSource"),
+                }
+
+            # ── OLO ──────────────────────────────────────────────────────────
+            if _olo_modes:
+                _df_olo = aloha_df[aloha_df["OrderMode"].isin(_olo_modes)]
+                _split_debug["oloAlohaRows"]   = int(len(_df_olo))
+                _split_debug["oloAlohaItems"]  = int(_df_olo["AlohaItem"].nunique()) if not _df_olo.empty else 0
+                if not _df_olo.empty:
+                    _lkp_olo = _make_split_lookup(_df_olo)
+                    _enrich_split(_order_mode_split.get("olo", {}).get("itemBreakdownDaily", []), _lkp_olo)
+                    _enrich_split(_order_mode_split.get("olo", {}).get("itemBreakdown", []), _lkp_olo)
+                else:
+                    _split_debug["oloSkipped"] = "df_olo is empty after filtering"
+            else:
+                _split_debug["oloSkipped"] = "no Aloha order modes mapped to OLO channels"
+
+            # ── In-Store ──────────────────────────────────────────────────────
+            if _instore_modes:
+                _df_instore = aloha_df[aloha_df["OrderMode"].isin(_instore_modes)]
+                _split_debug["instoreAlohaRows"]  = int(len(_df_instore))
+                _split_debug["instoreAlohaItems"] = int(_df_instore["AlohaItem"].nunique()) if not _df_instore.empty else 0
+                if not _df_instore.empty:
+                    _lkp_instore = _make_split_lookup(_df_instore)
+                    _enrich_split(_order_mode_split.get("inStore", {}).get("itemBreakdownDaily", []), _lkp_instore)
+                    _enrich_split(_order_mode_split.get("inStore", {}).get("itemBreakdown", []), _lkp_instore)
+                else:
+                    _split_debug["instoreSkipped"] = "df_instore is empty after filtering"
+            else:
+                _split_debug["instoreSkipped"] = "no Aloha order modes mapped to In-Store channels"
+
+            # ── Restore combined Aloha quantities on main (non-split) rows ────
+            # Re-stamp itemBreakdown / itemTotals with the combined values we
+            # saved above, undoing any in-place overwrites from _enrich_split.
+            for _row in _combined_rows:
+                _saved = _saved_combined.get(id(_row))
+                if _saved is None:
+                    continue
+                _row["alohaQty"] = _saved["alohaQty"]
+                if _saved.get("alohaItemName") is not None:
+                    _row["alohaItemName"]   = _saved["alohaItemName"]
+                if _saved.get("alohaDetails") is not None:
+                    _row["alohaDetails"]    = _saved["alohaDetails"]
+                if _saved.get("alohaMatchSource") is not None:
+                    _row["alohaMatchSource"] = _saved["alohaMatchSource"]
+
+            # ── Post-enrichment sample ────────────────────────────────────────
+            _olo_rows     = _order_mode_split.get("olo",     {}).get("itemBreakdown", [])
+            _instore_rows = _order_mode_split.get("inStore", {}).get("itemBreakdown", [])
+            _split_debug["oloItemCount"]      = len(_olo_rows)
+            _split_debug["instoreItemCount"]  = len(_instore_rows)
+            _split_debug["oloMatchedCount"]   = sum(1 for r in _olo_rows     if r.get("alohaQty"))
+            _split_debug["instoreMatchedCount"] = sum(1 for r in _instore_rows if r.get("alohaQty"))
+            _split_debug["oloSample"] = [
+                {"name": r.get("menuItemName"), "guid": (r.get("menuItemGuid") or "")[:8],
+                 "alohaQty": r.get("alohaQty"), "alohaName": r.get("alohaItemName"),
+                 "matchSrc": r.get("alohaMatchSource")}
+                for r in _olo_rows[:5]
+            ]
+            _split_debug["instoreSample"] = [
+                {"name": r.get("menuItemName"), "guid": (r.get("menuItemGuid") or "")[:8],
+                 "alohaQty": r.get("alohaQty"), "alohaName": r.get("alohaItemName"),
+                 "matchSrc": r.get("alohaMatchSource")}
+                for r in _instore_rows[:5]
+            ]
+            logger.info(
+                f"[YoY split debug] oloModes={len(_olo_modes)} instoreModes={len(_instore_modes)} "
+                f"oloAlohaRows={_split_debug.get('oloAlohaRows','?')} "
+                f"instoreAlohaRows={_split_debug.get('instoreAlohaRows','?')} "
+                f"oloItems={len(_olo_rows)} matched={_split_debug['oloMatchedCount']} "
+                f"instoreItems={len(_instore_rows)} matched={_split_debug['instoreMatchedCount']}"
+            )
+        else:
+            _split_debug["blockEntered"]  = True
+            _split_debug["omMappingFound"] = False
+            _split_debug["note"] = "Order mode mapping file not found or empty — no split enrichment performed"
+    else:
+        _split_debug["blockEntered"] = False
+        _reasons = []
+        if not _sd_has_split:   _reasons.append("result has no orderModeSplit key")
+        if not _sd_has_om_col:  _reasons.append("aloha_df has no OrderMode column")
+        if _sd_om_filter:       _reasons.append(f"om_filter is active: {_sd_om_filter}")
+        _split_debug["skippedReasons"] = _reasons
+        logger.info(f"[YoY split debug] block SKIPPED — reasons: {_reasons}")
+
+    yoy_info = result.setdefault("yoyInfo", {})
+    yoy_info["alohaDateRange"] = {"start": aloha_start.isoformat(), "end": aloha_end.isoformat()}
+    yoy_info["alohaDate"] = aloha_start.isoformat()
+    yoy_info["debug"] = {
+        "alohaDistinctItems": int(len(aloha_qty_by_name)),
+        "alohaNonZeroItems": int(sum(1 for qty in aloha_qty_by_name.values() if qty)),
+        "matchedByGuid": match_stats["matchedByGuid"],
+        "matchedByToastName": match_stats["matchedByToastName"],
+        "matchedByAlohaName": match_stats["matchedByAlohaName"],
+        "matchedTotal": match_stats["matchedTotal"],
+        "splitDebug": _split_debug,
+    }
+    return result
 
 # Authentication configuration
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
@@ -71,6 +831,22 @@ if not TOAST_API_TOKEN and (not TOAST_API_CLIENT_ID or not TOAST_API_CLIENT_SECR
 _token_cache: Dict[str, any] = {"token": None, "expires_at": 0}
 _standard_token_cache: Dict[str, any] = {"token": None, "expires_at": 0}
 _menu_tags_cache: Dict[str, dict] = {}  # {restaurant_guid: {hash: ..., mapping: {...}}}
+_menu_data_cache: Dict[str, dict] = {}  # {restaurant_guid: {data: ..., expires_at: ...}}
+MENU_CACHE_TTL_SECONDS = 300
+_menu_data_cache_v2: Dict[str, dict] = {}  # {restaurant_guid: {data: ..., expires_at: ...}}
+MENU_V2_CACHE_TTL_SECONDS = 60 * 60 * 12
+_price_group_cache: Dict[str, dict] = {}  # {restaurant_guid: {data: ..., expires_at: ...}}
+PRICE_GROUP_CACHE_TTL_SECONDS = 300
+_sc_config_cache: Dict[str, Dict[str, Dict]] = {}  # {restaurant_guid: {sc_guid: {destination, gratuity, name}}}
+_sc_daily_cache: Dict[str, float] = {}  # {f"{restaurant_guid}|{business_date_yyyymmdd}": non_restaurant_sc_total}
+_DEFAULT_TIER_MAPPING_CANDIDATES = [
+    os.path.join(ROOT_DIR, "Toast Price Tiers Mapping .xlsx"),
+    os.path.join(os.path.dirname(__file__), "price_tier_mapping.csv"),
+]
+PRICE_TIER_MAPPING_FILE = os.getenv(
+    "PRICE_TIER_MAPPING_FILE",
+    next((path for path in _DEFAULT_TIER_MAPPING_CANDIDATES if os.path.exists(path)), _DEFAULT_TIER_MAPPING_CANDIDATES[0])
+)
 
 # ------------------
 # Data Models
@@ -79,6 +855,40 @@ _menu_tags_cache: Dict[str, dict] = {}  # {restaurant_guid: {hash: ..., mapping:
 class Location(BaseModel):
     restaurantGuid: str
     restaurantName: str
+    externalId: Optional[str] = None
+
+
+class MissingConsolidatedExportResponse(BaseModel):
+    success: bool
+    output_file: str
+    start_date: str
+    end_date: str
+    total_rows: int
+    missing_rows: int
+
+
+def prioritize_menu_tag_restaurants(restaurant_ids: List[str], locations: List["Location"]) -> List[str]:
+    preferred_external = (TOAST_MENU_TAGS_PRIORITY_EXTERNAL_ID or "").strip()
+    preferred_name = (TOAST_MENU_TAGS_PRIORITY_NAME or "").strip().lower()
+    if not preferred_external and not preferred_name:
+        return restaurant_ids
+
+    matches: List[str] = []
+    for loc in locations:
+        if loc.restaurantGuid not in restaurant_ids:
+            continue
+        if preferred_external and str(loc.externalId or "").strip() == preferred_external:
+            matches.append(loc.restaurantGuid)
+            continue
+        if preferred_name and preferred_name in (loc.restaurantName or "").lower():
+            matches.append(loc.restaurantGuid)
+
+    if not matches:
+        return restaurant_ids
+
+    ordered = matches + [rid for rid in restaurant_ids if rid not in matches]
+    logger.info(f"Prioritized menu tag mapping restaurants: {matches} -> {ordered[:5]}")
+    return ordered
 
 class ReportConfig(BaseModel):
     reportType: str  # "metrics" or "menu"
@@ -88,6 +898,11 @@ class ReportConfig(BaseModel):
     restaurantIds: List[str] = []  # empty = all locations
     groupBy: List[str] = []  # Toast groupBy options
     itemTags: List[str] = []  # For menu reports - filter by item tags
+    includeZeroSales: bool = False  # Include items with 0 sales in breakdown
+    yoyEnabled: bool = False  # Show YoY (Aloha) quantities in menu reports
+    alohaDate: Optional[str] = None  # YYYY-MM-DD for Aloha comparison
+    orderModeFilter: Optional[str] = None  # e.g. "Dine In", "Delivery" — filters Aloha YoY data by channel
+    debug: bool = False  # Include debugInfo in response for troubleshooting tag/mapping issues
 
 class SavedReport(BaseModel):
     id: str
@@ -111,12 +926,130 @@ class ItemTagsQuantitiesRequest(BaseModel):
     daily: bool = False
     tagAttributionMode: str = "MULTI_COUNT"  # MULTI_COUNT | SPLIT | PRIMARY_ONLY
 
+class YoYCompareRequest(BaseModel):
+    toast_start_date: str  # YYYY-MM-DD
+    toast_end_date: str  # YYYY-MM-DD
+    aloha_date: str  # YYYY-MM-DD
+    restaurantIds: List[str] = []
+
+class AlohaSqlImportRequest(BaseModel):
+    start_date: Optional[str] = None  # YYYY-MM-DD
+    end_date: Optional[str] = None  # YYYY-MM-DD
+    batch_days: int = 31
+    overwrite: bool = False
+
+class AlohaSqlRecentImportRequest(BaseModel):
+    days: int = 7
+    batch_days: int = 31
+    overwrite: bool = False
+
 class HelpTicketRequest(BaseModel):
     name: str
     email: str
     subject: str
     priority: int  # 1=Low, 2=Medium, 3=High, 4=Urgent
     description: str
+
+class LaborSummaryRequest(BaseModel):
+    restaurantIds: List[str]
+    startDate: str   # YYYY-MM-DD
+    endDate: str     # YYYY-MM-DD
+
+# ------------------
+# V2 Operational Intelligence Models
+# ------------------
+
+class V2InsightRequest(BaseModel):
+    """Request model for v2 insights endpoints"""
+    dateRangeType: str  # "last_7_days", "last_30_days", "last_90_days", "custom"
+    customStartDate: Optional[str] = None  # YYYY-MM-DD
+    customEndDate: Optional[str] = None  # YYYY-MM-DD
+    restaurantIds: List[str] = []  # empty = all locations
+
+class ItemPerformanceResponse(BaseModel):
+    """Normalized item performance data"""
+    itemName: str
+    tagName: Optional[str] = None
+    quantity: int
+    sales: float
+    storeName: str
+    date: str  # YYYYMMDD or YYYY-MM-DD
+
+class TopMoversResponse(BaseModel):
+    """Top movers insight data"""
+    itemName: str
+    changePercent: float
+    period1Value: float
+    period2Value: float
+    direction: str  # "up", "down", "neutral"
+
+class StoreVarianceResponse(BaseModel):
+    """Store variance insight data"""
+    storeName: str
+    metric: str  # "netSales", "guestCount", etc.
+    value: float
+    variance: float  # percentage or absolute difference
+    benchmark: float  # comparison value
+
+class StoreRollupResponse(BaseModel):
+    """Store rollup aggregated metrics"""
+    storeName: str
+    storeGuid: str
+    netSales: float
+    guestCount: int
+    itemCount: int
+    avgTicket: float
+    dateRange: str  # "YYYY-MM-DD to YYYY-MM-DD"
+
+class TrendDeltaResponse(BaseModel):
+    """Period-over-period trend delta"""
+    metric: str  # "netSales", "guestCount", etc.
+    period1Value: float
+    period2Value: float
+    delta: float  # absolute change
+    deltaPercent: float  # percentage change
+    period1Label: str
+    period2Label: str
+    direction: str  # "up", "down", "neutral"
+
+class AnomalyFlagResponse(BaseModel):
+    """Anomaly detection flag"""
+    storeName: str
+    metric: str
+    value: float
+    expectedValue: float
+    deviation: float  # standard deviations or percentage
+    severity: str  # "low", "medium", "high"
+    flagType: str  # "outlier", "spike", "drop", "trend_break"
+
+class StoreGroup(BaseModel):
+    """Store group for organizing locations"""
+    id: str
+    name: str
+    description: Optional[str] = ""
+    storeGuids: List[str] = []
+    createdAt: str
+    updatedAt: str
+
+class StoreGroupCreate(BaseModel):
+    """Request to create a store group"""
+    name: str
+    description: Optional[str] = ""
+    storeGuids: List[str] = []
+
+class DashboardWidget(BaseModel):
+    """Dashboard widget data"""
+    type: str  # "kpi", "chart", "table", "alert"
+    title: str
+    data: Dict
+    config: Optional[Dict] = {}
+
+class DashboardResponse(BaseModel):
+    """Dashboard data response"""
+    dashboardType: str  # "executive", "operations", "financial"
+    widgets: List[DashboardWidget]
+    lastUpdated: str
+    dateRange: Optional[Dict[str, str]] = None  # {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
 
 # ------------------
 # User Authentication Models
@@ -130,6 +1063,7 @@ class User(BaseModel):
     lastLogin: Optional[str] = None
     preferences: Optional[Dict] = {}  # User preferences (default locations, etc.)
     role: Optional[str] = "user"  # User role: "user" or "admin"
+    assignedRestaurants: Optional[List[str]] = []  # Allowed restaurant GUIDs; [] = show all
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -171,6 +1105,7 @@ async def get_auth_headers() -> Dict[str, str]:
         
         resp = await client.post(TOAST_AUTH_URL, json=auth_body)
         if resp.status_code != 200:
+            logger.error(f"Toast ERA auth failed: status={resp.status_code} body={resp.text[:500]}")
             raise HTTPException(status_code=resp.status_code, detail=f"Failed to authenticate: {resp.text}")
         
         data = resp.json()
@@ -186,6 +1121,7 @@ async def get_auth_headers() -> Dict[str, str]:
             expires_in = 3600
         
         if not token:
+            logger.error(f"No token in Toast ERA auth response; keys={list(data.keys()) if isinstance(data, dict) else 'n/a'}")
             raise HTTPException(status_code=500, detail="No token received from authentication")
         
         _token_cache["token"] = token
@@ -245,19 +1181,59 @@ async def get_standard_api_auth_headers() -> Dict[str, str]:
 def to_business_date(d: date) -> str:
     return d.strftime("%Y%m%d")
 
+def chunk_list(items: List[str], size: int) -> List[List[str]]:
+    if size <= 0:
+        return [items]
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
 async def get_all_active_locations(client: httpx.AsyncClient) -> List[Location]:
+    """Get all active locations from Toast API with error handling"""
     url = f"{TOAST_API_BASE_URL}/restaurants-information"
-    headers = await get_auth_headers()
-    resp = await client.get(url, headers=headers)
+    
+    try:
+        headers = await get_auth_headers()
+    except HTTPException:
+        raise
+    except Exception as e:
+        detail = getattr(e, "detail", str(e)) or repr(e)
+        logger.error(f"Failed to get auth headers for locations: {type(e).__name__}: {detail}")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {detail}")
+    
+    try:
+        resp = await client.get(url, headers=headers, timeout=30.0)
+    except httpx.TimeoutException:
+        logger.error("Timeout fetching locations from Toast API")
+        raise HTTPException(status_code=504, detail="Timeout fetching locations from Toast API. Please check your connection.")
+    except Exception as e:
+        logger.error(f"Network error fetching locations: {e}")
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+    
     if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=f"Error fetching locations: {resp.text}")
-    data = resp.json()
+        error_msg = resp.text[:200] if resp.text else "Unknown error"
+        logger.error(f"Toast API returned {resp.status_code} for locations: {error_msg}")
+        raise HTTPException(status_code=resp.status_code, detail=f"Error fetching locations: {error_msg}")
+    
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"Failed to parse locations response: {e}")
+        raise HTTPException(status_code=500, detail="Invalid response from Toast API")
+    
+    if not isinstance(data, list):
+        logger.error(f"Unexpected locations response format: {type(data)}")
+        raise HTTPException(status_code=500, detail="Invalid response format from Toast API")
     
     active = [
-        Location(restaurantGuid=item["restaurantGuid"], restaurantName=item["restaurantName"])
+        Location(
+            restaurantGuid=item["restaurantGuid"],
+            restaurantName=item["restaurantName"],
+            externalId=item.get("externalId") or item.get("restaurantExternalId") or item.get("restaurantId")
+        )
         for item in data
         if item.get("active") and not item.get("archived") and not item.get("testMode")
     ]
+    
+    logger.info(f"Loaded {len(active)} active locations from Toast API")
     return active
 
 async def request_toast_report(
@@ -266,7 +1242,9 @@ async def request_toast_report(
     end: date,
     restaurant_ids: List[str],
     report_type: str,
-    group_by: List[str]
+    group_by: List[str],
+    max_attempts: int = 3,
+    delay_seconds: float = 1.0,
 ) -> str:
     days_diff = (end - start).days + 1
     
@@ -303,30 +1281,44 @@ async def request_toast_report(
     
     logger.info(f"Requesting {report_type} report: URL={url}, Body={body}")
     
-    headers = await get_auth_headers()
-    resp = await client.post(url, headers=headers, json=body)
-    
-    if resp.status_code == 429:
-        raise HTTPException(status_code=429, detail="Toast API rate limit exceeded. Please wait before trying again.")
-    
-    if resp.status_code != 200:
-        error_msg = resp.text
+    last_resp = None
+    for attempt in range(max_attempts):
+        headers = await get_auth_headers()
+        resp = await client.post(url, headers=headers, json=body)
+        last_resp = resp
+
+        if resp.status_code in [502, 503, 504]:
+            if attempt < max_attempts - 1:
+                logger.warning(f"Toast API returned {resp.status_code} creating report (attempt {attempt + 1}/{max_attempts}); retrying...")
+                await asyncio.sleep(delay_seconds)
+                delay_seconds = min(delay_seconds * 2, 8.0)
+                continue
+        
+        if resp.status_code == 429:
+            raise HTTPException(status_code=429, detail="Toast API rate limit exceeded. Please wait before trying again.")
+        
+        if resp.status_code != 200:
+            error_msg = resp.text
+            try:
+                error_json = resp.json()
+                error_msg = error_json.get("message", error_json.get("detail", error_msg))
+            except:
+                pass
+            raise HTTPException(status_code=resp.status_code, detail=f"Error creating report: {error_msg}")
+        
         try:
-            error_json = resp.json()
-            error_msg = error_json.get("message", error_json.get("detail", error_msg))
-        except:
-            pass
-        raise HTTPException(status_code=resp.status_code, detail=f"Error creating report: {error_msg}")
+            data = resp.json()
+        except ValueError:
+            return resp.text.strip().strip('"')
+        
+        if isinstance(data, str):
+            return data.strip().strip('"')
+        
+        return data.get("reportRequestGuid") or data.get("guid") or resp.text.strip().strip('"')
     
-    try:
-        data = resp.json()
-    except ValueError:
-        return resp.text.strip().strip('"')
-    
-    if isinstance(data, str):
-        return data.strip().strip('"')
-    
-    return data.get("reportRequestGuid") or data.get("guid") or resp.text.strip().strip('"')
+    if last_resp is not None:
+        raise HTTPException(status_code=last_resp.status_code, detail=f"Error creating report: {last_resp.text}")
+    raise HTTPException(status_code=500, detail="Error creating report: no response from Toast API")
 
 async def fetch_toast_report(
     client: httpx.AsyncClient,
@@ -358,6 +1350,12 @@ async def fetch_toast_report(
             delay_seconds = min(delay_seconds * 1.5, 10.0)
             continue
         
+        if resp.status_code in [502, 503, 504]:
+            logger.warning(f"Toast API returned {resp.status_code} retrieving report {report_guid} (attempt {attempt + 1}/{max_attempts}); retrying...")
+            await asyncio.sleep(delay_seconds)
+            delay_seconds = min(delay_seconds * 1.5, 10.0)
+            continue
+        
         if resp.status_code == 429:
             raise HTTPException(status_code=429, detail="Toast API rate limit exceeded while retrieving report.")
         
@@ -371,6 +1369,196 @@ async def fetch_toast_report(
         raise HTTPException(status_code=resp.status_code, detail=f"Error retrieving report: {error_msg}")
     
     raise HTTPException(status_code=504, detail=f"Timed out waiting for report {report_guid}. Try narrowing the date range.")
+
+
+async def _fetch_orders_for_restaurant_day(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    business_date_yyyymmdd: str,
+) -> List[Dict]:
+    """Fetch all orders for one restaurant and one business day via Orders API (paginated). Returns list of Order objects."""
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {
+        **standard_headers,
+        "Toast-Restaurant-External-ID": restaurant_guid,
+    }
+    url = f"{TOAST_ORDERS_API_BASE_URL}/orders/v2/ordersBulk"
+    all_orders: List[Dict] = []
+    page = 1
+    page_size = 100
+    while True:
+        params = {"businessDate": business_date_yyyymmdd, "pageSize": page_size, "page": page}
+        resp = await client.get(url, headers=headers, params=params, timeout=60.0)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=resp.status_code,
+                detail=f"Orders API error: {resp.text[:500]}",
+            )
+        data = resp.json()
+        if not isinstance(data, list):
+            break
+        all_orders.extend(data)
+        if len(data) < page_size:
+            break
+        page += 1
+        await asyncio.sleep(0.25)
+    return all_orders
+
+
+async def _fetch_orders_for_restaurant_date_range(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    start_date: date,
+    end_date: date,
+) -> List[Dict]:
+    """
+    Fetch all orders for one restaurant for each business day in [start_date, end_date].
+    Uses Orders API businessDate filter (one request per day) so returned orders match
+    the same business-day logic as the menu report (Toast uses closeoutHour for business day).
+    Note: Order objects also have closedDate (when payment status became CLOSED) if needed later.
+    """
+    all_orders: List[Dict] = []
+    d = start_date
+    while d <= end_date:
+        day_orders = await _fetch_orders_for_restaurant_day(
+            client, restaurant_guid, to_business_date(d)
+        )
+        all_orders.extend(day_orders)
+        d += timedelta(days=1)
+        if d <= end_date:
+            await asyncio.sleep(0.12)
+    logger.info(
+        "Pick3 orders fetch (by businessDate): restaurant=%s start=%s end=%s days=%s total_orders=%s",
+        restaurant_guid[:8] + "...",
+        start_date.isoformat(),
+        end_date.isoformat(),
+        (end_date - start_date).days + 1,
+        len(all_orders),
+    )
+    return all_orders
+
+
+async def _fetch_service_charge_configs(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+) -> Dict[str, Dict]:
+    """
+    Fetch and cache service charge configurations for one restaurant from Toast Config API.
+
+    Returns dict of {sc_guid: {"destination": str, "gratuity": bool, "name": str}}
+    Destination values: RESTAURANT, SERVER, TOAST, THIRD_PARTY
+
+    Results are cached indefinitely per restaurant_guid (SC configs rarely change).
+    On any error returns {} so callers can short-circuit without crashing.
+    """
+    global _sc_config_cache
+    if restaurant_guid in _sc_config_cache:
+        return _sc_config_cache[restaurant_guid]
+
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {
+        **standard_headers,
+        "Toast-Restaurant-External-ID": restaurant_guid,
+    }
+    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/serviceCharges"
+    try:
+        resp = await client.get(url, headers=headers, timeout=30.0)
+        if resp.status_code != 200:
+            logger.warning(
+                "SC config fetch failed for restaurant %s: HTTP %s — SCs will be treated as 0",
+                restaurant_guid[:8] + "...",
+                resp.status_code,
+            )
+            _sc_config_cache[restaurant_guid] = {}
+            return {}
+        sc_list = resp.json()
+        configs: Dict[str, Dict] = {}
+        if isinstance(sc_list, list):
+            for sc in sc_list:
+                guid = sc.get("guid", "")
+                if guid:
+                    configs[guid] = {
+                        "destination": sc.get("destination", "RESTAURANT"),
+                        "gratuity": bool(sc.get("gratuity", False)),
+                        "name": sc.get("name", ""),
+                    }
+        _sc_config_cache[restaurant_guid] = configs
+        non_rest = [g for g, c in configs.items() if c.get("destination") != "RESTAURANT" and not c.get("gratuity")]
+        logger.info(
+            "SC configs cached for restaurant %s: %d total, %d non-restaurant",
+            restaurant_guid[:8] + "...",
+            len(configs),
+            len(non_rest),
+        )
+        return configs
+    except Exception as exc:
+        logger.warning("SC config fetch error for %s: %s", restaurant_guid[:8] + "...", exc)
+        _sc_config_cache[restaurant_guid] = {}
+        return {}
+
+
+async def _compute_restaurant_service_charges(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    business_date_yyyymmdd: str,
+) -> float:
+    """
+    Compute total restaurant-destination service charges for one restaurant on one business day.
+
+    The Toast ERA netSalesAmount EXCLUDES service charges entirely.  Newk's Net Sales is
+    therefore higher than Toast Net Sales by the sum of service charges that go to the
+    restaurant (destination == 'RESTAURANT', gratuity == false) — e.g. delivery fees,
+    catering delivery fees ("CAT 3rd Party"), etc.
+
+    Formula: Newk's Net Sales = Toast netSalesAmount + result of this function.
+
+    NOTE: destination is a top-level field on AppliedServiceCharge.  The nested
+    serviceCharge object is a stub reference (guid + entityType only) with no fields.
+    """
+    global _sc_daily_cache
+    cache_key = f"{restaurant_guid}|{business_date_yyyymmdd}"
+    if cache_key in _sc_daily_cache:
+        return _sc_daily_cache[cache_key]
+
+    # Fetch all orders for this business day
+    orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
+
+    # Walk orders → checks → appliedServiceCharges and sum restaurant-destination SC amounts.
+    total_restaurant_sc: float = 0.0
+    for order in orders:
+        if order.get("voided"):
+            continue
+        for check in order.get("checks", []):
+            if check.get("voided"):
+                continue
+            for applied_sc in check.get("appliedServiceCharges", []):
+                charge_amount = float(applied_sc.get("chargeAmount") or 0)
+                if charge_amount <= 0:
+                    continue
+
+                # destination is a top-level field on AppliedServiceCharge (not on the stub
+                # nested serviceCharge reference).  Default to RESTAURANT when absent.
+                destination = applied_sc.get("destination") or "RESTAURANT"
+                gratuity = bool(applied_sc.get("gratuity", False))
+
+                if destination == "RESTAURANT" and not gratuity:
+                    total_restaurant_sc += charge_amount
+
+    _sc_daily_cache[cache_key] = total_restaurant_sc
+    logger.info(
+        "SC computed for %s|%s: restaurant_sc=%.2f (from %d orders)",
+        restaurant_guid[:8] + "...",
+        business_date_yyyymmdd,
+        total_restaurant_sc,
+        len(orders),
+    )
+    return total_restaurant_sc
+
+
+def _get_modifier_guid_to_name(restaurant_guid: str) -> Dict[str, str]:
+    """Return modifier option GUID -> display name from menu cache. Call get_menu_tags_mapping first to populate."""
+    return (_menu_tags_cache.get(restaurant_guid) or {}).get("guid_to_name") or {}
+
 
 # ------------------
 # Menus API V3 - Tags Mapping
@@ -582,9 +1770,41 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
         if var in modifier_name_to_guid:
             logger.info(f"DEBUG: Target modifier name variation '{var}' found in name mapping -> {modifier_name_to_guid[var]}")
     
-    # Store name mapping in cache for later use
+    # Build GUID -> name mapping for both menu items and modifiers
+    guid_to_name = {}
+    # Add menu items
+    for menu in menus_data.get("menus", []):
+        for group in menu.get("menuGroups", []):
+            for item in group.get("menuItems", []):
+                item_guid = item.get("guid")
+                # Prefer displayName over name (name might be kitchenName)
+                item_name = item.get("displayName") or item.get("name", "")
+                # If name exists but displayName doesn't, check if name is actually kitchenName
+                if not item.get("displayName") and item.get("name") and item.get("kitchenName"):
+                    # If name matches kitchenName, prefer name (it's the display name)
+                    # Otherwise, use name (it's the display name)
+                    item_name = item.get("name", "")
+                if item_guid and item_name:
+                    guid_to_name[item_guid] = item_name
+    # Add modifiers
+    for mod_group_guid, mod_group in modifier_group_refs.items():
+        for mod_option in mod_group.get("modifierOptions", []):
+            mod_option_guid = mod_option.get("guid")
+            # Prefer displayName over name for modifiers too
+            mod_option_name = mod_option.get("displayName") or mod_option.get("name", "")
+            if mod_option_guid and mod_option_name:
+                guid_to_name[mod_option_guid] = mod_option_name
+    # Also check modifierOptionReferences
+    for mod_option_guid, mod_option in modifier_option_refs.items():
+        # Prefer displayName over name for modifiers too
+        mod_option_name = mod_option.get("displayName") or mod_option.get("name", "")
+        if mod_option_guid and mod_option_name:
+            guid_to_name[mod_option_guid] = mod_option_name
+    
+    # Store name mappings in cache for later use
     if restaurant_guid in _menu_tags_cache:
-        _menu_tags_cache[restaurant_guid]["name_mapping"] = modifier_name_to_guid
+        _menu_tags_cache[restaurant_guid]["name_mapping"] = modifier_name_to_guid  # Keep reverse mapping for fuzzy matching
+        _menu_tags_cache[restaurant_guid]["guid_to_name"] = guid_to_name  # Add GUID -> name mapping
     
     return mapping
 
@@ -739,7 +1959,523 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
     
     logger.info(f"Built modifier name mapping (V2): {len(modifier_name_to_guid)} modifier names")
     
+    # Build GUID -> name mapping for both menu items and modifiers (V2)
+    guid_to_name = {}
+    # Add menu items
+    for menu in menus_data.get("menus", []):
+        for group in menu.get("menuGroups", []):
+            for item in group.get("menuItems", []):
+                item_guid = item.get("guid")
+                # Prefer displayName over name (name might be kitchenName)
+                item_name = item.get("displayName") or item.get("name", "")
+                if item_guid and item_name:
+                    guid_to_name[item_guid] = item_name
+    # Add modifiers from modifierGroupReferences
+    for mod_group_guid, mod_group in modifier_group_refs.items():
+        for mod_option in mod_group.get("modifierOptions", []):
+            mod_option_guid = mod_option.get("guid")
+            # Prefer displayName over name for modifiers too
+            mod_option_name = mod_option.get("displayName") or mod_option.get("name", "")
+            if mod_option_guid and mod_option_name:
+                guid_to_name[mod_option_guid] = mod_option_name
+    # Add modifiers from modifierOptionReferences
+    for mod_option_id, mod_option in modifier_option_refs.items():
+        mod_option_guid = mod_option.get("guid", "")
+        # Prefer displayName over name for modifiers too
+        mod_option_name = mod_option.get("displayName") or mod_option.get("name", "")
+        if mod_option_guid and mod_option_name:
+            guid_to_name[mod_option_guid] = mod_option_name
+    
+    # Store name mappings in cache for later use (V2)
+    if restaurant_guid not in _menu_tags_cache:
+        _menu_tags_cache[restaurant_guid] = {}
+    _menu_tags_cache[restaurant_guid]["name_mapping"] = modifier_name_to_guid  # Keep reverse mapping for fuzzy matching
+    _menu_tags_cache[restaurant_guid]["guid_to_name"] = guid_to_name  # Add GUID -> name mapping
+    
     return mapping
+
+
+async def fetch_toast_menus(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    force_refresh: bool = False
+) -> Dict:
+    """Fetch menus from Toast V2 (no V3 dependency)."""
+    return await fetch_toast_menus_v2(
+        client,
+        restaurant_guid,
+        force_refresh=force_refresh
+    )
+
+
+async def fetch_price_groups(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    force_refresh: bool = False
+) -> Dict[str, str]:
+    """Fetch price groups (location pricing tiers) and return guid->name map."""
+    now = time.time()
+    cache_entry = _price_group_cache.get(restaurant_guid)
+    if cache_entry and not force_refresh and cache_entry.get("expires_at", 0) > now:
+        return cache_entry.get("data", {})
+
+    standard_headers = await get_standard_api_auth_headers()
+    headers_with_guid = {
+        **standard_headers,
+        "Toast-Restaurant-External-ID": restaurant_guid
+    }
+
+    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/priceGroups"
+    try:
+        resp = await client.get(url, headers=headers_with_guid)
+    except Exception:
+        return {}
+
+    if resp.status_code == 429:
+        logger.warning("Toast rate limit hit when fetching price groups.")
+        if cache_entry and cache_entry.get("data"):
+            return cache_entry.get("data", {})
+        return {}
+
+    if resp.status_code != 200:
+        return {}
+
+    data = resp.json()
+    if isinstance(data, dict) and "priceGroups" in data:
+        price_groups = data.get("priceGroups", [])
+    elif isinstance(data, list):
+        price_groups = data
+    else:
+        price_groups = []
+
+    mapping = {}
+    for group in price_groups:
+        if not isinstance(group, dict):
+            continue
+        guid = group.get("guid") or group.get("priceGroupGuid")
+        name = group.get("name") or group.get("priceGroupName")
+        if guid and name:
+            mapping[str(guid)] = str(name)
+
+    _price_group_cache[restaurant_guid] = {
+        "data": mapping,
+        "expires_at": now + PRICE_GROUP_CACHE_TTL_SECONDS
+    }
+    return mapping
+
+
+async def fetch_toast_menus_v2(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    force_refresh: bool = False,
+    max_attempts: int = 5
+) -> Dict:
+    """Fetch menus from Toast V2 endpoint with rate-limit handling."""
+    now = time.time()
+    cache_entry = _menu_data_cache_v2.get(restaurant_guid)
+    if cache_entry and not force_refresh and cache_entry.get("expires_at", 0) > now:
+        return cache_entry.get("data", {})
+
+    standard_headers = await get_standard_api_auth_headers()
+    headers_with_guid = {
+        **standard_headers,
+        "Toast-Restaurant-External-ID": restaurant_guid
+    }
+
+    url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus"
+    delay_seconds = 1.5
+
+    for _ in range(max_attempts):
+        resp = await client.get(url, headers=headers_with_guid)
+        if resp.status_code == 200:
+            menus_data = resp.json()
+            _menu_data_cache_v2[restaurant_guid] = {
+                "data": menus_data,
+                "expires_at": now + MENU_V2_CACHE_TTL_SECONDS
+            }
+            return menus_data
+
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After")
+            wait_seconds = delay_seconds
+            if retry_after:
+                try:
+                    wait_seconds = max(float(retry_after), wait_seconds)
+                except ValueError:
+                    pass
+            await asyncio.sleep(wait_seconds)
+            delay_seconds = min(delay_seconds * 1.8, 10.0)
+            continue
+
+        raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch menu data: {resp.text[:200]}")
+
+    raise HTTPException(status_code=429, detail="Toast API rate limit exceeded while fetching menu data.")
+
+
+def _collect_menu_items(menu_data: Dict) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+
+    def walk_groups(groups: List[Dict], menu_name: str) -> None:
+        for group in groups or []:
+            group_name = group.get("name") or "Unnamed Group"
+            for item in group.get("menuItems", []):
+                rows.append({
+                    "menu": menu_name,
+                    "menu_group": group_name,
+                    "item": item.get("displayName") or item.get("name") or "Unnamed Item",
+                    "guid": item.get("guid") or ""
+                })
+            nested_groups = group.get("menuGroups") or []
+            if nested_groups:
+                walk_groups(nested_groups, menu_name)
+
+    for menu in menu_data.get("menus", []):
+        menu_name = menu.get("name") or "Unnamed Menu"
+        walk_groups(menu.get("menuGroups", []), menu_name)
+
+    return rows
+
+
+def load_price_tier_mapping() -> List[Tuple[str, List[str]]]:
+    """Load tier mapping file with TierName + location identifiers."""
+    if not os.path.exists(PRICE_TIER_MAPPING_FILE):
+        raise HTTPException(status_code=400, detail=f"Missing price tier mapping file: {PRICE_TIER_MAPPING_FILE}")
+
+    ext = os.path.splitext(PRICE_TIER_MAPPING_FILE)[1].lower()
+    if ext in [".xlsx", ".xls"]:
+        df = pd.read_excel(PRICE_TIER_MAPPING_FILE)
+    else:
+        df = pd.read_csv(PRICE_TIER_MAPPING_FILE)
+
+    if df.shape[1] < 2:
+        raise HTTPException(status_code=400, detail="Price tier mapping file must have at least two columns")
+
+    columns = list(df.columns)
+    lower_cols = [str(c).strip().lower() for c in columns]
+    tier_col = next((columns[i] for i, c in enumerate(lower_cols) if "tier" in c or "group" in c), columns[0])
+    stores_col = next(
+        (columns[i] for i, c in enumerate(lower_cols) if "location" in c or "store" in c or "guid" in c),
+        columns[1]
+    )
+
+    mapping: Dict[str, List[str]] = {}
+    current_tier: Optional[str] = None
+
+    for _, row in df.iterrows():
+        tier_raw = row.get(tier_col)
+        tier_name = str(tier_raw).strip() if tier_raw is not None and str(tier_raw).strip() else ""
+        if tier_name:
+            current_tier = tier_name
+        if not current_tier:
+            continue
+
+        raw_value = row.get(stores_col)
+        if raw_value is None or (isinstance(raw_value, float) and pd.isna(raw_value)):
+            continue
+
+        identifiers: List[str] = []
+        if isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
+            if float(raw_value).is_integer():
+                identifiers = [str(int(raw_value))]
+            else:
+                identifiers = [str(raw_value)]
+        else:
+            raw_text = str(raw_value).strip()
+            if raw_text == "-" or raw_text == "":
+                identifiers = []
+            else:
+                identifiers = [s.strip() for s in re.split(r"[,\n;]+", raw_text) if s.strip()]
+
+        if identifiers:
+            mapping.setdefault(current_tier, []).extend(identifiers)
+        else:
+            mapping.setdefault(current_tier, [])
+
+    normalized: List[Tuple[str, List[str]]] = []
+    for tier_name, values in mapping.items():
+        deduped = []
+        seen = set()
+        for value in values:
+            key = str(value).strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(key)
+        normalized.append((tier_name, deduped))
+
+    return normalized
+
+
+def extract_store_numbers_from_location(location: Location) -> List[str]:
+    candidates: List[str] = []
+    if location.externalId:
+        candidates.append(str(location.externalId).strip())
+    if location.restaurantName:
+        candidates.extend(re.findall(r"\b\d{3,5}\b", location.restaurantName))
+    return list({c for c in candidates if c})
+
+
+def format_location_display_name(location: Location) -> str:
+    """Return display name including 4-digit store number when available, e.g. 'Store Name (1234)'."""
+    name = (location.restaurantName or "").strip() or "Unknown"
+    store_num: Optional[str] = None
+    if location.externalId:
+        eid = str(location.externalId).strip()
+        if len(eid) == 4 and eid.isdigit():
+            store_num = eid
+    if not store_num and location.restaurantName:
+        four_digit = re.findall(r"\b\d{4}\b", location.restaurantName)
+        if four_digit:
+            store_num = four_digit[0]
+    if not store_num:
+        candidates = extract_store_numbers_from_location(location)
+        if candidates:
+            store_num = candidates[0]
+    if store_num and not (name.endswith(f" ({store_num})")):
+        return f"{name} ({store_num})"
+    return name
+
+
+def build_tier_location_map(
+    tiers: List[Tuple[str, List[str]]],
+    locations: List[Location]
+) -> Tuple[Dict[str, List[Location]], Dict[str, List[str]]]:
+    uuid_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
+    store_to_locations: Dict[str, List[Location]] = {}
+    for loc in locations:
+        for store_num in extract_store_numbers_from_location(loc):
+            store_to_locations.setdefault(store_num, []).append(loc)
+
+    guid_to_location: Dict[str, Location] = {loc.restaurantGuid: loc for loc in locations}
+    for loc in locations:
+        if loc.externalId:
+            guid_to_location.setdefault(str(loc.externalId), loc)
+
+    tier_locations: Dict[str, List[Location]] = {}
+    tier_missing: Dict[str, List[str]] = {}
+    for tier_name, store_nums in tiers:
+        matched: List[Location] = []
+        missing: List[str] = []
+        for store_num in store_nums:
+            if uuid_re.match(store_num):
+                loc = guid_to_location.get(store_num)
+                if loc:
+                    matched.append(loc)
+                else:
+                    missing.append(store_num)
+            else:
+                locs = store_to_locations.get(store_num)
+                if locs:
+                    matched.extend(locs)
+                else:
+                    missing.append(store_num)
+        deduped: Dict[str, Location] = {loc.restaurantGuid: loc for loc in matched}
+        tier_locations[tier_name] = list(deduped.values())
+        if missing:
+            tier_missing[tier_name] = missing
+
+    return tier_locations, tier_missing
+
+
+def format_tier_price(prices: List[Optional[float]]) -> str:
+    clean = [p for p in prices if p is not None]
+    if not clean:
+        return ""
+    unique = sorted({round(float(p), 2) for p in clean})
+    if len(unique) == 1:
+        return _format_price_value(unique[0])
+    return f"MIXED ({_format_price_value(unique[0])}-{_format_price_value(unique[-1])}, n={len(unique)})"
+
+
+def find_item_match(base_rows: List[Dict[str, str]], needle: str) -> Tuple[Optional[Dict[str, str]], List[Dict[str, str]]]:
+    cleaned = (needle or "").strip().lower()
+    if not cleaned:
+        return None, []
+    exact = next((row for row in base_rows if str(row.get("guid") or "").lower() == cleaned), None)
+    if exact:
+        return exact, [exact]
+    matches = [row for row in base_rows if cleaned in str(row.get("item") or "").lower()]
+    return (matches[0] if matches else None), matches
+
+
+def compute_store_tier_duplicates(tiers: List[Tuple[str, List[str]]]) -> Dict[str, List[str]]:
+    store_to_tiers: Dict[str, List[str]] = {}
+    for tier_name, store_nums in tiers:
+        for store_num in store_nums:
+            store_to_tiers.setdefault(store_num, []).append(tier_name)
+    return {store: tier_list for store, tier_list in store_to_tiers.items() if len(tier_list) > 1}
+
+
+def _format_price_value(value: Optional[float]) -> str:
+    if value is None:
+        return ""
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _extract_price_tiers(item: Dict) -> List[Dict[str, Optional[float]]]:
+    tiers: List[Dict[str, Optional[float]]] = []
+
+    def add_tier(name: str, price: Optional[float]) -> None:
+        if not name and price is None:
+            return
+        for existing in tiers:
+            if existing.get("name") == name and existing.get("price") == price:
+                return
+        tiers.append({"name": name, "price": price})
+
+    base_price = item.get("price")
+    if base_price is not None:
+        add_tier("Base Price", base_price)
+
+    for key in [
+        "priceGroups",
+        "priceGroupPrices",
+        "priceLevels",
+        "pricesByPriceGroup",
+        "priceByPriceGroup",
+        "priceGroupsByGuid"
+    ]:
+        if key not in item:
+            continue
+        container = item.get(key)
+        if isinstance(container, list):
+            for entry in container:
+                if not isinstance(entry, dict):
+                    continue
+                name = (
+                    entry.get("name")
+                    or entry.get("priceGroupName")
+                    or entry.get("priceLevelName")
+                    or entry.get("priceGroup")
+                    or entry.get("priceLevel")
+                    or entry.get("priceGroupGuid")
+                    or entry.get("guid")
+                    or ""
+                )
+                price = entry.get("price")
+                if price is None:
+                    price = entry.get("amount") or entry.get("value") or entry.get("basePrice")
+                add_tier(str(name), price)
+        elif isinstance(container, dict):
+            for entry_key, entry_value in container.items():
+                if isinstance(entry_value, dict):
+                    name = (
+                        entry_value.get("name")
+                        or entry_value.get("priceGroupName")
+                        or entry_value.get("priceLevelName")
+                        or entry_key
+                    )
+                    price = entry_value.get("price")
+                    if price is None:
+                        price = entry_value.get("amount") or entry_value.get("value") or entry_value.get("basePrice")
+                    add_tier(str(name), price)
+                else:
+                    add_tier(str(entry_key), entry_value)
+
+    if not tiers and item.get("pricingStrategy"):
+        add_tier(item.get("pricingStrategy", "").replace("_", " ").title(), None)
+
+    return tiers
+
+
+def _extract_location_prices(
+    item: Dict,
+    location_name_by_guid: Optional[Dict[str, str]] = None,
+    price_group_name_by_guid: Optional[Dict[str, str]] = None
+) -> Dict[str, Optional[float]]:
+    location_name_by_guid = location_name_by_guid or {}
+    price_group_name_by_guid = price_group_name_by_guid or {}
+    prices: Dict[str, Optional[float]] = {}
+
+    def add_price(name: str, price: Optional[float]) -> None:
+        if not name:
+            return
+        if name not in prices:
+            prices[name] = price
+
+    containers = []
+    for key in [
+        "locationPrices",
+        "locationSpecificPrices",
+        "pricesByLocation",
+        "locationPriceOverrides",
+        "locationPriceMap",
+        "priceGroupPrices",
+        "priceGroups",
+        "pricesByPriceGroup",
+        "priceByPriceGroup",
+        "priceGroupsByGuid"
+    ]:
+        if key in item:
+            containers.append(item.get(key))
+
+    for container in containers:
+        if isinstance(container, list):
+            for entry in container:
+                if not isinstance(entry, dict):
+                    continue
+                price = entry.get("price")
+                if price is None:
+                    price = entry.get("amount") or entry.get("value") or entry.get("basePrice")
+                name = (
+                    entry.get("locationName")
+                    or entry.get("locationGroupName")
+                    or entry.get("priceGroupName")
+                    or entry.get("restaurantName")
+                    or entry.get("groupName")
+                    or entry.get("name")
+                )
+                guid = (
+                    entry.get("locationGuid")
+                    or entry.get("locationId")
+                    or entry.get("restaurantGuid")
+                    or entry.get("restaurantId")
+                    or entry.get("groupGuid")
+                    or entry.get("priceGroupGuid")
+                    or entry.get("guid")
+                )
+                if not name and guid:
+                    name = location_name_by_guid.get(str(guid)) or price_group_name_by_guid.get(str(guid), str(guid))
+                if name:
+                    add_price(str(name), price)
+        elif isinstance(container, dict):
+            for entry_key, entry_value in container.items():
+                name = None
+                price = None
+                if isinstance(entry_value, dict):
+                    name = (
+                        entry_value.get("locationName")
+                        or entry_value.get("locationGroupName")
+                        or entry_value.get("priceGroupName")
+                        or entry_value.get("restaurantName")
+                        or entry_value.get("groupName")
+                        or entry_value.get("name")
+                        or entry_key
+                    )
+                    price = entry_value.get("price")
+                    if price is None:
+                        price = entry_value.get("amount") or entry_value.get("value") or entry_value.get("basePrice")
+                    guid = (
+                        entry_value.get("locationGuid")
+                        or entry_value.get("locationId")
+                        or entry_value.get("restaurantGuid")
+                        or entry_value.get("restaurantId")
+                        or entry_value.get("groupGuid")
+                        or entry_value.get("priceGroupGuid")
+                        or entry_value.get("guid")
+                    )
+                    if not name and guid:
+                        name = location_name_by_guid.get(str(guid)) or price_group_name_by_guid.get(str(guid), str(guid))
+                else:
+                    name = entry_key
+                    price = entry_value
+                if name:
+                    add_price(str(name), price)
+
+    return prices
 
 def aggregate_quantities_by_tag(
     analytics_rows: List[dict],
@@ -907,6 +2643,28 @@ async def get_current_admin_user(current_user: User = Depends(get_current_user))
         )
     return current_user
 
+# Optional auth — does not raise 401 when no token is provided
+security_optional = HTTPBearer(auto_error=False)
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional)
+) -> Optional[User]:
+    """Return the authenticated User if a valid Bearer token is present; otherwise None."""
+    if not credentials:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        user_id: str = payload.get("sub")
+        if not user_id:
+            return None
+        users = load_users()
+        user_data = users.get(user_id)
+        if not user_data:
+            return None
+        return User(**{k: v for k, v in user_data.items() if k != "password"})
+    except Exception:
+        return None
+
 # ------------------
 # Initialize Super Admin (if configured)
 # ------------------
@@ -957,6 +2715,7 @@ def initialize_super_admin():
 # ------------------
 
 SAVED_REPORTS_FILE = os.path.join(os.path.dirname(__file__), "saved_reports.json")
+STORE_GROUPS_FILE = os.path.join(os.path.dirname(__file__), "store_groups.json")
 
 def load_saved_reports() -> List[SavedReport]:
     if not os.path.exists(SAVED_REPORTS_FILE):
@@ -993,68 +2752,119 @@ def save_saved_reports(reports: List[SavedReport]) -> None:
         logger.error(f"Error saving reports: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save reports: {str(e)}")
 
+def load_store_groups() -> List[StoreGroup]:
+    if not os.path.exists(STORE_GROUPS_FILE):
+        return []
+    
+    try:
+        with open(STORE_GROUPS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return [StoreGroup(**item) for item in data]
+    except Exception as e:
+        logger.error(f"Error loading store groups: {e}")
+        return []
+
+def save_store_groups(groups: List[StoreGroup]) -> None:
+    try:
+        with open(STORE_GROUPS_FILE, 'w', encoding='utf-8') as f:
+            json.dump([g.dict() for g in groups], f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Error saving store groups: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save store groups: {str(e)}")
+
 # ------------------
 # Report Data Transformation
 # ------------------
 
-def pivot_metrics_by_location_and_date(raw_rows: list) -> dict:
+def pivot_metrics_by_location_and_date(
+    raw_rows: list,
+    service_charges: Optional[Dict[str, float]] = None,
+) -> dict:
     """
     Transform metrics data into pivot table format:
     - Rows: Restaurant locations
-    - Columns: Business dates
-    - Values: Net sales
-    
+    - Columns: Business dates (Toast net sales) + same dates with _newks suffix (Newk's net sales)
+
+    The Toast ERA netSalesAmount INCLUDES restaurant-destination service charges (delivery/catering
+    fees collected from the customer on behalf of Newk's).  However, Newk's must pay those fees
+    out to the delivery providers (DeliverThat, etc.), so they are NOT Newk's revenue:
+        Newk's Net Sales = Toast netSalesAmount - restaurant_sc (destination==RESTAURANT, non-gratuity)
+
+    service_charges: optional dict keyed by f"{restaurantGuid}|{businessDate}" (YYYYMMDD),
+        value = total restaurant-destination SC amount for that location+day (from Orders API).
+        When None or a key is missing, falls back to 0 (Newk's == Toast).
+
     Returns:
     {
         "pivotTable": [
-            {"restaurantName": "Location A", "20251210": 1000, "20251211": 1200, ...},
+            {"restaurantName": "Location A", "20251210": 1000, "20251210_newks": 937, ...},
             ...
         ],
         "totals": [
-            {"date": "20251210", "totalNetSales": 5000},
+            {"date": "20251210", "totalNetSales": 5000, "totalNetSalesNewks": 4685, "totalServiceChargeAddon": 315},
             ...
         ]
     }
     """
     if not raw_rows:
         return {"pivotTable": [], "totals": []}
-    
-    location_data = {}
+
+    location_data = {}  # location -> date -> toast_net_sales
+    location_sc_addon = {}  # location -> date -> restaurant_sc amount subtracted from Newk's
     all_dates = set()
-    date_totals = {}  # {date: total_net_sales}
-    
+    date_totals = {}       # date -> total Toast net sales
+    date_totals_newks = {} # date -> total Newk's net sales
+    date_totals_sc = {}    # date -> total SC add-on (for display)
+
     for row in raw_rows:
         restaurant_name = row.get("restaurantName", "Unknown")
+        restaurant_guid = row.get("restaurantGuid", "")
         business_date = row.get("businessDate", "")
-        # Toast API returns netSalesAmount, not netSales
-        net_sales = row.get("netSalesAmount", 0) or 0
-        
+        # Toast ERA netSalesAmount: menu item sales only, service charges excluded
+        toast_net_sales = row.get("netSalesAmount", 0) or 0
+        # Restaurant-destination SCs fetched via Orders API; subtracted to get Newk's true net
+        sc_key = f"{restaurant_guid}|{business_date}"
+        sc_addon = (service_charges or {}).get(sc_key, 0.0)
+        newks_net_sales = toast_net_sales - sc_addon
+
         if restaurant_name not in location_data:
             location_data[restaurant_name] = {}
-        
-        location_data[restaurant_name][business_date] = net_sales
+            location_sc_addon[restaurant_name] = {}
+
+        location_data[restaurant_name][business_date] = toast_net_sales
+        location_sc_addon[restaurant_name][business_date] = sc_addon
         all_dates.add(business_date)
-        
-        # Accumulate totals by date
+
         if business_date not in date_totals:
             date_totals[business_date] = 0
-        date_totals[business_date] += net_sales
-    
+            date_totals_newks[business_date] = 0
+            date_totals_sc[business_date] = 0
+        date_totals[business_date] += toast_net_sales
+        date_totals_newks[business_date] += newks_net_sales
+        date_totals_sc[business_date] += sc_addon
+
     sorted_dates = sorted(list(all_dates))
     sorted_locations = sorted(location_data.keys())
-    
-    # Build pivot rows
+
+    # Build pivot rows: each date column has Toast value; date_newks has Newk's (Toast - SC addon)
     pivot_rows = []
     for location in sorted_locations:
         row_data = {"restaurantName": location}
-        for date in sorted_dates:
-            row_data[date] = location_data[location].get(date, 0)
+        for d in sorted_dates:
+            toast_val = location_data[location].get(d, 0)
+            sc = location_sc_addon[location].get(d, 0)
+            row_data[d] = toast_val
+            row_data[f"{d}_newks"] = toast_val - sc
         pivot_rows.append(row_data)
-    
-    # Build totals section
+
     totals_rows = [
-        {"date": date, "totalNetSales": date_totals[date]}
-        for date in sorted_dates
+        {
+            "date": d,
+            "totalNetSales": date_totals[d],
+            "totalNetSalesNewks": date_totals_newks[d],
+            "totalServiceChargeAddon": date_totals_sc[d],
+        }
+        for d in sorted_dates
     ]
     
     return {
@@ -1067,8 +2877,10 @@ def pivot_menu_items_by_tag(
     tags_mapping: Dict[str, List[Dict]],
     selected_tags: List[str],
     item_names_mapping: Dict[str, str] = None,
-    menu_item_guids: set = None
+    menu_item_guids: set = None,
+    include_zero_sales: bool = False
 ) -> dict:
+    logger.info(f"pivot_menu_items_by_tag called with include_zero_sales={include_zero_sales}, selected_tags={selected_tags}, tags_mapping size={len(tags_mapping)}")
     """
     Transform menu items into pivot table format by restaurant and tag.
     
@@ -1088,7 +2900,8 @@ def pivot_menu_items_by_tag(
         ]
     }
     """
-    if not analytics_rows:
+    # Don't return early if include_zero_sales is True - we need to process zero-sales items
+    if not analytics_rows and not include_zero_sales:
         return {"pivotTable": [], "totals": [], "itemBreakdown": []}
     
     if item_names_mapping is None:
@@ -1101,10 +2914,26 @@ def pivot_menu_items_by_tag(
     restaurant_tag_data = {}  # {restaurantGuid: {restaurantName: str, tags: {tagName: qty}}}
     tag_totals = {}  # {tagName: total_qty}
     tag_item_breakdown = {}  # {tagName: {menuItemGuid: total_qty}}
+    tag_item_breakdown_daily = {}  # {tagName: {menuItemGuid: {menuItemName, totalQty, daily}}}
+    item_totals = {}  # {menuItemGuid: {menuItemName: str, totalQty: int}}
+    date_columns = set()
     
     modifier_count_in_pivot = 0
     modifier_count_in_breakdown = 0
     skipped_no_tags = 0
+
+    # One canonical display name per normalized tag so "* Consolidated Pizza" and "Consolidated Pizza" merge
+    _canonical_for_norm: Dict[str, str] = {}
+
+    def _canonical_tag(tag_name: str) -> str:
+        norm = _normalize_tag_name(tag_name)
+        if norm not in _canonical_for_norm:
+            _canonical_for_norm[norm] = tag_name
+        return _canonical_for_norm[norm]
+
+    if selected_tags:
+        for t in selected_tags:
+            _canonical_tag(t)
     
     for row in analytics_rows:
         restaurant_guid = row.get("restaurantGuid", "")
@@ -1112,11 +2941,13 @@ def pivot_menu_items_by_tag(
         menu_item_guid = row.get("menuItemGuid", "")
         menu_item_name = row.get("menuItemName", "") or item_names_mapping.get(menu_item_guid, f"Item {menu_item_guid[:8]}")
         quantity_sold = row.get("quantitySold", 0) or 0
+        business_date = row.get("businessDate")
         
         if not menu_item_guid:
             continue
         
-        if menu_item_guid not in tags_mapping:
+        # If tags are selected, require mapping to validate tag membership
+        if selected_tags and menu_item_guid not in tags_mapping:
             skipped_no_tags += 1
             # Log first few skipped items to debug
             if skipped_no_tags <= 3:
@@ -1127,13 +2958,28 @@ def pivot_menu_items_by_tag(
         is_modifier = menu_item_guid not in menu_item_guids
         
         # Get tags for this item (works for both menu items and modifiers)
-        item_tags = tags_mapping[menu_item_guid]
-        
-        # Filter to only selected tags (if any selected)
         if selected_tags:
-            item_tags = [t for t in item_tags if t["tagName"] in selected_tags]
+            item_tags = tags_mapping.get(menu_item_guid, [])
+        else:
+            item_tags = [{"tagName": "All Items"}]
+        
+        # Filter to only selected tags (if any selected) - use normalized so "* Consolidated Pizza" matches "Consolidated Pizza"
+        if selected_tags:
+            selected_tags_norm_pivot = [_normalize_tag_name(t) for t in selected_tags]
+            item_tags = [t for t in item_tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm_pivot]
             if not item_tags:
                 continue
+        else:
+            # No tags selected: collapse all items into a single section
+            item_tags = [{"tagName": "All Items"}]
+        
+        # Track overall item totals once per row (avoid double-counting across tags)
+        if menu_item_guid not in item_totals:
+            item_totals[menu_item_guid] = {
+                "menuItemName": menu_item_name,
+                "totalQty": 0
+            }
+        item_totals[menu_item_guid]["totalQty"] += quantity_sold
         
         # Initialize restaurant data if needed (only for menu items)
         if not is_modifier:
@@ -1144,37 +2990,59 @@ def pivot_menu_items_by_tag(
                 }
         
         # Add quantity to each tag (MULTI_COUNT mode - each tag gets full quantity)
-        # Process modifiers and menu items the SAME way for breakdown
+        # Use canonical tag so "* Consolidated Pizza" and "Consolidated Pizza" merge into one column
         for tag in item_tags:
             tag_name = tag["tagName"]
+            canonical = _canonical_tag(tag_name)
             
             # Add to restaurant-tag aggregation (pivot table) - only for menu items
             if not is_modifier:
-                if tag_name not in restaurant_tag_data[restaurant_guid]["tags"]:
-                    restaurant_tag_data[restaurant_guid]["tags"][tag_name] = 0
-                restaurant_tag_data[restaurant_guid]["tags"][tag_name] += quantity_sold
+                if canonical not in restaurant_tag_data[restaurant_guid]["tags"]:
+                    restaurant_tag_data[restaurant_guid]["tags"][canonical] = 0
+                restaurant_tag_data[restaurant_guid]["tags"][canonical] += quantity_sold
                 
                 # Add to totals (pivot table totals) - only for menu items
-                if tag_name not in tag_totals:
-                    tag_totals[tag_name] = 0
-                tag_totals[tag_name] += quantity_sold
+                if canonical not in tag_totals:
+                    tag_totals[canonical] = 0
+                tag_totals[canonical] += quantity_sold
             
             # Track item-level breakdown by tag (SAME for both menu items and modifiers)
-            if tag_name not in tag_item_breakdown:
-                tag_item_breakdown[tag_name] = {}
-            if menu_item_guid not in tag_item_breakdown[tag_name]:
-                tag_item_breakdown[tag_name][menu_item_guid] = {
+            if canonical not in tag_item_breakdown:
+                tag_item_breakdown[canonical] = {}
+            if menu_item_guid not in tag_item_breakdown[canonical]:
+                tag_item_breakdown[canonical][menu_item_guid] = {
                     "menuItemName": menu_item_name,
                     "totalQty": 0
                 }
-            tag_item_breakdown[tag_name][menu_item_guid]["totalQty"] += quantity_sold
+            tag_item_breakdown[canonical][menu_item_guid]["totalQty"] += quantity_sold
+            
+            # Track item-level breakdown with daily columns
+            if canonical not in tag_item_breakdown_daily:
+                tag_item_breakdown_daily[canonical] = {}
+            if menu_item_guid not in tag_item_breakdown_daily[canonical]:
+                tag_item_breakdown_daily[canonical][menu_item_guid] = {
+                    "menuItemName": menu_item_name,
+                    "totalQty": 0,
+                    "daily": {}
+                }
+            tag_item_breakdown_daily[canonical][menu_item_guid]["totalQty"] += quantity_sold
+            if business_date:
+                date_columns.add(business_date)
+                if business_date not in tag_item_breakdown_daily[canonical][menu_item_guid]["daily"]:
+                    tag_item_breakdown_daily[canonical][menu_item_guid]["daily"][business_date] = 0
+                tag_item_breakdown_daily[canonical][menu_item_guid]["daily"][business_date] += quantity_sold
             
             if is_modifier:
                 modifier_count_in_breakdown += 1
     
     # Build pivot table
-    # Get all unique tag names (sorted)
-    all_tag_names = sorted(set(tag_totals.keys()))
+    # Get all unique tag names (sorted); use canonical so one column per normalized tag
+    if include_zero_sales and not tag_totals and selected_tags:
+        for t in selected_tags:
+            _canonical_tag(t)
+        all_tag_names = sorted(set(_canonical_for_norm.values()))
+    else:
+        all_tag_names = sorted(set(tag_totals.keys()))
     
     # Build pivot rows
     pivot_rows = []
@@ -1186,24 +3054,81 @@ def pivot_menu_items_by_tag(
     
     # Build totals section
     totals_rows = [
-        {"itemTagName": tag_name, "totalQty": tag_totals[tag_name]}
+        {"itemTagName": tag_name, "totalQty": tag_totals.get(tag_name, 0)}
         for tag_name in all_tag_names
     ]
     
     # Build item breakdown section
     item_breakdown_rows = []
+    item_breakdown_daily_rows = []
     modifier_breakdown_totals = {}  # Track modifier totals across all tags for debugging
+    
+    # If include_zero_sales is True, get all items with selected tags from tags_mapping
+    items_with_zero_sales = {}
+    if include_zero_sales and selected_tags:
+        # Use case-insensitive matching
+        selected_tags_lower = [t.lower() for t in selected_tags]
+        selected_tags_set = set(selected_tags_lower)
+        logger.info(f"Looking for zero-sales items in tags_mapping (size: {len(tags_mapping)}) with selected tags: {selected_tags}")
+        for item_guid, item_tags in tags_mapping.items():
+            # Check if this item has any of the selected tags (case-insensitive)
+            matching_tags = [t for t in item_tags if t["tagName"].lower() in selected_tags_set]
+            if matching_tags:
+                item_name = item_names_mapping.get(item_guid, f"Item {item_guid[:8]}")
+                # Track which tags this item has (use canonical so we merge with pivot)
+                for tag in matching_tags:
+                    canon = _canonical_tag(tag["tagName"])
+                    if canon not in items_with_zero_sales:
+                        items_with_zero_sales[canon] = {}
+                    if item_guid not in items_with_zero_sales[canon]:
+                        items_with_zero_sales[canon][item_guid] = item_name
+        logger.info(f"Found {sum(len(items) for items in items_with_zero_sales.values())} zero-sales items across {len(items_with_zero_sales)} tags")
+    elif include_zero_sales and not selected_tags:
+        logger.info("No tags selected; adding zero-sales items under 'All Items'")
+        items_with_zero_sales["All Items"] = {}
+        for item_guid, item_tags in tags_mapping.items():
+            item_name = item_names_mapping.get(item_guid, f"Item {item_guid[:8]}")
+            items_with_zero_sales["All Items"][item_guid] = item_name
+
+    # Always build "all items per tag" from tags_mapping (normalized tag match) so the breakdown
+    # and Toast Items popup list every item that belongs to the tag, including 0-count.
+    all_items_per_tag = {}
+    if selected_tags and tags_mapping:
+        selected_tags_norm = [_normalize_tag_name(t) for t in selected_tags]
+        for tag_name in all_tag_names:
+            all_items_per_tag[tag_name] = {}
+            tag_norm = _normalize_tag_name(tag_name)
+            for item_guid, item_tags in tags_mapping.items():
+                for t in item_tags:
+                    if _normalize_tag_name(t["tagName"]) == tag_norm:
+                        all_items_per_tag[tag_name][item_guid] = item_names_mapping.get(item_guid, f"Item {item_guid[:8]}")
+                        break
+    
     for tag_name in all_tag_names:
+        # Track which items we've already added (those with sales)
+        items_in_tag = set()
+        
+        # Start with items that have sales
         if tag_name in tag_item_breakdown:
             for menu_item_guid, item_data in sorted(tag_item_breakdown[tag_name].items(), 
                                                      key=lambda x: x[1]["totalQty"], 
                                                      reverse=True):
+                items_in_tag.add(menu_item_guid)
                 item_breakdown_rows.append({
                     "itemTagName": tag_name,
                     "menuItemGuid": menu_item_guid,
                     "menuItemName": item_data["menuItemName"],
                     "totalQty": item_data["totalQty"]
                 })
+                if tag_name in tag_item_breakdown_daily and menu_item_guid in tag_item_breakdown_daily[tag_name]:
+                    daily_data = tag_item_breakdown_daily[tag_name][menu_item_guid]
+                    item_breakdown_daily_rows.append({
+                        "itemTagName": tag_name,
+                        "menuItemGuid": menu_item_guid,
+                        "menuItemName": daily_data["menuItemName"],
+                        "totalQty": daily_data["totalQty"],
+                        "daily": daily_data["daily"]
+                    })
                 
                 # Track modifier totals for debugging
                 if menu_item_guid not in menu_item_guids:
@@ -1215,6 +3140,49 @@ def pivot_menu_items_by_tag(
                         }
                     modifier_breakdown_totals[menu_item_guid]["totalQty"] += item_data["totalQty"]
                     modifier_breakdown_totals[menu_item_guid]["tags"].append(tag_name)
+        
+        # Add items with 0 sales if include_zero_sales is True
+        if include_zero_sales and tag_name in items_with_zero_sales:
+            logger.info(f"Adding {len(items_with_zero_sales[tag_name])} zero-sales items for tag '{tag_name}'")
+            for item_guid, item_name in sorted(items_with_zero_sales[tag_name].items()):
+                if item_guid not in items_in_tag:
+                    logger.info(f"  Adding zero-sales item: {item_name} (guid: {item_guid[:8]}...)")
+                    items_in_tag.add(item_guid)
+                    item_breakdown_rows.append({
+                        "itemTagName": tag_name,
+                        "menuItemGuid": item_guid,
+                        "menuItemName": item_name,
+                        "totalQty": 0
+                    })
+                    item_breakdown_daily_rows.append({
+                        "itemTagName": tag_name,
+                        "menuItemGuid": item_guid,
+                        "menuItemName": item_name,
+                        "totalQty": 0,
+                        "daily": {}
+                    })
+                else:
+                    logger.info(f"  Skipping zero-sales item {item_name} (guid: {item_guid[:8]}...) - already has sales")
+
+        # Always add any item that belongs to this tag (from tags_mapping) but not yet in breakdown,
+        # so the Toast Items popup shows the full list including 0-count items.
+        if tag_name in all_items_per_tag:
+            for item_guid, item_name in sorted(all_items_per_tag[tag_name].items()):
+                if item_guid not in items_in_tag:
+                    items_in_tag.add(item_guid)
+                    item_breakdown_rows.append({
+                        "itemTagName": tag_name,
+                        "menuItemGuid": item_guid,
+                        "menuItemName": item_name,
+                        "totalQty": 0
+                    })
+                    item_breakdown_daily_rows.append({
+                        "itemTagName": tag_name,
+                        "menuItemGuid": item_guid,
+                        "menuItemName": item_name,
+                        "totalQty": 0,
+                        "daily": {}
+                    })
     
     # Log modifier totals for debugging
     target_modifier_guid = "6d02e1aa-41c4-489e-bd72-90d12d79edf2"
@@ -1230,11 +3198,135 @@ def pivot_menu_items_by_tag(
                 logger.info(f"  -> Tag '{tag_name}': {tag_qty}")
     
     logger.info(f"Pivot processing: {modifier_count_in_pivot} modifiers excluded from pivot totals, {modifier_count_in_breakdown} modifier entries in breakdown, {skipped_no_tags} rows skipped (not in tags_mapping)")
-    
+
+    item_totals_rows = [
+        {
+            "menuItemGuid": item_guid,
+            "menuItemName": data["menuItemName"],
+            "totalQty": data["totalQty"]
+        }
+        for item_guid, data in item_totals.items()
+    ]
+    item_totals_rows.sort(key=lambda x: (-x["totalQty"], (x["menuItemName"] or "").lower()))
+
+    # ── Order mode split ────────────────────────────────────────────────────────
+    # Items whose name contains "OLO" (case-insensitive) are online-ordering items;
+    # everything else is in-store.
+
+    def _mode_totals_from_breakdown(rows: list) -> list:
+        totals_by_tag: Dict[str, float] = {}
+        for r in rows:
+            tag = r.get("itemTagName", "")
+            totals_by_tag[tag] = totals_by_tag.get(tag, 0.0) + (r.get("totalQty") or 0)
+        return [{"itemTagName": k, "totalQty": v} for k, v in sorted(totals_by_tag.items())]
+
+    olo_breakdown_daily = [r for r in item_breakdown_daily_rows if _is_olo_item(r.get("menuItemName", ""))]
+    instore_breakdown_daily = [r for r in item_breakdown_daily_rows if not _is_olo_item(r.get("menuItemName", ""))]
+    olo_breakdown = [r for r in item_breakdown_rows if _is_olo_item(r.get("menuItemName", ""))]
+    instore_breakdown = [r for r in item_breakdown_rows if not _is_olo_item(r.get("menuItemName", ""))]
+
+    # ── Per-store / per-day EE-weighted counts ──────────────────────────────────
+    # For each analytics row that passes the tag filter, look up its EE weight tag
+    # (any tag whose name matches "EE <number>") and accumulate weighted quantities
+    # per (restaurant, date, tag).  Items with no EE tag are collected for the warning.
+
+    per_store_day: Dict[Tuple, float] = {}   # (r_name, bdate, tag_canonical) -> weighted qty
+    missing_ee_items: set = set()
+
+    selected_tags_norm_ee = [_normalize_tag_name(t) for t in (selected_tags or [])]
+
+    for row in analytics_rows:
+        r_name = row.get("restaurantName", "Unknown")
+        m_guid = row.get("menuItemGuid", "")
+        m_name = (row.get("menuItemName") or
+                  item_names_mapping.get(m_guid, f"Item {m_guid[:8]}") if m_guid else "")
+        qty = row.get("quantitySold", 0) or 0
+        bdate = row.get("businessDate")
+
+        if not m_guid or not bdate:
+            continue
+
+        all_item_tags = tags_mapping.get(m_guid, [])
+
+        # Respect the same tag filter as the main loop
+        if selected_tags and m_guid not in tags_mapping:
+            continue
+
+        if selected_tags:
+            active_canonical = [
+                _canonical_tag(t["tagName"])
+                for t in all_item_tags
+                if _normalize_tag_name(t["tagName"]) in selected_tags_norm_ee
+            ]
+            if not active_canonical:
+                continue
+        else:
+            active_canonical = ["All Items"]
+
+        # Find EE weight (use the FULL tag list, not just selected tags)
+        ee_weight: Optional[float] = None
+        for t in all_item_tags:
+            w = _parse_ee_weight(t["tagName"])
+            if w is not None:
+                ee_weight = w
+                break
+
+        if ee_weight is None:
+            missing_ee_items.add(m_name or f"Item {m_guid[:8]}")
+            continue
+
+        for tag_canonical in active_canonical:
+            key = (r_name, bdate, tag_canonical)
+            per_store_day[key] = per_store_day.get(key, 0.0) + qty * ee_weight
+
+    # Build structured per-store/day weighted rows
+    store_tag_data: Dict[str, Dict[str, Dict]] = {}
+    for (r_name, bdate, tag_name), wqty in per_store_day.items():
+        if r_name not in store_tag_data:
+            store_tag_data[r_name] = {}
+        if tag_name not in store_tag_data[r_name]:
+            store_tag_data[r_name][tag_name] = {"totalWeightedQty": 0.0, "daily": {}}
+        store_tag_data[r_name][tag_name]["totalWeightedQty"] += wqty
+        store_tag_data[r_name][tag_name]["daily"][bdate] = (
+            store_tag_data[r_name][tag_name]["daily"].get(bdate, 0.0) + wqty
+        )
+
+    weighted_rows = []
+    for r_name in sorted(store_tag_data.keys()):
+        for tag_name in sorted(store_tag_data[r_name].keys()):
+            d = store_tag_data[r_name][tag_name]
+            weighted_rows.append({
+                "restaurantName": r_name,
+                "itemTagName": tag_name,
+                "totalWeightedQty": round(d["totalWeightedQty"], 2),
+                "daily": {k: round(v, 2) for k, v in sorted(d["daily"].items())},
+            })
+
     return {
         "pivotTable": pivot_rows,
         "totals": totals_rows,
-        "itemBreakdown": item_breakdown_rows
+        "itemTotals": item_totals_rows,
+        "itemBreakdown": item_breakdown_rows,
+        "itemBreakdownDaily": item_breakdown_daily_rows,
+        "dateColumns": sorted(date_columns),
+        # ── New fields ──────────────────────────────────────────────────────────
+        "orderModeSplit": {
+            "inStore": {
+                "itemBreakdownDaily": instore_breakdown_daily,
+                "itemBreakdown": instore_breakdown,
+                "totals": _mode_totals_from_breakdown(instore_breakdown),
+            },
+            "olo": {
+                "itemBreakdownDaily": olo_breakdown_daily,
+                "itemBreakdown": olo_breakdown,
+                "totals": _mode_totals_from_breakdown(olo_breakdown),
+            },
+        },
+        "perStoreDayWeighted": {
+            "rows": weighted_rows,
+            "dateColumns": sorted(date_columns),
+            "missingEETags": sorted(missing_ee_items),
+        },
     }
 
 # ------------------
@@ -1242,6 +3334,7 @@ def pivot_menu_items_by_tag(
 # ------------------
 
 app = FastAPI(title="Newk's Custom Reporting Platform")
+app.include_router(pick3_router)
 
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -1254,6 +3347,1050 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ------------------
+# V2 API Router
+# ------------------
+
+v2_router = APIRouter(prefix="/api/v2", tags=["v2"])
+
+@v2_router.get("/health")
+async def v2_health():
+    """V2 health check endpoint"""
+    return {"status": "ok", "version": "v2", "platform": "operational-intelligence"}
+
+@v2_router.get("/health/detailed")
+async def v2_health_detailed():
+    """Detailed health check with Toast API connectivity"""
+    health_info = {
+        "status": "ok",
+        "version": "v2",
+        "platform": "operational-intelligence",
+        "toast_api": {
+            "configured": bool(TOAST_API_CLIENT_ID and TOAST_API_CLIENT_SECRET) or bool(TOAST_API_TOKEN),
+            "base_url": TOAST_API_BASE_URL,
+            "auth_cached": bool(_token_cache.get("token")),
+            "locations_test": "not_tested"
+        }
+    }
+    
+    # Test locations endpoint
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            locations = await get_all_active_locations(client)
+            health_info["toast_api"]["locations_test"] = "success"
+            health_info["toast_api"]["location_count"] = len(locations)
+    except Exception as e:
+        health_info["toast_api"]["locations_test"] = f"failed: {str(e)[:100]}"
+        health_info["status"] = "degraded"
+    
+    return health_info
+
+@v2_router.get("/locations", response_model=List[Location])
+async def v2_list_locations():
+    """V2 locations endpoint - reuses v1 logic exactly"""
+    logger.info("V2 locations endpoint called")
+    # Use exact same implementation as v1 endpoint for consistency
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        logger.info("Calling get_all_active_locations from v2 endpoint")
+        result = await get_all_active_locations(client)
+        logger.info(f"V2 locations endpoint returning {len(result)} locations")
+        return result
+
+def calculate_date_range_from_request(request: V2InsightRequest) -> Tuple[date, date]:
+    """Helper function to calculate start and end dates from V2InsightRequest"""
+    if request.dateRangeType == "custom":
+        if not request.customStartDate or not request.customEndDate:
+            raise HTTPException(status_code=400, detail="Custom date range requires start and end dates")
+        start_date = date.fromisoformat(request.customStartDate)
+        end_date = date.fromisoformat(request.customEndDate)
+    elif request.dateRangeType == "last_7_days":
+        end_date = date.today()
+        start_date = end_date - timedelta(days=7)
+    elif request.dateRangeType == "last_30_days":
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+    elif request.dateRangeType == "last_90_days":
+        end_date = date.today()
+        start_date = end_date - timedelta(days=90)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid date range type")
+    
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="End date must be on or after start date")
+    
+    return start_date, end_date
+
+@v2_router.post("/insights/item-performance", response_model=List[ItemPerformanceResponse])
+async def v2_item_performance(request: V2InsightRequest = Body(...)):
+    """Get item performance data - uses MENU_ITEM groupBy and fetches tags"""
+    start_date, end_date = calculate_date_range_from_request(request)
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Get restaurant IDs
+            restaurant_ids = request.restaurantIds
+            locations = None
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                locations = await get_all_active_locations(client)
+                restaurant_ids = [loc.restaurantGuid for loc in locations]
+            elif TOAST_MENU_TAGS_PRIORITY_EXTERNAL_ID or TOAST_MENU_TAGS_PRIORITY_NAME:
+                locations = await get_all_active_locations(client)
+            else:
+                locations = None
+            
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                raise HTTPException(status_code=400, detail="No restaurants available")
+            
+            # Get menu tags mapping for tag names
+            all_tags_mapping = await get_menu_tags_mapping(client, restaurant_ids[0])
+            # Try a few more restaurants to get complete coverage
+            for i in range(1, min(4, len(restaurant_ids))):
+                try:
+                    additional_mapping = await get_menu_tags_mapping(client, restaurant_ids[i])
+                    for item_guid, tags in additional_mapping.items():
+                        if item_guid not in all_tags_mapping:
+                            all_tags_mapping[item_guid] = tags
+                except Exception as e:
+                    logger.warning(f"Failed to get menu mapping from restaurant {restaurant_ids[i]}: {e}")
+                    continue
+            
+            # Helper function to fetch menu data with MENU_ITEM groupBy
+            async def fetch_menu_data_with_groupby(chunk_start: date, chunk_end: date) -> list:
+                days_diff = (chunk_end - chunk_start).days + 1
+                
+                if days_diff <= 7:
+                    report_guid = await request_toast_report(
+                        client, chunk_start, chunk_end, restaurant_ids, "menu", ["MENU_ITEM"]
+                    )
+                    chunk_data = await fetch_toast_report(client, report_guid, "menu")
+                    return chunk_data if isinstance(chunk_data, list) else []
+                else:
+                    # Split into week-sized chunks and fetch in parallel
+                    chunks = []
+                    current_start = chunk_start
+                    while current_start <= chunk_end:
+                        current_end = min(current_start + timedelta(days=6), chunk_end)
+                        chunks.append((current_start, current_end))
+                        current_start = current_end + timedelta(days=1)
+                    
+                    async def fetch_chunk(ch_start: date, ch_end: date) -> list:
+                        report_guid = await request_toast_report(
+                            client, ch_start, ch_end, restaurant_ids, "menu", ["MENU_ITEM"]
+                        )
+                        chunk_data = await fetch_toast_report(client, report_guid, "menu")
+                        return chunk_data if isinstance(chunk_data, list) else []
+                    
+                    chunk_results = await asyncio.gather(*[fetch_chunk(cs, ce) for cs, ce in chunks])
+                    all_data = []
+                    for chunk_data in chunk_results:
+                        all_data.extend(chunk_data)
+                    return all_data
+            
+            # Fetch menu data with MENU_ITEM groupBy
+            raw_data = await fetch_menu_data_with_groupby(start_date, end_date)
+            
+            # Ensure data is a list
+            if not isinstance(raw_data, list):
+                raw_data = []
+            
+            # Transform to normalized format with tags
+            results = []
+            for row in raw_data:
+                if not isinstance(row, dict):
+                    continue
+                
+                # Only process menu items (not modifiers)
+                item_guid = row.get("menuItemGuid", "")
+                if not item_guid:
+                    continue
+                
+                item_name = row.get("menuItemName", "")
+                if not item_name:
+                    item_name = f"Item {item_guid[:8]}"
+                
+                # Get tags for this item
+                tag_name = None
+                if item_guid in all_tags_mapping:
+                    tags = all_tags_mapping[item_guid]
+                    if tags and len(tags) > 0:
+                        # Use first tag name (or join multiple if needed)
+                        tag_name = tags[0]["tagName"]
+                
+                quantity = int(row.get("quantitySold", 0) or 0)
+                sales = float(row.get("netSalesAmount", 0.0) or 0.0)
+                store_name = row.get("restaurantName", "Unknown")
+                business_date = row.get("businessDate", "")
+                
+                # Format date from YYYYMMDD to YYYY-MM-DD if needed
+                if business_date and len(str(business_date)) == 8:
+                    formatted_date = f"{str(business_date)[:4]}-{str(business_date)[4:6]}-{str(business_date)[6:8]}"
+                else:
+                    formatted_date = str(business_date) if business_date else ""
+                
+                results.append(ItemPerformanceResponse(
+                    itemName=item_name,
+                    tagName=tag_name,
+                    quantity=quantity,
+                    sales=sales,
+                    storeName=store_name,
+                    date=formatted_date
+                ))
+            
+            return results
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in v2_item_performance: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching item performance: {str(e)}")
+
+@v2_router.post("/insights/top-movers", response_model=List[TopMoversResponse])
+async def v2_top_movers(request: V2InsightRequest = Body(...)):
+    """Get top movers insight - compares two periods to find items with largest changes"""
+    start_date, end_date = calculate_date_range_from_request(request)
+    
+    # Calculate period length
+    period_length = (end_date - start_date).days
+    
+    # Period 1: earlier period of same length
+    period1_end = start_date - timedelta(days=1)
+    period1_start = period1_end - timedelta(days=period_length)
+    
+    # Validate period1_start is not too far in the past (Toast API may not have data)
+    if period1_start < date.today() - timedelta(days=365):
+        raise HTTPException(status_code=400, detail="Comparison period is too far in the past. Please use a more recent date range.")
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Get restaurant IDs
+            restaurant_ids = request.restaurantIds
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                locations = await get_all_active_locations(client)
+                restaurant_ids = [loc.restaurantGuid for loc in locations]
+            
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                raise HTTPException(status_code=400, detail="No restaurants available")
+            
+            # Helper function to fetch menu data with MENU_ITEM groupBy
+            # If date range is > 7 days, split into week chunks (groupBy only works for day/week)
+            async def fetch_menu_data_with_groupby(chunk_start: date, chunk_end: date) -> list:
+                days_diff = (chunk_end - chunk_start).days + 1
+                
+                if days_diff <= 7:
+                    # Can use groupBy directly
+                    report_guid = await request_toast_report(
+                        client, chunk_start, chunk_end, restaurant_ids, "menu", ["MENU_ITEM"]
+                    )
+                    chunk_data = await fetch_toast_report(client, report_guid, "menu")
+                    return chunk_data if isinstance(chunk_data, list) else []
+                else:
+                    # Split into week-sized chunks and fetch in parallel
+                    chunks = []
+                    current_start = chunk_start
+                    while current_start <= chunk_end:
+                        current_end = min(current_start + timedelta(days=6), chunk_end)
+                        chunks.append((current_start, current_end))
+                        current_start = current_end + timedelta(days=1)
+                    
+                    # Fetch all chunks in parallel
+                    async def fetch_chunk(ch_start: date, ch_end: date) -> list:
+                        report_guid = await request_toast_report(
+                            client, ch_start, ch_end, restaurant_ids, "menu", ["MENU_ITEM"]
+                        )
+                        chunk_data = await fetch_toast_report(client, report_guid, "menu")
+                        return chunk_data if isinstance(chunk_data, list) else []
+                    
+                    # Run all chunk fetches in parallel
+                    chunk_results = await asyncio.gather(*[fetch_chunk(cs, ce) for cs, ce in chunks])
+                    
+                    # Flatten results
+                    all_data = []
+                    for chunk_data in chunk_results:
+                        all_data.extend(chunk_data)
+                    
+                    return all_data
+            
+            # Fetch data for both periods
+            data_p1 = await fetch_menu_data_with_groupby(period1_start, period1_end)
+            data_p2 = await fetch_menu_data_with_groupby(start_date, end_date)
+            
+            # Aggregate by item GUID (not name) to avoid combining different items with same name
+            # Only include rows with menuItemGuid (exclude modifiers which have modifierGuid instead)
+            p1_totals: Dict[str, Dict[str, float]] = {}  # guid -> {name, sales}
+            p2_totals: Dict[str, Dict[str, float]] = {}  # guid -> {name, sales}
+            
+            for row in data_p1:
+                if not isinstance(row, dict):
+                    continue
+                # Only process menu items (not modifiers)
+                item_guid = row.get("menuItemGuid", "")
+                if not item_guid:
+                    # Skip if no menuItemGuid (might be a modifier or invalid row)
+                    continue
+                item_name = row.get("menuItemName", "")
+                if not item_name:
+                    item_name = f"Item {item_guid[:8]}"
+                sales = float(row.get("netSalesAmount", 0.0) or 0.0)
+                if item_guid not in p1_totals:
+                    p1_totals[item_guid] = {"name": item_name, "sales": 0.0}
+                p1_totals[item_guid]["sales"] += sales
+            
+            for row in data_p2:
+                if not isinstance(row, dict):
+                    continue
+                # Only process menu items (not modifiers)
+                item_guid = row.get("menuItemGuid", "")
+                if not item_guid:
+                    # Skip if no menuItemGuid (might be a modifier or invalid row)
+                    continue
+                item_name = row.get("menuItemName", "")
+                if not item_name:
+                    item_name = f"Item {item_guid[:8]}"
+                sales = float(row.get("netSalesAmount", 0.0) or 0.0)
+                if item_guid not in p2_totals:
+                    p2_totals[item_guid] = {"name": item_name, "sales": 0.0}
+                p2_totals[item_guid]["sales"] += sales
+            
+            # Calculate changes for all items (by GUID to avoid name collisions)
+            movers = []
+            all_guids = set(p1_totals.keys()) | set(p2_totals.keys())
+            
+            for item_guid in all_guids:
+                p1_data = p1_totals.get(item_guid, {"name": "Unknown", "sales": 0.0})
+                p2_data = p2_totals.get(item_guid, {"name": "Unknown", "sales": 0.0})
+                
+                # Use the name from whichever period has it, or prefer p2
+                item_name = p2_data["name"] or p1_data["name"] or "Unknown"
+                p1_val = p1_data["sales"]
+                p2_val = p2_data["sales"]
+                
+                if p1_val == 0:
+                    change_percent = 100.0 if p2_val > 0 else 0.0
+                else:
+                    change_percent = ((p2_val - p1_val) / p1_val) * 100.0
+                
+                direction = "up" if change_percent > 0 else ("down" if change_percent < 0 else "neutral")
+                
+                movers.append(TopMoversResponse(
+                    itemName=item_name,
+                    changePercent=round(change_percent, 2),
+                    period1Value=round(p1_val, 2),
+                    period2Value=round(p2_val, 2),
+                    direction=direction
+                ))
+            
+            # Sort by absolute change percent, return top 20
+            movers.sort(key=lambda x: abs(x.changePercent), reverse=True)
+            return movers[:20]
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in v2_top_movers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching top movers: {str(e)}")
+
+@v2_router.post("/insights/store-variance", response_model=List[StoreVarianceResponse])
+async def v2_store_variance(request: V2InsightRequest = Body(...)):
+    """Get store variance insight - compares stores against average benchmark"""
+    start_date, end_date = calculate_date_range_from_request(request)
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Get restaurant IDs
+            restaurant_ids = request.restaurantIds
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                locations = await get_all_active_locations(client)
+                restaurant_ids = [loc.restaurantGuid for loc in locations]
+            
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                raise HTTPException(status_code=400, detail="No restaurants available")
+            
+            # Fetch metrics data
+            report_guid = await request_toast_report(
+                client, start_date, end_date, restaurant_ids, "metrics", []
+            )
+            raw_data = await fetch_toast_report(client, report_guid, "metrics")
+            
+            # Ensure data is a list
+            if not isinstance(raw_data, list):
+                raw_data = []
+            
+            # Aggregate by store
+            store_totals: Dict[str, Dict[str, float]] = {}
+            
+            for row in raw_data:
+                if not isinstance(row, dict):
+                    continue
+                store_name = row.get("restaurantName", "Unknown")
+                if store_name not in store_totals:
+                    store_totals[store_name] = {"netSales": 0.0, "guestCount": 0.0, "itemCount": 0.0}
+                
+                store_totals[store_name]["netSales"] += float(row.get("netSalesAmount", 0.0) or 0.0)
+                store_totals[store_name]["guestCount"] += float(row.get("guestCount", 0.0) or 0.0)
+                store_totals[store_name]["itemCount"] += float(row.get("itemCount", 0.0) or 0.0)
+            
+            # Calculate benchmarks (average across all stores)
+            num_stores = len(store_totals)
+            if num_stores == 0:
+                return []
+            
+            benchmarks = {
+                "netSales": sum(s["netSales"] for s in store_totals.values()) / num_stores,
+                "guestCount": sum(s["guestCount"] for s in store_totals.values()) / num_stores,
+                "itemCount": sum(s["itemCount"] for s in store_totals.values()) / num_stores
+            }
+            
+            # Calculate variance for each store and metric
+            results = []
+            for store_name, totals in store_totals.items():
+                for metric, value in totals.items():
+                    benchmark = benchmarks[metric]
+                    if benchmark > 0:
+                        variance = ((value - benchmark) / benchmark) * 100.0
+                    else:
+                        variance = 0.0
+                    
+                    results.append(StoreVarianceResponse(
+                        storeName=store_name,
+                        metric=metric,
+                        value=round(value, 2),
+                        variance=round(variance, 2),
+                        benchmark=round(benchmark, 2)
+                    ))
+            
+            # Sort by absolute variance
+            results.sort(key=lambda x: abs(x.variance), reverse=True)
+            return results
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in v2_store_variance: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching store variance: {str(e)}")
+
+@v2_router.post("/insights/store-rollups", response_model=List[StoreRollupResponse])
+async def v2_store_rollups(request: V2InsightRequest = Body(...)):
+    """Get aggregated metrics rolled up by store"""
+    start_date, end_date = calculate_date_range_from_request(request)
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Get restaurant IDs
+            restaurant_ids = request.restaurantIds
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                locations = await get_all_active_locations(client)
+                restaurant_ids = [loc.restaurantGuid for loc in locations]
+            
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                raise HTTPException(status_code=400, detail="No restaurants available")
+            
+            # Fetch metrics data
+            report_guid = await request_toast_report(
+                client, start_date, end_date, restaurant_ids, "metrics", []
+            )
+            raw_data = await fetch_toast_report(client, report_guid, "metrics")
+            
+            # Ensure data is a list
+            if not isinstance(raw_data, list):
+                raw_data = []
+            
+            # Aggregate by store
+            store_rollups: Dict[str, Dict[str, Any]] = {}
+            
+            for row in raw_data:
+                if not isinstance(row, dict):
+                    continue
+                store_name = row.get("restaurantName", "Unknown")
+                store_guid = row.get("restaurantGuid", "")
+                
+                if store_name not in store_rollups:
+                    store_rollups[store_name] = {
+                        "storeGuid": store_guid,
+                        "netSales": 0.0,
+                        "guestCount": 0,
+                        "itemCount": 0
+                    }
+                
+                store_rollups[store_name]["netSales"] += float(row.get("netSalesAmount", 0.0) or 0.0)
+                store_rollups[store_name]["guestCount"] += int(row.get("guestCount", 0) or 0)
+                store_rollups[store_name]["itemCount"] += int(row.get("itemCount", 0) or 0)
+            
+            # Build response
+            results = []
+            date_range_str = f"{start_date.isoformat()} to {end_date.isoformat()}"
+            
+            for store_name, totals in store_rollups.items():
+                guest_count = totals["guestCount"]
+                avg_ticket = totals["netSales"] / guest_count if guest_count > 0 else 0.0
+                
+                results.append(StoreRollupResponse(
+                    storeName=store_name,
+                    storeGuid=totals["storeGuid"],
+                    netSales=round(totals["netSales"], 2),
+                    guestCount=totals["guestCount"],
+                    itemCount=totals["itemCount"],
+                    avgTicket=round(avg_ticket, 2),
+                    dateRange=date_range_str
+                ))
+            
+            # Sort by net sales descending
+            results.sort(key=lambda x: x.netSales, reverse=True)
+            return results
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in v2_store_rollups: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching store rollups: {str(e)}")
+
+@v2_router.post("/insights/trend-deltas", response_model=List[TrendDeltaResponse])
+async def v2_trend_deltas(request: V2InsightRequest = Body(...)):
+    """Get period-over-period trend deltas for key metrics"""
+    start_date, end_date = calculate_date_range_from_request(request)
+    
+    # Calculate period length
+    period_length = (end_date - start_date).days
+    
+    # Period 1: earlier period of same length
+    period1_end = start_date - timedelta(days=1)
+    period1_start = period1_end - timedelta(days=period_length)
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Get restaurant IDs
+            restaurant_ids = request.restaurantIds
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                locations = await get_all_active_locations(client)
+                restaurant_ids = [loc.restaurantGuid for loc in locations]
+            
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                raise HTTPException(status_code=400, detail="No restaurants available")
+            
+            # Validate period1_start is not too far in the past
+            if period1_start < date.today() - timedelta(days=365):
+                raise HTTPException(status_code=400, detail="Comparison period is too far in the past. Please use a more recent date range.")
+            
+            # Fetch data for both periods
+            report_guid_p1 = await request_toast_report(
+                client, period1_start, period1_end, restaurant_ids, "metrics", []
+            )
+            data_p1 = await fetch_toast_report(client, report_guid_p1, "metrics")
+            
+            report_guid_p2 = await request_toast_report(
+                client, start_date, end_date, restaurant_ids, "metrics", []
+            )
+            data_p2 = await fetch_toast_report(client, report_guid_p2, "metrics")
+            
+            # Ensure data is a list
+            if not isinstance(data_p1, list):
+                data_p1 = []
+            if not isinstance(data_p2, list):
+                data_p2 = []
+            
+            # Aggregate metrics across all stores
+            p1_totals = {"netSales": 0.0, "guestCount": 0.0, "itemCount": 0.0}
+            p2_totals = {"netSales": 0.0, "guestCount": 0.0, "itemCount": 0.0}
+            
+            for row in data_p1:
+                if not isinstance(row, dict):
+                    continue
+                p1_totals["netSales"] += float(row.get("netSalesAmount", 0.0) or 0.0)
+                p1_totals["guestCount"] += float(row.get("guestCount", 0.0) or 0.0)
+                p1_totals["itemCount"] += float(row.get("itemCount", 0.0) or 0.0)
+            
+            for row in data_p2:
+                if not isinstance(row, dict):
+                    continue
+                p2_totals["netSales"] += float(row.get("netSalesAmount", 0.0) or 0.0)
+                p2_totals["guestCount"] += float(row.get("guestCount", 0.0) or 0.0)
+                p2_totals["itemCount"] += float(row.get("itemCount", 0.0) or 0.0)
+            
+            # Calculate deltas
+            results = []
+            period1_label = f"{period1_start.isoformat()} to {period1_end.isoformat()}"
+            period2_label = f"{start_date.isoformat()} to {end_date.isoformat()}"
+            
+            for metric in ["netSales", "guestCount", "itemCount"]:
+                p1_val = p1_totals[metric]
+                p2_val = p2_totals[metric]
+                delta = p2_val - p1_val
+                
+                if p1_val > 0:
+                    delta_percent = (delta / p1_val) * 100.0
+                else:
+                    delta_percent = 100.0 if p2_val > 0 else 0.0
+                
+                direction = "up" if delta > 0 else ("down" if delta < 0 else "neutral")
+                
+                results.append(TrendDeltaResponse(
+                    metric=metric,
+                    period1Value=round(p1_val, 2),
+                    period2Value=round(p2_val, 2),
+                    delta=round(delta, 2),
+                    deltaPercent=round(delta_percent, 2),
+                    period1Label=period1_label,
+                    period2Label=period2_label,
+                    direction=direction
+                ))
+            
+            return results
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in v2_trend_deltas: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching trend deltas: {str(e)}")
+
+@v2_router.post("/insights/anomaly-flags", response_model=List[AnomalyFlagResponse])
+async def v2_anomaly_flags(request: V2InsightRequest = Body(...)):
+    """Detect anomalies in store metrics using statistical methods"""
+    start_date, end_date = calculate_date_range_from_request(request)
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Get restaurant IDs
+            restaurant_ids = request.restaurantIds
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                locations = await get_all_active_locations(client)
+                restaurant_ids = [loc.restaurantGuid for loc in locations]
+            
+            if not restaurant_ids or len(restaurant_ids) == 0:
+                raise HTTPException(status_code=400, detail="No restaurants available")
+            
+            # Fetch metrics data
+            report_guid = await request_toast_report(
+                client, start_date, end_date, restaurant_ids, "metrics", []
+            )
+            raw_data = await fetch_toast_report(client, report_guid, "metrics")
+            
+            # Ensure data is a list
+            if not isinstance(raw_data, list):
+                raw_data = []
+            
+            # Aggregate by store
+            store_metrics: Dict[str, Dict[str, float]] = {}
+            
+            for row in raw_data:
+                if not isinstance(row, dict):
+                    continue
+                store_name = row.get("restaurantName", "Unknown")
+                if store_name not in store_metrics:
+                    store_metrics[store_name] = {"netSales": 0.0, "guestCount": 0.0}
+                
+                store_metrics[store_name]["netSales"] += float(row.get("netSalesAmount", 0.0) or 0.0)
+                store_metrics[store_name]["guestCount"] += float(row.get("guestCount", 0.0) or 0.0)
+            
+            if len(store_metrics) < 3:
+                # Need at least 3 stores for meaningful anomaly detection
+                return []
+            
+            # Calculate statistics for each metric
+            results = []
+            
+            for metric in ["netSales", "guestCount"]:
+                values = [store_metrics[store][metric] for store in store_metrics.keys()]
+                mean = sum(values) / len(values)
+                
+                # Calculate standard deviation
+                variance = sum((x - mean) ** 2 for x in values) / len(values)
+                std_dev = variance ** 0.5
+                
+                if std_dev == 0:
+                    continue
+                
+                # Flag stores that are more than 2 standard deviations from mean
+                for store_name, metrics in store_metrics.items():
+                    value = metrics[metric]
+                    deviation = (value - mean) / std_dev
+                    
+                    if abs(deviation) >= 2.0:
+                        severity = "high" if abs(deviation) >= 3.0 else "medium"
+                        flag_type = "outlier"
+                        
+                        if deviation > 0:
+                            flag_type = "spike"
+                        else:
+                            flag_type = "drop"
+                        
+                        results.append(AnomalyFlagResponse(
+                            storeName=store_name,
+                            metric=metric,
+                            value=round(value, 2),
+                            expectedValue=round(mean, 2),
+                            deviation=round(deviation, 2),
+                            severity=severity,
+                            flagType=flag_type
+                        ))
+            
+            # Sort by deviation (absolute value)
+            results.sort(key=lambda x: abs(x.deviation), reverse=True)
+            return results
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in v2_anomaly_flags: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching anomaly flags: {str(e)}")
+
+@v2_router.get("/dashboards/{dashboard_type}", response_model=DashboardResponse)
+async def v2_get_dashboard(dashboard_type: str):
+    """Get dashboard data for executive, operations, or financial dashboard"""
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Get all locations for default
+            locations = await get_all_active_locations(client)
+            restaurant_ids = [loc.restaurantGuid for loc in locations]
+            
+            # Default to last 30 days
+            end_date = date.today()
+            start_date = end_date - timedelta(days=30)
+            
+            widgets = []
+            
+            if dashboard_type == "executive":
+                # Executive dashboard: High-level KPIs
+                # Get store rollups
+                report_guid = await request_toast_report(
+                    client, start_date, end_date, restaurant_ids, "metrics", []
+                )
+                raw_data = await fetch_toast_report(client, report_guid, "metrics")
+                
+                if isinstance(raw_data, list):
+                    total_sales = sum(float(row.get("netSalesAmount", 0.0) or 0.0) for row in raw_data if isinstance(row, dict))
+                    total_guests = sum(float(row.get("guestCount", 0.0) or 0.0) for row in raw_data if isinstance(row, dict))
+                    avg_ticket = total_sales / total_guests if total_guests > 0 else 0.0
+                    
+                    widgets.append(DashboardWidget(
+                        type="kpi",
+                        title="Total Net Sales",
+                        data={"value": round(total_sales, 2), "format": "currency"},
+                        config={}
+                    ))
+                    widgets.append(DashboardWidget(
+                        type="kpi",
+                        title="Total Guests",
+                        data={"value": int(total_guests), "format": "number"},
+                        config={}
+                    ))
+                    widgets.append(DashboardWidget(
+                        type="kpi",
+                        title="Average Ticket",
+                        data={"value": round(avg_ticket, 2), "format": "currency"},
+                        config={}
+                    ))
+                
+                # Get trend deltas
+                period1_end = start_date - timedelta(days=1)
+                period1_start = period1_end - timedelta(days=30)
+                if period1_start >= date.today() - timedelta(days=365):
+                    report_guid_p1 = await request_toast_report(
+                        client, period1_start, period1_end, restaurant_ids, "metrics", []
+                    )
+                    data_p1 = await fetch_toast_report(client, report_guid_p1, "metrics")
+                    
+                    if isinstance(data_p1, list) and isinstance(raw_data, list):
+                        p1_sales = sum(float(row.get("netSalesAmount", 0.0) or 0.0) for row in data_p1 if isinstance(row, dict))
+                        p2_sales = total_sales
+                        if p1_sales > 0:
+                            change_pct = ((p2_sales - p1_sales) / p1_sales) * 100.0
+                            widgets.append(DashboardWidget(
+                                type="kpi",
+                                title="Sales Change",
+                                data={"value": round(change_pct, 2), "format": "percent", "direction": "up" if change_pct > 0 else "down"},
+                                config={}
+                            ))
+                
+                # Add a sales trend chart for visual cues
+                if isinstance(raw_data, list):
+                    daily_sales = {}
+                    for row in raw_data:
+                        if not isinstance(row, dict):
+                            continue
+                        business_date = row.get("businessDate", "")
+                        if business_date:
+                            daily_sales[business_date] = daily_sales.get(business_date, 0.0) + float(row.get("netSalesAmount", 0.0) or 0.0)
+                    
+                    widgets.append(DashboardWidget(
+                        type="chart",
+                        title="Daily Sales Trend",
+                        data={"series": [{"date": k, "sales": round(v, 2)} for k, v in sorted(daily_sales.items())]},
+                        config={"chartType": "line"}
+                    ))
+            
+            elif dashboard_type == "operations":
+                # Operations dashboard: Store performance, anomalies
+                # Get store rollups
+                report_guid = await request_toast_report(
+                    client, start_date, end_date, restaurant_ids, "metrics", []
+                )
+                raw_data = await fetch_toast_report(client, report_guid, "metrics")
+                
+                if isinstance(raw_data, list):
+                    # Aggregate by store
+                    store_totals = {}
+                    for row in raw_data:
+                        if not isinstance(row, dict):
+                            continue
+                        store_name = row.get("restaurantName", "Unknown")
+                        if store_name not in store_totals:
+                            store_totals[store_name] = {"netSales": 0.0, "guestCount": 0.0}
+                        store_totals[store_name]["netSales"] += float(row.get("netSalesAmount", 0.0) or 0.0)
+                        store_totals[store_name]["guestCount"] += float(row.get("guestCount", 0.0) or 0.0)
+                    
+                    # Top stores with average ticket
+                    top_stores = sorted(store_totals.items(), key=lambda x: x[1]["netSales"], reverse=True)[:5]
+                    store_rows = []
+                    for k, v in top_stores:
+                        avg_ticket = v["netSales"] / v["guestCount"] if v["guestCount"] > 0 else 0.0
+                        store_rows.append({
+                            "store": k,
+                            "sales": round(v["netSales"], 2),
+                            "guests": int(v["guestCount"]),
+                            "avgTicket": round(avg_ticket, 2)
+                        })
+                    widgets.append(DashboardWidget(
+                        type="table",
+                        title="Top 5 Stores by Sales",
+                        data={"rows": store_rows},
+                        config={}
+                    ))
+                    
+                    # Anomaly flags
+                    if len(store_totals) >= 3:
+                        values = [v["netSales"] for v in store_totals.values()]
+                        mean = sum(values) / len(values)
+                        variance = sum((x - mean) ** 2 for x in values) / len(values)
+                        std_dev = variance ** 0.5 if variance > 0 else 0
+                        
+                        anomalies = []
+                        for store_name, metrics in store_totals.items():
+                            value = metrics["netSales"]
+                            if std_dev > 0:
+                                deviation = (value - mean) / std_dev
+                                if abs(deviation) >= 2.0:
+                                    anomalies.append({
+                                        "store": store_name,
+                                        "value": round(value, 2),
+                                        "deviation": round(deviation, 2),
+                                        "severity": "high" if abs(deviation) >= 3.0 else "medium"
+                                    })
+                        
+                        if anomalies:
+                            widgets.append(DashboardWidget(
+                                type="alert",
+                                title="Performance Alerts",
+                                data={"alerts": anomalies[:5]},
+                                config={}
+                            ))
+            
+            elif dashboard_type == "financial":
+                # Financial dashboard: Revenue trends, forecasting
+                report_guid = await request_toast_report(
+                    client, start_date, end_date, restaurant_ids, "metrics", []
+                )
+                raw_data = await fetch_toast_report(client, report_guid, "metrics")
+                
+                if isinstance(raw_data, list):
+                    # Daily sales trend
+                    daily_sales = {}
+                    for row in raw_data:
+                        if not isinstance(row, dict):
+                            continue
+                        business_date = row.get("businessDate", "")
+                        if business_date:
+                            daily_sales[business_date] = daily_sales.get(business_date, 0.0) + float(row.get("netSalesAmount", 0.0) or 0.0)
+                    
+                    widgets.append(DashboardWidget(
+                        type="chart",
+                        title="Daily Sales Trend",
+                        data={"series": [{"date": k, "sales": round(v, 2)} for k, v in sorted(daily_sales.items())]},
+                        config={"chartType": "line"}
+                    ))
+            
+            return DashboardResponse(
+                dashboardType=dashboard_type,
+                widgets=widgets,
+                lastUpdated=datetime.now().isoformat(),
+                dateRange={"start": start_date.isoformat(), "end": end_date.isoformat()}
+            )
+            
+    except HTTPException as e:
+        # Re-raise HTTP exceptions (like 429 rate limits) as-is
+        raise e
+    except Exception as e:
+        logger.error(f"Error in v2_get_dashboard: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching dashboard: {str(e)}")
+
+# Store Groups Endpoints
+@v2_router.get("/store-groups", response_model=List[StoreGroup])
+async def v2_get_store_groups():
+    """Get all store groups"""
+    return load_store_groups()
+
+@v2_router.post("/store-groups", response_model=StoreGroup)
+async def v2_create_store_group(group: StoreGroupCreate = Body(...)):
+    """Create a new store group"""
+    groups = load_store_groups()
+    
+    if any(g.name.lower() == group.name.lower() for g in groups):
+        raise HTTPException(status_code=400, detail="A store group with this name already exists")
+    
+    new_group = StoreGroup(
+        id=str(uuid.uuid4()),
+        name=group.name,
+        description=group.description or "",
+        storeGuids=group.storeGuids,
+        createdAt=datetime.now().isoformat(),
+        updatedAt=datetime.now().isoformat()
+    )
+    groups.append(new_group)
+    save_store_groups(groups)
+    
+    return new_group
+
+@v2_router.put("/store-groups/{group_id}", response_model=StoreGroup)
+async def v2_update_store_group(group_id: str, group: StoreGroupCreate = Body(...)):
+    """Update a store group"""
+    groups = load_store_groups()
+    
+    index = None
+    for i, g in enumerate(groups):
+        if g.id == group_id:
+            index = i
+            break
+    
+    if index is None:
+        raise HTTPException(status_code=404, detail="Store group not found")
+    
+    if any(g.name.lower() == group.name.lower() and g.id != group_id for g in groups):
+        raise HTTPException(status_code=400, detail="A store group with this name already exists")
+    
+    updated_group = StoreGroup(
+        id=group_id,
+        name=group.name,
+        description=group.description or "",
+        storeGuids=group.storeGuids,
+        createdAt=groups[index].createdAt,
+        updatedAt=datetime.now().isoformat()
+    )
+    groups[index] = updated_group
+    save_store_groups(groups)
+    
+    return updated_group
+
+@v2_router.delete("/store-groups/{group_id}")
+async def v2_delete_store_group(group_id: str):
+    """Delete a store group"""
+    groups = load_store_groups()
+    original_count = len(groups)
+    groups = [g for g in groups if g.id != group_id]
+    
+    if len(groups) == original_count:
+        raise HTTPException(status_code=404, detail="Store group not found")
+    
+    save_store_groups(groups)
+    return {"message": "Store group deleted successfully"}
+
+# Mount v2 router
+app.include_router(v2_router)
+
+# ------------------
+# OLO Order Export / Digital Orders by Platform
+# ------------------
+
+olo_router = APIRouter(prefix="/api/olo", tags=["olo"])
+
+
+class OloDigitalOrdersRequest(BaseModel):
+    """Request to run Digital Orders by Platform report for selected batches."""
+    batch_ids: List[int]
+
+
+class OloDigitalOrdersByDateRequest(BaseModel):
+    """Request to run report for a date range; batches are auto-selected by generated date."""
+    start_date: str  # YYYY-MM-DD
+    end_date: str    # YYYY-MM-DD
+
+
+@olo_router.get("/batches")
+async def olo_list_batches():
+    """List available OLO order export batches (Signature auth required)."""
+    try:
+        batches = await list_order_batches()
+        return {"batches": batches}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text or "OLO API error")
+    except Exception as e:
+        logger.exception("OLO list batches failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@olo_router.post("/digital-orders-by-platform")
+async def olo_digital_orders_by_platform(body: OloDigitalOrdersRequest = Body(...)):
+    """
+    Download selected order batches from OLO, parse orderbatch XML, and return
+    aggregated Digital Orders by Platform report rows (platform, store, order count, totals).
+    """
+    if not body.batch_ids:
+        raise HTTPException(status_code=400, detail="At least one batch_id is required")
+    all_orders = []
+    for batch_id in body.batch_ids:
+        try:
+            zip_bytes = await download_batch_zip(batch_id)
+            orders = extract_orders_from_zip(zip_bytes)
+            all_orders.extend(orders)
+        except Exception as e:
+            logger.warning(f"OLO batch {batch_id} failed: {e}")
+            raise HTTPException(status_code=502, detail=f"Failed to process batch {batch_id}: {e}")
+    rows = aggregate_digital_orders_by_platform(all_orders)
+    return {"rows": rows, "totalOrders": len(all_orders)}
+
+
+@olo_router.post("/digital-orders-by-platform-by-date")
+async def olo_digital_orders_by_platform_by_date(body: OloDigitalOrdersByDateRequest = Body(...)):
+    """
+    Run Digital Orders by Platform for a date range. Fetches batches, filters by generated
+    date within [start_date, end_date], then downloads and aggregates. No batch selection needed.
+    """
+    try:
+        all_batches = await list_order_batches()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("OLO list batches failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    filtered = filter_batches_by_date_range(
+        all_batches, body.start_date.strip(), body.end_date.strip()
+    )
+    if not filtered:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No OLO batches found for date range {body.start_date} to {body.end_date}. Try a different range or check OLO batch availability.",
+        )
+    batch_ids = [b["batchId"] for b in filtered]
+    all_orders = []
+    for batch_id in batch_ids:
+        try:
+            zip_bytes = await download_batch_zip(batch_id)
+            orders = extract_orders_from_zip(zip_bytes)
+            all_orders.extend(orders)
+        except Exception as e:
+            logger.warning(f"OLO batch {batch_id} failed: {e}")
+            raise HTTPException(status_code=502, detail=f"Failed to process batch {batch_id}: {e}")
+    rows = aggregate_digital_orders_by_platform(all_orders)
+    return {
+        "rows": rows,
+        "totalOrders": len(all_orders),
+        "batchIds": batch_ids,
+        "startDate": body.start_date,
+        "endDate": body.end_date,
+    }
+
+
+app.include_router(olo_router)
 
 # ------------------
 # Core Endpoints
@@ -1537,14 +4674,459 @@ async def delete_user(
     # Delete the user
     del users[user_id]
     save_users(users)
-    
+
     logger.info(f"Admin {admin_user.email} deleted user {user_data.get('email')}")
     return {"message": "User deleted successfully"}
 
+@app.put("/api/users/me/restaurants")
+async def update_my_restaurants(
+    data: dict = Body(...),
+    current_user: User = Depends(get_current_user)
+):
+    """Save the calling user's restaurant filter. Pass restaurantIds=[] to clear (show all)."""
+    restaurant_ids = data.get("restaurantIds", [])
+    users = load_users()
+    if current_user.id not in users:
+        raise HTTPException(status_code=404, detail="User not found")
+    users[current_user.id]["assignedRestaurants"] = restaurant_ids
+    save_users(users)
+    logger.info(f"User {current_user.email} updated assignedRestaurants: {len(restaurant_ids)} location(s)")
+    return User(**{k: v for k, v in users[current_user.id].items() if k != "password"})
+
+@app.put("/api/admin/users/{user_id}/restaurants")
+async def admin_set_user_restaurants(
+    user_id: str,
+    data: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user)
+):
+    """Admin assigns restaurant access for any user. Pass restaurantIds=[] to restore 'show all'."""
+    restaurant_ids = data.get("restaurantIds", [])
+    users = load_users()
+    if user_id not in users:
+        raise HTTPException(status_code=404, detail="User not found")
+    users[user_id]["assignedRestaurants"] = restaurant_ids
+    save_users(users)
+    logger.info(f"Admin {admin_user.email} set assignedRestaurants for user {user_id}: {len(restaurant_ids)} location(s)")
+    return User(**{k: v for k, v in users[user_id].items() if k != "password"})
+
 @app.get("/locations", response_model=List[Location])
-async def list_locations():
+async def list_locations(optional_user: Optional[User] = Depends(get_optional_user)):
     async with httpx.AsyncClient(timeout=30.0) as client:
-        return await get_all_active_locations(client)
+        all_locs = await get_all_active_locations(client)
+    # Filter to assigned restaurants for authenticated non-admin users who have an assignment.
+    # Admins and unauthenticated callers always receive the full list.
+    if optional_user and optional_user.role != "admin" and optional_user.assignedRestaurants:
+        assigned = set(optional_user.assignedRestaurants)
+        return [loc for loc in all_locs if loc.restaurantGuid in assigned]
+    return all_locs
+
+
+@app.post("/api/menu/export-missing-consolidated", response_model=MissingConsolidatedExportResponse)
+async def export_missing_consolidated_categories(preview_limit: int = 0):
+    """Export menu items/modifiers with sales missing ConsolidatedCat mapping."""
+    end_date = date.today()
+    start_date = end_date - timedelta(days=89)
+    output_file = os.path.join(ROOT_DIR, "Missing_ConsolidatedCat_Items.xlsx")
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        locations = await get_all_active_locations(client)
+        restaurant_ids = [loc.restaurantGuid for loc in locations]
+        if not restaurant_ids:
+            raise HTTPException(status_code=400, detail="No restaurants available")
+
+        consolidated_map = get_consolidated_category_map()
+        consolidated_override = get_consolidated_override_map()
+
+        menu_rows = await _fetch_menu_rows_for_range(
+            client,
+            restaurant_ids,
+            start_date,
+            end_date,
+            ["MENU_ITEM"]
+        )
+        modifier_rows = await _fetch_menu_rows_for_range(
+            client,
+            restaurant_ids,
+            start_date,
+            end_date,
+            ["MODIFIER"]
+        )
+
+    if modifier_rows:
+        for row in modifier_rows:
+            if "modifierGuid" in row:
+                row["menuItemGuid"] = row.pop("modifierGuid")
+            elif "modifierOptionGuid" in row:
+                row["menuItemGuid"] = row.pop("modifierOptionGuid")
+            if "modifierName" in row:
+                row["menuItemName"] = row.pop("modifierName")
+            elif "modifierOptionName" in row:
+                row["menuItemName"] = row.pop("modifierOptionName")
+
+    aggregated_menu = _aggregate_missing_consolidated_rows(menu_rows, "menu", consolidated_map)
+    aggregated_mods = _aggregate_missing_consolidated_rows(modifier_rows, "modifier", consolidated_map)
+    aggregated_menu.update(aggregated_mods)
+
+    missing_rows = list(aggregated_menu.values())
+    missing_rows.sort(key=lambda r: (r["menuItemName"] or "").lower())
+
+    df = pd.DataFrame(missing_rows)
+    output_file = _safe_write_excel(df, output_file)
+
+    if preview_limit and preview_limit > 0:
+        preview_file = os.path.join(ROOT_DIR, "Missing_ConsolidatedCat_Preview.xlsx")
+        aggregated_all = _aggregate_all_rows(menu_rows, "menu", consolidated_map)
+        aggregated_all.update(_aggregate_all_rows(modifier_rows, "modifier", consolidated_map))
+        preview_rows = list(aggregated_all.values())
+        preview_rows.sort(key=lambda r: (r["menuItemName"] or "").lower())
+        preview_df = pd.DataFrame(preview_rows[:preview_limit])
+        _safe_write_excel(preview_df, preview_file)
+
+    return {
+        "success": True,
+        "output_file": output_file,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "total_rows": len(menu_rows) + len(modifier_rows),
+        "missing_rows": len(missing_rows)
+    }
+
+
+# ------------------
+# Mapping Table API (Toast–Aloha consolidated mapping)
+# ------------------
+
+def _load_mapping_table_excel() -> Tuple[str, List[str], List[Dict]]:
+    """Load primary mapping Excel; returns (source_path, columns, rows)."""
+    path = MAPPING_FILE
+    if not os.path.exists(path):
+        path = FALLBACK_MAPPING_FILE
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Mapping file not found (Updated Mapping Table.xlsx or Fallback)")
+    df = pd.read_excel(path)
+    columns = [str(c) for c in df.columns]
+    rows = []
+    for _, row in df.iterrows():
+        r = {}
+        for col in columns:
+            v = row.get(col)
+            if pd.isna(v):
+                r[col] = ""
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                r[col] = int(v) if float(v).is_integer() else v
+            else:
+                r[col] = str(v).strip() if v is not None else ""
+        rows.append(r)
+    return path, columns, rows
+
+
+@app.get("/api/mapping-table")
+async def get_mapping_table():
+    """Return the Toast–Aloha consolidated mapping table for viewing/editing."""
+    path, columns, rows = _load_mapping_table_excel()
+    return {
+        "source": path,
+        "columns": columns,
+        "rows": rows,
+    }
+
+
+class MappingTableUpdate(BaseModel):
+    columns: List[str]
+    rows: List[Dict[str, str]]  # values as strings from UI
+
+
+@app.put("/api/mapping-table")
+async def update_mapping_table(body: MappingTableUpdate):
+    """Save the mapping table back to Excel and clear cache."""
+    path = MAPPING_FILE
+    if not os.path.exists(path):
+        path = FALLBACK_MAPPING_FILE
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Mapping file not found; cannot save")
+    if not body.columns or not body.rows:
+        raise HTTPException(status_code=400, detail="columns and rows are required")
+    # Build DataFrame in same column order; fill missing keys with ""
+    ordered = []
+    for r in body.rows:
+        row_dict = {}
+        for c in body.columns:
+            v = r.get(c)
+            if v is None or v == "":
+                row_dict[c] = ""
+            elif isinstance(v, str):
+                row_dict[c] = v.strip()
+            else:
+                row_dict[c] = v
+        ordered.append(row_dict)
+    df = pd.DataFrame(ordered, columns=body.columns)
+    out_path = _safe_write_excel(df, path)
+    # Invalidate consolidated category cache so next read uses new data
+    global _consolidated_cat_cache
+    _consolidated_cat_cache = {}
+    return {"success": True, "saved_to": out_path, "rows": len(body.rows)}
+
+
+# ------------------
+# Mapping Audit API
+# ------------------
+
+@app.get("/api/audit/toast-vs-mapping")
+async def audit_toast_vs_mapping():
+    """
+    Compare every item on the live Toast menu (V2) across ALL locations against
+    Toast_Item_Name in the mapping table.  Returns three buckets:
+      unmapped  – Toast items with no matching mapping row
+      stale     – Mapping rows whose Toast_Item_Name is not on any current menu
+      ok        – Items matched in both directions
+    Each item tracks which location names it was found at.
+    """
+    _, _cols, mapping_rows = _load_mapping_table_excel()
+
+    # Build normalised name → row from mapping
+    mapping_by_norm: Dict[str, dict] = {}
+    for row in mapping_rows:
+        name = (row.get("Toast_Item_Name") or "").strip()
+        if name:
+            mapping_by_norm[_normalize_item_name(name)] = row
+
+    def _collect_items_from_groups(groups, menu_name, loc_name, out: Dict[str, dict]):
+        """Recursively walk menuGroups (Toast can nest sub-groups)."""
+        for group in groups:
+            group_name = group.get("name", "")
+            for item in group.get("menuItems", []):
+                name = (item.get("name") or "").strip()
+                if not name:
+                    continue
+                norm = _normalize_item_name(name)
+                if norm not in out:
+                    out[norm] = {
+                        "name":          name,
+                        "guid":          item.get("guid", ""),
+                        "plu":           str(item.get("plu") or ""),
+                        "mli":           str(item.get("multiLocationId") or ""),
+                        "menu":          menu_name,
+                        "group":         group_name,
+                        "tags":          [t.get("name") for t in item.get("itemTags", []) if t.get("name")],
+                        "locationCount": 0,
+                    }
+                out[norm]["locationCount"] += 1
+            # Recurse into nested sub-groups
+            _collect_items_from_groups(group.get("menuGroups", []), menu_name, loc_name, out)
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            locations = await get_all_active_locations(client)
+            if not locations:
+                raise HTTPException(status_code=404, detail="No active locations found")
+            standard_headers = await get_standard_api_auth_headers()
+
+            toast_items: Dict[str, dict] = {}
+            errors: List[str] = []
+
+            for loc in locations:
+                loc_name = (getattr(loc, "restaurantName", None) or "").strip() or loc.restaurantGuid
+                try:
+                    resp = await client.get(
+                        f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus",
+                        headers={**standard_headers, "Toast-Restaurant-External-ID": loc.restaurantGuid},
+                    )
+                    if resp.status_code != 200:
+                        errors.append(f"{loc_name}: HTTP {resp.status_code}")
+                        continue
+                    menu_data = resp.json()
+                    for menu in menu_data.get("menus", []):
+                        _collect_items_from_groups(
+                            menu.get("menuGroups", []),
+                            menu.get("name", ""),
+                            loc_name,
+                            toast_items,
+                        )
+                except Exception as exc:
+                    errors.append(f"{loc_name}: {exc}")
+
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Error fetching Toast menu: {exc}")
+
+    # Build secondary index: MLI → toast item (for items with a non-empty MLI)
+    toast_by_mli: Dict[str, dict] = {}
+    for item in toast_items.values():
+        mli = (item.get("mli") or "").strip()
+        if mli:
+            toast_by_mli[mli] = item
+
+    # Also build secondary index: ToastPLU → toast item
+    toast_by_plu: Dict[str, dict] = {}
+    for item in toast_items.values():
+        plu = (item.get("plu") or "").strip()
+        if plu:
+            toast_by_plu[plu] = item
+
+    unmapped = []
+    ok = []
+    for norm, item in toast_items.items():
+        if norm in mapping_by_norm:
+            ok.append({**item, "mappedAs": mapping_by_norm[norm].get("Toast_Item_Name", "")})
+        else:
+            unmapped.append(item)
+
+    stale = []
+    name_drifted = []
+    for norm, row in mapping_by_norm.items():
+        if norm in toast_items:
+            continue  # already counted in ok
+
+        map_mli = str(row.get("MultiLocationId") or "").strip()
+        map_plu = str(row.get("ToastPLU") or "").strip()
+
+        # Secondary match: try MLI first, then ToastPLU
+        matched_item = None
+        match_method = ""
+        if map_mli and map_mli in toast_by_mli:
+            matched_item = toast_by_mli[map_mli]
+            match_method = "MLI"
+        elif map_plu and map_plu in toast_by_plu:
+            matched_item = toast_by_plu[map_plu]
+            match_method = "PLU"
+
+        if matched_item:
+            name_drifted.append({
+                "mappingName":     row.get("Toast_Item_Name", ""),
+                "currentName":     matched_item["name"],
+                "matchMethod":     match_method,
+                "mli":             map_mli,
+                "toastPLU":        map_plu,
+                "guid":            matched_item.get("guid", ""),
+                "menu":            matched_item.get("menu", ""),
+                "group":           matched_item.get("group", ""),
+                "AlohaItemName":   row.get("AlohaItemName", ""),
+                "ConsolidatedCat": row.get("ConsolidatedCat", ""),
+            })
+        else:
+            stale.append({
+                "Toast_Item_Name":  row.get("Toast_Item_Name", ""),
+                "AlohaItemName":    row.get("AlohaItemName", ""),
+                "ConsolidatedCat":  row.get("ConsolidatedCat", ""),
+                "ToastPLU":         map_plu,
+                "MultiLocationId":  map_mli,
+            })
+
+    return {
+        "summary": {
+            "toastItemCount":       len(toast_items),
+            "locationCount":        len(locations),
+            "mappingToastRowCount": len(mapping_by_norm),
+            "unmappedCount":        len(unmapped),
+            "nameDriftedCount":     len(name_drifted),
+            "staleCount":           len(stale),
+            "okCount":              len(ok),
+            "errors":               errors,
+        },
+        "unmapped":    sorted(unmapped,     key=lambda x: x["name"].lower()),
+        "nameDrifted": sorted(name_drifted, key=lambda x: x["mappingName"].lower()),
+        "stale":       sorted(stale,        key=lambda x: x["Toast_Item_Name"].lower()),
+        "ok":          sorted(ok,           key=lambda x: x["name"].lower()),
+    }
+
+
+@app.post("/api/audit/aloha-vs-mapping")
+async def audit_aloha_vs_mapping(file: UploadFile = File(...)):
+    """
+    Parse an uploaded ITM.DBF (Aloha item master) and compare LONGNAME / ID
+    against AlohaItemName / AlohaPLU in the mapping table.  Returns:
+      unmappedAloha  – DBF items with no matching mapping row
+      stale          – Mapping rows whose AlohaItemName is not in the DBF
+      pluMismatches  – Name matches but AlohaPLU ≠ DBF ID
+      ok             – Fully matched
+    """
+    try:
+        from dbfread import DBF as DbfReader
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="dbfread not installed — run: pip install dbfread"
+        )
+
+    import tempfile
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(suffix=".dbf", delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        dbf = DbfReader(tmp_path, encoding="latin-1", load=True)
+        dbf_items: Dict[str, dict] = {}
+        for rec in dbf:
+            longname = (rec.get("LONGNAME") or "").strip()
+            if not longname:
+                continue
+            norm = _normalize_item_name(longname)
+            if norm not in dbf_items:
+                dbf_items[norm] = {
+                    "longname":  longname,
+                    "shortname": (rec.get("SHORTNAME") or "").strip(),
+                    "id":        rec.get("ID"),
+                }
+    finally:
+        os.unlink(tmp_path)
+
+    _, _cols, mapping_rows = _load_mapping_table_excel()
+    mapping_aloha: Dict[str, dict] = {}
+    for row in mapping_rows:
+        name = (row.get("AlohaItemName") or "").strip()
+        if name:
+            mapping_aloha[_normalize_item_name(name)] = row
+
+    unmapped_aloha, plu_mismatches, ok = [], [], []
+    for norm, dbf_item in dbf_items.items():
+        if norm in mapping_aloha:
+            row      = mapping_aloha[norm]
+            map_plu  = str(row.get("AlohaPLU") or "").strip()
+            dbf_plu  = str(dbf_item["id"] or "").strip() if dbf_item["id"] is not None else ""
+            if map_plu and dbf_plu and map_plu != dbf_plu:
+                plu_mismatches.append({
+                    **dbf_item,
+                    "mappedAlohaName":  row.get("AlohaItemName", ""),
+                    "mappingAlohaPLU": map_plu,
+                    "dbfPLU":          dbf_plu,
+                })
+            else:
+                ok.append({**dbf_item, "mappingRow": {
+                    "AlohaItemName":  row.get("AlohaItemName", ""),
+                    "Toast_Item_Name": row.get("Toast_Item_Name", ""),
+                    "ConsolidatedCat": row.get("ConsolidatedCat", ""),
+                    "AlohaPLU":       row.get("AlohaPLU", ""),
+                }})
+        else:
+            unmapped_aloha.append(dbf_item)
+
+    stale = []
+    for norm, row in mapping_aloha.items():
+        if norm not in dbf_items:
+            stale.append({
+                "AlohaItemName":   row.get("AlohaItemName", ""),
+                "Toast_Item_Name": row.get("Toast_Item_Name", ""),
+                "ConsolidatedCat": row.get("ConsolidatedCat", ""),
+                "AlohaPLU":        row.get("AlohaPLU", ""),
+            })
+
+    return {
+        "summary": {
+            "dbfItemCount":         len(dbf_items),
+            "mappingAlohaRowCount": len(mapping_aloha),
+            "unmappedCount":        len(unmapped_aloha),
+            "staleCount":           len(stale),
+            "pluMismatchCount":     len(plu_mismatches),
+            "okCount":              len(ok),
+        },
+        "unmappedAloha":  sorted(unmapped_aloha,  key=lambda x: x["longname"].lower()),
+        "stale":          sorted(stale,            key=lambda x: x["AlohaItemName"].lower()),
+        "pluMismatches":  sorted(plu_mismatches,   key=lambda x: x["longname"].lower()),
+        "ok":             sorted(ok,               key=lambda x: x["longname"].lower()),
+    }
+
 
 # ------------------
 # Saved Reports API
@@ -1629,9 +5211,343 @@ async def delete_saved_report(report_id: str):
 # Report Execution API
 # ------------------
 
+async def build_menu_mix_report_fallback(
+    client: httpx.AsyncClient,
+    report_config: ReportConfig,
+    restaurant_ids: List[str],
+    start_date: date,
+    end_date: date,
+    response: Optional[Response] = None,
+) -> dict:
+    if response is not None:
+        response.headers["X-Menu-Path"] = "forced_menu"
+
+    if TOAST_MENU_TAGS_PRIORITY_EXTERNAL_ID or TOAST_MENU_TAGS_PRIORITY_NAME:
+        locations = await get_all_active_locations(client)
+        restaurant_ids = prioritize_menu_tag_restaurants(restaurant_ids, locations)
+    
+    tags_mapping = await get_menu_tags_mapping(client, restaurant_ids[0])
+    
+    if report_config.itemTags and len(report_config.itemTags) > 0:
+        selected_tags_lower = [t.lower() for t in report_config.itemTags]
+        selected_tags_norm = [_normalize_tag_name(t) for t in report_config.itemTags]
+        # Use normalized tag comparison so "* Consolidated Pizza" and "Consolidated Pizza" match
+        filtered_mapping = {
+            guid: [t for t in tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm]
+            for guid, tags in tags_mapping.items()
+            if any(_normalize_tag_name(t["tagName"]) in selected_tags_norm for t in tags)
+        }
+    else:
+        filtered_mapping = dict(tags_mapping)
+    
+    if len(filtered_mapping) == 0 and report_config.itemTags:
+        return {"pivotTable": [], "totals": [], "itemBreakdown": [], "itemBreakdownDaily": [], "dateColumns": []}
+    consolidated_cat_map = get_consolidated_category_map()
+    report_tag_map = get_report_tag_map()
+    consolidated_override = get_consolidated_override_map()
+    consolidated_fallback_hits = 0
+
+    name_to_tags: Dict[str, List[Dict]] = {}
+    if report_config.itemTags and restaurant_ids:
+        cache_entry = _menu_tags_cache.get(restaurant_ids[0], {})
+        guid_to_name = cache_entry.get("guid_to_name", {})
+        for guid, tags in tags_mapping.items():
+            item_name = guid_to_name.get(guid)
+            if not item_name:
+                continue
+            key = _normalize_item_name(item_name)
+            if not key:
+                continue
+            existing = {t["tagName"] for t in name_to_tags.get(key, [])}
+            merged = name_to_tags.get(key, [])
+            for tag in tags:
+                if tag["tagName"] not in existing:
+                    merged.append(tag)
+            name_to_tags[key] = merged
+    
+    # Fetch MENU_ITEM analytics (week chunks if needed)
+    days_diff = (end_date - start_date).days + 1
+    all_rows: List[Dict] = []
+    if days_diff > 7:
+        current_start = start_date
+        while current_start <= end_date:
+            chunk_end = min(current_start + timedelta(days=6), end_date)
+            report_guid = await request_toast_report(
+                client,
+                current_start,
+                chunk_end,
+                restaurant_ids,
+                "menu",
+                ["MENU_ITEM"]
+            )
+            chunk_rows = await fetch_toast_report(client, report_guid, "menu")
+            if chunk_rows:
+                all_rows.extend(chunk_rows)
+            current_start = chunk_end + timedelta(days=1)
+    else:
+        report_guid = await request_toast_report(
+            client,
+            start_date,
+            end_date,
+            restaurant_ids,
+            "menu",
+            ["MENU_ITEM"]
+        )
+        all_rows = await fetch_toast_report(client, report_guid, "menu")
+    
+    menu_item_count = len(all_rows)
+    
+    # Fetch MODIFIER analytics and merge
+    modifier_rows: List[Dict] = []
+    if days_diff > 7:
+        current_start = start_date
+        while current_start <= end_date:
+            chunk_end = min(current_start + timedelta(days=6), end_date)
+            modifier_guid = await request_toast_report(
+                client,
+                current_start,
+                chunk_end,
+                restaurant_ids,
+                "menu",
+                ["MODIFIER"]
+            )
+            chunk_rows = await fetch_toast_report(client, modifier_guid, "menu")
+            if chunk_rows:
+                modifier_rows.extend(chunk_rows)
+            current_start = chunk_end + timedelta(days=1)
+    else:
+        modifier_guid = await request_toast_report(
+            client,
+            start_date,
+            end_date,
+            restaurant_ids,
+            "menu",
+            ["MODIFIER"]
+        )
+        modifier_rows = await fetch_toast_report(client, modifier_guid, "menu")
+    
+    if modifier_rows:
+        for row in modifier_rows:
+            if "modifierGuid" in row:
+                row["menuItemGuid"] = row.pop("modifierGuid")
+            elif "modifierOptionGuid" in row:
+                row["menuItemGuid"] = row.pop("modifierOptionGuid")
+            if "modifierName" in row:
+                row["menuItemName"] = row.pop("modifierName")
+            elif "modifierOptionName" in row:
+                row["menuItemName"] = row.pop("modifierOptionName")
+        menu_item_guids_set = {r.get("menuItemGuid") for r in all_rows[:menu_item_count] if r.get("menuItemGuid")}
+        modifier_rows = [r for r in modifier_rows if r.get("menuItemGuid") not in menu_item_guids_set]
+        all_rows.extend(modifier_rows)
+    
+    if not all_rows:
+        return {"pivotTable": [], "totals": [], "itemBreakdown": [], "itemBreakdownDaily": [], "dateColumns": []}
+    
+    # Build item names mapping
+    item_names_mapping: Dict[str, str] = {}
+    for row in all_rows:
+        guid = row.get("menuItemGuid")
+        name = row.get("menuItemName")
+        if guid and name:
+            item_names_mapping[guid] = name
+
+    # Fill missing names for zero-sales items
+    if report_config.includeZeroSales:
+        missing_guids = set(filtered_mapping.keys()) - set(item_names_mapping.keys())
+        if missing_guids:
+            # Try cache-based names first (if available)
+            for restaurant_id in restaurant_ids:
+                if restaurant_id in _menu_tags_cache and "guid_to_name" in _menu_tags_cache[restaurant_id]:
+                    guid_to_name = _menu_tags_cache[restaurant_id]["guid_to_name"]
+                    for guid in list(missing_guids):
+                        if guid in guid_to_name:
+                            item_names_mapping[guid] = guid_to_name[guid]
+                            missing_guids.discard(guid)
+                if not missing_guids:
+                    break
+
+            if missing_guids:
+                try:
+                    standard_headers = await get_standard_api_auth_headers()
+                    headers_with_guid = {
+                        **standard_headers,
+                        "Toast-Restaurant-External-ID": restaurant_ids[0]
+                    }
+                    menus_url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v3/menus"
+                    menus_resp = await client.get(menus_url, headers=headers_with_guid)
+                    if menus_resp.status_code == 200:
+                        menus_data = menus_resp.json()
+                        # Extract item names
+                        for menu in menus_data.get("menus", []):
+                            for group in menu.get("menuGroups", []):
+                                for item in group.get("menuItems", []):
+                                    guid = item.get("guid")
+                                    if guid in missing_guids:
+                                        name = item.get("displayName") or item.get("name", "")
+                                        if name:
+                                            item_names_mapping[guid] = name
+                                            missing_guids.discard(guid)
+                        # Extract modifier names
+                        modifier_group_refs = menus_data.get("modifierGroupReferences", {})
+                        modifier_option_refs = menus_data.get("modifierOptionReferences", {})
+                        for mod_group in modifier_group_refs.values():
+                            for mod_option in mod_group.get("modifierOptions", []):
+                                guid = mod_option.get("guid")
+                                if guid in missing_guids:
+                                    name = mod_option.get("displayName") or mod_option.get("name", "")
+                                    if name:
+                                        item_names_mapping[guid] = name
+                                        missing_guids.discard(guid)
+                        for mod_option in modifier_option_refs.values():
+                            guid = mod_option.get("guid", "")
+                            if guid in missing_guids:
+                                name = mod_option.get("displayName") or mod_option.get("name", "")
+                                if name:
+                                    item_names_mapping[guid] = name
+                                    missing_guids.discard(guid)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch menu names for zero-sales items (fallback): {e}")
+    
+    # Filter analytics rows by selected tags if any
+    filtered_rows = []
+    debug_mapping_fallback_names = [] if getattr(report_config, "debug", False) else None
+    if report_config.itemTags:
+        for row in all_rows:
+            guid = row.get("menuItemGuid")
+            if guid in filtered_mapping:
+                filtered_rows.append(row)
+                continue
+            name_key = _normalize_item_name(row.get("menuItemName", ""))
+            report_tag = _get_tag_from_mapping(name_key, report_tag_map, consolidated_cat_map, consolidated_override, guid)
+            if report_tag and _normalize_tag_name(report_tag) in selected_tags_norm:
+                filtered_mapping[guid] = [{"tagName": report_tag}]
+                filtered_rows.append(row)
+                consolidated_fallback_hits += 1
+                if debug_mapping_fallback_names is not None:
+                    debug_mapping_fallback_names.append(row.get("menuItemName", ""))
+                continue
+            # Fallback: match by item name to tag mapping (risk of mis-tagging)
+            if name_key and name_key in name_to_tags:
+                matching_tags = [t for t in name_to_tags[name_key] if _normalize_tag_name(t["tagName"]) in selected_tags_norm]
+                if matching_tags:
+                    filtered_mapping[guid] = matching_tags
+                    filtered_rows.append(row)
+        if consolidated_fallback_hits:
+            logger.info(f"ConsolidatedCat fallback hits (menu_fallback): {consolidated_fallback_hits}")
+
+        debug_names = [
+            "Pepperoni & Portabella Pizza (Entree)",
+            "Pepperoni & Mushroom Pizza (Full Pairing Entree)"
+        ]
+        for name in debug_names:
+            consolidated_cat = consolidated_cat_map.get(_normalize_item_name(name))
+            logger.info(
+                f"Menu fallback tag compare debug for {name}: "
+                f"selected_raw={report_config.itemTags}, "
+                f"selected_norm={[_normalize_tag_name(t) for t in report_config.itemTags]}, "
+                f"consolidated_cat={consolidated_cat}, "
+                f"consolidated_norm={_normalize_tag_name(consolidated_cat) if consolidated_cat else ''}"
+            )
+    else:
+        filtered_rows = all_rows
+
+    # Add mapping-only items (in mapping table with selected tag but no analytics row) so they
+    # appear in the breakdown and Toast Items popup with count 0.
+    if report_config.itemTags and selected_tags_norm:
+        names_in_filtered = {_normalize_item_name(r.get("menuItemName", "")) for r in filtered_rows if r.get("menuItemName")}
+        for norm_name, tag in list(report_tag_map.items()) + list(consolidated_cat_map.items()):
+            if not norm_name or not tag:
+                continue
+            if _normalize_tag_name(tag) not in selected_tags_norm:
+                continue
+            if norm_name in names_in_filtered:
+                continue
+            synthetic_guid = "mapping:" + norm_name
+            if synthetic_guid in filtered_mapping:
+                continue
+            filtered_mapping[synthetic_guid] = [{"tagName": tag}]
+            item_names_mapping[synthetic_guid] = _humanize_item_name(norm_name)
+            names_in_filtered.add(norm_name)
+
+    # Tag/mapping debug for fallback path (when report_config.debug is True)
+    debug_info_extra = None
+    if getattr(report_config, "debug", False) and report_config.itemTags:
+        _nk = _normalize_item_name
+        _tk = _normalize_tag_name
+        mapping_keys_pepperoni = sorted(
+            k for k in list(report_tag_map.keys()) + list(consolidated_cat_map.keys())
+            if "pepperoni" in k or "mushroom" in k or "portabella" in k
+        )[:50]
+        analytics_names_pepperoni = sorted(
+            set(r.get("menuItemName", "") for r in all_rows if r.get("menuItemName"))
+        )
+        analytics_names_pepperoni = [n for n in analytics_names_pepperoni if "pepperoni" in n.lower() or "mushroom" in n.lower() or "portabella" in n.lower()][:30]
+        target_names = [
+            "Pepperoni & Mushroom Pizza (Full Pairing Entree)",
+            "Pepperoni & Portabella Pizza (Entree)",
+        ]
+        target_details = []
+        for tn in target_names:
+            nkey = _nk(tn)
+            tag_from_map = _get_tag_from_mapping(nkey, report_tag_map, consolidated_cat_map, consolidated_override, "")
+            in_analytics = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in all_rows)
+            in_filtered = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in filtered_rows)
+            target_details.append({
+                "name": tn,
+                "normalizedKey": nkey,
+                "tagFromMappingTable": tag_from_map,
+                "tagNormalized": _tk(tag_from_map) if tag_from_map else None,
+                "selectedTagsNormalized": selected_tags_norm[:5],
+                "inAnalyticsRows": in_analytics,
+                "inFilteredRows": in_filtered,
+                "inReportTagMap": nkey in report_tag_map,
+                "inConsolidatedCatMap": nkey in consolidated_cat_map,
+            })
+        debug_info_extra = {
+            "consolidatedFallbackHits": consolidated_fallback_hits,
+            "mappingFallbackItemNames": debug_mapping_fallback_names or [],
+            "mappingTableKeysContainingPepperoniMushroomPortabella": mapping_keys_pepperoni,
+            "analyticsNamesContainingPepperoniMushroomPortabella": analytics_names_pepperoni,
+            "targetItems": target_details,
+            "totalAnalyticsRows": len(all_rows),
+            "totalFilteredRows": len(filtered_rows),
+            "menuItemCount": menu_item_count,
+        }
+    
+    menu_item_guids = {r.get("menuItemGuid") for r in all_rows[:menu_item_count] if r.get("menuItemGuid")}
+    result = pivot_menu_items_by_tag(
+        filtered_rows,
+        filtered_mapping,
+        report_config.itemTags,
+        item_names_mapping,
+        menu_item_guids,
+        report_config.includeZeroSales
+    )
+    result["debugInfo"] = {
+        "path": "menu_fallback",
+        "itemTags": len(report_config.itemTags or []),
+        "includeZeroSales": bool(report_config.includeZeroSales),
+        "yoyEnabled": bool(report_config.yoyEnabled),
+        "alohaDate": report_config.alohaDate
+    }
+    if debug_info_extra is not None:
+        result["debugInfo"]["tagMappingDebug"] = debug_info_extra
+    result = await apply_yoy_aloha_quantities(result, report_config, start_date, end_date)
+    return result
+
 @app.post("/api/reports/run")
-async def run_report(report_config: ReportConfig = Body(...)):
+async def run_report(report_config: ReportConfig = Body(...), response: Response = None):
     """Run a report with the given configuration"""
+    
+    if response is not None:
+        response.headers["X-Backend-Version"] = "menu-mix-v3"
+        response.headers["X-Report-Type-Received"] = str(report_config.reportType)
+        response.headers["X-ItemTags-Count"] = str(len(report_config.itemTags or []))
+    
+    report_type = (report_config.reportType or "").strip().lower()
+    if "menu" in report_type:
+        report_type = "menu"
+    report_config.reportType = report_type
     
     # Calculate date range
     if report_config.dateRangeType == "custom":
@@ -1658,17 +5574,27 @@ async def run_report(report_config: ReportConfig = Body(...)):
         async with httpx.AsyncClient(timeout=120.0) as client:
             # Get restaurant IDs
             restaurant_ids = report_config.restaurantIds
+            locations = None
             if not restaurant_ids or len(restaurant_ids) == 0:
                 locations = await get_all_active_locations(client)
                 restaurant_ids = [loc.restaurantGuid for loc in locations]
+            elif TOAST_MENU_TAGS_PRIORITY_EXTERNAL_ID or TOAST_MENU_TAGS_PRIORITY_NAME:
+                locations = await get_all_active_locations(client)
             
             if not restaurant_ids or len(restaurant_ids) == 0:
                 raise HTTPException(status_code=400, detail="No restaurants available")
             
-            # Special handling for menu reports with tag filtering
+            # Special handling for menu reports
             # Use Analytics API with groupBy: MENU_ITEM + join to tags
-            if report_config.reportType == "menu" and report_config.itemTags and len(report_config.itemTags) > 0:
-                logger.info(f"Using Analytics API with MENU_ITEM groupBy for tag filtering: {report_config.itemTags}")
+            if report_config.reportType == "menu":
+                if locations:
+                    restaurant_ids = prioritize_menu_tag_restaurants(restaurant_ids, locations)
+                if response is not None:
+                    response.headers["X-Menu-Path"] = "menu"
+                if report_config.itemTags and len(report_config.itemTags) > 0:
+                    logger.info(f"Using Analytics API with MENU_ITEM groupBy for tag filtering: {report_config.itemTags}")
+                else:
+                    logger.info("Using Analytics API with MENU_ITEM groupBy (no tag filters)")
                 
                 # Get menu tags mapping - try multiple restaurants to get complete coverage
                 # Start with first restaurant, then try a few more if needed
@@ -1689,9 +5615,10 @@ async def run_report(report_config: ReportConfig = Body(...)):
                         similar = [n for n in modifier_name_to_guid.keys() if "half black" in n and "bleu" in n]
                         logger.info(f"DEBUG: Target name not found. Similar names: {similar[:5]}")
                 
-                # Try a few more restaurants to catch items that might not be in the first one
-                # Limit to 3 additional restaurants to avoid too many API calls
-                restaurants_to_check = min(4, len(restaurant_ids))
+                # Check all selected restaurants to get complete menu coverage
+                # This is especially important for includeZeroSales to find all items with tags
+                restaurants_to_check = len(restaurant_ids)
+                logger.info(f"Checking {restaurants_to_check} restaurants for complete menu mapping")
                 for i in range(1, restaurants_to_check):
                     try:
                         additional_mapping = await get_menu_tags_mapping(client, restaurant_ids[i])
@@ -1699,26 +5626,108 @@ async def run_report(report_config: ReportConfig = Body(...)):
                         for item_guid, tags in additional_mapping.items():
                             if item_guid not in all_tags_mapping:
                                 all_tags_mapping[item_guid] = tags
+                            else:
+                                # Merge tags if item already exists (items can have different tags in different restaurants)
+                                existing_tags = {t["tagName"] for t in all_tags_mapping[item_guid]}
+                                new_tags = [t for t in tags if t["tagName"] not in existing_tags]
+                                if new_tags:
+                                    all_tags_mapping[item_guid].extend(new_tags)
                         logger.info(f"After checking restaurant {i+1}/{restaurants_to_check}: {len(all_tags_mapping)} total items in mapping")
                         
-                        # Also merge name mappings
-                        if restaurant_ids[i] in _menu_tags_cache and "name_mapping" in _menu_tags_cache[restaurant_ids[i]]:
-                            additional_name_mapping = _menu_tags_cache[restaurant_ids[i]]["name_mapping"]
-                            modifier_name_to_guid.update(additional_name_mapping)
+                        # Also merge name mappings and guid_to_name mappings
+                        if restaurant_ids[i] in _menu_tags_cache:
+                            if "name_mapping" in _menu_tags_cache[restaurant_ids[i]]:
+                                additional_name_mapping = _menu_tags_cache[restaurant_ids[i]]["name_mapping"]
+                                modifier_name_to_guid.update(additional_name_mapping)
+                            if "guid_to_name" in _menu_tags_cache[restaurant_ids[i]]:
+                                additional_guid_to_name = _menu_tags_cache[restaurant_ids[i]]["guid_to_name"]
+                                # We'll merge this into item_names_mapping later when it's initialized
+                                pass
                     except Exception as e:
                         logger.warning(f"Failed to get menu mapping from restaurant {restaurant_ids[i]}: {e}")
                         continue
                 
-                # Filter mapping to only selected tags
+                # Filter mapping to only selected tags (or include all if no tags selected)
                 filtered_mapping = {}
-                for item_guid, tags in all_tags_mapping.items():
-                    matching_tags = [t for t in tags if t["tagName"] in report_config.itemTags]
-                    if matching_tags:
-                        filtered_mapping[item_guid] = matching_tags
+                if report_config.itemTags and len(report_config.itemTags) > 0:
+                    # Use normalized tag comparison so "* Consolidated Pizza" and "Consolidated Pizza" match
+                    selected_tags_lower = [t.lower() for t in report_config.itemTags]
+                    selected_tags_norm = [_normalize_tag_name(t) for t in report_config.itemTags]
+                    for item_guid, tags in all_tags_mapping.items():
+                        matching_tags = [t for t in tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm]
+                        if matching_tags:
+                            filtered_mapping[item_guid] = matching_tags
+                else:
+                    filtered_mapping = dict(all_tags_mapping)
                 
-                logger.info(f"Filtered to {len(filtered_mapping)} items with selected tags")
+                logger.info(f"Filtered to {len(filtered_mapping)} items with selected tags: {report_config.itemTags}")
+                logger.info(f"Total items in all_tags_mapping: {len(all_tags_mapping)}")
+                if report_config.includeZeroSales:
+                    logger.info(f"IncludeZeroSales is TRUE - will show all {len(filtered_mapping)} items with selected tags, even if they have 0 sales")
+
+                name_to_tags: Dict[str, List[Dict]] = {}
+                if report_config.itemTags:
+                    for restaurant_id in restaurant_ids:
+                        cache_entry = _menu_tags_cache.get(restaurant_id, {})
+                        guid_to_name = cache_entry.get("guid_to_name", {})
+                        for guid, tags in all_tags_mapping.items():
+                            item_name = guid_to_name.get(guid)
+                            if not item_name:
+                                continue
+                            key = _normalize_item_name(item_name)
+                            if not key:
+                                continue
+                            existing = {t["tagName"] for t in name_to_tags.get(key, [])}
+                            merged = name_to_tags.get(key, [])
+                            for tag in tags:
+                                if tag["tagName"] not in existing:
+                                    merged.append(tag)
+                            name_to_tags[key] = merged
+
+                consolidated_cat_map = get_consolidated_category_map()
+                report_tag_map = get_report_tag_map()
+                consolidated_override = get_consolidated_override_map()
+                consolidated_fallback_hits = 0
+
+                # Debug specific GUIDs to confirm menu mapping/tag coverage
+                debug_guids = {
+                    "81c4867f-b73c-41e3-abe8-a89f9e180919": "Pepperoni & Portabella Pizza (Entree)",
+                    "ac99345a-f79d-4083-bb01-f56f0e44cf64": "Pepperoni & Mushroom Pizza (Full Pairing Entree)"
+                }
+                for guid, label in debug_guids.items():
+                    in_mapping = guid in all_tags_mapping
+                    in_filtered = guid in filtered_mapping
+                    tags = [t.get("tagName") for t in all_tags_mapping.get(guid, [])] if in_mapping else []
+                    consolidated_cat = consolidated_cat_map.get(_normalize_item_name(label))
+                    logger.info(
+                        f"Tag compare debug for {label}: "
+                        f"selected_raw={report_config.itemTags}, "
+                        f"selected_norm={[_normalize_tag_name(t) for t in report_config.itemTags]}, "
+                        f"consolidated_cat={consolidated_cat}, "
+                        f"consolidated_norm={_normalize_tag_name(consolidated_cat) if consolidated_cat else ''}"
+                    )
+                    logger.info(
+                        f"Tag debug for {label}: guid={guid} in_all_tags_mapping={in_mapping}, "
+                        f"in_filtered_mapping={in_filtered}, tags={tags}"
+                    )
                 
-                if len(filtered_mapping) == 0:
+                # Log sample of items that were filtered out (for debugging)
+                if len(filtered_mapping) < len(all_tags_mapping):
+                    sample_excluded = []
+                    for item_guid, tags in all_tags_mapping.items():
+                        if item_guid not in filtered_mapping:
+                            tag_names = [t["tagName"] for t in tags]
+                            if tag_names:  # Only log items that have tags
+                                sample_excluded.append((item_guid, tag_names))
+                                if len(sample_excluded) >= 5:
+                                    break
+                    if sample_excluded:
+                        logger.info(f"Sample excluded items (have tags but not selected ones): {sample_excluded[:3]}")
+                
+                # For includeZeroSales, we need to ensure filtered_mapping contains ALL items with selected tags
+                # even if they don't appear in analytics. filtered_mapping already has this, so we're good.
+                
+                if len(filtered_mapping) == 0 and report_config.itemTags:
                     return {"pivotTable": [], "totals": []}
                 
                 # Split date range into week-sized chunks if needed (groupBy only works for day/week)
@@ -1768,6 +5777,46 @@ async def run_report(report_config: ReportConfig = Body(...)):
                 
                 # Also request modifier-level data
                 logger.info("Requesting Analytics menu report with MODIFIER groupBy...")
+            restaurant_batch_size = 25
+
+            async def fetch_modifier_rows_for_chunk(chunk_start: date, chunk_end: date) -> List[Dict]:
+                try:
+                    modifier_report_guid = await request_toast_report(
+                        client,
+                        chunk_start,
+                        chunk_end,
+                        restaurant_ids,
+                        "menu",
+                        ["MODIFIER"]  # Group by modifier instead
+                    )
+                    logger.info(f"Fetching MODIFIER report for chunk {chunk_start} to {chunk_end} (guid: {modifier_report_guid})")
+                    return await fetch_toast_report(client, modifier_report_guid, "menu")
+                except HTTPException as e:
+                    if e.status_code in [502, 503, 504]:
+                        batches = chunk_list(restaurant_ids, restaurant_batch_size)
+                        logger.warning(
+                            f"MODIFIER report failed with {e.status_code} for {chunk_start} to {chunk_end}; "
+                            f"retrying in {len(batches)} restaurant batches of {restaurant_batch_size}."
+                        )
+                        all_rows: List[Dict] = []
+                        for i, batch in enumerate(batches):
+                            logger.info(
+                                f"Requesting MODIFIER chunk batch {i + 1}/{len(batches)}: "
+                                f"{chunk_start} to {chunk_end} ({len(batch)} restaurants)"
+                            )
+                            batch_guid = await request_toast_report(
+                                client,
+                                chunk_start,
+                                chunk_end,
+                                batch,
+                                "menu",
+                                ["MODIFIER"]
+                            )
+                            batch_rows = await fetch_toast_report(client, batch_guid, "menu")
+                            if batch_rows:
+                                all_rows.extend(batch_rows)
+                        return all_rows
+                    raise
                 
                 if days_diff > 7:
                     # Split into week-sized chunks for modifiers too
@@ -1777,17 +5826,7 @@ async def run_report(report_config: ReportConfig = Body(...)):
                         chunk_end = min(current_start + timedelta(days=6), end_date)
                         
                         logger.info(f"Requesting MODIFIER chunk: {current_start} to {chunk_end}")
-                        modifier_report_guid = await request_toast_report(
-                            client,
-                            current_start,
-                            chunk_end,
-                            restaurant_ids,
-                            "menu",
-                            ["MODIFIER"]  # Group by modifier instead
-                        )
-                        
-                        logger.info(f"Fetching MODIFIER report for chunk {current_start} to {chunk_end} (guid: {modifier_report_guid})")
-                        modifier_chunk_rows = await fetch_toast_report(client, modifier_report_guid, "menu")
+                        modifier_chunk_rows = await fetch_modifier_rows_for_chunk(current_start, chunk_end)
                         if modifier_chunk_rows:
                             # Log sample row to see what fields are returned
                             if len(modifier_chunk_rows) > 0:
@@ -1819,17 +5858,7 @@ async def run_report(report_config: ReportConfig = Body(...)):
                         current_start = chunk_end + timedelta(days=1)
                 else:
                     # Single request for ranges <= 7 days
-                    modifier_report_guid = await request_toast_report(
-                        client,
-                        start_date,
-                        end_date,
-                        restaurant_ids,
-                        "menu",
-                        ["MODIFIER"]
-                    )
-                    
-                    logger.info(f"Fetching MODIFIER report (guid: {modifier_report_guid})")
-                    modifier_rows = await fetch_toast_report(client, modifier_report_guid, "menu")
+                    modifier_rows = await fetch_modifier_rows_for_chunk(start_date, end_date)
                     if modifier_rows:
                         # Log sample row to see what fields are returned
                         if len(modifier_rows) > 0:
@@ -1967,7 +5996,7 @@ async def run_report(report_config: ReportConfig = Body(...)):
                             mod_tags = all_tags_mapping[target_modifier_guid]
                             logger.info(f"  Modifier tags: {[t['tagName'] for t in mod_tags]}")
                             if report_config.itemTags:
-                                matching_tags = [t for t in mod_tags if t['tagName'] in report_config.itemTags]
+                                matching_tags = [t for t in mod_tags if _normalize_tag_name(t.get('tagName', '')) in selected_tags_norm]
                                 logger.info(f"  Selected tags: {report_config.itemTags}")
                                 logger.info(f"  Matching tags: {[t['tagName'] for t in matching_tags]}")
                                 logger.info(f"  Will be included in breakdown: {len(matching_tags) > 0}")
@@ -2016,7 +6045,8 @@ async def run_report(report_config: ReportConfig = Body(...)):
                 filtered_rows = []
                 modifier_count_in_filtered = 0
                 menu_item_guids = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
-                
+                debug_mapping_fallback_names = [] if getattr(report_config, "debug", False) else None
+
                 for row in all_analytics_rows:
                     menu_item_guid = row.get("menuItemGuid", "")
                     menu_item_name = row.get("menuItemName", "")
@@ -2025,29 +6055,41 @@ async def run_report(report_config: ReportConfig = Body(...)):
                     
                     is_modifier = menu_item_guid not in menu_item_guids
                     matched_guid = menu_item_guid
+                    name_key = _normalize_item_name(menu_item_name)
                     
-                    # Check if item is in filtered mapping (has selected tags)
+                    # 1) Already in filtered set from Toast tags
                     if menu_item_guid in filtered_mapping:
                         filtered_rows.append(row)
                         if is_modifier:
                             modifier_count_in_filtered += 1
-                    # Also check if item has tags in all_tags_mapping (might have different GUID)
+                    # 2) Mapping table first: assign tag from mapping so items without the tag in Toast still count
+                    elif report_config.itemTags:
+                        report_tag = _get_tag_from_mapping(name_key, report_tag_map, consolidated_cat_map, consolidated_override, menu_item_guid)
+                        if report_tag and _normalize_tag_name(report_tag) in selected_tags_norm:
+                            filtered_mapping[menu_item_guid] = [{"tagName": report_tag}]
+                            filtered_rows.append(row)
+                            if is_modifier:
+                                modifier_count_in_filtered += 1
+                            consolidated_fallback_hits += 1
+                            if debug_mapping_fallback_names is not None:
+                                debug_mapping_fallback_names.append(menu_item_name)
+                    # 3) Toast tags: item in Menus API with matching tag (normalized so "* Consolidated Pizza" matches "Consolidated Pizza")
                     elif menu_item_guid in all_tags_mapping:
-                        # Check if any of its tags match selected tags
                         item_tags = all_tags_mapping[menu_item_guid]
-                        matching_tags = [t for t in item_tags if t["tagName"] in report_config.itemTags]
+                        matching_tags = [t for t in item_tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm]
                         if matching_tags:
-                            # Add to filtered_mapping so it's included in the pivot
                             filtered_mapping[menu_item_guid] = matching_tags
                             filtered_rows.append(row)
                             if is_modifier:
                                 modifier_count_in_filtered += 1
-                    # For modifiers: ONLY use GUID-based matching (no name-based fallback)
-                    # Name-based matching can cause duplicates and inflated counts
-                    # If the GUID isn't in the mapping, skip the modifier
+                    # 4) Name-to-tags from Toast (same name, different GUID); use normalized tag match
+                    elif not is_modifier and report_config.itemTags and name_key and name_key in name_to_tags:
+                        matching_tags = [t for t in name_to_tags[name_key] if _normalize_tag_name(t["tagName"]) in selected_tags_norm]
+                        if matching_tags:
+                            filtered_mapping[menu_item_guid] = matching_tags
+                            filtered_rows.append(row)
                     elif is_modifier:
-                        # Skip - modifiers must be found by GUID in all_tags_mapping
-                        # Don't use name-based matching as it can cause inflation
+                        # No mapping-table match; skip
                         pass
                         # Try to find modifier by name
                         name_key = menu_item_name.lower().strip()
@@ -2068,7 +6110,7 @@ async def run_report(report_config: ReportConfig = Body(...)):
                                 # Try to find similar names
                                 similar = [n for n in modifier_name_to_guid.keys() if "half black" in n or ("bleu" in n and "black" in n)]
                                 logger.info(f"DEBUG: Similar names in mapping: {similar[:10]}")
-                        
+
                         # Try exact match first
                         matched_guid = None
                         if name_key in modifier_name_to_guid:
@@ -2076,12 +6118,12 @@ async def run_report(report_config: ReportConfig = Body(...)):
                         # Try normalized version (with & -> and)
                         elif name_key_normalized in modifier_name_to_guid:
                             matched_guid = modifier_name_to_guid[name_key_normalized]
-                        
+
                         if matched_guid:
                             matched_guid = modifier_name_to_guid[name_key]
                             if matched_guid in all_tags_mapping:
                                 item_tags = all_tags_mapping[matched_guid]
-                                matching_tags = [t for t in item_tags if t["tagName"] in report_config.itemTags]
+                                matching_tags = [t for t in item_tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm]
                                 if matching_tags:
                                     # Update the row's GUID to the matched one and add to filtered_mapping
                                     row["menuItemGuid"] = matched_guid
@@ -2104,7 +6146,7 @@ async def run_report(report_config: ReportConfig = Body(...)):
                                 clean_word = word.strip("()&,").lower()
                                 if len(clean_word) > 2 and clean_word not in ["the", "and", "or", "for", "with"]:
                                     key_words.add(clean_word)
-                            
+
                             # Try to find a match with at least 3 key words in common
                             best_match = None
                             best_score = 0
@@ -2116,16 +6158,16 @@ async def run_report(report_config: ReportConfig = Body(...)):
                                     if score > best_score:
                                         best_score = score
                                         best_match = (map_name, map_guid)
-                            
+
                             if best_match and ("half black" in name_key or "6d02e1aa-41c4-489e-bd72-90d12d79edf2" == menu_item_guid):
                                 map_name, map_guid = best_match
                                 logger.info(f"DEBUG: Found potential fuzzy match: '{map_name}' -> {map_guid} (score: {best_score})")
-                            
+
                             if best_match:
                                 map_name, map_guid = best_match
                                 if map_guid in all_tags_mapping:
                                     item_tags = all_tags_mapping[map_guid]
-                                    matching_tags = [t for t in item_tags if t["tagName"] in report_config.itemTags]
+                                    matching_tags = [t for t in item_tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm]
                                     if matching_tags:
                                         row["menuItemGuid"] = map_guid
                                         filtered_mapping[map_guid] = matching_tags
@@ -2133,7 +6175,58 @@ async def run_report(report_config: ReportConfig = Body(...)):
                                         modifier_count_in_filtered += 1
                                         logger.info(f"Matched modifier by fuzzy name: '{menu_item_name}' -> '{map_name}' (guid: {map_guid})")
                 
+                if consolidated_fallback_hits:
+                    logger.info(f"ConsolidatedCat fallback hits (menu): {consolidated_fallback_hits}")
+
                 logger.info(f"Filtered analytics rows: {len(filtered_rows)} from {len(all_analytics_rows)} total (includes {modifier_count_in_filtered} modifiers)")
+
+                # Build debug info for tag/mapping troubleshooting (when report_config.debug is True)
+                debug_info_extra = None
+                if getattr(report_config, "debug", False) and report_config.itemTags:
+                    _nk = _normalize_item_name
+                    _tk = _normalize_tag_name
+                    # Keys in mapping table that might relate to pepperoni/mushroom/portabella
+                    mapping_keys_pepperoni = sorted(
+                        k for k in list(report_tag_map.keys()) + list(consolidated_cat_map.keys())
+                        if "pepperoni" in k or "mushroom" in k or "portabella" in k
+                    )[:50]
+                    # Unique names from analytics that contain those words (what Toast sent)
+                    analytics_names_pepperoni = sorted(
+                        set(r.get("menuItemName", "") for r in all_analytics_rows if r.get("menuItemName"))
+                    )
+                    analytics_names_pepperoni = [n for n in analytics_names_pepperoni if "pepperoni" in n.lower() or "mushroom" in n.lower() or "portabella" in n.lower()][:30]
+                    # Target items: did we see them and did they get in?
+                    target_names = [
+                        "Pepperoni & Mushroom Pizza (Full Pairing Entree)",
+                        "Pepperoni & Portabella Pizza (Entree)",
+                    ]
+                    target_details = []
+                    for tn in target_names:
+                        nkey = _nk(tn)
+                        tag_from_map = _get_tag_from_mapping(nkey, report_tag_map, consolidated_cat_map, consolidated_override, "")
+                        in_analytics = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in all_analytics_rows)
+                        in_filtered = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in filtered_rows)
+                        target_details.append({
+                            "name": tn,
+                            "normalizedKey": nkey,
+                            "tagFromMappingTable": tag_from_map,
+                            "tagNormalized": _tk(tag_from_map) if tag_from_map else None,
+                            "selectedTagsNormalized": selected_tags_norm[:5],
+                            "inAnalyticsRows": in_analytics,
+                            "inFilteredRows": in_filtered,
+                            "inReportTagMap": nkey in report_tag_map,
+                            "inConsolidatedCatMap": nkey in consolidated_cat_map,
+                        })
+                    debug_info_extra = {
+                        "consolidatedFallbackHits": consolidated_fallback_hits,
+                        "mappingFallbackItemNames": debug_mapping_fallback_names or [],
+                        "mappingTableKeysContainingPepperoniMushroomPortabella": mapping_keys_pepperoni,
+                        "analyticsNamesContainingPepperoniMushroomPortabella": analytics_names_pepperoni,
+                        "targetItems": target_details,
+                        "totalAnalyticsRows": len(all_analytics_rows),
+                        "totalFilteredRows": len(filtered_rows),
+                        "menuItemCount": menu_item_count,
+                    }
                 
                 # Log sample of filtered modifier rows
                 # Get menu item GUIDs from first part (menu items)
@@ -2169,20 +6262,118 @@ async def run_report(report_config: ReportConfig = Body(...)):
                             logger.warning(f"  GUID {guid} found in analytics but not in menu mapping from first restaurant!")
                             logger.warning(f"  This item will be excluded because we can't determine its tags.")
                 
-                # Build item names mapping (empty for now, will use menuItemName from analytics if available)
+                # Build item names mapping from analytics data and menu mapping cache
                 item_names_mapping = {}
+                # First, get names from analytics data
+                for row in all_analytics_rows:
+                    item_guid = row.get("menuItemGuid")
+                    item_name = row.get("menuItemName")
+                    if item_guid and item_name:
+                        item_names_mapping[item_guid] = item_name
+                
+                # Then, get names from menu mapping cache for items not in analytics (for zero sales items)
+                # Check ALL selected restaurants to get complete name coverage
+                for restaurant_id in restaurant_ids:
+                    if restaurant_id in _menu_tags_cache:
+                        # Use guid_to_name mapping if available (GUID -> name)
+                        if "guid_to_name" in _menu_tags_cache[restaurant_id]:
+                            guid_to_name = _menu_tags_cache[restaurant_id]["guid_to_name"]
+                            for item_guid, item_name in guid_to_name.items():
+                                if item_guid not in item_names_mapping:
+                                    item_names_mapping[item_guid] = item_name
+                
+                # If we still don't have names for some items (for zero sales), fetch from menu API
+                if report_config.includeZeroSales:
+                    missing_guids = set()
+                    for item_guid in all_tags_mapping.keys():
+                        if item_guid not in item_names_mapping:
+                            missing_guids.add(item_guid)
+                    
+                    if missing_guids:
+                        logger.info(f"Fetching names for {len(missing_guids)} items with 0 sales")
+                        # Fetch menu data from first restaurant to get item names
+                        try:
+                            standard_headers = await get_standard_api_auth_headers()
+                            headers_with_guid = {
+                                **standard_headers,
+                                "Toast-Restaurant-External-ID": restaurant_ids[0]
+                            }
+                            menus_url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v3/menus"
+                            menus_resp = await client.get(menus_url, headers=headers_with_guid)
+                            if menus_resp.status_code == 200:
+                                menus_data = menus_resp.json()
+                                # Extract item names from menu data
+                                for menu in menus_data.get("menus", []):
+                                    for group in menu.get("menuGroups", []):
+                                        for item in group.get("menuItems", []):
+                                            item_guid = item.get("guid")
+                                            # Prefer displayName over name (name might be kitchenName)
+                                            item_name = item.get("displayName") or item.get("name", "")
+                                            if item_guid in missing_guids and item_name:
+                                                item_names_mapping[item_guid] = item_name
+                                
+                                # Also check modifiers
+                                modifier_group_refs = menus_data.get("modifierGroupReferences", {})
+                                modifier_option_refs = menus_data.get("modifierOptionReferences", {})
+                                for mod_group in modifier_group_refs.values():
+                                    for mod_option in mod_group.get("modifierOptions", []):
+                                        mod_guid = mod_option.get("guid")
+                                        # Prefer displayName over name for modifiers too
+                                        mod_name = mod_option.get("displayName") or mod_option.get("name", "")
+                                        if mod_guid in missing_guids and mod_name:
+                                            item_names_mapping[mod_guid] = mod_name
+                                for mod_option in modifier_option_refs.values():
+                                    mod_guid = mod_option.get("guid", "")
+                                    # Prefer displayName over name for modifiers too
+                                    mod_name = mod_option.get("displayName") or mod_option.get("name", "")
+                                    if mod_guid in missing_guids and mod_name:
+                                        item_names_mapping[mod_guid] = mod_name
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch menu names for zero-sales items: {e}")
+
+                # Add mapping-only items (in mapping table with selected tag but no analytics row)
+                # so they appear in the breakdown and Toast Items popup with count 0.
+                if report_config.itemTags and selected_tags_norm:
+                    names_in_filtered = {_normalize_item_name(r.get("menuItemName", "")) for r in filtered_rows if r.get("menuItemName")}
+                    for norm_name, tag in list(report_tag_map.items()) + list(consolidated_cat_map.items()):
+                        if not norm_name or not tag:
+                            continue
+                        if _normalize_tag_name(tag) not in selected_tags_norm:
+                            continue
+                        if norm_name in names_in_filtered:
+                            continue
+                        synthetic_guid = "mapping:" + norm_name
+                        if synthetic_guid in filtered_mapping:
+                            continue
+                        filtered_mapping[synthetic_guid] = [{"tagName": tag}]
+                        item_names_mapping[synthetic_guid] = _humanize_item_name(norm_name)
+                        names_in_filtered.add(norm_name)
                 
                 # Transform into pivot table format
+                # For includeZeroSales, we need to use filtered_mapping (items with selected tags)
+                # but we also need all items from all_tags_mapping that have the selected tags
+                # So we'll pass filtered_mapping which already contains all items with selected tags
+                # The pivot function will then include items with 0 sales from this mapping
                 result = pivot_menu_items_by_tag(
                     filtered_rows,
-                    all_tags_mapping,
+                    filtered_mapping,  # Use filtered_mapping which has all items with selected tags
                     report_config.itemTags,
                     item_names_mapping,
-                    menu_item_guids  # Pass menu item GUIDs to identify modifiers
+                    menu_item_guids,  # Pass menu item GUIDs to identify modifiers
+                    report_config.includeZeroSales  # Include items with 0 sales
                 )
-                
+                result["debugInfo"] = {
+                    "path": "menu",
+                    "itemTags": len(report_config.itemTags or []),
+                    "includeZeroSales": bool(report_config.includeZeroSales),
+                    "yoyEnabled": bool(report_config.yoyEnabled),
+                    "alohaDate": report_config.alohaDate
+                }
+                if debug_info_extra is not None:
+                    result["debugInfo"]["tagMappingDebug"] = debug_info_extra
+                result = await apply_yoy_aloha_quantities(result, report_config, start_date, end_date)
                 return result
-            
+
             # Default: Use ERA reporting API
             report_guid = await request_toast_report(
                 client,
@@ -2200,9 +6391,66 @@ async def run_report(report_config: ReportConfig = Body(...)):
             
             # Transform metrics data to pivot table format if needed
             if report_config.reportType == "metrics" and not report_config.groupBy:
-                pivot_data = pivot_metrics_by_location_and_date(raw_rows)
+                # Fetch non-restaurant service charges for each (restaurant, date) in parallel.
+                # These are third-party delivery fees (DoorDash, UberEats, etc.) that flow away
+                # from the restaurant — used to compute "Newk's Net Sales" vs Toast gross.
+                unique_combos: set = {
+                    (row.get("restaurantGuid", ""), row.get("businessDate", ""))
+                    for row in raw_rows
+                    if row.get("restaurantGuid") and row.get("businessDate")
+                }
+                sem = asyncio.Semaphore(10)
+
+                sample_guid = next(iter(g for g, _ in unique_combos), "")
+                logger.info(
+                    "Net sales SC fetch: %d location-date combos, sample GUID=%s",
+                    len(unique_combos),
+                    sample_guid,
+                )
+
+                async def _fetch_sc_for_combo(guid: str, bd: str) -> Tuple[str, float]:
+                    async with sem:
+                        try:
+                            amount = await _compute_restaurant_service_charges(client, guid, bd)
+                            return f"{guid}|{bd}", amount
+                        except Exception as exc:
+                            logger.warning(
+                                "SC fetch failed for %s|%s: %s — defaulting to 0",
+                                guid, bd, exc,
+                                exc_info=True,
+                            )
+                            return f"{guid}|{bd}", 0.0
+
+                sc_results = await asyncio.gather(
+                    *[_fetch_sc_for_combo(g, b) for g, b in unique_combos]
+                )
+                service_charges: Dict[str, float] = dict(sc_results)
+                total_sc = sum(service_charges.values())
+                logger.info(
+                    "Net sales SC fetch complete: %d combos, total_restaurant_sc=%.2f, "
+                    "non_zero_combos=%d",
+                    len(service_charges),
+                    total_sc,
+                    sum(1 for v in service_charges.values() if v > 0),
+                )
+                pivot_data = pivot_metrics_by_location_and_date(raw_rows, service_charges)
                 return pivot_data
             
+            if report_config.reportType == "menu":
+                return await build_menu_mix_report_fallback(
+                    client,
+                    report_config,
+                    restaurant_ids,
+                    start_date,
+                    end_date,
+                    response,
+                )
+            
+            if response is not None:
+                if report_config.reportType == "menu":
+                    response.headers["X-Menu-Path"] = "default_menu"
+                else:
+                    response.headers["X-Menu-Path"] = "default"
             return raw_rows
     
     except HTTPException:
@@ -2210,6 +6458,100 @@ async def run_report(report_config: ReportConfig = Body(...)):
     except Exception as e:
         logger.error(f"Error running report: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error running report: {str(e)}")
+
+@app.get("/api/debug/service-charges")
+async def debug_service_charges(
+    business_date: str = Query(..., description="Business date YYYYMMDD, e.g. 20250301"),
+    restaurant_name: str = Query(None, description="Partial location name filter (case-insensitive). Omit to use first location."),
+    restaurant_guid: str = Query(None, description="Exact restaurant GUID (alternative to restaurant_name)."),
+):
+    """
+    Debug endpoint: fetches raw Orders API data for one restaurant/date and returns
+    the full appliedServiceCharges structure so you can see exactly what fields are present.
+
+    Usage examples:
+      /api/debug/service-charges?business_date=20250301&restaurant_name=Jackson
+      /api/debug/service-charges?business_date=20250301&restaurant_guid=xxxx-xxxx-...
+
+    Returns sc_samples (full raw objects per SC name) so you can see every field Toast returns.
+    """
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Resolve the GUID — look up by name if needed
+        if not restaurant_guid:
+            locations = await get_all_active_locations(client)
+            if not locations:
+                raise HTTPException(status_code=404, detail="No active locations found")
+            if restaurant_name:
+                needle = restaurant_name.lower()
+                matches = [loc for loc in locations if needle in (loc.restaurantName or "").lower()]
+                if not matches:
+                    names = [loc.restaurantName for loc in locations[:20]]
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No location matching '{restaurant_name}'. Available (first 20): {names}",
+                    )
+                chosen = matches[0]
+            else:
+                chosen = locations[0]
+            restaurant_guid = chosen.restaurantGuid
+            restaurant_name_resolved = chosen.restaurantName
+        else:
+            restaurant_guid = restaurant_guid.strip()
+            restaurant_name_resolved = restaurant_guid  # fallback label
+
+        # Fetch orders via the same path the live SC computation uses
+        try:
+            orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date)
+        except HTTPException as e:
+            return {
+                "error": f"Orders API returned {e.status_code}: {e.detail}",
+                "restaurant_guid": restaurant_guid,
+                "restaurant_name": restaurant_name_resolved,
+                "business_date": business_date,
+                "hint": "Check that restaurant_guid is a valid Toast UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)",
+            }
+
+    total_orders = len(orders)
+    total_checks = sum(len(o.get("checks", [])) for o in orders)
+    total_applied_scs = 0
+    sc_samples: dict = {}   # sc name -> first full appliedServiceCharge object seen
+    sc_totals: dict = {}    # sc name -> {count, total_amount, destinations}
+
+    for order in orders:
+        if order.get("voided"):
+            continue
+        for check in order.get("checks", []):
+            if check.get("voided"):
+                continue
+            for applied_sc in check.get("appliedServiceCharges", []):
+                total_applied_scs += 1
+                name = applied_sc.get("name") or "(unnamed)"
+                if name not in sc_samples:
+                    sc_samples[name] = applied_sc  # full raw object — shows every field present
+                if name not in sc_totals:
+                    sc_totals[name] = {"count": 0, "total_amount": 0.0, "destinations": set()}
+                sc_totals[name]["count"] += 1
+                sc_totals[name]["total_amount"] += float(applied_sc.get("chargeAmount") or 0)
+                dest = applied_sc.get("destination") or "MISSING"
+                sc_totals[name]["destinations"].add(dest)
+
+    # Convert sets to lists for JSON serialisation
+    sc_totals_serial = {
+        name: {**v, "destinations": sorted(v["destinations"])}
+        for name, v in sc_totals.items()
+    }
+
+    return {
+        "restaurant_guid": restaurant_guid,
+        "restaurant_name": restaurant_name_resolved,
+        "business_date": business_date,
+        "total_orders": total_orders,
+        "total_checks": total_checks,
+        "total_applied_service_charges": total_applied_scs,
+        "sc_summary": sc_totals_serial,
+        "sc_samples": sc_samples,
+    }
+
 
 @app.post("/api/reports/item-tags-quantities")
 async def run_item_tags_quantities_report(request: ItemTagsQuantitiesRequest = Body(...)):
@@ -2281,12 +6623,1276 @@ async def run_item_tags_quantities_report(request: ItemTagsQuantitiesRequest = B
             
             logger.info(f"Returning {len(result)} aggregated rows")
             return result
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in item tags quantities report: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
+
+@app.post("/api/reports/pick3")
+async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
+    """
+    Pick 3 Report: per-store-per-day counts of (Pick 3 Entree) items and
+    drill-down of (POS Pairing Choice) / (OLO Pairing Choice) modifier selections.
+    Prompts only for time period; uses all locations when restaurantIds is empty.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            restaurant_ids = list(request.restaurantIds) if request.restaurantIds else []
+            locations: List[Location] = []
+            if not restaurant_ids:
+                locations = await get_all_active_locations(client)
+                restaurant_ids = [loc.restaurantGuid for loc in locations]
+            else:
+                locations = await get_all_active_locations(client)
+            if not restaurant_ids:
+                return {"summary": [], "drillDown": []}
+            guid_to_location = {loc.restaurantGuid: loc for loc in locations}
+
+            try:
+                start_date = datetime.strptime(request.start_date, "%Y-%m-%d").date()
+                end_date = datetime.strptime(request.end_date, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+            if start_date > end_date:
+                raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+
+            days_diff = (end_date - start_date).days + 1
+            pick3_entree_substring = "(Pick 3 Entree)"
+            pairing_substrings = ("(POS Pairing Choice)", "(OLO Pairing Choice)")
+
+            # --- Fetch MENU_ITEM report (chunked by week if needed) ---
+            all_menu_rows: List[Dict] = []
+            if days_diff > 7:
+                current_start = start_date
+                while current_start <= end_date:
+                    chunk_end = min(current_start + timedelta(days=6), end_date)
+                    report_guid = await request_toast_report(
+                        client, current_start, chunk_end, restaurant_ids, "menu", ["MENU_ITEM"]
+                    )
+                    chunk_rows = await fetch_toast_report(client, report_guid, "menu")
+                    if chunk_rows:
+                        all_menu_rows.extend(chunk_rows)
+                    current_start = chunk_end + timedelta(days=1)
+            else:
+                report_guid = await request_toast_report(
+                    client, start_date, end_date, restaurant_ids, "menu", ["MENU_ITEM"]
+                )
+                all_menu_rows = await fetch_toast_report(client, report_guid, "menu")
+
+            # Filter by variant: POS = (Pick 3 Entree) only, OLO = Pick 3 (OLO) only
+            variant = (request.variant or "pos").strip().lower()
+            if variant not in ("pos", "olo"):
+                variant = "pos"
+            summary_agg: Dict[Tuple[str, str], Dict] = {}
+            parent_items_agg: Dict[Tuple[str, str], Dict[str, int]] = {}  # (rguid, bdate) -> { menuItemName: qty }
+            for row in all_menu_rows or []:
+                name = (row.get("menuItemName") or "").strip()
+                if variant == "olo":
+                    menu_guid = (row.get("menuItemGuid") or "").strip().lower()
+                    is_pick3 = "Pick 3 (OLO)" in name or menu_guid == PICK3_OLO_ITEM_GUID.lower()
+                else:
+                    is_pick3 = pick3_entree_substring in name
+                if not is_pick3:
+                    continue
+                rguid = row.get("restaurantGuid", "")
+                bdate = row.get("businessDate", "")
+                qty = int(row.get("quantitySold", 0) or 0)
+                if not rguid or not bdate:
+                    continue
+                key = (rguid, bdate)
+                if key not in summary_agg:
+                    summary_agg[key] = {
+                        "restaurantGuid": rguid,
+                        "restaurantName": row.get("restaurantName", "Unknown"),
+                        "businessDate": bdate,
+                        "pick3Total": 0,
+                    }
+                summary_agg[key]["pick3Total"] += qty
+                if key not in parent_items_agg:
+                    parent_items_agg[key] = {}
+                parent_items_agg[key][name] = parent_items_agg[key].get(name, 0) + qty
+
+            for r in summary_agg.values():
+                if r["restaurantGuid"] in guid_to_location:
+                    r["restaurantName"] = format_location_display_name(guid_to_location[r["restaurantGuid"]])
+            summary = sorted(summary_agg.values(), key=lambda x: (x["businessDate"], x["restaurantName"]))
+            summary_by_key = {(r["restaurantGuid"], r["businessDate"]): r for r in summary}
+            # Debug: per-store Pick 3 totals from menu report (for comparison with drill-down)
+            menu_totals_by_store: Dict[str, int] = {}
+            for r in summary:
+                g = r["restaurantGuid"]
+                menu_totals_by_store[g] = menu_totals_by_store.get(g, 0) + r["pick3Total"]
+            for g, total in sorted(menu_totals_by_store.items(), key=lambda x: -x[1]):
+                name = next((r["restaurantName"] for r in summary if r["restaurantGuid"] == g), g[:8])
+                logger.info("Pick3 menu report store total: guid=%s name=%s total=%s", g[:8] + "...", name, total)
+
+            # --- Pairing selections: use menu report grouped by MENU_ITEM + MODIFIER so we only count
+            #     pairings that were sold with a Pick 3 parent item (not all pairings across the menu). ---
+            selections_agg: Dict[Tuple[str, str], Dict[str, int]] = {}
+            all_item_mod_rows: List[Dict] = []
+            group_by_item_modifier = ["MENU_ITEM", "MODIFIER"]
+            if days_diff > 7:
+                current_start = start_date
+                while current_start <= end_date:
+                    chunk_end = min(current_start + timedelta(days=6), end_date)
+                    report_guid = await request_toast_report(
+                        client, current_start, chunk_end, restaurant_ids, "menu", group_by_item_modifier
+                    )
+                    chunk_rows = await fetch_toast_report(client, report_guid, "menu")
+                    if chunk_rows:
+                        all_item_mod_rows.extend(chunk_rows)
+                    current_start = chunk_end + timedelta(days=1)
+            else:
+                report_guid = await request_toast_report(
+                    client, start_date, end_date, restaurant_ids, "menu", group_by_item_modifier
+                )
+                all_item_mod_rows = await fetch_toast_report(client, report_guid, "menu")
+            for row in all_item_mod_rows or []:
+                # Row has both menu item (parent) and modifier: menuItemGuid, menuItemName, modifierGuid/modifierOptionGuid, modifierName/modifierOptionName
+                parent_name = (row.get("menuItemName") or "").strip()
+                parent_guid = (row.get("menuItemGuid") or "").strip().lower()
+                is_pick3_parent = (
+                    (pick3_entree_substring in parent_name)
+                    if variant != "olo"
+                    else ("Pick 3 (OLO)" in parent_name or parent_guid == PICK3_OLO_ITEM_GUID.lower())
+                )
+                if not is_pick3_parent:
+                    continue
+                mod_name = (row.get("modifierName") or row.get("modifierOptionName") or "").strip()
+                if not mod_name or "(Side)" in mod_name or _is_pick3_premod_name(mod_name):
+                    continue
+                # POS report: only (POS Pairing Choice) modifiers; OLO report: only (OLO Pairing Choice) modifiers
+                if variant == "olo":
+                    if "(OLO Pairing Choice)" not in mod_name:
+                        continue
+                else:
+                    if "(POS Pairing Choice)" not in mod_name:
+                        continue
+                rguid = row.get("restaurantGuid", "")
+                bdate = row.get("businessDate", "")
+                qty = int(row.get("quantitySold", 0) or 0)
+                if not rguid or not bdate:
+                    continue
+                key = (rguid, bdate)
+                if key not in selections_agg:
+                    selections_agg[key] = {}
+                selections_agg[key][mod_name] = selections_agg[key].get(mod_name, 0) + qty
+
+            all_keys = set(summary_by_key.keys()) | set(selections_agg.keys())
+            # Build drillDown: one entry per (store, date) with pick3Total, parentItems (Pick 3 Entree), and selections
+            drill_down = []
+            for (rguid, bdate) in sorted(all_keys):
+                rec = summary_by_key.get((rguid, bdate))
+                pick3_total = rec["pick3Total"] if rec else 0
+                rname = rec["restaurantName"] if rec else "Unknown"
+                parent_map = parent_items_agg.get((rguid, bdate), {})
+                parent_items = [{"itemName": name, "quantity": qty} for name, qty in parent_map.items()]
+                parent_items.sort(key=lambda x: (-x["quantity"], x["itemName"]))
+                sel_map = selections_agg.get((rguid, bdate), {})
+                selections = [{"itemName": name, "quantity": qty} for name, qty in sel_map.items()]
+                selections.sort(key=lambda x: (-x["quantity"], x["itemName"]))
+                drill_down.append({
+                    "restaurantGuid": rguid,
+                    "restaurantName": format_location_display_name(guid_to_location[rguid]) if rguid in guid_to_location else rname,
+                    "businessDate": bdate,
+                    "pick3Total": pick3_total,
+                    "parentItems": parent_items,
+                    "selections": selections,
+                })
+
+            return {
+                "summary": summary,
+                "drillDown": drill_down,
+                "pairingSource": "menu_aggregate",
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Pick 3 report: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating Pick 3 report: {str(e)}")
+
+
+PICK3_ENTREE_SUBSTRING = "(Pick 3 Entree)"
+PICK3_OLO_ITEM_GUID = "e7adf8e6-5511-4e34-a45d-1a388996ad2f"  # Pick 3 (OLO) - separate report variant
+PICK3_PAIRING_SUBSTRINGS = ("(POS Pairing Choice)", "(OLO Pairing Choice)")
+# Premod prefixes: exclude modifiers like "ADD EXTRA NO XOTS" from Pick 3 pairing counts
+PICK3_PREMOD_PREFIXES = ("add ", "no ", "extra ")
+
+
+def _is_pick3_premod_name(mod_name: str) -> bool:
+    """True if modifier name looks like a premod we exclude (e.g. ADD EXTRA NO XOTS)."""
+    if not mod_name:
+        return True
+    upper = mod_name.strip().upper()
+    return any(upper.startswith(p.upper()) for p in PICK3_PREMOD_PREFIXES)
+
+
+def _is_pick3_selection(sel: Dict, variant: str) -> bool:
+    """True if this order selection counts as Pick 3 for the given variant (pos or olo)."""
+    if variant == "olo":
+        display_name = (sel.get("displayName") or "").strip()
+        if "Pick 3 (OLO)" in display_name:
+            return True
+        item = sel.get("item")
+        guid = (item.get("guid") if isinstance(item, dict) else item) if item else ""
+        return bool(guid and str(guid).strip().lower() == PICK3_OLO_ITEM_GUID.lower())
+    return PICK3_ENTREE_SUBSTRING in (sel.get("displayName") or "")
+
+
+async def _compute_pick3_drill_down_for_store(
+    client: httpx.AsyncClient,
+    rguid: str,
+    start_date: date,
+    end_date: date,
+    variant: str = "pos",
+) -> Dict:
+    """
+    Fetch orders for one store (date range), filter by businessDate in range,
+    aggregate Pick 3 parent items and pairing selections. variant "pos" = (Pick 3 Entree) only, "olo" = Pick 3 (OLO) only.
+    Returns dict with restaurantGuid, totalPick3Quantity, parentItems, selections (no restaurantName).
+    """
+    variant = (variant or "pos").strip().lower()
+    if variant not in ("pos", "olo"):
+        variant = "pos"
+    start_bdate = int(to_business_date(start_date))
+    end_bdate = int(to_business_date(end_date))
+    await get_menu_tags_mapping(client, rguid)
+    guid_to_name = _get_modifier_guid_to_name(rguid)
+    orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
+
+    parent_totals: Dict[str, int] = {}
+    pairing_totals: Dict[str, int] = {}
+
+    for order in orders:
+        obd = order.get("businessDate")
+        try:
+            order_bdate_int = int(obd) if obd is not None else None
+        except (TypeError, ValueError):
+            order_bdate_int = None
+        if order_bdate_int is None or not (start_bdate <= order_bdate_int <= end_bdate):
+            continue
+        for check in order.get("checks") or []:
+            for sel in check.get("selections") or []:
+                if not _is_pick3_selection(sel, variant):
+                    continue
+                display_name = (sel.get("displayName") or "").strip()
+                sel_qty = int(sel.get("quantity", 1) or 1)
+                parent_totals[display_name] = parent_totals.get(display_name, 0) + sel_qty
+                # Collect (mod_name, mod_qty) for this selection only; cap total at 3 pairings per Pick 3 entree
+                sel_pairings: List[Tuple[str, int]] = []
+                for mod in sel.get("modifiers") or []:
+                    item_ref = mod.get("item")
+                    if isinstance(item_ref, dict):
+                        mod_guid = item_ref.get("guid")
+                    elif isinstance(item_ref, str):
+                        mod_guid = item_ref
+                    else:
+                        mod_guid = mod.get("guid")
+                    if not mod_guid:
+                        continue
+                    mod_name = (guid_to_name.get(mod_guid) or "").strip()
+                    if not mod_name or "(Side)" in mod_name or _is_pick3_premod_name(mod_name):
+                        continue
+                    if variant == "olo":
+                        if "(OLO Pairing Choice)" not in mod_name:
+                            continue
+                    else:
+                        if "(POS Pairing Choice)" not in mod_name:
+                            continue
+                    mod_qty = int(mod.get("quantity", 1) or 1)
+                    sel_pairings.append((mod_name, mod_qty))
+                max_pairings_for_sel = sel_qty * 3
+                total_sel_pairings = sum(q for _, q in sel_pairings)
+                if total_sel_pairings > max_pairings_for_sel and max_pairings_for_sel > 0:
+                    scale = max_pairings_for_sel / total_sel_pairings
+                    for mod_name, mod_qty in sel_pairings:
+                        add_qty = max(0, int(round(mod_qty * scale)))
+                        if add_qty:
+                            pairing_totals[mod_name] = pairing_totals.get(mod_name, 0) + add_qty
+                else:
+                    for mod_name, mod_qty in sel_pairings:
+                        pairing_totals[mod_name] = pairing_totals.get(mod_name, 0) + mod_qty
+
+    total_pick3 = sum(parent_totals.values()) or 0
+    parent_items = [{"itemName": n, "quantity": q} for n, q in sorted(parent_totals.items(), key=lambda x: (-x[1], x[0]))]
+    selections = [{"itemName": n, "quantity": q} for n, q in sorted(pairing_totals.items(), key=lambda x: (-x[1], x[0]))]
+    return {
+        "restaurantGuid": rguid,
+        "totalPick3Quantity": total_pick3,
+        "parentItems": parent_items,
+        "selections": selections,
+    }
+
+
+class Pick3DrillDownOrdersRequest(BaseModel):
+    start_date: str
+    end_date: str
+    restaurant_guid: str
+    variant: str = "pos"  # "pos" or "olo"
+    debug: bool = False
+
+
+@app.post("/api/reports/pick3/drill-down-orders")
+async def pick3_drill_down_orders(request: Pick3DrillDownOrdersRequest = Body(...)):
+    """
+    On-demand: fetch order-level pairing counts for a single store only.
+    Fetches orders by businessDate (one API call per day) so drill-down matches menu report.
+    Set debug=true to return debug info (orders fetched, Pick 3 per order/businessDate).
+    """
+    try:
+        start_date = datetime.strptime(request.start_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(request.end_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+    rguid = request.restaurant_guid.strip()
+    if not rguid:
+        raise HTTPException(status_code=400, detail="restaurant_guid required")
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            start_iso = start_date.strftime("%Y-%m-%dT00:00:00.000-0600")
+            end_iso = (end_date + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00.000-0600")
+            variant = (request.variant or "pos").strip().lower()
+            if variant not in ("pos", "olo"):
+                variant = "pos"
+            result = await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant)
+            locs = await get_all_active_locations(client)
+            restaurant_name = "Unknown"
+            for loc in locs:
+                if loc.restaurantGuid == rguid:
+                    restaurant_name = format_location_display_name(loc)
+                    break
+            out: Dict = {
+                "pairingSource": "orders",
+                "restaurantGuid": rguid,
+                "restaurantName": restaurant_name,
+                "totalPick3Quantity": result["totalPick3Quantity"],
+                "parentItems": result["parentItems"],
+                "selections": result["selections"],
+            }
+            if request.debug:
+                orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
+                start_bdate = int(to_business_date(start_date))
+                end_bdate = int(to_business_date(end_date))
+                debug_per_order = []
+                pick3_by_business_date: Dict[str, int] = {}
+                for order in orders:
+                    obd = order.get("businessDate")
+                    try:
+                        order_bdate_int = int(obd) if obd is not None else None
+                    except (TypeError, ValueError):
+                        order_bdate_int = None
+                    if order_bdate_int is None or not (start_bdate <= order_bdate_int <= end_bdate):
+                        continue
+                    order_bdate = str(order_bdate_int)
+                    order_pick3 = sum(
+                        int(sel.get("quantity", 1) or 1)
+                        for check in (order.get("checks") or [])
+                        for sel in (check.get("selections") or [])
+                        if _is_pick3_selection(sel, variant)
+                    )
+                    if order_pick3 > 0:
+                        debug_per_order.append({
+                            "orderGuid": (order.get("guid") or "")[:8],
+                            "businessDate": order_bdate,
+                            "pick3Count": order_pick3,
+                        })
+                        pick3_by_business_date[order_bdate] = pick3_by_business_date.get(order_bdate, 0) + order_pick3
+                out["debug"] = {
+                    "dateRangeRequested": {"start": start_iso, "end": end_iso},
+                    "ordersFetched": len(orders),
+                    "ordersWithPick3": len(debug_per_order),
+                    "totalPick3FromOrders": result["totalPick3Quantity"],
+                    "pick3ByBusinessDate": dict(sorted(pick3_by_business_date.items())),
+                    "sampleOrdersWithPick3": debug_per_order[:20],
+                }
+            return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pick 3 drill-down-orders: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class Pick3DrillDownAllStoresRequest(BaseModel):
+    start_date: str
+    end_date: str
+    restaurant_ids: Optional[List[str]] = None  # if empty, all locations
+    variant: str = "pos"  # "pos" or "olo"
+
+
+@app.post("/api/reports/pick3/drill-down-all-stores")
+async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = Body(...)):
+    """
+    Fetch Pick 3 order-level breakdown for all stores in parallel (concurrency limited).
+    Uses same logic as single-store drill-down; runs multiple stores at once so total
+    time is much lower than sequential (e.g. ~2–4 min for 50 stores instead of 15+).
+    """
+    try:
+        start_date = datetime.strptime(request.start_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(request.end_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            locs = await get_all_active_locations(client)
+            if not locs:
+                return {"stores": [], "pairingSource": "orders"}
+            if request.restaurant_ids:
+                guids = [g.strip() for g in request.restaurant_ids if g.strip()]
+                locs = [loc for loc in locs if loc.restaurantGuid in guids]
+            if not locs:
+                return {"stores": [], "pairingSource": "orders"}
+
+            store_guids = [loc.restaurantGuid for loc in locs]
+            guid_to_name = {loc.restaurantGuid: format_location_display_name(loc) for loc in locs}
+
+            variant = (request.variant or "pos").strip().lower()
+            if variant not in ("pos", "olo"):
+                variant = "pos"
+
+            # Prefetch menu tags for all stores in parallel so each store task hits cache (faster)
+            prefetch_sem = asyncio.Semaphore(10)
+            async def prefetch_one(g: str):
+                async with prefetch_sem:
+                    await get_menu_tags_mapping(client, g)
+            await asyncio.gather(*[prefetch_one(g) for g in store_guids], return_exceptions=True)
+
+            sem = asyncio.Semaphore(8)
+
+            async def one_store(rguid: str):
+                async with sem:
+                    try:
+                        return await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant)
+                    except Exception as e:
+                        logger.warning("Pick3 all-stores drill-down for %s: %s", rguid[:8], e)
+                        return {"restaurantGuid": rguid, "totalPick3Quantity": 0, "parentItems": [], "selections": []}
+
+            results = await asyncio.gather(*[one_store(g) for g in store_guids], return_exceptions=False)
+
+            stores = []
+            for r in results:
+                stores.append({
+                    "restaurantGuid": r["restaurantGuid"],
+                    "restaurantName": guid_to_name.get(r["restaurantGuid"], "Unknown"),
+                    "totalPick3Quantity": r["totalPick3Quantity"],
+                    "parentItems": r["parentItems"],
+                    "selections": r["selections"],
+                })
+
+            logger.info(
+                "Pick3 drill-down all-stores: range=%s to %s stores=%s total_pick3=%s",
+                request.start_date,
+                request.end_date,
+                len(stores),
+                sum(s["totalPick3Quantity"] for s in stores),
+            )
+            return {"stores": stores, "pairingSource": "orders"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pick 3 drill-down-all-stores: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/reports/pick3/from-csv")
+async def pick3_breakdown_from_csv(
+    file: Optional[UploadFile] = File(None, description="Toast Product Mix Items.csv"),
+    modifiers_file: Optional[UploadFile] = File(None, description="Toast Product Mix Modifiers.csv"),
+    selected_levels_file: Optional[UploadFile] = File(None, description="Toast Product Mix Selected_levels.csv (recommended for correct pairing counts)"),
+    variant: str = Query("pos", description="pos = (Pick 3 Entree), olo = Pick 3 (OLO), all = both"),
+):
+    """
+    Parse Toast Product Mix CSVs. Upload one or more files:
+    - Selected_levels.csv (recommended): uses Type='modifier' for pairing rows; Item = Pick 3 parent, Modifier = pairing choice. Correct parent–child link.
+    - Items.csv + optional Modifiers.csv: parent totals from Items; pairings from Modifiers where parent is Pick 3.
+    If Selected_levels.csv is provided, it is used for both parent and pairing counts (Items/Modifiers ignored for pairings).
+    """
+    variant = (variant or "pos").strip().lower()
+    if variant not in ("pos", "olo", "all"):
+        variant = "pos"
+
+    has_selected_levels = (
+        selected_levels_file
+        and selected_levels_file.filename
+        and selected_levels_file.filename.lower().endswith(".csv")
+    )
+    has_items = file and file.filename and file.filename.lower().endswith(".csv")
+    if not has_selected_levels and not has_items:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload at least one file: Selected_levels.csv (recommended) or Items.csv.",
+        )
+
+    def parse_qty(s: str) -> float:
+        if not s:
+            return 0.0
+        s = str(s).strip().replace(",", "")
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
+    # Prefer Selected_levels.csv when provided (correct parent–child link: Type='modifier' for pairing rows)
+    if has_selected_levels:
+        try:
+            raw_sl = await selected_levels_file.read()
+            if len(raw_sl) > 20 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Selected_levels file too large (max 20MB).")
+            text_sl = raw_sl.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="Selected_levels must be UTF-8 encoded.")
+        reader_sl = csv.reader(io.StringIO(text_sl))
+        rows_sl = list(reader_sl)
+        if not rows_sl:
+            raise HTTPException(status_code=400, detail="Selected_levels CSV is empty.")
+        header_sl = [c.strip() for c in rows_sl[0]]
+        col_type = col_item = col_modifier = col_qty = None
+        for i, h in enumerate(header_sl):
+            if not h:
+                continue
+            h_lower = h.lower().strip()
+            if col_type is None and h_lower in ("type", "level", "level type", "row type"):
+                col_type = i
+            if col_item is None and h_lower in ("item", "product", "menu item", "item name"):
+                col_item = i
+            if col_modifier is None and ("modifier" in h_lower or h_lower in ("option", "modifier name")):
+                col_modifier = i
+            if col_qty is None and "voided" not in h_lower:
+                if h_lower in ("qty sold", "quantity sold", "quantity", "qty", "units", "sold", "unit sold") or ("qty" in h_lower and "sold" in h_lower) or "quantity" in h_lower:
+                    col_qty = i
+        if col_item is None:
+            col_item = next((i for i, x in enumerate(header_sl) if x and x.lower().strip() == "item"), None)
+        if col_modifier is None:
+            col_modifier = next((i for i, x in enumerate(header_sl) if x and "modifier" in x.lower()), None)
+        if col_qty is None:
+            col_qty = next((i for i, x in enumerate(header_sl) if x and ("qty" in x.lower() or "quantity" in x.lower()) and "voided" not in x.lower()), None)
+        missing = []
+        if col_type is None:
+            missing.append("Type (or Level)")
+        if col_item is None:
+            missing.append("Item")
+        if col_modifier is None:
+            missing.append("Modifier")
+        if col_qty is None:
+            missing.append("Qty sold / Quantity")
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected_levels.csv missing: {}. Found columns: {}.".format(", ".join(missing), ", ".join(header_sl[:20])),
+            )
+
+        def _is_pick3_parent(item_name: str) -> bool:
+            if not item_name:
+                return False
+            if variant == "olo":
+                return "Pick 3 (OLO)" in item_name
+            if variant == "pos":
+                return "(Pick 3 Entree)" in item_name
+            return "(Pick 3 Entree)" in item_name or "Pick 3 (OLO)" in item_name
+
+        def _is_valid_pairing(mod_name: str) -> bool:
+            if not mod_name or "(Side)" in mod_name or _is_pick3_premod_name(mod_name):
+                return False
+            if variant == "olo":
+                return "(OLO Pairing Choice)" in mod_name
+            if variant == "pos":
+                return "(POS Pairing Choice)" in mod_name
+            return "(POS Pairing Choice)" in mod_name or "(OLO Pairing Choice)" in mod_name
+
+        parent_totals_sl: Dict[str, float] = {}
+        pairing_totals_sl: Dict[str, float] = {}
+        for row in rows_sl[1:]:
+            if len(row) <= max(col_type, col_item, col_modifier, col_qty):
+                continue
+            row_type = (row[col_type] or "").strip().lower()
+            item_name = (row[col_item] or "").strip()
+            mod_name = (row[col_modifier] or "").strip() if col_modifier < len(row) else ""
+            qty = parse_qty(row[col_qty] if col_qty < len(row) else "")
+            if row_type == "modifier":
+                if not _is_pick3_parent(item_name) or not _is_valid_pairing(mod_name) or qty <= 0:
+                    continue
+                pairing_totals_sl[mod_name] = pairing_totals_sl.get(mod_name, 0.0) + qty
+            else:
+                if not _is_pick3_parent(item_name) or qty <= 0:
+                    continue
+                parent_totals_sl[item_name] = parent_totals_sl.get(item_name, 0.0) + qty
+        total_pick3_sl = sum(parent_totals_sl.values())
+        max_pairings_sl = 3.0 * total_pick3_sl if total_pick3_sl else 0
+        total_pairings_raw_sl = sum(pairing_totals_sl.values())
+        if max_pairings_sl > 0 and total_pairings_raw_sl > max_pairings_sl:
+            scale = max_pairings_sl / total_pairings_raw_sl
+            pairing_totals_sl = {n: qty * scale for n, qty in pairing_totals_sl.items()}
+        parent_items_sl = [
+            {"itemName": name, "quantity": int(round(qty))}
+            for name, qty in sorted(parent_totals_sl.items(), key=lambda x: (-x[1], x[0]))
+        ]
+        selections_sl = [
+            {"itemName": name, "quantity": int(round(qty))}
+            for name, qty in sorted(pairing_totals_sl.items(), key=lambda x: (-x[1], x[0]))
+        ]
+        return {
+            "pairingSource": "toast_product_mix_selected_levels",
+            "totalPick3Quantity": int(round(total_pick3_sl)),
+            "parentItems": parent_items_sl,
+            "selections": selections_sl,
+            "restaurantName": "All locations (from CSV)",
+        }
+
+    # Items.csv (+ optional Modifiers.csv) path
+    if not has_items:
+        raise HTTPException(status_code=400, detail="When not using Selected_levels.csv, Items.csv is required.")
+    try:
+        raw = await file.read()
+        if len(raw) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large (max 20MB).")
+        text = raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded.")
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        raise HTTPException(status_code=400, detail="Items CSV is empty.")
+
+    header = [c.strip() for c in rows[0]]
+    col_master = col_parent = col_item = col_qty = None
+    for i, h in enumerate(header):
+        if h and h.lower() == "masterid":
+            col_master = i
+        if h and h.lower() == "parentid":
+            col_parent = i
+        if h and h.lower() == "item":
+            col_item = i
+        if h and h.lower().strip() == "qty sold":
+            col_qty = i
+        elif h and col_qty is None and "qty" in h.lower() and "sold" in h.lower() and "voided" not in h.lower():
+            col_qty = i
+    if col_item is None or col_qty is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Items.csv must have 'Item' and 'Qty sold' columns (Toast Product Mix Items.csv).",
+        )
+
+    def is_pick3_row(item_name: str) -> bool:
+        if not item_name:
+            return False
+        if variant == "pos":
+            return "(Pick 3 Entree)" in item_name
+        if variant == "olo":
+            return "Pick 3 (OLO)" in item_name
+        return "(Pick 3 Entree)" in item_name or "Pick 3 (OLO)" in item_name
+
+    parent_totals: Dict[str, float] = {}
+    pick3_parent_ids: set = set()
+    pick3_master_ids: set = set()
+    item_parent_to_masters: Dict[str, set] = {}
+
+    for row in rows[1:]:
+        if len(row) <= max(col_item, col_qty):
+            continue
+        item_name = (row[col_item] or "").strip()
+        master_id = (row[col_master] or "").strip() if col_master is not None and len(row) > col_master else ""
+        parent_id = (row[col_parent] or "").strip() if col_parent is not None and len(row) > col_parent else ""
+        if parent_id:
+            item_parent_to_masters.setdefault(parent_id, set()).add(master_id)
+        if not is_pick3_row(item_name):
+            continue
+        qty = parse_qty(row[col_qty])
+        if qty <= 0:
+            continue
+        parent_totals[item_name] = parent_totals.get(item_name, 0.0) + qty
+        if parent_id:
+            pick3_parent_ids.add(parent_id)
+        if master_id:
+            pick3_master_ids.add(master_id)
+
+    # Only count pairings attached to Pick 3 items (master id), not the whole product family
+    pick3_master_ids_only: set = set(pick3_master_ids)
+
+    selections: List[Dict] = []
+    if modifiers_file and modifiers_file.filename and modifiers_file.filename.lower().endswith(".csv"):
+        try:
+            mod_raw = await modifiers_file.read()
+            if len(mod_raw) > 20 * 1024 * 1024:
+                pass
+            else:
+                mod_text = mod_raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+                mod_reader = csv.reader(io.StringIO(mod_text))
+                mod_rows = list(mod_reader)
+                if mod_rows:
+                    mh = [c.strip() for c in mod_rows[0]]
+                    m_col_parent = m_col_mod = m_col_cat = m_col_qty = None
+                    for i, c in enumerate(mh):
+                        if c and c.lower() == "parentid":
+                            m_col_parent = i
+                        if c and c.lower() == "modifier":
+                            m_col_mod = i
+                        if c and "sales" in c.lower() and "category" in c.lower():
+                            m_col_cat = i
+                        if c and c.lower().strip() == "qty sold":
+                            m_col_qty = i
+                        elif c and m_col_qty is None and "qty" in c.lower() and "sold" in c.lower() and "voided" not in c.lower():
+                            m_col_qty = i
+                    if m_col_parent is not None and m_col_mod is not None and m_col_qty is not None:
+                        pairing_totals: Dict[str, float] = {}
+                        for mrow in mod_rows[1:]:
+                            if len(mrow) <= max(m_col_parent, m_col_mod, m_col_qty):
+                                continue
+                            pid = (mrow[m_col_parent] or "").strip()
+                            if pid not in pick3_master_ids_only:
+                                continue
+                            mod_name = (mrow[m_col_mod] or "").strip()
+                            if not mod_name or "(Side)" in mod_name or _is_pick3_premod_name(mod_name):
+                                continue
+                            if variant == "olo":
+                                if "(OLO Pairing Choice)" not in mod_name:
+                                    continue
+                            elif variant == "pos":
+                                if "(POS Pairing Choice)" not in mod_name:
+                                    continue
+                            else:
+                                if "(POS Pairing Choice)" not in mod_name and "(OLO Pairing Choice)" not in mod_name:
+                                    continue
+                            qty = parse_qty(mrow[m_col_qty])
+                            if qty <= 0:
+                                continue
+                            pairing_totals[mod_name] = pairing_totals.get(mod_name, 0.0) + qty
+                        total_pick3_csv = sum(parent_totals.values())
+                        total_pairings_raw = sum(pairing_totals.values())
+                        max_pairings = 3.0 * total_pick3_csv if total_pick3_csv else 0
+                        if max_pairings > 0 and total_pairings_raw > max_pairings:
+                            scale = max_pairings / total_pairings_raw
+                            pairing_totals = {n: qty * scale for n, qty in pairing_totals.items()}
+                        selections = [
+                            {"itemName": name, "quantity": int(round(qty))}
+                            for name, qty in sorted(pairing_totals.items(), key=lambda x: (-x[1], x[0]))
+                        ]
+        except Exception:
+            pass
+
+    total_pick3 = sum(parent_totals.values())
+    parent_items = [
+        {"itemName": name, "quantity": int(round(qty))}
+        for name, qty in sorted(parent_totals.items(), key=lambda x: (-x[1], x[0]))
+    ]
+    return {
+        "pairingSource": "toast_product_mix_csv",
+        "totalPick3Quantity": int(round(total_pick3)),
+        "parentItems": parent_items,
+        "selections": selections,
+        "restaurantName": "All locations (from CSV)",
+    }
+
+
+@app.post("/api/reports/pick3/from-selected-levels")
+async def pick3_breakdown_from_selected_levels(
+    file: UploadFile = File(..., description="Toast Product Mix Selected_levels.csv"),
+    variant: str = Query("pos", description="pos = (Pick 3 Entree), olo = Pick 3 (OLO), all = both"),
+):
+    """
+    Parse Toast Product Mix Selected_levels.csv for Pick 3 entree + pairing counts.
+    The parent-child link lives in this file: use Type == 'modifier' to isolate pairing rows.
+    - POS: Item contains 'Pick 3 Entree' + Modifier contains 'POS Pairing Choice'
+    - OLO: Item contains 'Pick 3 (OLO)' + Modifier contains 'OLO Pairing Choice'
+    Excludes (Side) and premods (ADD/NO/EXTRA). Returns same shape as from-csv.
+    """
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload Selected_levels.csv.")
+    variant = (variant or "pos").strip().lower()
+    if variant not in ("pos", "olo", "all"):
+        variant = "pos"
+
+    def parse_qty(s: str) -> float:
+        if not s:
+            return 0.0
+        s = str(s).strip().replace(",", "")
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
+    try:
+        raw = await file.read()
+        if len(raw) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large (max 20MB).")
+        text = raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded.")
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        raise HTTPException(status_code=400, detail="Selected_levels CSV is empty.")
+
+    header = [c.strip() for c in rows[0]]
+    col_type = col_item = col_modifier = col_qty = None
+    for i, h in enumerate(header):
+        if not h:
+            continue
+        h_lower = h.lower().strip()
+        if col_type is None and h_lower in ("type", "level", "level type", "row type"):
+            col_type = i
+        if col_item is None and h_lower in ("item", "product", "menu item", "item name"):
+            col_item = i
+        if col_modifier is None and ("modifier" in h_lower or h_lower in ("option", "modifier name")):
+            col_modifier = i
+        if col_qty is None and "voided" not in h_lower:
+            if h_lower in ("qty sold", "quantity sold", "quantity", "qty", "units", "sold", "unit sold") or ("qty" in h_lower and "sold" in h_lower) or "quantity" in h_lower:
+                col_qty = i
+    if col_item is None:
+        col_item = next((i for i, x in enumerate(header) if x and x.lower().strip() == "item"), None)
+    if col_modifier is None:
+        col_modifier = next((i for i, x in enumerate(header) if x and "modifier" in x.lower()), None)
+    if col_qty is None:
+        col_qty = next((i for i, x in enumerate(header) if x and ("qty" in x.lower() or "quantity" in x.lower()) and "voided" not in x.lower()), None)
+    missing = []
+    if col_type is None:
+        missing.append("Type (or Level)")
+    if col_item is None:
+        missing.append("Item")
+    if col_modifier is None:
+        missing.append("Modifier")
+    if col_qty is None:
+        missing.append("Qty sold / Quantity")
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected_levels.csv missing: {}. Found columns: {}.".format(", ".join(missing), ", ".join(header[:20])),
+        )
+
+    def is_pick3_parent(item_name: str) -> bool:
+        if not item_name:
+            return False
+        if variant == "olo":
+            return "Pick 3 (OLO)" in item_name
+        if variant == "pos":
+            return "(Pick 3 Entree)" in item_name
+        return "(Pick 3 Entree)" in item_name or "Pick 3 (OLO)" in item_name
+
+    def is_valid_pairing_modifier(mod_name: str) -> bool:
+        if not mod_name or "(Side)" in mod_name or _is_pick3_premod_name(mod_name):
+            return False
+        if variant == "olo":
+            return "(OLO Pairing Choice)" in mod_name
+        if variant == "pos":
+            return "(POS Pairing Choice)" in mod_name
+        return "(POS Pairing Choice)" in mod_name or "(OLO Pairing Choice)" in mod_name
+
+    parent_totals: Dict[str, float] = {}
+    pairing_totals: Dict[str, float] = {}
+
+    for row in rows[1:]:
+        if len(row) <= max(col_type, col_item, col_modifier, col_qty):
+            continue
+        row_type = (row[col_type] or "").strip().lower()
+        item_name = (row[col_item] or "").strip()
+        modifier_name = (row[col_modifier] or "").strip() if col_modifier < len(row) else ""
+        qty = parse_qty(row[col_qty] if col_qty < len(row) else "")
+
+        if row_type == "modifier":
+            if not is_pick3_parent(item_name) or not is_valid_pairing_modifier(modifier_name) or qty <= 0:
+                continue
+            pairing_totals[modifier_name] = pairing_totals.get(modifier_name, 0.0) + qty
+        else:
+            if not is_pick3_parent(item_name) or qty <= 0:
+                continue
+            parent_totals[item_name] = parent_totals.get(item_name, 0.0) + qty
+
+    total_pick3 = sum(parent_totals.values())
+    max_pairings = 3.0 * total_pick3 if total_pick3 else 0
+    total_pairings_raw = sum(pairing_totals.values())
+    if max_pairings > 0 and total_pairings_raw > max_pairings:
+        scale = max_pairings / total_pairings_raw
+        pairing_totals = {n: qty * scale for n, qty in pairing_totals.items()}
+
+    parent_items = [
+        {"itemName": name, "quantity": int(round(qty))}
+        for name, qty in sorted(parent_totals.items(), key=lambda x: (-x[1], x[0]))
+    ]
+    selections = [
+        {"itemName": name, "quantity": int(round(qty))}
+        for name, qty in sorted(pairing_totals.items(), key=lambda x: (-x[1], x[0]))
+    ]
+
+    return {
+        "pairingSource": "toast_product_mix_selected_levels",
+        "totalPick3Quantity": int(round(total_pick3)),
+        "parentItems": parent_items,
+        "selections": selections,
+        "restaurantName": "All locations (from Selected_levels)",
+    }
+
+
+# ------------------
+# Menus Sync API
+# ------------------
+
+@app.get("/menus")
+async def get_menus(refresh: bool = Query(False), restaurant_guid: Optional[str] = Query(None)):
+    """Fetch full Toast menu data (cached for 5 minutes by default)."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        if not restaurant_guid:
+            locations = await get_all_active_locations(client)
+            if not locations:
+                raise HTTPException(status_code=404, detail="No active locations found")
+            restaurant_guid = locations[0].restaurantGuid
+
+        return await fetch_toast_menus(client, restaurant_guid, force_refresh=refresh)
+
+
+@app.get("/api/toast-pricing-export")
+async def toast_pricing_export(
+    refresh: bool = Query(False),
+    restaurant_guid: Optional[str] = Query(None),
+    per_location: bool = Query(True),
+    group_by_tier: bool = Query(False),
+    diagnostics: bool = Query(False),
+    diagnostics_item: Optional[str] = Query(None),
+    location_limit: Optional[int] = Query(None, ge=1)
+):
+    """Export menu pricing with location-specific prices as a CSV download."""
+    if group_by_tier:
+        tiers = load_price_tier_mapping()
+        if not tiers:
+            raise HTTPException(status_code=400, detail="Price tier mapping file is empty.")
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            locations = await get_all_active_locations(client)
+            tier_locations, tier_missing = build_tier_location_map(tiers, locations)
+            duplicate_store_numbers = compute_store_tier_duplicates(tiers)
+            store_to_locations: Dict[str, List[Location]] = {}
+            for loc in locations:
+                for store_num in extract_store_numbers_from_location(loc):
+                    store_to_locations.setdefault(store_num, []).append(loc)
+            needed_locations: Dict[str, Location] = {}
+            for locs in tier_locations.values():
+                for loc in locs:
+                    needed_locations[loc.restaurantGuid] = loc
+            locations_to_fetch = list(needed_locations.values())
+            if not locations_to_fetch:
+                raise HTTPException(status_code=400, detail="No locations matched the tier mapping file.")
+
+            base_menu_data = await fetch_toast_menus_v2(
+                client,
+                locations_to_fetch[0].restaurantGuid,
+                force_refresh=refresh
+            )
+            base_rows = _collect_menu_items(base_menu_data)
+
+            location_price_maps: Dict[str, Dict[str, Optional[float]]] = {}
+            for idx, loc in enumerate(locations_to_fetch):
+                menu_data_loc = await fetch_toast_menus_v2(
+                    client,
+                    loc.restaurantGuid,
+                    force_refresh=refresh
+                )
+                price_map: Dict[str, Optional[float]] = {}
+                for menu in menu_data_loc.get("menus", []):
+                    for group in menu.get("menuGroups", []):
+                        stack = [group]
+                        while stack:
+                            current = stack.pop()
+                            for item in current.get("menuItems", []):
+                                guid = item.get("guid")
+                                if not guid:
+                                    continue
+                                price_map[guid] = item.get("price")
+                            stack.extend(current.get("menuGroups") or [])
+                location_price_maps[loc.restaurantGuid] = price_map
+
+                if idx < len(locations_to_fetch) - 1:
+                    await asyncio.sleep(1.1)
+
+            if diagnostics:
+                item_match, item_matches = find_item_match(base_rows, diagnostics_item or "")
+                item_trace = None
+                if item_match:
+                    guid = item_match.get("guid")
+                    tier_details = []
+                    for tier_name, _ in tiers:
+                        locs = tier_locations.get(tier_name, [])
+                        entries = []
+                        for loc in locs:
+                            price = location_price_maps.get(loc.restaurantGuid, {}).get(guid)
+                            store_nums = extract_store_numbers_from_location(loc)
+                            entries.append({
+                                "restaurantGuid": loc.restaurantGuid,
+                                "restaurantName": loc.restaurantName,
+                                "storeNumbers": store_nums,
+                                "price": price
+                            })
+                        prices = [entry["price"] for entry in entries if entry["price"] is not None]
+                        tier_details.append({
+                            "tierName": tier_name,
+                            "locationCount": len(locs),
+                            "uniquePrices": sorted({round(float(p), 2) for p in prices}) if prices else [],
+                            "locations": entries
+                        })
+                    item_trace = {
+                        "itemName": item_match.get("item"),
+                        "itemGuid": item_match.get("guid"),
+                        "matchCount": len(item_matches),
+                        "matches": [{"itemName": row.get("item"), "itemGuid": row.get("guid")} for row in item_matches],
+                        "tiers": tier_details
+                    }
+                diagnostics_payload = {
+                    "tierCount": len(tiers),
+                    "locationCount": len(locations),
+                    "matchedLocationCount": len(locations_to_fetch),
+                    "duplicateStoreNumbers": duplicate_store_numbers,
+                    "unmatchedStoreNumbers": tier_missing,
+                    "itemTrace": item_trace
+                }
+                return diagnostics_payload
+
+            output = io.StringIO()
+            writer = csv.writer(output)
+            tier_names = [tier_name for tier_name, _ in tiers]
+            writer.writerow(["Menu", "Menu Group", "Item", *tier_names])
+            for row in base_rows:
+                guid = row.get("guid")
+                if not guid:
+                    continue
+                tier_prices = []
+                for tier_name in tier_names:
+                    locs = tier_locations.get(tier_name, [])
+                    prices = [location_price_maps.get(loc.restaurantGuid, {}).get(guid) for loc in locs]
+                    tier_prices.append(format_tier_price(prices))
+                writer.writerow([
+                    row.get("menu", ""),
+                    row.get("menu_group", ""),
+                    row.get("item", ""),
+                    *tier_prices
+                ])
+
+            filename = f"toast_pricing_export_{datetime.now().strftime('%Y-%m-%d')}.csv"
+            bom = "\ufeff"
+            return Response(
+                content=bom + output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+
+    if per_location:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            locations = await get_all_active_locations(client)
+            if location_limit:
+                locations = locations[:location_limit]
+            if not locations:
+                raise HTTPException(status_code=404, detail="No active locations found")
+
+            base_menu_data = await fetch_toast_menus_v2(
+                client,
+                locations[0].restaurantGuid,
+                force_refresh=refresh
+            )
+            base_rows = _collect_menu_items(base_menu_data)
+
+            location_price_maps: Dict[str, Dict[str, Optional[float]]] = {}
+            for idx, loc in enumerate(locations):
+                menu_data_loc = await fetch_toast_menus_v2(
+                    client,
+                    loc.restaurantGuid,
+                    force_refresh=refresh
+                )
+                price_map = {}
+                # Build price map from menu data
+                for menu in menu_data_loc.get("menus", []):
+                    for group in menu.get("menuGroups", []):
+                        stack = [group]
+                        while stack:
+                            current = stack.pop()
+                            for item in current.get("menuItems", []):
+                                guid = item.get("guid")
+                                if not guid:
+                                    continue
+                                price_map[guid] = item.get("price")
+                            stack.extend(current.get("menuGroups") or [])
+                location_price_maps[loc.restaurantName] = price_map
+
+                if idx < len(locations) - 1:
+                    await asyncio.sleep(1.1)
+
+            output = io.StringIO()
+            writer = csv.writer(output)
+            header = ["Menu", "Menu Group", "Item", *[loc.restaurantName for loc in locations]]
+            writer.writerow(header)
+            for row in base_rows:
+                guid = row.get("guid")
+                if not guid:
+                    continue
+                writer.writerow([
+                    row.get("menu", ""),
+                    row.get("menu_group", ""),
+                    row.get("item", ""),
+                    *[
+                        _format_price_value(location_price_maps[loc.restaurantName].get(guid))
+                        for loc in locations
+                    ]
+                ])
+
+            filename = f"toast_pricing_export_{datetime.now().strftime('%Y-%m-%d')}.csv"
+            bom = "\ufeff"
+            return Response(
+                content=bom + output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            )
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        if not restaurant_guid:
+            locations = await get_all_active_locations(client)
+            if not locations:
+                raise HTTPException(status_code=404, detail="No active locations found")
+            restaurant_guid = locations[0].restaurantGuid
+
+        location_name_by_guid = {}
+        price_group_name_by_guid = {}
+        try:
+            locations = await get_all_active_locations(client)
+            location_name_by_guid = {
+                loc.restaurantGuid: loc.restaurantName
+                for loc in locations
+            }
+        except Exception:
+            location_name_by_guid = {}
+        try:
+            price_group_name_by_guid = await fetch_price_groups(client, restaurant_guid, force_refresh=refresh)
+        except Exception:
+            price_group_name_by_guid = {}
+
+        menu_data = await fetch_toast_menus(client, restaurant_guid, force_refresh=refresh)
+
+    rows = []
+    all_location_columns = set()
+    has_base_price = False
+    for menu in menu_data.get("menus", []):
+        menu_name = menu.get("name", "Unnamed Menu")
+        for group in menu.get("menuGroups", []):
+            group_name = group.get("name", "Unnamed Group")
+            for item in group.get("menuItems", []):
+                item_name = item.get("displayName") or item.get("name") or "Unnamed Item"
+                base_price = item.get("price")
+                if base_price is not None:
+                    has_base_price = True
+                location_prices = _extract_location_prices(
+                    item,
+                    location_name_by_guid=location_name_by_guid,
+                    price_group_name_by_guid=price_group_name_by_guid
+                )
+                if location_prices:
+                    all_location_columns.update(location_prices.keys())
+                rows.append({
+                    "menu": menu_name,
+                    "menu_group": group_name,
+                    "item": item_name,
+                    "base_price": base_price,
+                    "location_prices": location_prices
+                })
+
+    location_columns = sorted(
+        [name for name in all_location_columns if name],
+        key=lambda value: (0 if str(value).startswith("*") else 1, str(value).lower())
+    )
+    include_base_price = has_base_price or not location_columns
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    header = ["Menu", "Menu Group", "Item", *location_columns]
+    if include_base_price:
+        header.append("Base Price")
+    writer.writerow(header)
+    for row in rows:
+        values = [
+            row["menu"],
+            row["menu_group"],
+            row["item"]
+        ]
+        location_prices = row.get("location_prices", {}) or {}
+        for location_name in location_columns:
+            values.append(_format_price_value(location_prices.get(location_name)))
+        if include_base_price:
+            values.append(_format_price_value(row.get("base_price")))
+        writer.writerow(values)
+
+    filename = f"toast_pricing_export_{datetime.now().strftime('%Y-%m-%d')}.csv"
+    bom = "\ufeff"
+    return Response(
+        content=bom + output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+def _collect_pricing_debug_fields(item: Dict) -> Dict:
+    keys_of_interest = [
+        "price",
+        "pricingStrategy",
+        "pricingRules",
+        "locationPrices",
+        "locationSpecificPrices",
+        "pricesByLocation",
+        "locationPriceOverrides",
+        "locationPriceMap",
+        "priceGroups",
+        "priceGroupPrices",
+        "pricesByPriceGroup",
+        "priceByPriceGroup",
+        "priceGroupsByGuid"
+    ]
+    debug = {key: item.get(key) for key in keys_of_interest if key in item}
+    if not debug:
+        # Fallback: include any price-related keys
+        debug = {k: item.get(k) for k in item.keys() if "price" in k.lower()}
+    return debug
+
+
+@app.get("/api/toast-pricing-debug")
+async def toast_pricing_debug(
+    item_name: Optional[str] = Query(None),
+    limit: int = Query(5, ge=1, le=20),
+    refresh: bool = Query(False),
+    restaurant_guid: Optional[str] = Query(None)
+):
+    """Return sample menu items with pricing-related fields for debugging."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        if not restaurant_guid:
+            locations = await get_all_active_locations(client)
+            if not locations:
+                raise HTTPException(status_code=404, detail="No active locations found")
+            restaurant_guid = locations[0].restaurantGuid
+
+        menu_data = await fetch_toast_menus(client, restaurant_guid, force_refresh=refresh)
+
+    matches = []
+    name_filter = (item_name or "").strip().lower()
+    for menu in menu_data.get("menus", []):
+        for group in menu.get("menuGroups", []):
+            for item in group.get("menuItems", []):
+                item_display = item.get("displayName") or item.get("name") or ""
+                if name_filter and name_filter not in item_display.lower():
+                    continue
+                debug_fields = _collect_pricing_debug_fields(item)
+                if not debug_fields and not name_filter:
+                    continue
+                matches.append({
+                    "menu": menu.get("name"),
+                    "menuGroup": group.get("name"),
+                    "itemName": item_display,
+                    "guid": item.get("guid"),
+                    "pricingFields": debug_fields
+                })
+                if len(matches) >= limit:
+                    return {"count": len(matches), "items": matches}
+
+    return {"count": len(matches), "items": matches}
+
 
 # ------------------
 # Menu Items & Tags API
@@ -2386,6 +7992,427 @@ async def get_report_types():
             {"id": "custom", "name": "Custom Range"}
         ]
     }
+
+# ------------------
+# ------------------
+# Aloha Config APIs (Location Mapping + Order Mode Mapping)
+# ------------------
+
+@app.get("/api/aloha/location-mapping")
+async def get_location_mapping_ui():
+    """Return Toast restaurants with their mapped Aloha store IDs."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            locations = await get_all_active_locations(client)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Could not fetch Toast locations: {exc}")
+
+    loc_map = get_aloha_location_mapping()
+    rows = []
+    for loc in locations:
+        rows.append({
+            "restaurantGuid": loc.restaurantGuid,
+            "restaurantName": loc.restaurantName,
+            "externalId": loc.externalId or "",
+            "alohaStoreId": loc_map.get(loc.restaurantGuid, ""),
+        })
+    rows.sort(key=lambda r: r["restaurantName"])
+    mapped_count = sum(1 for r in rows if r["alohaStoreId"])
+    return {"rows": rows, "total": len(rows), "mapped": mapped_count}
+
+
+@app.put("/api/aloha/location-mapping")
+async def save_location_mapping_ui(body: dict = Body(...)):
+    """Save the Toast GUID -> Aloha store ID mapping."""
+    mapping = body.get("mapping", {})
+    if not isinstance(mapping, dict):
+        raise HTTPException(status_code=400, detail="'mapping' must be an object {guid: storeId}")
+    cleaned: Dict[str, str] = {}
+    for guid, store_id in mapping.items():
+        sid = str(store_id).strip()
+        if sid:
+            cleaned[str(guid).strip()] = sid
+    os.makedirs(YOY_DATA_DIR, exist_ok=True)
+    with open(ALOHA_LOCATION_MAPPING_FILE, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, indent=2)
+    return {"success": True, "saved": len(cleaned)}
+
+
+@app.get("/api/aloha/order-modes")
+async def get_aloha_order_modes_ui():
+    """Return distinct Aloha OrderMode values + saved mapping."""
+    order_modes: set = set()
+
+    # Primary: query SQLite (instant, covers all data)
+    if aloha_db.db_available():
+        try:
+            db_modes = await asyncio.to_thread(aloha_db.get_distinct_order_modes)
+            order_modes.update(db_modes)
+        except Exception:
+            pass
+
+    # Fallback: sample recent CSV files
+    if not order_modes:
+        index = load_yoy_index()
+        file_entries = list(index.get("files", {}).values())
+        sampled = file_entries[-60:] if len(file_entries) > 60 else file_entries
+        for entry in sampled:
+            path = entry.get("path")
+            if path and os.path.exists(path):
+                try:
+                    df = pd.read_csv(path, usecols=lambda c: c == "OrderMode")
+                    if "OrderMode" in df.columns:
+                        for val in df["OrderMode"].dropna().unique():
+                            order_modes.add(str(val).strip())
+                except Exception:
+                    pass
+
+    mapping: Dict[str, str] = {}
+    if os.path.exists(ALOHA_ORDER_MODE_MAPPING_FILE):
+        try:
+            with open(ALOHA_ORDER_MODE_MAPPING_FILE, "r", encoding="utf-8") as f:
+                mapping = json.load(f)
+        except Exception:
+            pass
+
+    return {
+        "aloha_order_modes": sorted(order_modes),
+        "mapping": mapping,
+    }
+
+
+@app.put("/api/aloha/order-mode-mapping")
+async def save_order_mode_mapping_ui(body: dict = Body(...)):
+    """Save the Aloha OrderMode -> Toast channel mapping."""
+    mapping = body.get("mapping", {})
+    if not isinstance(mapping, dict):
+        raise HTTPException(status_code=400, detail="'mapping' must be an object {alohaMode: toastChannel}")
+    os.makedirs(YOY_DATA_DIR, exist_ok=True)
+    with open(ALOHA_ORDER_MODE_MAPPING_FILE, "w", encoding="utf-8") as f:
+        json.dump({str(k): str(v) for k, v in mapping.items()}, f, indent=2)
+    return {"success": True, "saved": len(mapping)}
+
+
+@app.get("/api/aloha/toast-channels")
+async def get_toast_channels_ui():
+    """Return the list of Toast channel label options."""
+    return {"channels": get_toast_channels()}
+
+
+@app.put("/api/aloha/toast-channels")
+async def save_toast_channels_ui(body: dict = Body(...)):
+    """Save the Toast channel label list."""
+    channels = body.get("channels", [])
+    if not isinstance(channels, list):
+        raise HTTPException(status_code=400, detail="'channels' must be an array of strings")
+    cleaned = [str(c).strip() for c in channels if str(c).strip()]
+    os.makedirs(YOY_DATA_DIR, exist_ok=True)
+    with open(TOAST_CHANNELS_FILE, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, indent=2)
+    return {"success": True, "saved": len(cleaned)}
+
+
+# YoY Comparison API
+# ------------------
+
+@app.get("/api/yoy/aloha-dates")
+async def get_available_aloha_dates():
+    """Get list of dates with Aloha data (merges SQLite + index.json sources)."""
+    # Primary: SQLite (fast, authoritative after migration)
+    db_dates = set(aloha_db.get_available_dates())
+    # Secondary: index.json (catches manually-uploaded files not in SQLite)
+    index = load_yoy_index()
+    csv_dates = set(index.get("files", {}).keys())
+    all_dates = sorted(db_dates | csv_dates)
+    return {
+        "available_dates": all_dates,
+        "db_dates": len(db_dates),
+        "csv_only_dates": len(csv_dates - db_dates),
+    }
+
+
+@app.get("/api/yoy/aloha-stats")
+async def get_aloha_stats():
+    """Return summary statistics about the Aloha SQLite database."""
+    stats = await asyncio.to_thread(aloha_db.get_stats)
+    index = load_yoy_index()
+    csv_count = len(index.get("files", {}))
+    return {
+        **stats,
+        "csv_file_count": csv_count,
+        "db_available": aloha_db.db_available(),
+    }
+
+
+@app.post("/api/yoy/aloha-rebuild-db")
+async def rebuild_aloha_db():
+    """
+    Rebuild the SQLite database from the existing CSV files.
+    Use after a fresh install or if the DB gets out of sync.
+    This runs synchronously and may take a minute for large datasets.
+    """
+    import glob as _glob
+
+    index = load_yoy_index()
+    file_entries = list(index.get("files", {}).items())
+    # Also pick up any CSV files not in the index
+    csv_glob = sorted(_glob.glob(os.path.join(YOY_DATA_DIR, "aloha_????-??-??.csv")))
+    indexed_paths = {v.get("path") for _, v in file_entries}
+    for p in csv_glob:
+        if p not in indexed_paths:
+            basename = os.path.basename(p)
+            date_iso = basename[6:16]
+            file_entries.append((date_iso, {"path": p}))
+
+    aloha_db.initialize_db()
+    written = 0
+    errors = 0
+    _ORDER_MODE_ID_ALIASES = ("fkordermodeid", "fk_order_mode_id", "ordermodeid", "order_mode_id")
+    for date_iso, entry in file_entries:
+        path = entry.get("path", "")
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            df = pd.read_csv(path)
+            df.columns = [c.strip() for c in df.columns]
+            if "Item" not in df.columns:
+                continue
+            if "OrderMode" not in df.columns:
+                for c in df.columns:
+                    if c.strip().lower() in _ORDER_MODE_ID_ALIASES:
+                        df = df.rename(columns={c: "OrderMode"})
+                        df["OrderMode"] = df["OrderMode"].astype(str).str.strip()
+                        break
+            for col, default in [("Quantity", 0), ("Sales", 0), ("Location", ""), ("OrderMode", "Unknown")]:
+                if col not in df.columns:
+                    df[col] = default
+            aloha_db.upsert_date(df, date_iso)
+            written += 1
+        except Exception as exc:
+            logger.warning(f"Rebuild: failed for {date_iso}: {exc}")
+            errors += 1
+
+    stats = aloha_db.get_stats()
+    return {
+        "success": True,
+        "dates_written": written,
+        "errors": errors,
+        **stats,
+    }
+
+
+@app.post("/api/yoy/upload-aloha")
+async def upload_aloha_data(
+    file: UploadFile = File(...),
+    business_date: str = Body(...)
+):
+    """Upload Aloha CSV/XLSX data and store for YoY comparisons."""
+    ensure_yoy_storage()
+    try:
+        date_obj = date.fromisoformat(business_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="business_date must be YYYY-MM-DD")
+
+    filename = file.filename or "aloha_data"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in [".csv", ".xlsx", ".xls"]:
+        raise HTTPException(status_code=400, detail="Only .csv, .xlsx, or .xls files are supported")
+
+    safe_name = f"aloha_{date_obj.isoformat()}{ext}"
+    target_path = os.path.join(YOY_DATA_DIR, safe_name)
+    raw = await file.read()
+
+    with open(target_path, "wb") as f:
+        f.write(raw)
+
+    # Also insert into SQLite so it's immediately queryable
+    try:
+        if ext == ".csv":
+            import io
+            df_upload = pd.read_csv(io.BytesIO(raw))
+        else:
+            import io
+            df_upload = pd.read_excel(io.BytesIO(raw))
+        df_upload.columns = [c.strip() for c in df_upload.columns]
+        if "Item" in df_upload.columns:
+            if "OrderMode" not in df_upload.columns:
+                for c in df_upload.columns:
+                    if c.strip().lower() in ("fkordermodeid", "fk_order_mode_id", "ordermodeid", "order_mode_id"):
+                        df_upload = df_upload.rename(columns={c: "OrderMode"})
+                        df_upload["OrderMode"] = df_upload["OrderMode"].astype(str).str.strip()
+                        break
+            aloha_db.upsert_date(df_upload, date_obj.isoformat())
+    except Exception as exc:
+        logger.warning(f"Could not insert uploaded file into SQLite: {exc}")
+
+    index = load_yoy_index()
+    index.setdefault("files", {})[date_obj.isoformat()] = {
+        "path": target_path,
+        "original_name": filename,
+        "uploaded_at": datetime.now().isoformat()
+    }
+    save_yoy_index(index)
+
+    return {
+        "success": True,
+        "message": f"Uploaded Aloha data for {date_obj.isoformat()}",
+        "stored_as": safe_name
+    }
+
+@app.post("/api/yoy/import-aloha-sql")
+async def import_aloha_sql(request: AlohaSqlImportRequest = Body(...)):
+    """Import historical Aloha data directly from SQL Server."""
+    try:
+        if request.end_date:
+            end_date = date.fromisoformat(request.end_date)
+        else:
+            end_date = date.today()
+
+        if request.start_date:
+            start_date = date.fromisoformat(request.start_date)
+        else:
+            start_date = end_date - timedelta(days=729)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start_date/end_date must be YYYY-MM-DD")
+
+    try:
+        result = await asyncio.to_thread(
+            import_aloha_sql_range,
+            start_date,
+            end_date,
+            request.batch_days,
+            request.overwrite
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 500 if "Missing ALOHA_SQL" in message else 400
+        raise HTTPException(status_code=status_code, detail=message)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"SQL import failed: {exc}")
+
+    return {
+        "success": True,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        **result
+    }
+
+@app.post("/api/yoy/import-aloha-sql/recent")
+async def import_aloha_sql_recent(request: AlohaSqlRecentImportRequest = Body(...)):
+    """Import recent Aloha data for periodic updates."""
+    try:
+        result = await asyncio.to_thread(
+            import_aloha_sql_last_days,
+            request.days,
+            request.overwrite,
+            request.batch_days
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 500 if "Missing ALOHA_SQL" in message else 400
+        raise HTTPException(status_code=status_code, detail=message)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"SQL import failed: {exc}")
+
+    return {
+        "success": True,
+        "days": request.days,
+        **result
+    }
+
+@app.post("/api/yoy/compare")
+async def compare_yoy(request: YoYCompareRequest = Body(...)):
+    """
+    Compare Toast period vs Aloha historical data.
+    """
+    try:
+        toast_start = date.fromisoformat(request.toast_start_date)
+        toast_end = date.fromisoformat(request.toast_end_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="toast_start_date/toast_end_date must be YYYY-MM-DD")
+    
+    if toast_end < toast_start:
+        raise HTTPException(status_code=400, detail="toast_end_date must be on or after toast_start_date")
+    
+    try:
+        aloha_date_obj = date.fromisoformat(request.aloha_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="aloha_date must be YYYY-MM-DD")
+    
+    aloha_file_path = get_aloha_file_path(aloha_date_obj.isoformat())
+    
+    consolidator = get_yoy_consolidator()
+    hierarchy_gen = HierarchicalReportGenerator(consolidator)
+    
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        # Get restaurant IDs
+        restaurant_ids = request.restaurantIds
+        if not restaurant_ids:
+            locations = await get_all_active_locations(client)
+            restaurant_ids = [loc.restaurantGuid for loc in locations]
+        
+        if not restaurant_ids:
+            raise HTTPException(status_code=400, detail="No restaurants available")
+        
+        # Fetch Toast menu report
+        report_guid = await request_toast_report(
+            client,
+            toast_start,
+            toast_end,
+            restaurant_ids,
+            "menu",
+            ["MENU_ITEM"]
+        )
+        toast_raw = await fetch_toast_report(client, report_guid, "menu")
+        if not toast_raw:
+            raise HTTPException(status_code=404, detail="No Toast data returned for the selected period")
+        
+        toast_df = pd.DataFrame(toast_raw)
+        
+        # Load Aloha data
+        aloha_df = await asyncio.to_thread(consolidator.load_aloha_data, aloha_file_path)
+        
+        # Consolidate Toast to Aloha item level (no location/date breakdown)
+        toast_consolidated = await asyncio.to_thread(
+            consolidator.consolidate_toast_data,
+            toast_df,
+            "menuItemGuid",
+            "quantitySold",
+            "netSalesAmount",
+            None,
+            None
+        )
+        
+        # Compare periods
+        aloha_label = aloha_date_obj.strftime("%b %Y")
+        toast_label = toast_start.strftime("%b %Y") if toast_start.month == toast_end.month else f"{toast_start} to {toast_end}"
+        comparison = await asyncio.to_thread(
+            consolidator.compare_yoy,
+            aloha_df,
+            toast_consolidated,
+            aloha_label,
+            toast_label
+        )
+        
+        # Generate hierarchical report
+        hierarchy = await asyncio.to_thread(
+            hierarchy_gen.generate_hierarchical_comparison,
+            comparison,
+            aloha_label,
+            toast_label
+        )
+        
+        return {
+            "success": True,
+            "aloha_period": aloha_date_obj.isoformat(),
+            "toast_period": f"{toast_start} to {toast_end}",
+            "category_summary": hierarchy["category_summary"].to_dict("records"),
+            "hierarchy": hierarchy["hierarchy"],
+            "period_labels": {
+                "aloha": aloha_label,
+                "toast": toast_label
+            }
+        }
 
 # ------------------
 # Help Desk Integration
@@ -2532,6 +8559,84 @@ async def create_help_ticket(ticket: HelpTicketRequest = Body(...)):
         raise HTTPException(status_code=500, detail=f"Error submitting request: {str(e)}")
 
 # ------------------
+# Labor Summary Endpoint
+# ------------------
+
+@app.post("/api/labor-summary")
+async def get_labor_summary(
+    req: LaborSummaryRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch aggregated labor cost + hours from Toast Labor API for a date range.
+
+    Uses the Toast Standard API /labor/v1/timeEntries endpoint (one call per restaurant).
+    Overtime is calculated at 1.5x. Salaried employees (hourlyWage=null) contribute to
+    hours totals but are excluded from cost (wage not available via API).
+    Toast Labor API caps requests at 30 days; wider ranges are automatically chunked.
+    """
+    start_dt = datetime.strptime(req.startDate, "%Y-%m-%d")
+    end_dt   = datetime.strptime(req.endDate,   "%Y-%m-%d")
+
+    total_cost      = 0.0
+    total_reg_hours = 0.0
+    total_ot_hours  = 0.0
+    errors: List[str] = []
+
+    standard_headers = await get_standard_api_auth_headers()
+    labor_url = f"{TOAST_STANDARD_API_BASE_URL}/labor/v1/timeEntries"
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for restaurant_guid in req.restaurantIds:
+            headers = {
+                **standard_headers,
+                "Toast-Restaurant-External-ID": restaurant_guid,
+            }
+            # Toast Labor API caps at 30 days per request — chunk wider ranges
+            chunk_start = start_dt
+            while chunk_start <= end_dt:
+                chunk_end = min(chunk_start + timedelta(days=29), end_dt)
+                params = {
+                    "startDate": chunk_start.strftime("%Y-%m-%dT00:00:00.000+0000"),
+                    "endDate":   chunk_end.strftime("%Y-%m-%dT23:59:59.999+0000"),
+                }
+                try:
+                    resp = await client.get(labor_url, headers=headers, params=params, timeout=60.0)
+                    if resp.status_code != 200:
+                        errors.append(f"{restaurant_guid}: HTTP {resp.status_code}")
+                        logger.warning(f"Labor API {resp.status_code} for {restaurant_guid}: {resp.text[:200]}")
+                    else:
+                        entries = resp.json()
+                        if not isinstance(entries, list):
+                            entries = entries.get("timeEntries", []) if isinstance(entries, dict) else []
+                        for entry in entries:
+                            # Skip still-clocked-in shifts (outDate is null)
+                            if entry.get("outDate") is None:
+                                continue
+                            reg_h = float(entry.get("regularHours")  or 0)
+                            ot_h  = float(entry.get("overtimeHours") or 0)
+                            wage  = entry.get("hourlyWage")   # None for salaried employees
+                            total_reg_hours += reg_h
+                            total_ot_hours  += ot_h
+                            if wage is not None:   # hourly only; salaried excluded from cost
+                                total_cost += reg_h * float(wage) + ot_h * float(wage) * 1.5
+                except Exception as exc:
+                    errors.append(f"{restaurant_guid}: {str(exc)}")
+                    logger.warning(f"Labor API exception for {restaurant_guid}: {exc}")
+                chunk_start = chunk_end + timedelta(days=1)
+
+    logger.info(
+        f"Labor summary: {len(req.restaurantIds)} locations, {req.startDate}–{req.endDate}, "
+        f"cost=${total_cost:.2f}, hours={total_reg_hours + total_ot_hours:.2f}, errors={errors}"
+    )
+    return {
+        "totalLaborCost":     round(total_cost, 2),
+        "totalHours":         round(total_reg_hours + total_ot_hours, 2),
+        "totalRegularHours":  round(total_reg_hours, 2),
+        "totalOvertimeHours": round(total_ot_hours,  2),
+        "errors": errors,
+    }
+
+# ------------------
 # Static Frontend
 # ------------------
 
@@ -2547,5 +8652,9 @@ initialize_super_admin()
 # ------------------
 
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
+kiosk_path = os.path.join(os.path.dirname(__file__), "kiosk")
+
+if os.path.isdir(kiosk_path):
+    app.mount("/kiosk", StaticFiles(directory=kiosk_path, html=True), name="kiosk")
 
 app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")

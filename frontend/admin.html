@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>User Management – Newk's</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #F8FAFC;
+      color: #2c2c2c;
+      min-height: 100vh;
+    }
+
+    /* ─── Header ─────────────────────────────────────── */
+    .header {
+      background: #C41E3A;
+      padding: 1.25rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .header-left { display: flex; align-items: center; gap: 1rem; }
+    .header h1 { margin: 0; color: #ffffff; font-size: 1.4rem; font-weight: 700; }
+    .header p  { margin: 0.2rem 0 0 0; color: rgba(255,255,255,0.8); font-size: 0.82rem; }
+    .header-right { display: flex; align-items: center; gap: 0.75rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.85rem;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.5); }
+
+    /* ─── User chip in header ─────────────────────────── */
+    .header-user {
+      display: flex; align-items: center; gap: 0.5rem;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 20px;
+      padding: 0.3rem 0.75rem 0.3rem 0.3rem;
+      color: #fff; font-size: 0.85rem;
+    }
+    .header-avatar {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: rgba(255,255,255,0.25);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.72rem; flex-shrink: 0;
+    }
+    .header-user-name { font-weight: 600; }
+    .header-user-role { opacity: 0.75; font-size: 0.78rem; text-transform: capitalize; }
+
+    /* ─── Status toast ───────────────────────────────── */
+    .status-bar {
+      max-width: 1100px;
+      margin: 1rem auto 0;
+      padding: 0 2rem;
+    }
+    .status {
+      padding: 0.7rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      display: none;
+    }
+    .status.visible { display: block; }
+    .status.success { background: #D1FAE5; color: #065F46; border: 1px solid #6EE7B7; }
+    .status.error   { background: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; }
+
+    /* ─── Main content ───────────────────────────────── */
+    .admin-content {
+      max-width: 1100px;
+      margin: 1.5rem auto;
+      padding: 0 2rem 3rem;
+    }
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+    }
+    .section-header h2 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #1E3A5F;
+    }
+    .user-count {
+      font-size: 0.82rem;
+      color: #6B7280;
+      margin-top: 0.2rem;
+    }
+
+    /* ─── Admin table ────────────────────────────────── */
+    .table-wrapper {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #E5E7EB;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+    .admin-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .admin-table th {
+      background: #1E3A5F; color: #ffffff;
+      padding: 0.7rem 1rem;
+      text-align: left; border-bottom: 2px solid #162e4a;
+      font-weight: 600; font-size: 0.82rem; letter-spacing: 0.3px;
+    }
+    .admin-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #F3F4F6;
+      color: #2c2c2c;
+      vertical-align: middle;
+    }
+    .admin-table tbody tr:last-child td { border-bottom: none; }
+    .admin-table tbody tr:hover td { background: #F9FAFB; }
+    .role-badge {
+      padding: 0.2rem 0.6rem; border-radius: 4px;
+      font-size: 0.78rem; font-weight: 700; color: #fff;
+      display: inline-block;
+    }
+    .meta-text { color: #9CA3AF; font-size: 0.8rem; }
+    .you-chip { color: #9CA3AF; font-size: 0.8rem; font-style: italic; }
+
+    /* ─── Buttons ────────────────────────────────────── */
+    button {
+      padding: 0.55rem 1.1rem;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s;
+      font-size: 0.875rem;
+      font-family: inherit;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; }
+    .btn-primary   { background: #C41E3A; color: #fff; }
+    .btn-primary:hover:not(:disabled)   { background: #A01A2E; transform: translateY(-1px); }
+    .btn-blue      { background: #1E3A5F; color: #fff; }
+    .btn-blue:hover:not(:disabled)      { background: #162e4a; transform: translateY(-1px); }
+    .btn-secondary { background: #6B7280; color: #fff; }
+    .btn-secondary:hover:not(:disabled) { background: #4B5563; }
+    .btn-danger    { background: #dc2626; color: #fff; }
+    .btn-danger:hover:not(:disabled)    { background: #b91c1c; }
+    .btn-sm { font-size: 0.8rem; padding: 0.3rem 0.65rem; }
+    .btn-logout {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      font-size: 0.82rem; padding: 0.35rem 0.75rem; border-radius: 6px;
+    }
+    .btn-logout:hover { background: rgba(255,255,255,0.25); }
+
+    /* ─── Modals ─────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: flex; justify-content: center; align-items: center;
+      z-index: 10000;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 2rem;
+      max-width: 480px;
+      width: 92%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+      border: 1px solid #e8e0d5;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #E5E7EB;
+    }
+    .modal-header h2 { margin: 0; color: #C41E3A; font-size: 1.2rem; font-weight: 700; }
+    .modal-close {
+      background: none; border: none; font-size: 1.4rem; cursor: pointer;
+      color: #6B7280; padding: 0; width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center; border-radius: 4px;
+    }
+    .modal-close:hover { background: #F3F4F6; color: #C41E3A; }
+    .modal-form-group { margin-bottom: 1.1rem; }
+    .modal-form-group label {
+      display: block; margin-bottom: 0.4rem;
+      font-weight: 600; color: #374151; font-size: 0.875rem;
+    }
+    .modal-form-group input,
+    .modal-form-group select {
+      width: 100%; padding: 0.6rem 0.75rem;
+      border-radius: 6px; border: 1px solid #D1D5DB;
+      background: #ffffff; color: #2c2c2c;
+      font-size: 0.875rem; font-family: inherit;
+    }
+    .modal-form-group input:focus,
+    .modal-form-group select:focus {
+      outline: none; border-color: #C41E3A;
+      box-shadow: 0 0 0 3px rgba(196,30,58,0.1);
+    }
+    .modal-actions {
+      display: flex; gap: 0.75rem; justify-content: flex-end;
+      margin-top: 1.5rem; padding-top: 1.25rem;
+      border-top: 2px solid #E5E7EB;
+    }
+
+    /* ─── Non-admin / loading states ─────────────────── */
+    .state-msg {
+      text-align: center;
+      padding: 3rem 2rem;
+      color: #6B7280;
+      font-size: 0.95rem;
+    }
+    .state-msg .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .state-msg.error-state { color: #DC2626; }
+  </style>
+</head>
+<body>
+
+  <!-- ─── Header ───────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-content">
+      <div class="header-left">
+        <a class="home-btn" href="/legacy.html">← Back to Reports</a>
+        <div>
+          <h1>User Management</h1>
+          <p>Newk's Reporting Platform</p>
+        </div>
+      </div>
+      <div class="header-right" id="headerUserArea" style="display:none;">
+        <div class="header-user">
+          <div class="header-avatar" id="headerAvatar">?</div>
+          <div>
+            <div class="header-user-name" id="headerUserName">–</div>
+            <div class="header-user-role" id="headerUserRole">–</div>
+          </div>
+        </div>
+        <button class="btn-logout" id="logoutBtn">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── Status toast ─────────────────────────────────── -->
+  <div class="status-bar">
+    <div id="adminStatus" class="status"></div>
+  </div>
+
+  <!-- ─── Main content ─────────────────────────────────── -->
+  <main class="admin-content">
+    <div class="section-header">
+      <div>
+        <h2>Users</h2>
+        <div class="user-count" id="userCount"></div>
+      </div>
+      <button class="btn-primary" id="createUserBtn">+ Create New User</button>
+    </div>
+    <div class="table-wrapper">
+      <div id="usersList">
+        <div class="state-msg">
+          <div class="icon">⏳</div>
+          Loading users…
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ─── Auth Modal ───────────────────────────────────── -->
+  <div id="authModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Login to Newk's</h2>
+      </div>
+      <form id="authForm" autocomplete="on">
+        <div class="modal-form-group">
+          <label for="authEmail">Email *</label>
+          <input type="email" id="authEmail" required placeholder="your.email@newkseatery.com" autocomplete="username" />
+        </div>
+        <div class="modal-form-group">
+          <label for="authPassword">Password *</label>
+          <input type="password" id="authPassword" required placeholder="Enter your password" autocomplete="current-password" />
+        </div>
+        <div class="modal-actions" style="border-top:none; padding-top:0; margin-top:0.5rem;">
+          <button type="submit" class="btn-primary" id="authSubmitBtn" style="width:100%;">Login</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ─── Create User Modal ────────────────────────────── -->
+  <div id="createUserModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Create New User</h2>
+        <button class="modal-close" id="closeCreateUserModal">&times;</button>
+      </div>
+      <form id="createUserForm" autocomplete="off">
+        <div class="modal-form-group">
+          <label for="newUserName">Name *</label>
+          <input type="text" id="newUserName" required placeholder="Full name" />
+        </div>
+        <div class="modal-form-group">
+          <label for="newUserEmail">Email *</label>
+          <input type="email" id="newUserEmail" required placeholder="user@newkseatery.com" />
+        </div>
+        <div class="modal-form-group">
+          <label for="newUserPassword">Password *</label>
+          <input type="password" id="newUserPassword" required placeholder="Min 6 characters" />
+        </div>
+        <div class="modal-form-group">
+          <label for="newUserRole">Role</label>
+          <select id="newUserRole">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancelCreateUserBtn">Cancel</button>
+          <button type="submit" class="btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ─── Assign Restaurants Modal ────────────────────────── -->
+  <div id="assignRestaurantsModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <h2>📍 Assign Locations</h2>
+        <button class="modal-close" id="closeAssignRestaurantsModal">&times;</button>
+      </div>
+      <p id="assignRestaurantsSubtitle" style="margin:0 0 1rem;color:#6B7280;font-size:0.875rem;"></p>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:600;font-size:0.875rem;cursor:pointer;">
+          <input type="checkbox" id="selectAllAssignRestaurants" style="width:15px;height:15px;accent-color:#C41E3A;" />
+          Select All
+        </label>
+        <span id="assignRestaurantsCount" style="font-size:0.82rem;color:#6B7280;"></span>
+      </div>
+      <div style="max-height:320px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px;padding:0.5rem;">
+        <div id="assignRestaurantsGrid" style="display:flex;flex-direction:column;gap:0.25rem;">
+          <div style="padding:1rem;text-align:center;color:#6B7280;">Loading locations…</div>
+        </div>
+      </div>
+      <p style="margin:0.75rem 0 0;font-size:0.8rem;color:#9CA3AF;">Leave all unchecked to give this user access to every location.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="cancelAssignRestaurantsBtn">Cancel</button>
+        <button type="button" class="btn-primary" id="saveAssignRestaurantsBtn">Save Locations</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let authToken = null;
+    let currentUser = null;
+
+    // ──────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────
+    function getAuthHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+      return headers;
+    }
+
+    function showStatus(type, message) {
+      const el = document.getElementById('adminStatus');
+      el.className = `status ${type} visible`;
+      el.textContent = message;
+      if (type === 'success') {
+        setTimeout(() => { el.className = 'status'; el.textContent = ''; }, 5000);
+      }
+    }
+
+    function clearStatus() {
+      const el = document.getElementById('adminStatus');
+      el.className = 'status';
+      el.textContent = '';
+    }
+
+    // ──────────────────────────────────────────────────────
+    // Auth
+    // ──────────────────────────────────────────────────────
+    function clearAuth() {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      authToken = null;
+      currentUser = null;
+      document.getElementById('headerUserArea').style.display = 'none';
+      document.getElementById('authModal').classList.remove('hidden');
+    }
+
+    function updateHeaderUser() {
+      if (!currentUser) return;
+      const area = document.getElementById('headerUserArea');
+      area.style.display = 'flex';
+      document.getElementById('headerAvatar').textContent =
+        currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+      document.getElementById('headerUserName').textContent = currentUser.name;
+      document.getElementById('headerUserRole').textContent = currentUser.role || 'user';
+    }
+
+    async function checkAuth() {
+      authToken = localStorage.getItem('auth_token');
+      const userStr = localStorage.getItem('user');
+      if (authToken && userStr) {
+        try {
+          currentUser = JSON.parse(userStr);
+          // Refresh from server
+          try {
+            const resp = await fetch('/api/auth/me', { headers: getAuthHeaders() });
+            if (resp.ok) {
+              currentUser = await resp.json();
+              localStorage.setItem('user', JSON.stringify(currentUser));
+            } else if (resp.status === 401) {
+              clearAuth();
+              return false;
+            }
+          } catch (err) {
+            console.warn('Could not refresh user info:', err);
+          }
+
+          if (currentUser.role !== 'admin') {
+            document.getElementById('usersList').innerHTML = `
+              <div class="state-msg error-state">
+                <div class="icon">🔒</div>
+                Admin access required. Redirecting…
+              </div>`;
+            setTimeout(() => { window.location.href = '/legacy.html'; }, 2000);
+            return false;
+          }
+
+          document.getElementById('authModal').classList.add('hidden');
+          updateHeaderUser();
+          return true;
+        } catch (e) {
+          clearAuth();
+        }
+      }
+      document.getElementById('authModal').classList.remove('hidden');
+      return false;
+    }
+
+    async function handleAuth(e) {
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      if (!email || !password) { showStatus('error', 'Please fill in all fields'); return; }
+      const btn = document.getElementById('authSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Logging in…';
+      try {
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(err.detail || err.message || 'Authentication failed');
+        }
+        const data = await resp.json();
+        localStorage.setItem('auth_token', data.access_token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        authToken = data.access_token;
+        currentUser = data.user;
+
+        if (currentUser.role !== 'admin') {
+          showStatus('error', 'Admin access required — redirecting…');
+          setTimeout(() => { window.location.href = '/legacy.html'; }, 2000);
+          return;
+        }
+
+        document.getElementById('authModal').classList.add('hidden');
+        updateHeaderUser();
+        showStatus('success', `Welcome, ${currentUser.name}!`);
+        await loadAdminUsers();
+      } catch (err) {
+        showStatus('error', `Login failed: ${err.message}`);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Login';
+      }
+    }
+
+    function logout() {
+      clearAuth();
+    }
+
+    // ──────────────────────────────────────────────────────
+    // User Management
+    // ──────────────────────────────────────────────────────
+    async function loadAdminUsers() {
+      if (!authToken || currentUser?.role !== 'admin') {
+        showStatus('error', 'Admin access required');
+        return;
+      }
+      const usersList = document.getElementById('usersList');
+      usersList.innerHTML = '<div class="state-msg"><div class="icon">⏳</div>Loading users…</div>';
+      document.getElementById('userCount').textContent = '';
+
+      try {
+        const resp = await fetch('/api/admin/users', { headers: getAuthHeaders() });
+        if (resp.status === 403) {
+          showStatus('error', 'Admin access required');
+          return;
+        }
+        if (!resp.ok) throw new Error('Failed to load users');
+        const users = await resp.json();
+
+        if (users.length === 0) {
+          usersList.innerHTML = '<div class="state-msg">No users found</div>';
+          return;
+        }
+
+        document.getElementById('userCount').textContent = `${users.length} user${users.length !== 1 ? 's' : ''}`;
+
+        usersList.innerHTML = `
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Locations</th>
+                <th>Created</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users.map(user => {
+                const restCount = user.assignedRestaurants?.length ?? 0;
+                const restBadge = restCount > 0
+                  ? `<span style="background:#1E3A5F;color:#fff;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.78rem;font-weight:600;">${restCount} location${restCount !== 1 ? 's' : ''}</span>`
+                  : `<span style="color:#9CA3AF;font-size:0.82rem;">All</span>`;
+                return `
+                <tr>
+                  <td><strong>${escHtml(user.name)}</strong></td>
+                  <td>${escHtml(user.email)}</td>
+                  <td>
+                    <span class="role-badge" style="background:${user.role === 'admin' ? '#C41E3A' : '#444b6b'};">
+                      ${user.role === 'admin' ? 'Admin' : 'User'}
+                    </span>
+                  </td>
+                  <td>${restBadge}</td>
+                  <td class="meta-text">${new Date(user.createdAt).toLocaleDateString()}</td>
+                  <td class="meta-text">${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}</td>
+                  <td>
+                    ${user.id !== currentUser.id ? `
+                      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                        <button class="btn-blue btn-sm assign-restaurants-btn"
+                          data-user-id="${user.id}"
+                          data-user-name="${escAttr(user.name)}"
+                          data-assigned="${escAttr(JSON.stringify(user.assignedRestaurants ?? []))}">
+                          📍 Locations
+                        </button>
+                        <button class="btn-secondary btn-sm toggle-role-btn"
+                          data-user-id="${user.id}"
+                          data-new-role="${user.role === 'admin' ? 'user' : 'admin'}">
+                          ${user.role === 'admin' ? 'Demote' : 'Promote'}
+                        </button>
+                        <button class="btn-danger btn-sm delete-user-btn"
+                          data-user-id="${user.id}"
+                          data-user-name="${escAttr(user.name)}"
+                          data-user-email="${escAttr(user.email)}">
+                          Delete
+                        </button>
+                      </div>
+                    ` : '<span class="you-chip">(You)</span>'}
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        `;
+
+        usersList.querySelectorAll('.toggle-role-btn').forEach(btn => {
+          btn.addEventListener('click', () =>
+            toggleUserRole(btn.dataset.userId, btn.dataset.newRole));
+        });
+        usersList.querySelectorAll('.delete-user-btn').forEach(btn => {
+          btn.addEventListener('click', () =>
+            deleteUser(btn.dataset.userId, btn.dataset.userName, btn.dataset.userEmail));
+        });
+        usersList.querySelectorAll('.assign-restaurants-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const assigned = JSON.parse(btn.dataset.assigned || '[]');
+            openAssignRestaurantsModal(btn.dataset.userId, btn.dataset.userName, assigned);
+          });
+        });
+
+      } catch (err) {
+        usersList.innerHTML = `<div class="state-msg error-state"><div class="icon">⚠️</div>${err.message}</div>`;
+      }
+    }
+
+    async function toggleUserRole(userId, newRole) {
+      if (!confirm(`Change this user's role to ${newRole}?`)) return;
+      try {
+        const resp = await fetch(`/api/admin/users/${userId}/role`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ role: newRole })
+        });
+        if (!resp.ok) {
+          const e = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(e.detail || 'Failed to update role');
+        }
+        showStatus('success', `Role updated to ${newRole}`);
+        await loadAdminUsers();
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
+
+    async function deleteUser(userId, userName, userEmail) {
+      if (!confirm(`Delete user "${userName}" (${userEmail})?\nThis cannot be undone.`)) return;
+      try {
+        const resp = await fetch(`/api/admin/users/${userId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
+        if (!resp.ok) {
+          const e = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(e.detail || 'Failed to delete user');
+        }
+        showStatus('success', `${userEmail} deleted`);
+        await loadAdminUsers();
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      }
+    }
+
+    async function createUser(e) {
+      e.preventDefault();
+      if (!authToken || currentUser?.role !== 'admin') {
+        showStatus('error', 'Admin access required');
+        return;
+      }
+      const name     = document.getElementById('newUserName').value.trim();
+      const email    = document.getElementById('newUserEmail').value.trim();
+      const password = document.getElementById('newUserPassword').value;
+      const role     = document.getElementById('newUserRole').value;
+      if (!name || !email || !password) {
+        showStatus('error', 'Please fill in all required fields');
+        return;
+      }
+      const btn = e.target.querySelector('button[type="submit"]');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Creating…';
+      try {
+        const resp = await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ name, email, password, role })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(err.detail || 'Failed to create user');
+        }
+        showStatus('success', `User ${email} created!`);
+        document.getElementById('createUserForm').reset();
+        document.getElementById('createUserModal').classList.add('hidden');
+        await loadAdminUsers();
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      } finally {
+        btn.disabled = false; btn.textContent = orig;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
+    // Assign Restaurants (admin sets per-user location access)
+    // ──────────────────────────────────────────────────────
+    let _assignTargetUserId = null;
+    let _assignAllLocs = [];
+
+    async function openAssignRestaurantsModal(userId, userName, assignedIds) {
+      _assignTargetUserId = userId;
+      const grid = document.getElementById('assignRestaurantsGrid');
+      grid.innerHTML = '<div style="padding:1rem;text-align:center;color:#6B7280;">Loading…</div>';
+      document.getElementById('assignRestaurantsSubtitle').textContent =
+        `Setting locations for: ${userName}`;
+      document.getElementById('assignRestaurantsModal').classList.remove('hidden');
+      try {
+        const resp = await fetch('/locations', { headers: getAuthHeaders() });
+        _assignAllLocs = await resp.json();
+        const assigned = new Set(assignedIds);
+        grid.innerHTML = _assignAllLocs.map(loc => `
+          <label style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.5rem;border-radius:6px;cursor:pointer;font-size:0.875rem;">
+            <input type="checkbox" class="assign-rest-cb" value="${loc.restaurantGuid}"
+              ${assigned.has(loc.restaurantGuid) ? 'checked' : ''}
+              style="width:15px;height:15px;accent-color:#C41E3A;flex-shrink:0;" />
+            ${loc.restaurantName}
+          </label>`).join('');
+        document.querySelectorAll('.assign-rest-cb').forEach(cb =>
+          cb.addEventListener('change', updateAssignRestaurantsCount));
+        updateAssignRestaurantsCount();
+      } catch (err) {
+        grid.innerHTML = `<div style="padding:1rem;text-align:center;color:#DC2626;">Failed: ${err.message}</div>`;
+      }
+    }
+
+    function closeAssignRestaurantsModal() {
+      document.getElementById('assignRestaurantsModal').classList.add('hidden');
+      _assignTargetUserId = null;
+    }
+
+    function updateAssignRestaurantsCount() {
+      const total = _assignAllLocs.length;
+      const checked = document.querySelectorAll('.assign-rest-cb:checked').length;
+      const el = document.getElementById('assignRestaurantsCount');
+      if (el) el.textContent = checked === 0 ? 'None (will show all)' : `${checked} of ${total} selected`;
+      const selectAll = document.getElementById('selectAllAssignRestaurants');
+      if (selectAll) selectAll.checked = checked > 0 && checked === total;
+    }
+
+    function toggleAllAssignRestaurants() {
+      const checked = document.getElementById('selectAllAssignRestaurants').checked;
+      document.querySelectorAll('.assign-rest-cb').forEach(cb => cb.checked = checked);
+      updateAssignRestaurantsCount();
+    }
+
+    async function saveAssignedRestaurants() {
+      if (!_assignTargetUserId) return;
+      const ids = Array.from(document.querySelectorAll('.assign-rest-cb:checked')).map(cb => cb.value);
+      const btn = document.getElementById('saveAssignRestaurantsBtn');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        const resp = await fetch(`/api/admin/users/${_assignTargetUserId}/restaurants`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ restaurantIds: ids })
+        });
+        if (!resp.ok) {
+          const e = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(e.detail || 'Failed to save');
+        }
+        showStatus('success', ids.length
+          ? `Saved — ${ids.length} location(s) assigned`
+          : 'Saved — user will see all locations');
+        closeAssignRestaurantsModal();
+        await loadAdminUsers();
+      } catch (err) {
+        showStatus('error', `Error: ${err.message}`);
+      } finally {
+        btn.disabled = false; btn.textContent = orig;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
+    // Sanitization helpers
+    // ──────────────────────────────────────────────────────
+    function escHtml(str) {
+      return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function escAttr(str) {
+      return String(str ?? '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // ──────────────────────────────────────────────────────
+    // Init
+    // ──────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Wire up event listeners
+      document.getElementById('authForm').addEventListener('submit', handleAuth);
+      document.getElementById('logoutBtn').addEventListener('click', logout);
+      document.getElementById('createUserBtn').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.remove('hidden');
+      });
+      document.getElementById('closeCreateUserModal').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.add('hidden');
+      });
+      document.getElementById('cancelCreateUserBtn').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.add('hidden');
+      });
+      document.getElementById('createUserForm').addEventListener('submit', createUser);
+
+      // Assign restaurants modal
+      document.getElementById('closeAssignRestaurantsModal').addEventListener('click', closeAssignRestaurantsModal);
+      document.getElementById('cancelAssignRestaurantsBtn').addEventListener('click', closeAssignRestaurantsModal);
+      document.getElementById('saveAssignRestaurantsBtn').addEventListener('click', saveAssignedRestaurants);
+      document.getElementById('selectAllAssignRestaurants').addEventListener('change', toggleAllAssignRestaurants);
+
+      // Auth gate
+      const isAuth = await checkAuth();
+      if (isAuth) {
+        await loadAdminUsers();
+      }
+    });
+  </script>
+</body>
+</html>

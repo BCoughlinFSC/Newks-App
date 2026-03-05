@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Newk's Custom Reporting Platform</title>
+  <title>Newk's Back Office</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='url(%23grad)'/%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='0%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%231E3A5F;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%231E3A5F;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%23ffffff;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23ffffff;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Ctext x='50' y='35' font-family='Arial' font-size='12' font-weight='600' font-style='italic' fill='white' text-anchor='middle'%3ENewk's%3C/text%3E%3Crect x='35' y='5' width='30' height='8' rx='2' fill='%23C41E3A'/%3E%3Ctext x='50' y='11' font-family='Arial' font-size='6' font-weight='600' fill='white' text-anchor='middle'%3EEATERY%3C/text%3E%3Ctext x='50' y='70' font-family='Arial' font-size='20' font-weight='700' fill='%23C41E3A' text-anchor='middle' letter-spacing='2'%3EIT%3C/text%3E%3C/svg%3E" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -13,12 +15,69 @@
       background: #F8FAFC;
       color: #2c2c2c;
     }
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-right: 1rem;
+    }
+    .logo-circle {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: linear-gradient(to bottom, #1E3A5F 0%, #1E3A5F 50%, #ffffff 50%, #ffffff 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      position: relative;
+      overflow: visible;
+      padding: 2px;
+    }
+    .logo-top {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 0.65rem;
+      font-weight: 600;
+      font-style: italic;
+      padding-top: 2px;
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+    .logo-badge {
+      position: absolute;
+      top: 12px;
+      background: #C41E3A;
+      color: white;
+      padding: 1px 3px;
+      font-size: 0.45rem;
+      border-radius: 2px;
+      font-weight: 600;
+      line-height: 1;
+    }
+    .logo-bottom {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #C41E3A;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding-bottom: 2px;
+      line-height: 1;
+    }
     .header {
       background: #C41E3A;
       padding: 1.5rem 2rem;
       border-bottom: 3px solid #A01A2E;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      position: relative;
     }
     .header-content {
       display: flex;
@@ -27,44 +86,6 @@
     }
     .header-text {
       flex: 1;
-    }
-    .header-actions {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
-    }
-    .auth-tab.active {
-      border-bottom-color: #C41E3A !important;
-      color: #C41E3A !important;
-      font-weight: 600 !important;
-    }
-    .auth-tab:not(.active) {
-      border-bottom-color: transparent !important;
-      color: #6B7280 !important;
-    }
-    .user-info {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      color: #ffffff;
-      font-size: 0.9rem;
-    }
-    .user-name {
-      font-weight: 600;
-    }
-    .logout-btn {
-      background: rgba(255, 255, 255, 0.15);
-      color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      padding: 0.4rem 0.8rem;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .logout-btn:hover {
-      background: rgba(255, 255, 255, 0.25);
-      border-color: rgba(255, 255, 255, 0.5);
     }
     .header h1 {
       margin: 0;
@@ -78,21 +99,280 @@
       opacity: 0.9;
       font-size: 0.9rem;
     }
-    .help-btn {
-      background: rgba(255, 255, 255, 0.2);
+    .header-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .home-btn {
+      background: rgba(255, 255, 255, 0.15);
       color: #ffffff;
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      padding: 0.6rem 1.2rem;
-      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .home-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: #ffffff;
+      font-size: 0.9rem;
+    }
+    .user-name {
+      font-weight: 600;
+    }
+    .logout-btn, .help-btn, .admin-btn {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .logout-btn:hover, .help-btn:hover, .admin-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+    .help-btn {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      background: #C41E3A;
+      color: #ffffff;
+      border: none;
+      padding: 1rem 1.5rem;
+      border-radius: 50px;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
       font-size: 0.9rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
     .help-btn:hover {
-      background: rgba(255, 255, 255, 0.3);
-      border-color: rgba(255, 255, 255, 0.5);
-      transform: translateY(-1px);
+      background: #A01A2E;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+    }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      gap: 1.5rem;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .left-nav {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+      height: fit-content;
+      position: sticky;
+      top: 2rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .left-nav-content {
+      flex: 1;
+    }
+    .left-nav-footer {
+      margin-top: auto;
+      padding-top: 1.5rem;
+      border-top: 1px solid #e8e0d5;
+    }
+    .user-profile {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .user-profile-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: #F0F9FF;
+      border-radius: 8px;
+    }
+    .user-profile-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #C41E3A;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .user-profile-details {
+      flex: 1;
+    }
+    .user-profile-name {
+      font-weight: 600;
+      color: #2c2c2c;
+      font-size: 0.9rem;
+    }
+    .user-profile-role {
+      font-size: 0.75rem;
+      color: #666;
+      text-transform: capitalize;
+    }
+    .user-profile-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .user-profile-btn {
+      width: 100%;
+      padding: 0.5rem;
+      border-radius: 6px;
+      border: 1px solid #d4c9b8;
+      background: white;
+      color: #2c2c2c;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .user-profile-btn:hover {
+      background: #F0F9FF;
+      border-color: #C41E3A;
+      color: #C41E3A;
+    }
+    .user-profile-btn.admin {
+      background: #C41E3A;
+      color: white;
+      border-color: #C41E3A;
+    }
+    .user-profile-btn.admin:hover {
+      background: #A01A2E;
+    }
+    .left-nav h3 {
+      margin: 0 0 1rem 0;
+      color: #C41E3A;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .nav-category {
+      margin-bottom: 1rem;
+    }
+    .nav-category-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+    .nav-category-header:hover {
+      background: #F0F9FF;
+    }
+    .nav-category-header .toggle-icon {
+      transition: transform 0.2s;
+      font-size: 0.7rem;
+    }
+    .nav-category-header.collapsed .toggle-icon {
+      transform: rotate(-90deg);
+    }
+    .nav-category-header.collapsed {
+      margin-bottom: 0;
+    }
+    .nav-category-items {
+      margin-top: 0.5rem;
+      max-height: 500px;
+      overflow-y: auto;
+      transition: max-height 0.3s ease;
+    }
+    .nav-category-header.collapsed + .nav-category-items {
+      max-height: 0;
+      overflow: hidden;
+    }
+    .nav-link-item {
+      display: block;
+      padding: 0.5rem 0.75rem;
+      color: #2c2c2c;
+      text-decoration: none;
+      border-radius: 6px;
+      margin-bottom: 0.25rem;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+      padding-left: 1.5rem;
+    }
+    .nav-link-item:hover {
+      background: #F0F9FF;
+      color: #C41E3A;
+    }
+    .nav-link-item.active {
+      background: #C41E3A;
+      color: #ffffff;
+    }
+    .container {
+      max-width: 100%;
+    }
+    .welcome-card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+    }
+    .welcome-card h2 {
+      margin: 0 0 1rem 0;
+      color: #C41E3A;
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+    .welcome-card p {
+      color: #666;
+      font-size: 1rem;
+      line-height: 1.6;
+      margin: 0;
+    }
+    .chart-card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+    }
+    .chart-card h3 {
+      margin: 0 0 1rem 0;
+      color: #1E3A5F;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .chart-container {
+      position: relative;
+      height: 300px;
     }
     .modal-overlay {
       position: fixed;
@@ -160,9 +440,7 @@
       color: #374151;
       font-size: 0.9rem;
     }
-    .modal-form-group input,
-    .modal-form-group textarea,
-    .modal-form-group select {
+    .modal-form-group input {
       width: 100%;
       padding: 0.75rem;
       border-radius: 6px;
@@ -170,13 +448,7 @@
       font-size: 0.9rem;
       font-family: inherit;
     }
-    .modal-form-group textarea {
-      min-height: 120px;
-      resize: vertical;
-    }
-    .modal-form-group input:focus,
-    .modal-form-group textarea:focus,
-    .modal-form-group select:focus {
+    .modal-form-group input:focus {
       outline: none;
       border-color: #C41E3A;
       box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.1);
@@ -189,333 +461,60 @@
       padding-top: 1.5rem;
       border-top: 2px solid #E5E7EB;
     }
-    .container {
-      display: grid;
-      grid-template-columns: 300px 1fr;
-      gap: 1.5rem;
-      padding: 1.5rem 2rem;
-      max-width: 1600px;
-      margin: 0 auto;
-    }
-    .sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-    .card {
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 1.25rem;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-      border: 1px solid #e8e0d5;
-    }
-    .card h2 {
-      margin: 0 0 1rem 0;
-      color: #C41E3A;
-      font-size: 1.25rem;
-      font-weight: 700;
-    }
-    .saved-reports-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      max-height: 500px;
-      overflow-y: auto;
-    }
-    .report-item {
-      background: #faf8f5;
-      border: 1px solid #e8e0d5;
-      border-radius: 8px;
-      padding: 0.75rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .report-item:hover {
-      background: #FEF2F2;
-      border-color: #C41E3A;
-      transform: translateY(-1px);
-    }
-    .report-item.active {
-      background: #FEF2F2;
-      border-color: #C41E3A;
-      border-width: 2px;
-      box-shadow: 0 2px 8px rgba(196, 30, 58, 0.15);
-    }
-    .report-item-name {
-      font-weight: 600;
-      color: #2c2c2c;
-      margin-bottom: 0.25rem;
-    }
-    .report-item-creator {
-      font-size: 0.75rem;
-      color: #666;
-    }
-    .new-report-btn {
-      background: #C41E3A;
-      color: #ffffff;
-      border: none;
-      padding: 0.75rem;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      box-shadow: 0 2px 4px rgba(196, 30, 58, 0.2);
-    }
-    .new-report-btn:hover {
-      background: #A01A2E;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(196, 30, 58, 0.3);
-    }
-    .main-content {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-    .form-group {
-      margin-bottom: 1rem;
-    }
-    .form-group label {
-      display: block;
-      margin-bottom: 0.5rem;
-      font-weight: 600;
-      color: #2c2c2c;
-      font-size: 0.9rem;
-    }
-    .form-group input,
-    .form-group select {
-      width: 100%;
-      padding: 0.5rem 0.75rem;
-      border-radius: 6px;
-      border: 1px solid #d4c9b8;
-      background: #ffffff;
-      color: #2c2c2c;
-      font-size: 0.9rem;
-    }
-    .form-group input:focus,
-    .form-group select:focus {
-      outline: none;
-      border-color: #C41E3A;
-      box-shadow: 0 0 0 3px rgba(196, 30, 58, 0.1);
-    }
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-    .checkbox-group {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      padding: 0.5rem 0;
-    }
-    .checkbox-group label {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-weight: normal;
-      margin: 0;
-      color: #2c2c2c;
-    }
-    .checkbox-group input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      cursor: pointer;
-      accent-color: #C41E3A;
-    }
-    /* Scrollbar styling for locations */
-    .locations-grid::-webkit-scrollbar,
-    .saved-reports-list::-webkit-scrollbar {
-      width: 8px;
-    }
-    .locations-grid::-webkit-scrollbar-track,
-    .saved-reports-list::-webkit-scrollbar-track {
-      background: #f0ebe3;
-      border-radius: 4px;
-    }
-    .locations-grid::-webkit-scrollbar-thumb,
-    .saved-reports-list::-webkit-scrollbar-thumb {
-      background: #d4c9b8;
-      border-radius: 4px;
-    }
-    .locations-grid::-webkit-scrollbar-thumb:hover,
-    .saved-reports-list::-webkit-scrollbar-thumb:hover {
-      background: #c4b9a8;
-    }
-    .locations-grid {
-      max-height: 150px;
-      overflow-y: auto;
-      padding: 0.75rem;
-      background: #faf8f5;
-      border-radius: 6px;
-      border: 1px solid #e8e0d5;
-    }
-    .locations-grid label {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.4rem 0;
-      font-weight: normal;
-      margin: 0;
-      color: #2c2c2c;
-      font-size: 0.85rem;
-    }
-    .locations-grid label:hover {
-      color: #C41E3A;
-    }
-    .locations-grid input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      cursor: pointer;
-      accent-color: #C41E3A;
-    }
-    .btn-group {
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-    }
-    button {
-      padding: 0.6rem 1.25rem;
-      border-radius: 6px;
-      border: none;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-size: 0.9rem;
-    }
     .btn-primary {
       background: #C41E3A;
-      color: #ffffff;
-      box-shadow: 0 2px 4px rgba(196, 30, 58, 0.2);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
     }
     .btn-primary:hover {
       background: #A01A2E;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(196, 30, 58, 0.3);
-    }
-    .btn-success {
-      background: #1E40AF;
-      color: #ffffff;
-      box-shadow: 0 2px 4px rgba(30, 64, 175, 0.2);
-    }
-    .btn-success:hover {
-      background: #1E3A8A;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(30, 64, 175, 0.3);
     }
     .btn-secondary {
-      background: #6c757d;
-      color: #ffffff;
+      background: #6B7280;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
     }
     .btn-secondary:hover {
-      background: #5a6268;
-    }
-    .btn-danger {
-      background: #d9534f;
-      color: #ffffff;
-    }
-    .btn-danger:hover {
-      background: #c9302c;
-    }
-    button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none !important;
-    }
-    .status {
-      padding: 0.75rem;
-      border-radius: 8px;
-      margin-top: 0.75rem;
-      font-size: 0.9rem;
-    }
-    .status.info {
-      background: #DBEAFE;
-      border: 1px solid #60A5FA;
-      color: #1E40AF;
-    }
-    .status.success {
-      background: #D1FAE5;
-      border: 1px solid #34D399;
-      color: #065F46;
-    }
-    .status.error {
-      background: #FEE2E2;
-      border: 1px solid #F87171;
-      color: #991B1B;
-    }
-    .results-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-    .results-summary {
-      font-size: 0.9rem;
-      color: #666;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 0.75rem;
-    }
-    th, td {
-      padding: 0.75rem;
-      border-bottom: 1px solid #e8e0d5;
-      text-align: left;
-      font-size: 0.9rem;
-    }
-    th {
-      background: #faf8f5;
-      font-weight: 600;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      color: #2c2c2c;
-    }
-    tr:hover {
-      background: #F0F9FF;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: #999;
+      background: #4B5563;
     }
     .hidden {
       display: none;
     }
-    .loading-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
-      gap: 1rem;
-    }
-    .loading-overlay.hidden {
-      display: none !important;
-    }
-    .loading-spinner {
-      width: 60px;
-      height: 60px;
-      border: 6px solid #F0F9FF;
-      border-top: 6px solid #C41E3A;
+    .live-dot {
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      animation: spin 1s linear infinite;
+      background: #22C55E;
+      display: inline-block;
+      flex-shrink: 0;
+      animation: pulse-dot 2s ease-in-out infinite;
     }
-    .loading-text {
-      color: white;
-      font-size: 1.1rem;
-      font-weight: 600;
-      text-align: center;
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.8); }
     }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    .today-location-row {
+      padding: 0.45rem 0;
+      border-top: 1px solid #F3F4F6;
+    }
+    .today-location-row:first-child { border-top: none; }
+    .today-bar-track {
+      height: 4px; background: #F3F4F6; border-radius: 2px; overflow: hidden; margin-top: 0.2rem;
+    }
+    .today-bar-fill {
+      height: 100%; background: #C41E3A; border-radius: 2px; transition: width 0.4s ease;
     }
   </style>
 </head>
@@ -523,155 +522,130 @@
   <div class="header">
     <div class="header-content">
       <div class="header-text">
-        <h1>Newk's Custom Reporting Platform</h1>
-        <p>Build, save, and run custom reports using Toast data</p>
+        <div style="display: flex; align-items: center;">
+          <div class="logo">
+            <div class="logo-circle">
+              <div class="logo-top">Newk's</div>
+              <div class="logo-badge">EATERY</div>
+              <div class="logo-bottom">IT</div>
       </div>
-      <div class="header-actions">
-        <div class="user-info hidden" id="userInfo">
-          <span class="user-name" id="userName"></span>
-          <button class="help-btn" id="adminBtn" style="display: none;">Admin Panel</button>
-          <button class="logout-btn" id="logoutBtn">Logout</button>
         </div>
-        <button class="help-btn" id="helpBtn">I Need Help</button>
+          <div>
+            <h1 style="margin: 0;">Newk's Back Office</h1>
+            <p style="margin: 0.5rem 0 0 0;"></p>
       </div>
     </div>
   </div>
-
-  <div class="container">
-    <!-- Sidebar: Saved Reports -->
-    <div class="sidebar">
-      <div class="card">
-        <h2>Saved Reports</h2>
-        <button class="new-report-btn" id="newReportBtn">+ New Report</button>
-        <div style="margin-top: 1rem;">
-          <div class="saved-reports-list" id="savedReportsList">
-            <div class="empty-state">Loading...</div>
-          </div>
+      <div class="header-actions">
+        <a href="/" class="home-btn" title="Home">🏠 Home</a>
         </div>
       </div>
     </div>
+
+  <div class="main-layout">
+    <!-- Left Navigation -->
+    <div class="left-nav">
+      <h3>Navigation</h3>
+      
+      <div class="nav-category">
+        <div class="nav-category-header collapsed" data-category="reports">
+          <span>REPORTS</span>
+          <span class="toggle-icon">▶</span>
+          </div>
+        <div class="nav-category-items" style="max-height: 0; overflow: hidden; opacity: 0; margin-top: 0;">
+          <a href="/legacy.html" class="nav-link-item">📋 Reports V1</a>
+          <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink">📱 Digital Orders by Platform (OLO)</a>
+          <a href="/pick3.html" class="nav-link-item">📊 Pick 3 Report</a>
+          </div>
+        </div>
+
+      <div class="nav-category hidden" id="dataNavSection">
+        <div class="nav-category-header collapsed" data-category="data">
+          <span>DATA</span>
+          <span class="toggle-icon">▶</span>
+        </div>
+        <div class="nav-category-items" style="max-height: 0; overflow: hidden; opacity: 0; margin-top: 0;">
+          <a href="/mapping.html" class="nav-link-item" id="mappingNavLink">🗂 Mapping Table</a>
+        </div>
+      </div>
+
+      <!-- User Profile Section at Bottom -->
+      <div class="left-nav-footer hidden" id="userProfileSection">
+        <div class="user-profile">
+          <div class="user-profile-info">
+            <div class="user-profile-avatar" id="userAvatar">U</div>
+            <div class="user-profile-details">
+              <div class="user-profile-name" id="userProfileName">User</div>
+              <div class="user-profile-role" id="userProfileRole">user</div>
+            </div>
+          </div>
+          <div class="user-profile-actions">
+            <button class="user-profile-btn admin hidden" id="userAdminBtn">Admin Panel</button>
+            <button class="user-profile-btn" id="userLogoutBtn">Logout</button>
+          </div>
+        </div>
+          </div>
+        </div>
 
     <!-- Main Content -->
-    <div class="main-content">
-      <!-- Report Builder -->
-      <div class="card">
-        <h2 id="builderTitle">Report Builder</h2>
-        
-        <div class="form-group">
-          <label>Report Name</label>
-          <input type="text" id="reportName" placeholder="e.g., Net Sales by Location - Weekly" />
+    <div class="container">
+      <div class="welcome-card">
+        <h2>Welcome to Newk's Reporting Platform</h2>
+        <p>Access operational reports and data tools for Newk's Restaurant Group. Use the navigation menu to open reports and mapping.</p>
         </div>
 
-        <div class="form-group">
-          <label>Description (optional)</label>
-          <input type="text" id="reportDescription" placeholder="Brief description of this report" />
+      <!-- Today's Net Sales Panel -->
+      <div class="chart-card" id="todaysSalesCard">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+          <div style="display:flex;align-items:center;gap:0.6rem;">
+            <h3 style="margin:0;color:#1E3A5F;">Today's Net Sales</h3>
+            <span id="todayDateBadge" style="font-size:0.8rem;color:#6B7280;font-weight:400;"></span>
+            <span class="live-dot" title="Live data"></span>
+          </div>
+          <button id="refreshSalesBtn" style="background:none;border:1px solid #d4c9b8;border-radius:6px;padding:0.3rem 0.65rem;cursor:pointer;font-size:0.85rem;color:#555;transition:all 0.2s;" onmouseover="this.style.background='#F0F9FF'" onmouseout="this.style.background='none'">↻ Refresh</button>
         </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label>Report Type</label>
-            <select id="reportType">
-              <option value="metrics">Metrics Report (Sales, Guest Count, etc.)</option>
-              <option value="menu">Menu Performance (Item-level Sales)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Date Range</label>
-            <select id="dateRangeType">
-              <option value="last_7_days">Last 7 Days</option>
-              <option value="last_30_days">Last 30 Days</option>
-              <option value="last_90_days">Last 90 Days</option>
-              <option value="custom">Custom Range</option>
-            </select>
-          </div>
+        <div style="display:flex;align-items:baseline;gap:0.6rem;margin-bottom:1rem;">
+          <span id="todaysTotalSales" style="font-size:2.25rem;font-weight:700;color:#C41E3A;line-height:1;">—</span>
+          <span style="font-size:0.85rem;color:#6B7280;">Newk's Net Sales</span>
         </div>
 
-        <div class="form-row hidden" id="customDateRange">
-          <div class="form-group">
-            <label>Start Date</label>
-            <input type="date" id="customStartDate" />
+        <!-- Labor KPI row -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1.25rem;">
+          <div style="background:#F8FAFC;border:1px solid #e8e0d5;border-radius:8px;padding:0.75rem;text-align:center;">
+            <div style="font-size:0.75rem;color:#6B7280;font-weight:600;margin-bottom:0.3rem;">💼 Labor Cost</div>
+            <div id="todaysLaborCost" style="font-size:1.15rem;font-weight:700;color:#1E3A5F;">—</div>
           </div>
-          <div class="form-group">
-            <label>End Date</label>
-            <input type="date" id="customEndDate" />
+          <div style="background:#F8FAFC;border:1px solid #e8e0d5;border-radius:8px;padding:0.75rem;text-align:center;">
+            <div style="font-size:0.75rem;color:#6B7280;font-weight:600;margin-bottom:0.3rem;">📊 Labor %</div>
+            <div id="todaysLaborPct" style="font-size:1.15rem;font-weight:700;color:#1E3A5F;">—</div>
+          </div>
+          <div style="background:#F8FAFC;border:1px solid #e8e0d5;border-radius:8px;padding:0.75rem;text-align:center;">
+            <div style="font-size:0.75rem;color:#6B7280;font-weight:600;margin-bottom:0.3rem;">⚡ SPLH</div>
+            <div id="todaysSplh" style="font-size:1.15rem;font-weight:700;color:#1E3A5F;">—</div>
           </div>
         </div>
 
-        <div class="form-group">
-          <label style="display: flex; justify-content: space-between; align-items: center;">
-            <span>
-              <input type="checkbox" id="selectAllLocations" checked style="margin-right: 0.5rem; width: 16px; height: 16px; accent-color: #C41E3A;" /> 
-              Select All Locations
-            </span>
-            <span id="locationCount" style="font-size: 0.85rem; font-weight: normal; color: #666;"></span>
-          </label>
-          <div class="locations-grid" id="locationsGrid">
-            <div>Loading locations...</div>
-          </div>
+        <div id="todaysLocationList" style="max-height:280px;overflow-y:auto;">
+          <div style="color:#6B7280;font-size:0.85rem;padding:0.5rem 0;">Loading…</div>
         </div>
 
-        <div class="form-group" id="filterBySection">
-          <label>Filter By</label>
-          <select id="filterByType">
-            <option value="">None</option>
-            <option value="itemTags">Item Tags</option>
-          </select>
-        </div>
-
-        <div class="form-group hidden" id="itemTagsSection">
-          <label style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Item Tags</span>
-            <span id="tagCount" style="font-size: 0.85rem; font-weight: normal; color: #666;"></span>
-          </label>
-          <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
-            Select tags to filter menu items. Includes items, modifiers, and nested modifiers.
-          </div>
-          <div id="itemTagsLoadingStatus" style="padding: 0.75rem; color: #666; font-size: 0.85rem;">
-            Select Menu Performance to load item tags...
-          </div>
-          <div class="locations-grid hidden" id="itemTagsGrid" style="max-height: 200px;">
-            <!-- Dynamically populated with item tags -->
-          </div>
-        </div>
-
-
-        <div class="btn-group">
-          <button class="btn-primary" id="runReportBtn">Run Report</button>
-          <button class="btn-success" id="saveReportBtn">Save Report</button>
-          <button class="btn-secondary hidden" id="updateReportBtn">Update Report</button>
-          <button class="btn-danger hidden" id="deleteReportBtn">Delete Report</button>
-        </div>
-
-        <div class="status hidden" id="builderStatus"></div>
+        <div id="todaysTimestamp" style="font-size:0.72rem;color:#9CA3AF;margin-top:0.75rem;text-align:right;"></div>
       </div>
 
-      <!-- Results -->
-      <div class="card">
-        <div class="results-header">
-          <h2>Results</h2>
-          <button class="btn-success hidden" id="exportBtn">Download CSV</button>
-        </div>
-        <div class="results-summary" id="resultsSummary"></div>
-        <div style="overflow-x: auto;">
-          <table id="resultsTable">
-            <thead id="resultsHead"></thead>
-            <tbody id="resultsBody">
-              <tr>
-                <td colspan="100" class="empty-state">Run a report to see results</td>
-              </tr>
-            </tbody>
-          </table>
+      <!-- Chart Section -->
+      <div class="chart-card">
+        <h3>Sales Trend (Last 7 Days)</h3>
+        <div class="chart-container">
+          <canvas id="salesChart"></canvas>
         </div>
       </div>
+
     </div>
   </div>
 
-  <!-- Loading Overlay -->
-  <div id="loadingOverlay" class="loading-overlay hidden">
-    <div class="loading-spinner"></div>
-    <div class="loading-text">Running report...<br><span style="font-size: 0.9rem; font-weight: normal; opacity: 0.9;">This may take a moment</span></div>
-  </div>
+  <!-- Floating Help Button -->
+  <button class="help-btn" id="helpBtn">💬 I Need Help</button>
 
   <!-- Login/Register Modal -->
   <div id="authModal" class="modal-overlay">
@@ -692,59 +666,6 @@
         <div class="modal-actions">
           <button type="button" class="btn-secondary" id="cancelAuthBtn">Cancel</button>
           <button type="submit" class="btn-primary" id="authSubmitBtn">Login</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Admin Panel Modal -->
-  <div id="adminModal" class="modal-overlay hidden">
-    <div class="modal" style="max-width: 900px;">
-      <div class="modal-header">
-        <h2>Admin Panel</h2>
-        <button class="modal-close" id="closeAdminModal">&times;</button>
-      </div>
-      <div style="margin-bottom: 1.5rem;">
-        <button class="btn-primary" id="createUserBtn" style="margin-bottom: 1rem;">Create New User</button>
-      </div>
-      <div id="adminContent">
-        <div id="usersList" style="max-height: 500px; overflow-y: auto;">
-          <div style="text-align: center; padding: 2rem; color: #6B7280;">Loading users...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Create User Modal -->
-  <div id="createUserModal" class="modal-overlay hidden">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>Create New User</h2>
-        <button class="modal-close" id="closeCreateUserModal">&times;</button>
-      </div>
-      <form id="createUserForm">
-        <div class="modal-form-group">
-          <label for="newUserName">Name *</label>
-          <input type="text" id="newUserName" required placeholder="Enter user's name" />
-        </div>
-        <div class="modal-form-group">
-          <label for="newUserEmail">Email *</label>
-          <input type="email" id="newUserEmail" required placeholder="user@example.com" />
-        </div>
-        <div class="modal-form-group">
-          <label for="newUserPassword">Password *</label>
-          <input type="password" id="newUserPassword" required placeholder="Enter password (min 6 characters)" />
-        </div>
-        <div class="modal-form-group">
-          <label for="newUserRole">Role</label>
-          <select id="newUserRole">
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="btn-secondary" id="cancelCreateUserBtn">Cancel</button>
-          <button type="submit" class="btn-primary">Create User</button>
         </div>
       </form>
     </div>
@@ -781,7 +702,7 @@
         </div>
         <div class="modal-form-group">
           <label for="helpDescription">Description *</label>
-          <textarea id="helpDescription" required placeholder="Please provide details about what you need help with..."></textarea>
+          <textarea id="helpDescription" required placeholder="Please provide details about what you need help with..." style="width: 100%; padding: 0.75rem; border-radius: 6px; border: 1px solid #D1D5DB; font-size: 0.9rem; font-family: inherit; min-height: 120px; resize: vertical;"></textarea>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" id="cancelHelpBtn">Cancel</button>
@@ -792,210 +713,203 @@
   </div>
 
   <script>
-    // State
-    let locations = [];
-    let savedReports = [];
-    let currentReportId = null;
-    let currentResults = null;
-    let reportTypeOptions = {};
-    let menuItems = null; // Store menu items with tags
-    let allItemTags = [];
+    let authToken = null;
+    let currentUser = null;
+
+    function getAuthHeaders() {
+      return {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json'
+      };
+    }
 
     // Initialize
     async function init() {
-      // Check authentication first
+      // Nav expand/collapse works for everyone (auth or not)
+      setupNavigation();
+      setupEventListeners();
+
+      // Check authentication
       const isAuth = await checkAuth();
       if (!isAuth) {
-        // Will show login modal, wait for auth before continuing
-        setupEventListeners();
         return;
       }
-      
-      await loadLocations();
-      await loadReportTypes();
-      await loadSavedReports();
-      setupEventListeners();
+
+      loadDashboardMetrics();
+      loadTodaysSales();
+      document.getElementById('refreshSalesBtn').addEventListener('click', loadTodaysSales);
+      // Auto-refresh every 5 minutes
+      setInterval(loadTodaysSales, 5 * 60 * 1000);
     }
 
-    async function loadLocations() {
-      try {
-        const resp = await fetch('/locations');
-        locations = await resp.json();
-        renderLocations();
-      } catch (err) {
-        console.error('Error loading locations:', err);
-      }
-    }
-
-    async function loadReportTypes() {
-      try {
-        const resp = await fetch('/api/report-types');
-        reportTypeOptions = await resp.json();
-        updateFilterByOptions();
-      } catch (err) {
-        console.error('Error loading report types:', err);
-      }
-    }
-
-    async function loadMenuItems() {
-      try {
-        const statusEl = document.getElementById('itemTagsLoadingStatus');
-        statusEl.textContent = 'Loading item tags...';
-        statusEl.classList.remove('hidden');
-        
-        const resp = await fetch('/api/menu-items');
-        if (!resp.ok) {
-          throw new Error('Failed to load menu items');
-        }
-        
-        const data = await resp.json();
-        menuItems = data.items;
-        allItemTags = data.allTags;
-        
-        renderItemTags();
-        statusEl.classList.add('hidden');
-      } catch (err) {
-        console.error('Error loading menu items:', err);
-        const statusEl = document.getElementById('itemTagsLoadingStatus');
-        statusEl.textContent = 'Error loading item tags. Please try again.';
-        statusEl.style.color = '#d9534f';
-      }
-    }
-
-    function renderItemTags() {
-      const grid = document.getElementById('itemTagsGrid');
-      if (!allItemTags || allItemTags.length === 0) {
-        grid.innerHTML = '<div style="padding: 0.5rem; color: #666;">No item tags found in menu</div>';
-        grid.classList.remove('hidden');
-        return;
-      }
-      
-      grid.innerHTML = allItemTags.map(tag => `
-        <label>
-          <input type="checkbox" class="itemtag-checkbox" value="${tag}" />
-          ${tag}
-        </label>
-      `).join('');
-      
-      grid.classList.remove('hidden');
-      
-      // Add change listeners to update count
-      document.querySelectorAll('.itemtag-checkbox').forEach(cb => {
-        cb.addEventListener('change', updateItemTagCount);
-      });
-      
-      updateItemTagCount();
-    }
-
-    function updateItemTagCount() {
-      const total = allItemTags.length;
-      const selected = document.querySelectorAll('.itemtag-checkbox:checked').length;
-      const countEl = document.getElementById('tagCount');
-      if (countEl) {
-        if (selected === 0) {
-          countEl.textContent = 'All items';
-        } else {
-          countEl.textContent = `${selected} of ${total} tags selected`;
-        }
-      }
-    }
-
-    async function loadSavedReports() {
-      if (!authToken) return;
-      
-      try {
-        const resp = await fetch('/api/saved-reports', {
-          headers: getAuthHeaders()
+    // Navigation dropdowns
+    function setupNavigation() {
+      document.querySelectorAll('.nav-category-header').forEach(header => {
+        header.addEventListener('click', () => {
+          const isCollapsed = header.classList.contains('collapsed');
+          const items = header.nextElementSibling;
+          const icon = header.querySelector('.toggle-icon');
+          
+          if (isCollapsed) {
+            header.classList.remove('collapsed');
+            items.style.maxHeight = '500px';
+            items.style.opacity = '1';
+            items.style.marginTop = '0.5rem';
+            icon.textContent = '▼';
+          } else {
+            header.classList.add('collapsed');
+            items.style.maxHeight = '0';
+            items.style.opacity = '0';
+            items.style.marginTop = '0';
+            icon.textContent = '▶';
+          }
         });
-        
-        if (resp.status === 401) {
-          // Token expired or invalid
-          clearAuth();
-          return;
-        }
-        
-        savedReports = await resp.json();
-        renderSavedReports();
-      } catch (err) {
-        console.error('Error loading saved reports:', err);
-        if (err.message.includes('401')) {
-          clearAuth();
-        }
-      }
-    }
-
-    function renderLocations() {
-      const grid = document.getElementById('locationsGrid');
-      if (locations.length === 0) {
-        grid.innerHTML = '<div>No locations found</div>';
-        return;
-      }
-      
-      grid.innerHTML = locations.map(loc => `
-        <label>
-          <input type="checkbox" class="location-checkbox" value="${loc.restaurantGuid}" checked />
-          ${loc.restaurantName}
-        </label>
-      `).join('');
-      
-      // Add change listeners to update count
-      document.querySelectorAll('.location-checkbox').forEach(cb => {
-        cb.addEventListener('change', updateLocationCount);
-      });
-      
-      updateLocationCount();
-    }
-
-    function updateLocationCount() {
-      const total = locations.length;
-      const selected = document.querySelectorAll('.location-checkbox:checked').length;
-      const countEl = document.getElementById('locationCount');
-      if (countEl) {
-        countEl.textContent = `${selected} of ${total} selected`;
-      }
-    }
-
-    function renderSavedReports() {
-      const list = document.getElementById('savedReportsList');
-      if (savedReports.length === 0) {
-        list.innerHTML = '<div class="empty-state">No saved reports yet</div>';
-        return;
-      }
-      
-      list.innerHTML = savedReports.map(report => `
-        <div class="report-item" data-id="${report.id}">
-          <div class="report-item-name">${report.name}</div>
-          <div class="report-item-creator">Created ${new Date(report.createdAt).toLocaleDateString()}</div>
-        </div>
-      `).join('');
-      
-      // Add click handlers
-      document.querySelectorAll('.report-item').forEach(item => {
-        item.addEventListener('click', () => loadReport(item.dataset.id));
       });
     }
 
-    function updateFilterByOptions() {
-      const reportType = document.getElementById('reportType').value;
-      const filterByType = document.getElementById('filterByType').value;
-      const reportTypeConfig = reportTypeOptions.reportTypes?.find(t => t.id === reportType);
-      const itemTagsSection = document.getElementById('itemTagsSection');
-      
-      // Show/hide item tags section based on filter type selection
-      if (reportType === 'menu' && filterByType === 'itemTags' && reportTypeConfig?.supportsItemTagFilters) {
-        itemTagsSection.classList.remove('hidden');
-        // Load menu items if not already loaded
-        if (!menuItems) {
-          loadMenuItems();
+    // ── Today's Net Sales + Labor Panel ───────────────────────
+    async function loadTodaysSales() {
+      const today    = new Date().toISOString().split('T')[0];
+      const todayKey = today.replace(/-/g, '');
+      const fmt$     = v => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v || 0);
+      const laborEls = ['todaysLaborCost', 'todaysLaborPct', 'todaysSplh'];
+
+      const totalEl = document.getElementById('todaysTotalSales');
+      const listEl  = document.getElementById('todaysLocationList');
+      const tsEl    = document.getElementById('todaysTimestamp');
+      const dateEl  = document.getElementById('todayDateBadge');
+
+      if (dateEl)  dateEl.textContent = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      if (totalEl) totalEl.textContent = '…';
+      if (listEl)  listEl.innerHTML = '<div style="color:#6B7280;font-size:0.85rem;padding:0.5rem 0;">Loading…</div>';
+      if (tsEl)    tsEl.textContent = '';
+      laborEls.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '…'; });
+
+      const restaurantIds = (currentUser?.assignedRestaurants?.length > 0)
+        ? currentUser.assignedRestaurants : [];
+
+      // Fetch sales and labor in parallel
+      const [salesResult, laborResult] = await Promise.allSettled([
+        fetch('/api/reports/run', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            reportType: 'metrics',
+            dateRangeType: 'custom',
+            customStartDate: today,
+            customEndDate: today,
+            restaurantIds,
+            groupBy: [],
+            itemTags: [],
+            includeZeroSales: false,
+            yoyEnabled: false
+          })
+        }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+
+        fetch('/api/labor-summary', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ restaurantIds, startDate: today, endDate: today })
+        }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      ]);
+
+      // ── Sales ────────────────────────────────────────────────
+      let grandTotal = 0;
+      if (salesResult.status === 'fulfilled') {
+        const totals     = salesResult.value.totals     || [];
+        const pivotTable = salesResult.value.pivotTable || [];
+        grandTotal = totals.reduce(
+          (sum, t) => sum + (t.totalNetSalesNewks != null ? t.totalNetSalesNewks : (t.totalNetSales || 0)), 0
+        );
+        if (totalEl) totalEl.textContent = fmt$(grandTotal);
+
+        if (pivotTable.length === 0) {
+          if (listEl) listEl.innerHTML = '<div style="color:#6B7280;font-size:0.85rem;padding:0.5rem 0;">No sales recorded yet for today.</div>';
+        } else {
+          const sorted = [...pivotTable].sort((a, b) => {
+            return (b[todayKey + '_newks'] ?? b[todayKey] ?? 0) - (a[todayKey + '_newks'] ?? a[todayKey] ?? 0);
+          });
+          if (listEl) listEl.innerHTML = sorted.map(row => {
+            const val = row[todayKey + '_newks'] ?? row[todayKey] ?? 0;
+            const pct = grandTotal > 0 ? Math.min((val / grandTotal) * 100, 100) : 0;
+            return `
+              <div class="today-location-row">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span style="font-size:0.85rem;color:#374151;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${row.restaurantName || 'Unknown'}</span>
+                  <span style="font-size:0.85rem;font-weight:600;color:#1E3A5F;margin-left:1rem;white-space:nowrap;">${fmt$(val)}</span>
+                </div>
+                <div class="today-bar-track"><div class="today-bar-fill" style="width:${pct.toFixed(1)}%;"></div></div>
+              </div>`;
+          }).join('');
         }
       } else {
-        itemTagsSection.classList.add('hidden');
+        if (totalEl) totalEl.textContent = '—';
+        if (listEl)  listEl.innerHTML = `<div style="color:#991B1B;font-size:0.85rem;padding:0.5rem 0;">Could not load sales: ${salesResult.reason?.message || 'Unknown error'}</div>`;
       }
+
+      // ── Labor ────────────────────────────────────────────────
+      if (laborResult.status === 'fulfilled') {
+        const laborCost  = laborResult.value.totalLaborCost || 0;
+        const totalHours = laborResult.value.totalHours     || 0;
+        const laborPct   = grandTotal > 0 ? (laborCost / grandTotal * 100) : 0;
+        const splh       = totalHours > 0 ? (grandTotal / totalHours)      : 0;
+        const costEl  = document.getElementById('todaysLaborCost');
+        const pctEl   = document.getElementById('todaysLaborPct');
+        const splhEl  = document.getElementById('todaysSplh');
+        if (costEl) costEl.textContent = fmt$(laborCost);
+        if (pctEl)  pctEl.textContent  = `${laborPct.toFixed(1)}%`;
+        if (splhEl) splhEl.textContent = fmt$(splh);
+      } else {
+        laborEls.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = 'N/A'; });
+      }
+
+      if (tsEl) tsEl.textContent = `Updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
     }
 
-    // Authentication state
-    let currentUser = null;
-    let authToken = null;
+    // Load dashboard metrics (sales chart only)
+    async function loadDashboardMetrics() {
+      try {
+        // Load sample sales data for chart
+        const ctx = document.getElementById('salesChart');
+        if (ctx) {
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6', 'Day 7'],
+              datasets: [{
+                label: 'Net Sales',
+                data: [12000, 15000, 18000, 14000, 16000, 19000, 17000],
+                borderColor: '#C41E3A',
+                backgroundColor: 'rgba(196, 30, 58, 0.1)',
+                tension: 0.4,
+                fill: true
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: false
+                }
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  ticks: {
+                    callback: function(value) {
+                      return '$' + (value / 1000).toFixed(0) + 'k';
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.error('Error loading dashboard metrics:', err);
+      }
+    }
 
     // Check authentication on page load
     async function checkAuth() {
@@ -1005,8 +919,6 @@
       if (authToken && userStr) {
         try {
           currentUser = JSON.parse(userStr);
-          console.log('checkAuth - loaded user from localStorage:', currentUser);
-          console.log('checkAuth - user role:', currentUser?.role);
           
           // Refresh user info from server to get latest role
           try {
@@ -1015,8 +927,6 @@
             });
             if (resp.ok) {
               const serverUser = await resp.json();
-              console.log('checkAuth - user from server:', serverUser);
-              console.log('checkAuth - server user role:', serverUser?.role);
               currentUser = serverUser;
               localStorage.setItem('user', JSON.stringify(serverUser));
             }
@@ -1025,7 +935,6 @@
           }
           
           updateUIForAuth();
-          // Hide auth modal if authenticated
           const authModal = document.getElementById('authModal');
           if (authModal) {
             authModal.classList.add('hidden');
@@ -1038,32 +947,46 @@
       }
       
       // Not authenticated - show login modal
-      console.log('Not authenticated, showing login modal');
       showAuthModal();
       return false;
     }
 
     function updateUIForAuth() {
+      const userProfileSection = document.getElementById('userProfileSection');
+      const userProfileName = document.getElementById('userProfileName');
+      const userProfileRole = document.getElementById('userProfileRole');
+      const userAvatar = document.getElementById('userAvatar');
+      const userAdminBtn = document.getElementById('userAdminBtn');
+      
       if (currentUser) {
-        console.log('updateUIForAuth - currentUser:', currentUser);
-        console.log('updateUIForAuth - currentUser.role:', currentUser.role);
-        document.getElementById('userName').textContent = currentUser.name;
-        document.getElementById('userInfo').classList.remove('hidden');
-        document.getElementById('authModal').classList.add('hidden');
+        // Update user profile in sidebar
+        if (userProfileName) userProfileName.textContent = currentUser.name;
+        if (userProfileRole) userProfileRole.textContent = currentUser.role || 'user';
+        if (userAvatar) {
+          // Get initials for avatar
+          const initials = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+          userAvatar.textContent = initials;
+        }
+        if (userProfileSection) userProfileSection.classList.remove('hidden');
         
         // Show admin button if user is admin
-        const adminBtn = document.getElementById('adminBtn');
-        console.log('Admin button element:', adminBtn);
+        if (userAdminBtn) {
         if (currentUser.role === 'admin') {
-          console.log('User is admin, showing admin button');
-          adminBtn.style.display = 'inline-block';
+            userAdminBtn.classList.remove('hidden');
         } else {
-          console.log('User is not admin, hiding admin button');
-          adminBtn.style.display = 'none';
+            userAdminBtn.classList.add('hidden');
         }
+        }
+
+        // Show admin-only nav items
+        const isAdmin = currentUser.role === 'admin';
+        document.getElementById('oloNavLink')?.classList.toggle('hidden', !isAdmin);
+        document.getElementById('dataNavSection')?.classList.toggle('hidden', !isAdmin);
+
+        document.getElementById('authModal').classList.add('hidden');
       } else {
-        document.getElementById('userInfo').classList.add('hidden');
-        document.getElementById('adminBtn').style.display = 'none';
+        if (userProfileSection) userProfileSection.classList.add('hidden');
+        if (userAdminBtn) userAdminBtn.classList.add('hidden');
       }
     }
 
@@ -1087,7 +1010,7 @@
       const password = document.getElementById('authPassword').value;
       
       if (!email || !password) {
-        showStatus('error', 'Please fill in all required fields');
+        alert('Please fill in all required fields');
         return;
       }
       
@@ -1097,8 +1020,6 @@
       submitBtn.textContent = 'Logging in...';
       
       try {
-        console.log('Sending login request:', { email });
-        
         const resp = await fetch('/api/auth/login', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -1108,14 +1029,10 @@
         if (!resp.ok) {
           const error = await resp.json().catch(() => ({detail: resp.statusText}));
           const errorMsg = error.detail || error.message || 'Authentication failed';
-          console.error('Auth error:', errorMsg, error);
           throw new Error(errorMsg);
         }
         
         const data = await resp.json();
-        console.log('Auth response:', data);
-        console.log('User from response:', data.user);
-        console.log('User role from response:', data.user?.role);
         
         // Store auth data
         localStorage.setItem('auth_token', data.access_token);
@@ -1123,29 +1040,17 @@
         authToken = data.access_token;
         currentUser = data.user;
         
-        console.log('Auth state updated:', { authToken: authToken ? 'present' : 'missing', currentUser });
-        console.log('Current user role:', currentUser?.role);
-        
         updateUIForAuth();
-        showStatus('success', `Welcome, ${data.user.name}!`);
+        alert(`Welcome, ${data.user.name}!`);
         
         // Hide auth modal
         const authModal = document.getElementById('authModal');
         if (authModal) {
           authModal.classList.add('hidden');
-          console.log('Auth modal hidden');
         }
         
-        // Load app data
-        console.log('Loading app data...');
-        await loadLocations();
-        await loadReportTypes();
-        await loadSavedReports();
-        console.log('App data loaded');
-        
       } catch (err) {
-        console.error('Auth error details:', err);
-        showStatus('error', `Error: ${err.message}`);
+        alert(`Error: ${err.message}`);
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
@@ -1154,805 +1059,7 @@
 
     function logout() {
       clearAuth();
-      showStatus('success', 'Logged out successfully');
-      // Clear any user-specific data
-      loadSavedReports();
-    }
-
-    async function loadAdminUsers() {
-      if (!authToken || currentUser?.role !== 'admin') {
-        showStatus('error', 'Admin access required');
-        return;
-      }
-
-      const usersList = document.getElementById('usersList');
-      usersList.innerHTML = '<div style="text-align: center; padding: 2rem; color: #6B7280;">Loading users...</div>';
-
-      try {
-        const resp = await fetch('/api/admin/users', {
-          headers: getAuthHeaders()
-        });
-
-        if (resp.status === 403) {
-          showStatus('error', 'Admin access required');
-          document.getElementById('adminModal').classList.add('hidden');
-          return;
-        }
-
-        if (!resp.ok) {
-          throw new Error('Failed to load users');
-        }
-
-        const users = await resp.json();
-        
-        if (users.length === 0) {
-          usersList.innerHTML = '<div style="text-align: center; padding: 2rem; color: #6B7280;">No users found</div>';
-          return;
-        }
-
-        usersList.innerHTML = `
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background: #F3F4F6; border-bottom: 2px solid #E5E7EB;">
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Name</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Email</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Role</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Created</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Last Login</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${users.map(user => `
-                <tr style="border-bottom: 1px solid #E5E7EB;">
-                  <td style="padding: 0.75rem;">${user.name}</td>
-                  <td style="padding: 0.75rem;">${user.email}</td>
-                  <td style="padding: 0.75rem;">
-                    <span style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; 
-                      background: ${user.role === 'admin' ? '#C41E3A' : '#6B7280'}; 
-                      color: white;">
-                      ${user.role === 'admin' ? 'Admin' : 'User'}
-                    </span>
-                  </td>
-                  <td style="padding: 0.75rem; color: #6B7280; font-size: 0.9rem;">
-                    ${new Date(user.createdAt).toLocaleDateString()}
-                  </td>
-                  <td style="padding: 0.75rem; color: #6B7280; font-size: 0.9rem;">
-                    ${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
-                  </td>
-                  <td style="padding: 0.75rem;">
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                      ${user.id !== currentUser.id ? `
-                        <button class="btn-secondary toggle-role-btn" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;" 
-                          data-user-id="${user.id}" data-new-role="${user.role === 'admin' ? 'user' : 'admin'}">
-                          ${user.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
-                        </button>
-                        <button class="btn-secondary delete-user-btn" style="font-size: 0.85rem; padding: 0.4rem 0.8rem; background: #DC2626; color: white; border-color: #DC2626;" 
-                          data-user-id="${user.id}" data-user-name="${user.name.replace(/"/g, '&quot;')}" data-user-email="${user.email.replace(/"/g, '&quot;')}">
-                          Delete
-                        </button>
-                      ` : '<span style="color: #6B7280; font-size: 0.85rem;">(You)</span>'}
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `;
-        
-        // Attach event listeners to the buttons
-        usersList.querySelectorAll('.toggle-role-btn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const userId = btn.getAttribute('data-user-id');
-            const newRole = btn.getAttribute('data-new-role');
-            toggleUserRole(userId, newRole);
-          });
-        });
-        
-        usersList.querySelectorAll('.delete-user-btn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const userId = btn.getAttribute('data-user-id');
-            const userName = btn.getAttribute('data-user-name');
-            const userEmail = btn.getAttribute('data-user-email');
-            deleteUser(userId, userName, userEmail);
-          });
-        });
-      } catch (err) {
-        console.error('Error loading users:', err);
-        usersList.innerHTML = `<div style="text-align: center; padding: 2rem; color: #DC2626;">Error loading users: ${err.message}</div>`;
-      }
-    }
-
-    async function toggleUserRole(userId, newRole) {
-      if (!confirm(`Are you sure you want to change this user's role to ${newRole}?`)) {
-        return;
-      }
-
-      try {
-        const resp = await fetch(`/api/admin/users/${userId}/role`, {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ role: newRole })
-        });
-
-        if (!resp.ok) {
-          const error = await resp.json().catch(() => ({detail: resp.statusText}));
-          throw new Error(error.detail || 'Failed to update user role');
-        }
-
-        showStatus('success', `User role updated to ${newRole}`);
-        loadAdminUsers(); // Refresh the list
-      } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
-      }
-    }
-
-    async function deleteUser(userId, userName, userEmail) {
-      if (!confirm(`Are you sure you want to delete user "${userName}" (${userEmail})? This action cannot be undone.`)) {
-        return;
-      }
-
-      try {
-        const resp = await fetch(`/api/admin/users/${userId}`, {
-          method: 'DELETE',
-          headers: getAuthHeaders()
-        });
-
-        if (!resp.ok) {
-          const error = await resp.json().catch(() => ({detail: resp.statusText}));
-          throw new Error(error.detail || 'Failed to delete user');
-        }
-
-        showStatus('success', `User ${userEmail} deleted successfully`);
-        loadAdminUsers(); // Refresh the list
-      } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
-      }
-    }
-
-    async function createUser(e) {
-      e.preventDefault();
-
-      if (!authToken || currentUser?.role !== 'admin') {
-        showStatus('error', 'Admin access required');
-        return;
-      }
-
-      const name = document.getElementById('newUserName').value.trim();
-      const email = document.getElementById('newUserEmail').value.trim();
-      const password = document.getElementById('newUserPassword').value;
-      const role = document.getElementById('newUserRole').value;
-
-      if (!name || !email || !password) {
-        showStatus('error', 'Please fill in all required fields');
-        return;
-      }
-
-      const submitBtn = e.target.querySelector('button[type="submit"]');
-      const originalText = submitBtn.textContent;
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Creating...';
-
-      try {
-        const resp = await fetch('/api/admin/users', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ name, email, password, role })
-        });
-
-        if (!resp.ok) {
-          const error = await resp.json().catch(() => ({detail: resp.statusText}));
-          throw new Error(error.detail || 'Failed to create user');
-        }
-
-        showStatus('success', `User ${email} created successfully!`);
-        document.getElementById('createUserForm').reset();
-        document.getElementById('createUserModal').classList.add('hidden');
-        loadAdminUsers(); // Refresh the list
-      } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalText;
-      }
-    }
-
-    // Helper to add auth header to fetch requests
-    function getAuthHeaders() {
-      const headers = {'Content-Type': 'application/json'};
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-      }
-      return headers;
-    }
-
-    function setupEventListeners() {
-      // Auth event listeners
-      document.getElementById('closeAuthModal').addEventListener('click', (e) => {
-        if (!currentUser) {
-          // Don't allow closing if not authenticated
-          e.preventDefault();
-          e.stopPropagation();
-          showStatus('error', 'Please login to continue');
-          return false;
-        }
-        document.getElementById('authModal').classList.add('hidden');
-      });
-      document.getElementById('cancelAuthBtn').addEventListener('click', () => {
-        if (!currentUser) {
-          showStatus('error', 'Please login to continue');
-          return;
-        }
-        document.getElementById('authModal').classList.add('hidden');
-      });
-      document.getElementById('authForm').addEventListener('submit', handleAuth);
-      document.getElementById('logoutBtn').addEventListener('click', logout);
-      document.getElementById('adminBtn').addEventListener('click', () => {
-        document.getElementById('adminModal').classList.remove('hidden');
-        loadAdminUsers();
-      });
-      document.getElementById('closeAdminModal').addEventListener('click', () => {
-        document.getElementById('adminModal').classList.add('hidden');
-      });
-      document.getElementById('createUserBtn').addEventListener('click', () => {
-        document.getElementById('createUserModal').classList.remove('hidden');
-      });
-      document.getElementById('closeCreateUserModal').addEventListener('click', () => {
-        document.getElementById('createUserModal').classList.add('hidden');
-      });
-      document.getElementById('cancelCreateUserBtn').addEventListener('click', () => {
-        document.getElementById('createUserModal').classList.add('hidden');
-      });
-      document.getElementById('createUserForm').addEventListener('submit', createUser);
-      
-      document.getElementById('newReportBtn').addEventListener('click', newReport);
-      document.getElementById('runReportBtn').addEventListener('click', runReport);
-      document.getElementById('saveReportBtn').addEventListener('click', saveReport);
-      document.getElementById('updateReportBtn').addEventListener('click', updateReport);
-      document.getElementById('deleteReportBtn').addEventListener('click', deleteReport);
-      document.getElementById('exportBtn').addEventListener('click', exportCSV);
-      document.getElementById('helpBtn').addEventListener('click', () => {
-        document.getElementById('helpModal').classList.remove('hidden');
-      });
-      document.getElementById('closeHelpModal').addEventListener('click', () => {
-        document.getElementById('helpModal').classList.add('hidden');
-      });
-      document.getElementById('cancelHelpBtn').addEventListener('click', () => {
-        document.getElementById('helpModal').classList.add('hidden');
-      });
-      document.getElementById('helpForm').addEventListener('submit', submitHelpTicket);
-      
-      document.getElementById('reportType').addEventListener('change', updateFilterByOptions);
-      document.getElementById('filterByType').addEventListener('change', updateFilterByOptions);
-      document.getElementById('dateRangeType').addEventListener('change', toggleCustomDateRange);
-      document.getElementById('selectAllLocations').addEventListener('change', toggleAllLocations);
-    }
-
-    function toggleCustomDateRange() {
-      const type = document.getElementById('dateRangeType').value;
-      document.getElementById('customDateRange').classList.toggle('hidden', type !== 'custom');
-    }
-
-    function toggleAllLocations() {
-      const checked = document.getElementById('selectAllLocations').checked;
-      document.querySelectorAll('.location-checkbox').forEach(cb => cb.checked = checked);
-      updateLocationCount();
-    }
-
-    function newReport() {
-      currentReportId = null;
-      document.getElementById('builderTitle').textContent = 'Report Builder - New Report';
-      document.getElementById('reportName').value = '';
-      document.getElementById('reportDescription').value = '';
-      document.getElementById('reportType').value = 'metrics';
-      document.getElementById('dateRangeType').value = 'last_7_days';
-      document.getElementById('selectAllLocations').checked = true;
-      toggleAllLocations();
-      updateFilterByOptions();
-      toggleCustomDateRange();
-      
-      // Update buttons
-      document.getElementById('saveReportBtn').classList.remove('hidden');
-      document.getElementById('updateReportBtn').classList.add('hidden');
-      document.getElementById('deleteReportBtn').classList.add('hidden');
-      
-      // Clear active state
-      document.querySelectorAll('.report-item').forEach(item => item.classList.remove('active'));
-      
-      showStatus('info', 'Creating new report');
-      updateLocationCount();
-    }
-
-    function loadReport(reportId) {
-      const report = savedReports.find(r => r.id === reportId);
-      if (!report) return;
-      
-      currentReportId = reportId;
-      document.getElementById('builderTitle').textContent = `Report Builder - ${report.name}`;
-      document.getElementById('reportName').value = report.name;
-      document.getElementById('reportDescription').value = report.description || '';
-      document.getElementById('reportType').value = report.config.reportType;
-      document.getElementById('dateRangeType').value = report.config.dateRangeType;
-      
-      if (report.config.customStartDate) {
-        document.getElementById('customStartDate').value = report.config.customStartDate;
-      }
-      if (report.config.customEndDate) {
-        document.getElementById('customEndDate').value = report.config.customEndDate;
-      }
-      
-      updateFilterByOptions();
-      toggleCustomDateRange();
-      
-      // Set locations
-      if (report.config.restaurantIds && report.config.restaurantIds.length > 0) {
-        document.getElementById('selectAllLocations').checked = false;
-        document.querySelectorAll('.location-checkbox').forEach(cb => {
-          cb.checked = report.config.restaurantIds.includes(cb.value);
-        });
-      } else {
-        document.getElementById('selectAllLocations').checked = true;
-        toggleAllLocations();
-      }
-      
-      updateLocationCount();
-      
-      // Set filter by and item tags
-      setTimeout(() => {
-        // Set filter by type
-        if (report.config.reportType === 'menu' && report.config.itemTags && report.config.itemTags.length > 0) {
-          document.getElementById('filterByType').value = 'itemTags';
-          updateFilterByOptions();
-        } else {
-          document.getElementById('filterByType').value = '';
-          updateFilterByOptions();
-        }
-        
-        // Restore item tags if menu report
-        if (report.config.reportType === 'menu' && report.config.itemTags) {
-          document.querySelectorAll('.itemtag-checkbox').forEach(cb => {
-            cb.checked = report.config.itemTags.includes(cb.value);
-          });
-          updateItemTagCount();
-        }
-      }, 100);
-      
-      // Update buttons
-      document.getElementById('saveReportBtn').classList.add('hidden');
-      document.getElementById('updateReportBtn').classList.remove('hidden');
-      document.getElementById('deleteReportBtn').classList.remove('hidden');
-      
-      // Highlight active report
-      document.querySelectorAll('.report-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.id === reportId);
-      });
-      
-      showStatus('success', `Loaded report: ${report.name}`);
-    }
-
-    async function runReport() {
-      const config = getReportConfig();
-      if (!validateConfig(config)) return;
-      
-      // Show loading overlay
-      document.getElementById('loadingOverlay').classList.remove('hidden');
-      showStatus('info', 'Running report...');
-      document.getElementById('runReportBtn').disabled = true;
-      
-      try {
-        const resp = await fetch('/api/reports/run', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(config)
-        });
-        
-        if (!resp.ok) {
-          const error = await resp.text();
-          throw new Error(error);
-        }
-        
-        currentResults = await resp.json();
-        console.log('Report results:', currentResults); // Debug
-        renderResults(currentResults, config);
-        // Handle both old format (array) and new format (pivot object)
-        const rowCount = Array.isArray(currentResults) 
-          ? currentResults.length 
-          : (currentResults.pivotTable?.length || 0) + (currentResults.totals?.length || 0);
-        showStatus('success', `Report complete: ${rowCount} rows`);
-      } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
-      } finally {
-        // Hide loading overlay
-        document.getElementById('loadingOverlay').classList.add('hidden');
-        document.getElementById('runReportBtn').disabled = false;
-      }
-    }
-
-    async function saveReport() {
-      if (!authToken) {
-        showStatus('error', 'Please login to save reports');
-        showAuthModal();
-        return;
-      }
-      
-      const name = document.getElementById('reportName').value.trim();
-      
-      if (!name) {
-        showStatus('error', 'Please enter a report name');
-        return;
-      }
-      
-      const config = getReportConfig();
-      
-      try {
-        const resp = await fetch('/api/saved-reports', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            name,
-            description: document.getElementById('reportDescription').value.trim(),
-            config
-          })
-        });
-        
-        if (!resp.ok) {
-          const error = await resp.text();
-          throw new Error(error);
-        }
-        
-        await loadSavedReports();
-        showStatus('success', 'Report saved successfully!');
-      } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
-      }
-    }
-
-    async function updateReport() {
-      if (!currentReportId || !authToken) {
-        showStatus('error', 'Please login to update reports');
-        return;
-      }
-      
-      const name = document.getElementById('reportName').value.trim();
-      
-      if (!name) {
-        showStatus('error', 'Please enter a report name');
-        return;
-      }
-      
-      const config = getReportConfig();
-      
-      try {
-        const resp = await fetch(`/api/saved-reports/${currentReportId}`, {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            name,
-            description: document.getElementById('reportDescription').value.trim(),
-            config
-          })
-        });
-        
-        if (!resp.ok) {
-          const error = await resp.text();
-          throw new Error(error);
-        }
-        
-        await loadSavedReports();
-        showStatus('success', 'Report updated successfully!');
-      } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
-      }
-    }
-
-    async function deleteReport() {
-      if (!currentReportId || !authToken) {
-        showStatus('error', 'Please login to delete reports');
-        return;
-      }
-      
-      if (!confirm('Are you sure you want to delete this report?')) return;
-      
-      try {
-        const resp = await fetch(`/api/saved-reports/${currentReportId}`, {
-          method: 'DELETE',
-          headers: getAuthHeaders()
-        });
-        
-        if (!resp.ok) {
-          const error = await resp.text();
-          throw new Error(error);
-        }
-        
-        await loadSavedReports();
-        newReport();
-        showStatus('success', 'Report deleted successfully!');
-      } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
-      }
-    }
-
-    function getReportConfig() {
-      const selectedLocations = Array.from(document.querySelectorAll('.location-checkbox:checked')).map(cb => cb.value);
-      const selectedItemTags = Array.from(document.querySelectorAll('.itemtag-checkbox:checked')).map(cb => cb.value);
-      
-      return {
-        reportType: document.getElementById('reportType').value,
-        dateRangeType: document.getElementById('dateRangeType').value,
-        customStartDate: document.getElementById('customStartDate').value || null,
-        customEndDate: document.getElementById('customEndDate').value || null,
-        restaurantIds: selectedLocations,
-        groupBy: [], // No longer used - removed from UI
-        itemTags: selectedItemTags
-      };
-    }
-
-    function validateConfig(config) {
-      if (config.dateRangeType === 'custom' && (!config.customStartDate || !config.customEndDate)) {
-        showStatus('error', 'Please select custom date range');
-        return false;
-      }
-      if (config.restaurantIds.length === 0) {
-        showStatus('error', 'Please select at least one location');
-        return false;
-      }
-      return true;
-    }
-
-    function renderResults(results, config) {
-      const head = document.getElementById('resultsHead');
-      const body = document.getElementById('resultsBody');
-      
-      // Check if this is the new pivot format (object with pivotTable and totals)
-      if (results && typeof results === 'object' && !Array.isArray(results) && 
-          results.hasOwnProperty('pivotTable') && results.hasOwnProperty('totals')) {
-        console.log('Detected pivot format, rendering pivot table');
-        renderPivotResults(results, config);
-        return;
-      }
-      
-      console.log('Using old format, results type:', typeof results, 'isArray:', Array.isArray(results));
-      
-      // Old format: array of rows
-      if (!results || !Array.isArray(results) || results.length === 0) {
-        head.innerHTML = '';
-        body.innerHTML = '<tr><td colspan="100" class="empty-state">No data found</td></tr>';
-        document.getElementById('exportBtn').classList.add('hidden');
-        return;
-      }
-      
-      // Build table headers dynamically based on result keys
-      const keys = Object.keys(results[0]);
-      head.innerHTML = `<tr>${keys.map(k => `<th>${formatHeader(k)}</th>`).join('')}</tr>`;
-      
-      // Build table rows
-      body.innerHTML = results.map(row => `
-        <tr>
-          ${keys.map(k => `<td>${formatCell(k, row[k])}</td>`).join('')}
-        </tr>
-      `).join('');
-      
-      // Show export button
-      document.getElementById('exportBtn').classList.remove('hidden');
-      
-      // Update summary
-      document.getElementById('resultsSummary').textContent = `${results.length} rows`;
-    }
-
-    function renderPivotResults(results, config) {
-      const head = document.getElementById('resultsHead');
-      const body = document.getElementById('resultsBody');
-      const pivotTable = results.pivotTable || [];
-      const totals = results.totals || [];
-      
-      if (pivotTable.length === 0 && totals.length === 0) {
-        head.innerHTML = '';
-        body.innerHTML = '<tr><td colspan="100" class="empty-state">No data found</td></tr>';
-        document.getElementById('exportBtn').classList.add('hidden');
-        document.getElementById('resultsSummary').textContent = '0 rows';
-        return;
-      }
-      
-      // Detect report type: metrics (has dates) vs menu (has tags)
-      const isMetricsReport = pivotTable.length > 0 && 
-        totals.length > 0 && 
-        totals[0].hasOwnProperty('date') && 
-        totals[0].hasOwnProperty('totalNetSales');
-      
-      const columnNames = pivotTable.length > 0 ? Object.keys(pivotTable[0]).filter(k => k !== 'restaurantName') : [];
-      // Sort dates properly (YYYYMMDD format) or alphabetically for tags
-      const sortedColumns = isMetricsReport 
-        ? columnNames.sort((a, b) => {
-            // If both are date strings (8 digits), sort numerically
-            if (/^\d{8}$/.test(a) && /^\d{8}$/.test(b)) {
-              return a.localeCompare(b);
-            }
-            return a.localeCompare(b);
-          })
-        : columnNames.sort();
-      
-      let html = '';
-      
-      // Section 1: Totals at the top (expandable) - spreadsheet style
-      if (totals.length > 0 && pivotTable.length > 0) {
-        const expandId = 'expand-locations-' + Date.now();
-        
-        if (isMetricsReport) {
-          // For metrics: show date totals with expandable locations
-          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">Location</th>';
-          sortedColumns.forEach(col => {
-            html += `<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">${formatDateHeader(col)}</th>`;
-          });
-          html += '</tr>';
-          
-          // Totals row (expandable) - this is the "All Locations Totals:" row
-          html += '<tr class="expandable-header" data-expand-id="' + expandId + '" style="cursor: pointer; background: #EFF6FF; border: 1px solid #BFDBFE;">';
-          html += '<td style="padding: 0.75rem; font-weight: 700; border: 1px solid #BFDBFE;">';
-          html += '<span class="expand-icon" style="display: inline-block; width: 20px; text-align: center; margin-right: 0.5rem;">▶</span> ';
-          html += 'All Locations Totals:';
-          html += '</td>';
-          sortedColumns.forEach(col => {
-            const totalForDate = totals.find(t => t.date === col);
-            const totalValue = totalForDate ? totalForDate.totalNetSales : 0;
-            html += `<td style="text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #BFDBFE;">${formatCell('Sales', totalValue)}</td>`;
-          });
-          html += '</tr>';
-          
-          // Location rows (initially hidden)
-          pivotTable.forEach((row, index) => {
-            html += '<tr class="location-row" data-expand-id="' + expandId + '" style="display: none; background: white;">';
-            html += '<td style="padding: 0.5rem 0.75rem 0.5rem 2.5rem; border: 1px solid #E5E7EB;">' + (row.restaurantName || '') + '</td>';
-            sortedColumns.forEach(col => {
-              const value = row[col];
-              const displayValue = (value !== null && value !== undefined) ? value : 0;
-              html += `<td style="padding: 0.5rem 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('Sales', displayValue)}</td>`;
-            });
-            html += '</tr>';
-          });
-        } else {
-          // For menu: show tag totals with expandable locations
-          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">Location</th>';
-          sortedColumns.forEach(col => {
-            html += `<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #1E3A8A;">${col}</th>`;
-          });
-          html += '</tr>';
-          
-          // Calculate totals for each tag
-          const tagTotals = {};
-          sortedColumns.forEach(tagName => {
-            tagTotals[tagName] = totals.find(t => t.itemTagName === tagName)?.totalQty || 0;
-          });
-          
-          // Totals row (expandable) - this is the "All Locations Totals:" row
-          html += '<tr class="expandable-header" data-expand-id="' + expandId + '" style="cursor: pointer; background: #EFF6FF; border: 1px solid #BFDBFE;">';
-          html += '<td style="padding: 0.75rem; font-weight: 700; border: 1px solid #BFDBFE;">';
-          html += '<span class="expand-icon" style="display: inline-block; width: 20px; text-align: center; margin-right: 0.5rem;">▶</span> ';
-          html += 'All Locations Totals:';
-          html += '</td>';
-          sortedColumns.forEach(tagName => {
-            html += `<td style="text-align: right; font-weight: 700; padding: 0.75rem; border: 1px solid #BFDBFE;">${formatCell('quantity', tagTotals[tagName])}</td>`;
-          });
-          html += '</tr>';
-          
-          // Location rows (initially hidden)
-          pivotTable.forEach((row, index) => {
-            html += '<tr class="location-row" data-expand-id="' + expandId + '" style="display: none; background: white;">';
-            html += '<td style="padding: 0.5rem 0.75rem 0.5rem 2.5rem; border: 1px solid #E5E7EB;">' + (row.restaurantName || '') + '</td>';
-            sortedColumns.forEach(tagName => {
-              const value = row[tagName];
-              const displayValue = (value !== null && value !== undefined) ? value : 0;
-              html += `<td style="padding: 0.5rem 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('quantity', displayValue)}</td>`;
-            });
-            html += '</tr>';
-          });
-        }
-      } else if (totals.length > 0) {
-        // No locations, just show totals
-        if (isMetricsReport) {
-          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem;">Date</th>';
-          html += '<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem;">Total Net Sales</th></tr>';
-          totals.forEach(row => {
-            html += '<tr>';
-            html += `<td style="padding: 0.75rem; border: 1px solid #E5E7EB;"><strong>${formatDateHeader(row.date || '')}</strong></td>`;
-            html += `<td style="padding: 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('Sales', row.totalNetSales || 0)}</td>`;
-            html += '</tr>';
-          });
-        } else {
-          html += '<tr><th style="background: #1E40AF; color: white; text-align: left; font-weight: 700; padding: 0.75rem;">Item Tag Name</th>';
-          html += '<th style="background: #1E40AF; color: white; text-align: right; font-weight: 700; padding: 0.75rem;">Total Qty</th></tr>';
-          totals.forEach(row => {
-            html += '<tr>';
-            html += `<td style="padding: 0.75rem; border: 1px solid #E5E7EB;"><strong>${row.itemTagName || ''}</strong></td>`;
-            html += `<td style="padding: 0.75rem; text-align: right; border: 1px solid #E5E7EB;">${formatCell('quantity', row.totalQty || 0)}</td>`;
-            html += '</tr>';
-          });
-        }
-      }
-      
-      // Section 3: Item Breakdown (for menu reports only)
-      if (!isMetricsReport && results.itemBreakdown && results.itemBreakdown.length > 0) {
-        // Debug: Log item breakdown data
-        console.log('Item Breakdown Data:', results.itemBreakdown);
-        const missingGuids = ['6d02e1aa-41c4-489e-bd72-90d12d79edf2', '99746810-e792-4e7a-b99f-0e30b470a2bd'];
-        const foundItems = results.itemBreakdown.filter(item => 
-          missingGuids.includes(item.menuItemGuid) || 
-          (item.menuItemName && item.menuItemName.includes('OLO Pairing Choice'))
-        );
-        if (foundItems.length > 0) {
-          console.log('Found items with missing GUIDs or OLO Pairing Choice:', foundItems);
-        } else {
-          console.log('Items with GUIDs 6d02e1aa-41c4-489e-bd72-90d12d79edf2 or 99746810-e792-4e7a-b99f-0e30b470a2bd NOT found in itemBreakdown');
-          console.log('Total items in breakdown:', results.itemBreakdown.length);
-          console.log('Sample items:', results.itemBreakdown.slice(0, 5));
-        }
-        
-        html += '<tr><td colspan="100" style="height: 20px; border: none;"></td></tr>'; // Spacer
-        html += '<tr><th colspan="3" style="background: #059669; color: white; text-align: center; font-weight: 700;">ITEM BREAKDOWN BY TAG</th></tr>';
-        html += '<tr><th>Item Tag Name</th><th>Item Name</th><th>Total Qty</th></tr>';
-        
-        // Group by tag name
-        const breakdownByTag = {};
-        results.itemBreakdown.forEach(item => {
-          const tagName = item.itemTagName || '';
-          if (!breakdownByTag[tagName]) {
-            breakdownByTag[tagName] = [];
-          }
-          breakdownByTag[tagName].push(item);
-        });
-        
-        // Render each tag's items
-        Object.keys(breakdownByTag).sort().forEach(tagName => {
-          breakdownByTag[tagName].forEach(item => {
-            html += '<tr>';
-            html += `<td><strong>${tagName}</strong></td>`;
-            html += `<td>${item.menuItemName || 'Unknown Item'}</td>`;
-            html += `<td>${formatCell('quantity', item.totalQty || 0)}</td>`;
-            html += '</tr>';
-          });
-        });
-      }
-      
-      head.innerHTML = '';
-      body.innerHTML = html;
-      
-      // Add click handlers for expandable rows
-      setTimeout(() => {
-        body.querySelectorAll('.expandable-header').forEach(header => {
-          header.addEventListener('click', function() {
-            const expandId = this.getAttribute('data-expand-id');
-            const locationRows = body.querySelectorAll(`.location-row[data-expand-id="${expandId}"]`);
-            const icon = this.querySelector('.expand-icon');
-            const isExpanded = locationRows[0] && locationRows[0].style.display !== 'none';
-            
-            locationRows.forEach(row => {
-              row.style.display = isExpanded ? 'none' : 'table-row';
-            });
-            
-            icon.textContent = isExpanded ? '▶' : '▼';
-          });
-        });
-      }, 100);
-      
-      // Show export button
-      document.getElementById('exportBtn').classList.remove('hidden');
-      
-      // Update summary
-      if (isMetricsReport) {
-        document.getElementById('resultsSummary').textContent = `${pivotTable.length} restaurants, ${totals.length} date totals`;
-      } else {
-        document.getElementById('resultsSummary').textContent = `${pivotTable.length} restaurants, ${totals.length} tag totals`;
-      }
-    }
-
-    function formatDateHeader(dateStr) {
-      // Format YYYYMMDD to MM/DD/YYYY or keep as is if already formatted
-      if (/^\d{8}$/.test(dateStr)) {
-        const year = dateStr.substring(0, 4);
-        const month = dateStr.substring(4, 6);
-        const day = dateStr.substring(6, 8);
-        return `${month}/${day}/${year}`;
-      }
-      return dateStr;
+      alert('Logged out successfully');
     }
 
     async function submitHelpTicket(e) {
@@ -1961,11 +1068,11 @@
       const name = document.getElementById('helpName').value.trim();
       const email = document.getElementById('helpEmail').value.trim();
       const subject = document.getElementById('helpSubject').value.trim();
-      const priority = parseInt(document.getElementById('helpPriority').value);
+      const priority = document.getElementById('helpPriority').value;
       const description = document.getElementById('helpDescription').value.trim();
       
       if (!name || !email || !subject || !description) {
-        showStatus('error', 'Please fill in all required fields');
+        alert('Please fill in all required fields');
         return;
       }
       
@@ -1982,180 +1089,65 @@
             name,
             email,
             subject,
-            priority,
+            priority: parseInt(priority),
             description
           })
         });
         
-        if (!resp.ok) {
-          const error = await resp.text();
-          throw new Error(error);
-        }
+        const responseData = await resp.json().catch(() => ({ detail: resp.statusText }));
         
-        const result = await resp.json();
-        showStatus('success', `Help ticket submitted successfully! Ticket ID: ${result.ticketId || 'N/A'}`);
-        document.getElementById('helpForm').reset();
-        document.getElementById('helpModal').classList.add('hidden');
+        if (resp.ok) {
+          const result = responseData;
+          alert(`Help ticket submitted successfully! Ticket ID: ${result.ticketId || 'N/A'}\n\n${result.message || 'Our team will respond soon!'}`);
+          document.getElementById('helpForm').reset();
+          document.getElementById('helpModal').classList.add('hidden');
+        } else {
+          // Show the actual error from backend
+          const errorMsg = responseData.detail || responseData.message || 'Failed to submit ticket';
+          console.error('Help ticket submission error:', errorMsg);
+          alert(`Error submitting ticket: ${errorMsg}\n\nPlease check that SLACK_WEBHOOK_URL is configured in the backend.`);
+        }
       } catch (err) {
-        showStatus('error', `Error submitting ticket: ${err.message}`);
+        console.error('Help ticket submission error:', err);
+        alert(`Error submitting ticket: ${err.message}\n\nPlease check the browser console for details.`);
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
       }
     }
 
-    function formatHeader(key) {
-      return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-    }
-
-    function formatCell(key, value) {
-      if (key.includes('Amount') || key.includes('Sales')) {
-        return `$${parseFloat(value || 0).toFixed(2)}`;
-      }
-      if (key === 'businessDate') {
-        return value;
-      }
-      if (key === 'quantity' || key.includes('Qty') || key.includes('quantity')) {
-        return typeof value === 'number' ? value.toLocaleString() : (value || '0');
-      }
-      return value || '';
-    }
-
-    function exportCSV() {
-      if (!currentResults) return;
-      
-      // Handle pivot format
-      if (currentResults.pivotTable && currentResults.totals) {
-        const csvRows = [];
-        const pivotTable = currentResults.pivotTable || [];
-        const totals = currentResults.totals || [];
-        
-        // Detect report type
-        const isMetricsReport = totals.length > 0 && 
-          totals[0].hasOwnProperty('date') && 
-          totals[0].hasOwnProperty('totalNetSales');
-        
-        if (pivotTable.length > 0) {
-          const columnNames = Object.keys(pivotTable[0]).filter(k => k !== 'restaurantName').sort();
-          
-          if (isMetricsReport) {
-            // Metrics report: Restaurants x Dates
-            csvRows.push('Restaurant Location,' + columnNames.map(col => formatDateHeader(col)).join(','));
-            pivotTable.forEach(row => {
-              csvRows.push((row.restaurantName || '') + ',' + columnNames.map(col => (row[col] || 0)).join(','));
-            });
-            
-            // Totals row
-            csvRows.push('TOTALS,' + columnNames.map(col => {
-              const totalRow = totals.find(t => t.date === col);
-              return totalRow ? (totalRow.totalNetSales || 0) : '';
-            }).join(','));
-          } else {
-            // Menu report: Restaurants x Tags
-            csvRows.push(',Item tag Name,' + columnNames.map(() => '').join(',') + ',TOTALS:,' + columnNames.map(() => 'Item Tag Name').join(','));
-            csvRows.push('Restaurant Location,' + columnNames.map(() => '').join(',') + ',,' + columnNames.map(() => 'Total Qty').join(','));
-            
-            pivotTable.forEach(row => {
-              csvRows.push((row.restaurantName || '') + ',' + columnNames.map(tag => (row[tag] || 0)).join(',') + ',,' + columnNames.map(() => '').join(','));
-            });
-            
-            // Totals section
-            totals.forEach(row => {
-              csvRows.push(',,' + columnNames.map(() => '').join(',') + ',,' + (row.itemTagName || '') + ',' + (row.totalQty || 0));
-            });
-            
-            // Item Breakdown section (if available)
-            if (currentResults.itemBreakdown && currentResults.itemBreakdown.length > 0) {
-              csvRows.push(''); // Empty row separator
-              csvRows.push('ITEM BREAKDOWN BY TAG');
-              csvRows.push('Item Tag Name,Item Name,Total Qty');
-              
-              // Group by tag for better organization
-              const breakdownByTag = {};
-              currentResults.itemBreakdown.forEach(item => {
-                const tagName = item.itemTagName || '';
-                if (!breakdownByTag[tagName]) {
-                  breakdownByTag[tagName] = [];
-                }
-                breakdownByTag[tagName].push(item);
-              });
-              
-              // Sort tags alphabetically
-              const sortedTags = Object.keys(breakdownByTag).sort();
-              sortedTags.forEach(tagName => {
-                // Sort items by quantity (descending)
-                const items = breakdownByTag[tagName].sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0));
-                items.forEach(item => {
-                  const itemName = (item.menuItemName || '').replace(/,/g, ';'); // Replace commas to avoid CSV issues
-                  csvRows.push(`${tagName},${itemName},${item.totalQty || 0}`);
-                });
-              });
-            }
-          }
-        }
-        
-        const csv = csvRows.join('\n');
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'report.csv';
-        a.click();
-        URL.revokeObjectURL(url);
-        return;
-      }
-      
-      // Old format: array
-      if (!Array.isArray(currentResults) || currentResults.length === 0) return;
-      
-      const keys = Object.keys(currentResults[0]);
-      const csvRows = [];
-      
-      // Header
-      csvRows.push(keys.map(k => formatHeader(k)).join(','));
-      
-      // Data
-      currentResults.forEach(row => {
-        csvRows.push(keys.map(k => {
-          const value = row[k] || '';
-          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-            return `"${value.replace(/"/g, '""')}"`;
-          }
-          return value;
-        }).join(','));
+    function setupEventListeners() {
+      // Auth form
+      document.getElementById('authForm').addEventListener('submit', handleAuth);
+      document.getElementById('closeAuthModal').addEventListener('click', () => {
+        document.getElementById('authModal').classList.add('hidden');
+      });
+      document.getElementById('cancelAuthBtn').addEventListener('click', () => {
+        document.getElementById('authModal').classList.add('hidden');
       });
       
-      // Download
-      const csvContent = csvRows.join('\n');
-      const BOM = '\uFEFF';
-      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
+      // Logout (from sidebar)
+      document.getElementById('userLogoutBtn').addEventListener('click', logout);
       
-      const reportName = document.getElementById('reportName').value.trim() || 'report';
-      const filename = `${reportName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}.csv`;
-      
-      link.setAttribute('href', url);
-      link.setAttribute('download', filename);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 100);
+      // Admin panel (from sidebar) — navigates to standalone admin page
+      document.getElementById('userAdminBtn').addEventListener('click', () => {
+        window.location.href = '/admin.html';
+      });
+
+      // Help button (floating bubble)
+      document.getElementById('helpBtn').addEventListener('click', () => {
+        document.getElementById('helpModal').classList.remove('hidden');
+      });
+      document.getElementById('closeHelpModal').addEventListener('click', () => {
+        document.getElementById('helpModal').classList.add('hidden');
+      });
+      document.getElementById('cancelHelpBtn').addEventListener('click', () => {
+        document.getElementById('helpModal').classList.add('hidden');
+      });
+      document.getElementById('helpForm').addEventListener('submit', submitHelpTicket);
     }
 
-    function showStatus(type, message) {
-      const status = document.getElementById('builderStatus');
-      status.className = `status ${type}`;
-      status.textContent = message;
-      status.classList.remove('hidden');
-      
-      if (type === 'success') {
-        setTimeout(() => status.classList.add('hidden'), 5000);
-      }
-    }
-
-    // Start
+    // Initialize on page load
     init();
   </script>
 </body>

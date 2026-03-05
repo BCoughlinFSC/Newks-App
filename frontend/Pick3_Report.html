@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pick 3 Report — Standalone</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231E3A5F'/%3E%3C/svg%3E" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #F8FAFC; color: #2c2c2c; }
+    .header { background: #C41E3A; padding: 1.5rem 2rem; border-bottom: 3px solid #A01A2E; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p  { margin: 0.4rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+    .standalone-badge { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.8rem; white-space: nowrap; }
+    .standalone-layout { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    .card { background: #fff; border-radius: 12px; padding: 1.5rem 2rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e0d5; margin-bottom: 1.5rem; }
+    .card h2 { margin: 0 0 0.25rem; color: #C41E3A; font-size: 1.2rem; font-weight: 700; }
+    .card-sub { font-size: 0.85rem; color: #666; margin: 0 0 1.25rem; }
+    .btn { display: inline-flex; align-items: center; gap: 0.4rem; background: #C41E3A; color: #fff; border: none; padding: 0.6rem 1.25rem; border-radius: 6px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    .btn:hover    { background: #A01A2E; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-navy  { background: #1E3A5F; }
+    .btn-navy:hover  { background: #162d4a; }
+    .btn-gray  { background: #6B7280; }
+    .btn-gray:hover  { background: #4B5563; }
+    .vtabs { display: flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; width: fit-content; margin-bottom: 1rem; }
+    .vtab { padding: 0.45rem 1.2rem; border: none; background: #f1f5f9; color: #64748b; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+    .vtab:hover  { background: #e2e8f0; }
+    .vtab.active { background: #C41E3A; color: #fff; }
+    .upload-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin-bottom: 1rem; }
+    .file-field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .file-field label { font-size: 0.8rem; font-weight: 600; color: #374151; }
+    .badge-req { font-size: 0.7rem; background: #DBEAFE; color: #1E40AF; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: 600; }
+    .badge-opt { font-size: 0.7rem; background: #F3F4F6; color: #6B7280; padding: 0.1rem 0.4rem; border-radius: 4px; }
+    .status { padding: 0.55rem 0.9rem; border-radius: 6px; font-size: 0.85rem; margin-top: 0.75rem; display: none; white-space: pre-wrap; }
+    .status.loading { background: #FEF3C7; color: #92400E; display: block; }
+    .status.error   { background: #FEE2E2; color: #991B1B; display: block; }
+    .status.success { background: #D1FAE5; color: #065F46; display: block; }
+    .action-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+    @media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
+    .tbl-section h3 { margin: 0 0 0.5rem; font-size: 1rem; color: #1E3A5F; font-weight: 700; }
+    .tbl-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    thead th { background: #EFF6FF; color: #1E3A5F; font-weight: 700; padding: 0.5rem 0.75rem; text-align: left; border-bottom: 2px solid #BFDBFE; white-space: nowrap; }
+    thead th.num { text-align: right; }
+    tbody td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #F0F0F0; }
+    tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:nth-child(even) { background: #F8FAFF; }
+    tbody tr:hover { background: #EFF6FF; }
+    tfoot tr td { font-weight: 700; background: #FFF8DC !important; padding: 0.45rem 0.75rem; }
+    .help-text { font-size: 0.83rem; color: #6B7280; }
+    .sub-head { margin: 1rem 0 0.25rem; font-size: 0.8rem; font-weight: 700; }
+    .sub-head.pos { color: #1E40AF; }
+    .sub-head.olo { color: #9D174D; }
+    .instructions { background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; font-size: 0.88rem; color: #0C4A6E; line-height: 1.6; }
+    .instructions strong { color: #075985; }
+    .instructions ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+    .instructions ul { margin: 0.75rem 0 0; padding-left: 1.25rem; list-style: none; }
+    .instructions ul li { position: relative; padding-left: 1.25rem; margin-bottom: 0.35rem; }
+    .instructions ul li::before { content: "•"; position: absolute; left: 0; color: #C41E3A; font-weight: 700; }
+    /* ── Validation / Reconciliation Panel ── */
+    .validation-panel { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 2px solid #E2E8F0; }
+    .validation-panel h3 { margin: 0 0 0.75rem; font-size: 1rem; color: #1E3A5F; font-weight: 700; }
+    .checks-row { display: flex; flex-wrap: wrap; gap: 1rem; }
+    .check-box { flex: 1; min-width: 240px; border: 2px solid; border-radius: 8px; padding: 0.8rem 1rem; }
+    .check-box.pass { border-color: #10B981; background: #ECFDF5; }
+    .check-box.fail { border-color: #EF4444; background: #FEF2F2; }
+    .check-box .ch-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .check-box .ch-label { font-size: 0.8rem; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.05em; }
+    .check-box .ch-icon { font-size: 1.3rem; line-height: 1; }
+    .check-box .ch-row { font-size: 0.88rem; color: #374151; margin: 0.2rem 0; }
+    .check-box .ch-row strong { font-variant-numeric: tabular-nums; font-weight: 700; }
+    .check-box .ch-verdict { margin-top: 0.5rem; font-size: 0.9rem; font-weight: 700; }
+    .check-box.pass .ch-verdict { color: #059669; }
+    .check-box.fail .ch-verdict { color: #DC2626; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-content">
+    <div>
+      <h1>Pick 3 Report</h1>
+      <p>Upload Toast Product Mix CSVs for item counts and pairing breakdowns.</p>
+    </div>
+    <span class="standalone-badge">Standalone — no login required</span>
+  </div>
+</div>
+
+<div class="standalone-layout">
+
+  <!-- Upload Card -->
+  <div class="card">
+    <h2>Load Toast Product Mix CSVs</h2>
+
+    <div class="instructions">
+      <strong>How to export from Toast:</strong>
+      <ol>
+        <li>In Toast Back Office, go to <strong>Reports → Menus → Product Mix</strong></li>
+        <li>Select your locations and set your date range and run the report</li>
+        <li>Be sure the menu hierarchy is set to 7 levels</li>
+        <li>Export → select <strong> CSV All Available Data</strong></li>
+        <li>Unzip the exported file and head back here to upload the CSVs</li>
+        <li>Upload the CSVs below and click <strong>Load Breakdown</strong></li>
+      </ol>
+      <ul>
+        <li>Check the reconciliation panel at the bottom of the page to confirm the data is accurate.</li>
+        <li>Export the data to Excel using the <strong>Export Excel</strong> button.</li>
+      </ul>
+    </div>
+
+    <p class="card-sub">
+      <strong>All levels.csv</strong> is required for accurate pairing counts — it contains
+      the parent&rarr;pairing link. Items.csv and Modifiers.csv are optional fallbacks.
+    </p>
+
+    <div class="upload-row">
+      <div class="file-field">
+        <label>All levels.csv &nbsp;<span class="badge-req">Required</span></label>
+        <input type="file" id="fileSelectedLevels" accept=".csv" />
+      </div>
+      <div class="file-field">
+        <label>Items.csv &nbsp;<span class="badge-opt">Optional</span></label>
+        <input type="file" id="fileItems" accept=".csv" />
+      </div>
+      <div class="file-field">
+        <label>Modifiers.csv &nbsp;<span class="badge-opt">Optional</span></label>
+        <input type="file" id="fileModifiers" accept=".csv" />
+      </div>
+    </div>
+
+    <div class="vtabs" id="csvVariantTabs">
+      <button class="vtab active" data-v="all">POS + OLO</button>
+      <button class="vtab"        data-v="pos">POS only</button>
+      <button class="vtab"        data-v="olo">OLO only</button>
+    </div>
+
+    <div class="action-row">
+      <button class="btn"          id="btnLoad">&#128196; Load Breakdown</button>
+      <button class="btn btn-navy" id="btnExcel" disabled>&#11015; Export Excel</button>
+      <button class="btn btn-gray" id="btnCsvExport" style="display:none;">&#128196; Export CSV</button>
+    </div>
+    <div id="csvStatus" class="status"></div>
+  </div>
+
+  <!-- Results Card -->
+  <div class="card" id="csvResults" style="display:none;">
+    <h2 id="csvTitle">Breakdown Results</h2>
+    <p class="card-sub" id="csvSub"></p>
+    <div class="results-grid" id="csvGrid"></div>
+    <div id="csvValidation" style="display:none;"></div>
+  </div>
+
+</div>
+
+<!-- CDN libraries (pinned versions for stability) -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const PICK3_ENTREE_SUBSTRING = "(Pick 3 Entree)";
+const PICK3_PREMOD_PREFIXES  = ["add ", "no ", "extra "];
+const OLO_PAIRING_RE         = /OLO Pairing Cho(?:ice|cie)/i; // handles known Toast typo "Chocie"
+
+const COLORS = {
+  HEADER_FILL:  'FF1F3864',  // dark navy
+  SECTION_FILL: 'FF2E75B6',  // medium blue
+  COL_FILL:     'FFBDD7EE',  // light blue column headers
+  ALT_FILL:     'FFD6E4F0',  // alternating row
+  WHITE_FILL:   'FFFFFFFF',
+  TOTAL_FILL:   'FFFFF2CC',  // yellow totals row
+  BORDER_COLOR: 'FFAAAAAA',
+  WHITE_FONT:   'FFFFFFFF',
+  BLACK_FONT:   'FF000000',
+  // Reconciliation rows
+  RECON_FILL:   'FFF2F2F2',  // light gray for expected/actual label rows
+  PASS_FILL:    'FFE2EFDA',  // light green for match
+  FAIL_FILL:    'FFFCE4D6',  // light red/peach for mismatch
+  PASS_FONT:    'FF375623',  // dark green
+  FAIL_FONT:    'FF9C3728',  // dark red
+};
+
+// ── Application state ──────────────────────────────────────────────────────
+let csvVariant  = 'all';
+let lastCsvData = null;
+let lastSlFile  = null;
+
+// ── DOM helpers ────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function showStatus(msg, type) {
+  const e = $('csvStatus');
+  e.textContent = msg;
+  e.className = 'status ' + type;
+}
+
+function hideStatus() {
+  const e = $('csvStatus');
+  e.className = 'status';
+  e.style.display = 'none';
+}
+
+function fmt(n) { return Number(n || 0).toLocaleString(); }
+function pct(q, t) { return t ? Math.round(q / t * 100) + '%' : '–'; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function dlBlob(blob, name) {
+  const u = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = u; a.download = name; a.click(); URL.revokeObjectURL(u);
+}
+
+// ── File reading ───────────────────────────────────────────────────────────
+/**
+ * Reads a File as UTF-8 text, strips BOM, normalises line endings.
+ * Equivalent to Python's raw.decode("utf-8-sig").replace("\r\n","\n")
+ */
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      let text = e.target.result;
+      // Strip UTF-8 BOM if present (utf-8-sig equivalent)
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      resolve(text);
+    };
+    reader.onerror = () => reject(new Error('Failed to read file: ' + file.name));
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+// ── CSV parser ─────────────────────────────────────────────────────────────
+/**
+ * Parses CSV text into a 2D array of strings.
+ * Handles quoted fields, embedded commas, escaped double-quotes ("").
+ */
+function parseCsvText(text) {
+  const rows = [];
+  const len  = text.length;
+  let i = 0;
+
+  while (i <= len) {
+    const row = [];
+    // Parse one row
+    while (i <= len) {
+      if (i === len || text[i] === '\n') {
+        // End of line or end of input — push empty field only if row already has content
+        if (row.length > 0) row.push('');
+        i++;
+        break;
+      }
+      if (text[i] === '"') {
+        // Quoted field
+        let field = '';
+        i++; // skip opening quote
+        while (i <= len) {
+          if (i === len) break;
+          if (text[i] === '"') {
+            if (i + 1 < len && text[i + 1] === '"') {
+              field += '"'; i += 2; // escaped quote
+            } else {
+              i++; break; // closing quote
+            }
+          } else {
+            field += text[i++];
+          }
+        }
+        row.push(field);
+        if (i < len && text[i] === ',') i++;
+      } else if (text[i] === ',') {
+        row.push('');
+        i++;
+      } else {
+        // Unquoted field
+        let start = i;
+        while (i < len && text[i] !== ',' && text[i] !== '\n') i++;
+        row.push(text.slice(start, i));
+        if (i < len && text[i] === ',') i++;
+      }
+    }
+    if (row.length > 0 && !(row.length === 1 && row[0] === '')) {
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+// ── Quantity parser ────────────────────────────────────────────────────────
+function parseQty(s) {
+  if (!s) return 0;
+  const n = parseFloat(String(s).trim().replace(/,/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+/**
+ * Strips Toast-added prefixes from pairing choice modifier names so they
+ * merge into their canonical counterparts rather than appearing as
+ * separate line items. Prefixes are ONLY stripped when the modifier
+ * already carries a pairing suffix — regular premods like "ADD Ranch"
+ * are left unchanged and filtered out by isValidPairing as before.
+ *
+ * Examples:
+ *   "XOTS Half Green Goddess (POS Pairing Choice)"       → "Half Green Goddess (POS Pairing Choice)"
+ *   "ADD Cup Chicken Tortilla (POS Pairing Choice)"      → "Cup Chicken Tortilla (POS Pairing Choice)"
+ *   "NO Cup Tomato Basil (POS Pairing Choice)"           → "Cup Tomato Basil (POS Pairing Choice)"
+ *   "EXTRA Cup Crawfish Pepper Jack (POS Pairing Choice)"→ "Cup Crawfish Pepper Jack (POS Pairing Choice)"
+ *   "ADD Ranch"                                          → "ADD Ranch"  (no pairing suffix → unchanged)
+ */
+function normalizeModifierName(name) {
+  if (!name) return '';
+  const isPairingChoice = name.includes('(POS Pairing Choice)') || OLO_PAIRING_RE.test(name);
+  if (isPairingChoice) {
+    for (const prefix of ['XOTS ', 'ADD ', 'NO ', 'EXTRA ']) {
+      if (name.startsWith(prefix)) return name.slice(prefix.length);
+    }
+  }
+  return name;
+}
+
+// ── Pick 3 classifier helpers ──────────────────────────────────────────────
+/** True if modifier is a premod to exclude (ADD / NO / EXTRA prefix). */
+function isPick3PremodName(modName) {
+  if (!modName) return true;
+  const upper = modName.trim().toUpperCase();
+  return PICK3_PREMOD_PREFIXES.some(p => upper.startsWith(p.toUpperCase()));
+}
+
+/** True if modifier matches the OLO Pairing Choice pattern (handles Toast typo). */
+function isOloPairingChoice(modName) {
+  return !!(modName && OLO_PAIRING_RE.test(modName));
+}
+
+/** True if item name identifies a Pick 3 parent for the given variant. */
+function isPick3Parent(name, variant) {
+  if (!name) return false;
+  if (variant === 'olo') return name.includes('Pick 3 (OLO)');
+  if (variant === 'pos') return name.includes(PICK3_ENTREE_SUBSTRING);
+  return name.includes(PICK3_ENTREE_SUBSTRING) || name.includes('Pick 3 (OLO)');
+}
+
+/**
+ * True if modifier is a valid Pick 3 pairing for the given variant.
+ * Excludes: (Side) items, ADD/NO/EXTRA premods.
+ * Requires the correct pairing suffix for the variant.
+ * NOTE: call normalizeModifierName() before passing modName here so that
+ * XOTS-prefixed entries are already merged into their base names.
+ */
+function isValidPairing(modName, variant) {
+  if (!modName || modName.includes('(Side)') || isPick3PremodName(modName)) return false;
+  if (variant === 'olo') return isOloPairingChoice(modName);
+  if (variant === 'pos') return modName.includes('(POS Pairing Choice)');
+  return modName.includes('(POS Pairing Choice)') || isOloPairingChoice(modName);
+}
+
+// ── Column detection ───────────────────────────────────────────────────────
+/**
+ * Detects column indices from a Selected_levels.csv header row.
+ * Handles Toast's actual export header aliases and fuzzy fallbacks.
+ * Port of _detect_selected_levels_columns() from pick3_reports.py.
+ */
+function detectSelectedLevelsColumns(header) {
+  let colType = null, colItem = null, colModifier = null, colQty = null;
+
+  for (let i = 0; i < header.length; i++) {
+    const h = header[i];
+    if (!h) continue;
+    const hl = h.toLowerCase().trim();
+
+    if (colType === null && ['type', 'level', 'level type', 'row type'].includes(hl)) {
+      colType = i;
+    }
+    if (colItem === null && ['item', 'item, open item', 'product', 'menu item', 'item name'].includes(hl)) {
+      colItem = i;
+    }
+    if (colModifier === null && [
+      'modifier', 'modifiers, special requests', 'modifier name',
+      'modifiers', 'option', 'special requests',
+    ].includes(hl)) {
+      colModifier = i;
+    }
+    if (colQty === null && !hl.includes('voided')) {
+      if (['qty sold', 'quantity sold', 'quantity', 'qty', 'units', 'sold', 'unit sold'].includes(hl) ||
+          (hl.includes('qty') && hl.includes('sold')) ||
+          hl.includes('quantity')) {
+        colQty = i;
+      }
+    }
+  }
+
+  // Fuzzy fallbacks
+  if (colItem === null) {
+    const idx = header.findIndex(h => h && h.toLowerCase().includes('item') && !h.toLowerCase().includes('void'));
+    colItem = idx === -1 ? null : idx;
+  }
+  if (colModifier === null) {
+    const idx = header.findIndex(h => h && (h.toLowerCase().includes('modifier') || h.toLowerCase().includes('special request')));
+    colModifier = idx === -1 ? null : idx;
+  }
+  if (colQty === null) {
+    const idx = header.findIndex(h => h && (h.toLowerCase().includes('qty') || h.toLowerCase().includes('quantity')) && !h.toLowerCase().includes('voided'));
+    colQty = idx === -1 ? null : idx;
+  }
+
+  return { colType, colItem, colModifier, colQty };
+}
+
+// ── Selected Levels CSV parser ─────────────────────────────────────────────
+/**
+ * Parses a Toast Product Mix Selected_levels.csv.
+ * Port of _parse_selected_levels_csv() from pick3_reports.py.
+ */
+function parseSelectedLevelsCsv(text, variant) {
+  const rows = parseCsvText(text);
+  if (!rows.length) throw new Error('All levels CSV is empty.');
+
+  const header = rows[0].map(c => c.trim());
+  const { colType, colItem, colModifier, colQty } = detectSelectedLevelsColumns(header);
+
+  const missing = [];
+  if (colType === null)     missing.push('Type');
+  if (colItem === null)     missing.push('Item / Item, open item');
+  if (colModifier === null) missing.push('Modifier / Modifiers, special requests');
+  if (colQty === null)      missing.push('Qty sold');
+  if (missing.length) {
+    throw new Error(
+      `All levels.csv is missing required columns: ${missing.join(', ')}.\n` +
+      `First 20 columns found: ${header.slice(0, 20).join(', ')}`
+    );
+  }
+
+  const maxCol = Math.max(colType, colItem, colModifier, colQty);
+  const parentTotals  = {};
+  const pairingTotals = {};
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length <= maxCol) continue;
+
+    const rowType  = (row[colType] || '').trim().toLowerCase();
+    const itemName = (row[colItem] || '').trim();
+    const modName  = normalizeModifierName((colModifier < row.length ? row[colModifier] || '' : '').trim());
+    const qty      = parseQty(colQty < row.length ? row[colQty] : '');
+    if (qty <= 0) continue;
+
+    if (rowType === 'modifier') {
+      // Only count pairing modifier rows where the parent is a Pick 3 item
+      if (isPick3Parent(itemName, variant) && isValidPairing(modName, variant)) {
+        pairingTotals[modName] = (pairingTotals[modName] || 0) + qty;
+      }
+    } else if (rowType === 'menuitem') {
+      // Only count actual menu item rows for parent quantities
+      if (isPick3Parent(itemName, variant)) {
+        parentTotals[itemName] = (parentTotals[itemName] || 0) + qty;
+      }
+    }
+  }
+
+  const totalPick3    = Object.values(parentTotals).reduce((s, q) => s + q, 0);
+  const totalPairings = Object.values(pairingTotals).reduce((s, q) => s + q, 0);
+
+  // Safety cap: pairings cannot exceed 3× total Pick 3 orders
+  const maxPairings = 3.0 * totalPick3;
+  if (maxPairings > 0 && totalPairings > maxPairings) {
+    const scale = maxPairings / totalPairings;
+    for (const k in pairingTotals) pairingTotals[k] *= scale;
+  }
+
+  const sortFn = (a, b) => b.quantity - a.quantity || a.itemName.localeCompare(b.itemName);
+  return {
+    pairingSource: 'toast_product_mix_all_levels',
+    totalPick3Quantity: Math.round(totalPick3),
+    parentItems: Object.entries(parentTotals)
+      .map(([n, q]) => ({ itemName: n, quantity: Math.round(q) }))
+      .sort(sortFn),
+    selections: Object.entries(pairingTotals)
+      .map(([n, q]) => ({ itemName: n, quantity: Math.round(q) }))
+      .sort(sortFn),
+    restaurantName: 'All locations (from CSV)',
+  };
+}
+
+// ── Items.csv + Modifiers.csv fallback parser ──────────────────────────────
+/**
+ * Fallback: parse Items.csv (and optionally Modifiers.csv) when
+ * Selected_levels.csv is not available.
+ * Port of the Items.csv path inside pick3_breakdown_from_csv() in pick3_reports.py.
+ */
+function parseItemsAndModifiersCsv(itemsText, modText, variant) {
+  const rows = parseCsvText(itemsText);
+  if (!rows.length) throw new Error('Items CSV is empty.');
+
+  const header = rows[0].map(c => c.trim());
+  let colMaster = null, colItem = null, colQty = null;
+  for (let i = 0; i < header.length; i++) {
+    const hl = (header[i] || '').toLowerCase();
+    if (hl === 'masterid') colMaster = i;
+    if (hl === 'item')     colItem   = i;
+    if (colQty === null && hl === 'qty sold') colQty = i;
+    else if (colQty === null && hl.includes('qty') && hl.includes('sold') && !hl.includes('voided')) colQty = i;
+  }
+  if (colItem === null || colQty === null) {
+    throw new Error("Items.csv must have 'Item' and 'Qty sold' columns.");
+  }
+
+  const parentTotals   = {};
+  const pick3MasterIds = new Set();
+  const maxNeeded      = Math.max(colItem, colQty, colMaster !== null ? colMaster : 0);
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length <= maxNeeded) continue;
+    const itemName = (row[colItem] || '').trim();
+    const masterId = colMaster !== null && row.length > colMaster ? (row[colMaster] || '').trim() : '';
+    if (!isPick3Parent(itemName, variant)) continue;
+    const qty = parseQty(row[colQty]);
+    if (qty <= 0) continue;
+    parentTotals[itemName] = (parentTotals[itemName] || 0) + qty;
+    if (masterId) pick3MasterIds.add(masterId);
+  }
+
+  let selections = [];
+  if (modText) {
+    try {
+      const modRows = parseCsvText(modText);
+      if (modRows.length > 1) {
+        const mh = modRows[0].map(c => c.trim());
+        let mcParent = null, mcMod = null, mcQty = null;
+        for (let i = 0; i < mh.length; i++) {
+          const cl = (mh[i] || '').toLowerCase();
+          if (cl === 'parentid') mcParent = i;
+          if (cl === 'modifier') mcMod    = i;
+          if (mcQty === null && cl === 'qty sold') mcQty = i;
+          else if (mcQty === null && cl.includes('qty') && cl.includes('sold') && !cl.includes('voided')) mcQty = i;
+        }
+        if (mcParent !== null && mcMod !== null && mcQty !== null) {
+          const pt = {};
+          const mMaxNeeded = Math.max(mcParent, mcMod, mcQty);
+          for (let i = 1; i < modRows.length; i++) {
+            const mrow = modRows[i];
+            if (mrow.length <= mMaxNeeded) continue;
+            const pid     = (mrow[mcParent] || '').trim();
+            const modName = normalizeModifierName((mrow[mcMod] || '').trim());
+            if (!pick3MasterIds.has(pid) || !modName) continue;
+            if (modName.includes('(Side)') || isPick3PremodName(modName)) continue;
+            if (variant === 'olo' && !isOloPairingChoice(modName)) continue;
+            if (variant === 'pos' && !modName.includes('(POS Pairing Choice)')) continue;
+            if (variant === 'all' && !modName.includes('(POS Pairing Choice)') && !isOloPairingChoice(modName)) continue;
+            const qty = parseQty(mrow[mcQty]);
+            if (qty > 0) pt[modName] = (pt[modName] || 0) + qty;
+          }
+          // Safety cap
+          const totalP3  = Object.values(parentTotals).reduce((s, q) => s + q, 0);
+          const totalRaw = Object.values(pt).reduce((s, q) => s + q, 0);
+          const maxP = 3.0 * totalP3;
+          if (maxP > 0 && totalRaw > maxP) {
+            const scale = maxP / totalRaw;
+            for (const k in pt) pt[k] *= scale;
+          }
+          const sortFn = (a, b) => b.quantity - a.quantity || a.itemName.localeCompare(b.itemName);
+          selections = Object.entries(pt)
+            .map(([n, q]) => ({ itemName: n, quantity: Math.round(q) }))
+            .sort(sortFn);
+        }
+      }
+    } catch (e) {
+      console.warn('Modifiers.csv parsing failed:', e);
+    }
+  }
+
+  const totalPick3 = Object.values(parentTotals).reduce((s, q) => s + q, 0);
+  const sortFn = (a, b) => b.quantity - a.quantity || a.itemName.localeCompare(b.itemName);
+  return {
+    pairingSource: 'toast_product_mix_csv',
+    totalPick3Quantity: Math.round(totalPick3),
+    parentItems: Object.entries(parentTotals)
+      .map(([n, q]) => ({ itemName: n, quantity: Math.round(q) }))
+      .sort(sortFn),
+    selections,
+    restaurantName: 'All locations (from CSV)',
+  };
+}
+
+// ── Top-level dispatcher ───────────────────────────────────────────────────
+async function runCsvParsing(slFile, itemsFile, modFile, variant) {
+  if (!slFile && !itemsFile) {
+    throw new Error('Upload at least All levels.csv (required for pairing accuracy) or Items.csv.');
+  }
+  if (slFile) {
+    if (slFile.size > 20 * 1024 * 1024) throw new Error('All levels file too large (max 20 MB).');
+    const text = await readFileAsText(slFile);
+    return parseSelectedLevelsCsv(text, variant);
+  }
+  if (itemsFile.size > 20 * 1024 * 1024) throw new Error('Items file too large (max 20 MB).');
+  const itemsText = await readFileAsText(itemsFile);
+  const modText   = modFile ? await readFileAsText(modFile) : null;
+  return parseItemsAndModifiersCsv(itemsText, modText, variant);
+}
+
+// ── Excel styling helpers ──────────────────────────────────────────────────
+function solidFill(argbHex) {
+  return { type: 'pattern', pattern: 'solid', fgColor: { argb: argbHex } };
+}
+
+function thinBorder() {
+  const s = { style: 'thin', color: { argb: COLORS.BORDER_COLOR } };
+  return { top: s, left: s, bottom: s, right: s };
+}
+
+function styleCell(cell, { bold = false, fontColor = COLORS.BLACK_FONT, fill = null, align = 'left', size = 10 } = {}) {
+  cell.font      = { name: 'Arial', bold, color: { argb: fontColor }, size };
+  cell.fill      = fill || solidFill(COLORS.WHITE_FILL);
+  cell.alignment = { horizontal: align, vertical: 'middle' };
+  cell.border    = thinBorder();
+}
+
+// ── Excel sheet builder ────────────────────────────────────────────────────
+/**
+ * Builds a single styled worksheet.
+ * Port of _build_sheet() from pick3_reports.py, using ExcelJS API instead of openpyxl.
+ */
+function buildExcelSheet(ws, title, itemsData, pairingsData, itemColLabel, parentColLabel, validation = null) {
+  // Row 1: Title (merged A:C, dark navy)
+  ws.mergeCells('A1:C1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value     = title;
+  titleCell.font      = { name: 'Arial', bold: true, color: { argb: COLORS.WHITE_FONT }, size: 14 };
+  titleCell.fill      = solidFill(COLORS.HEADER_FILL);
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 30;
+
+  // Row 3: "ITEM QUANTITY COUNTS" section header (merged A:C, medium blue)
+  ws.mergeCells('A3:C3');
+  const sec1 = ws.getCell('A3');
+  sec1.value     = 'ITEM QUANTITY COUNTS';
+  sec1.font      = { name: 'Arial', bold: true, color: { argb: COLORS.WHITE_FONT }, size: 10 };
+  sec1.fill      = solidFill(COLORS.SECTION_FILL);
+  sec1.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  // Row 4: Column headers
+  let row = 4;
+  styleCell(ws.getCell(row, 1), { bold: true, fill: solidFill(COLORS.COL_FILL) });
+  ws.getCell(row, 1).value = itemColLabel;
+  styleCell(ws.getCell(row, 2), { bold: true, fill: solidFill(COLORS.COL_FILL), align: 'right' });
+  ws.getCell(row, 2).value = 'Qty Sold';
+
+  const dataStart = row + 1;
+  for (let i = 0; i < itemsData.length; i++) {
+    row++;
+    const fill = solidFill(i % 2 === 0 ? COLORS.ALT_FILL : COLORS.WHITE_FILL);
+    styleCell(ws.getCell(row, 1), { fill });
+    ws.getCell(row, 1).value = itemsData[i].itemName;
+    styleCell(ws.getCell(row, 2), { fill, align: 'right' });
+    ws.getCell(row, 2).value = itemsData[i].quantity;
+  }
+
+  // TOTAL row (yellow)
+  row++;
+  styleCell(ws.getCell(row, 1), { bold: true, fill: solidFill(COLORS.TOTAL_FILL) });
+  ws.getCell(row, 1).value = 'TOTAL';
+  const totalCell = ws.getCell(row, 2);
+  totalCell.value     = { formula: `SUM(B${dataStart}:B${row - 1})` };
+  totalCell.font      = { name: 'Arial', bold: true, size: 10, color: { argb: COLORS.BLACK_FONT } };
+  totalCell.fill      = solidFill(COLORS.TOTAL_FILL);
+  totalCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  totalCell.border    = thinBorder();
+
+  // Blank row then "PAIRING CHOICES BREAKDOWN" header
+  row += 2;
+  ws.mergeCells(`A${row}:C${row}`);
+  const sec2 = ws.getCell(`A${row}`);
+  sec2.value     = 'PAIRING CHOICES BREAKDOWN';
+  sec2.font      = { name: 'Arial', bold: true, color: { argb: COLORS.WHITE_FONT }, size: 10 };
+  sec2.fill      = solidFill(COLORS.SECTION_FILL);
+  sec2.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  // Pairing column headers
+  row++;
+  styleCell(ws.getCell(row, 1), { bold: true, fill: solidFill(COLORS.COL_FILL) });
+  ws.getCell(row, 1).value = parentColLabel;
+  styleCell(ws.getCell(row, 2), { bold: true, fill: solidFill(COLORS.COL_FILL) });
+  ws.getCell(row, 2).value = 'Pairing Choice';
+  styleCell(ws.getCell(row, 3), { bold: true, fill: solidFill(COLORS.COL_FILL), align: 'right' });
+  ws.getCell(row, 3).value = 'Qty Sold';
+
+  const pairingDataStart = row + 1;
+  for (let i = 0; i < pairingsData.length; i++) {
+    row++;
+    const fill = solidFill(i % 2 === 0 ? COLORS.ALT_FILL : COLORS.WHITE_FILL);
+    styleCell(ws.getCell(row, 1), { fill });
+    ws.getCell(row, 1).value = pairingsData[i].parentItem || '';
+    styleCell(ws.getCell(row, 2), { fill });
+    ws.getCell(row, 2).value = pairingsData[i].itemName;
+    styleCell(ws.getCell(row, 3), { fill, align: 'right' });
+    ws.getCell(row, 3).value = pairingsData[i].quantity;
+  }
+
+  // Pairing TOTAL row (yellow, mirrors the item-section total)
+  row++;
+  styleCell(ws.getCell(row, 1), { bold: true, fill: solidFill(COLORS.TOTAL_FILL) });
+  ws.getCell(row, 1).value = 'TOTAL';
+  styleCell(ws.getCell(row, 2), { bold: true, fill: solidFill(COLORS.TOTAL_FILL) });
+  ws.getCell(row, 2).value = '';
+  const pairingTotalCell = ws.getCell(row, 3);
+  if (pairingsData.length > 0) {
+    pairingTotalCell.value = { formula: `SUM(C${pairingDataStart}:C${row - 1})` };
+  } else {
+    pairingTotalCell.value = 0;
+  }
+  pairingTotalCell.font      = { name: 'Arial', bold: true, size: 10, color: { argb: COLORS.BLACK_FONT } };
+  pairingTotalCell.fill      = solidFill(COLORS.TOTAL_FILL);
+  pairingTotalCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  pairingTotalCell.border    = thinBorder();
+
+  // ── Reconciliation section (appended if validation data provided) ──
+  if (validation) {
+    const { entreeCount, multiplier, expected, actual } = validation;
+    const diff    = actual - expected;
+    const isMatch = diff === 0;
+
+    // Blank row, then RECONCILIATION CHECK header
+    row += 2;
+    ws.mergeCells(`A${row}:C${row}`);
+    const recHeader = ws.getCell(`A${row}`);
+    recHeader.value     = 'RECONCILIATION CHECK';
+    recHeader.font      = { name: 'Arial', bold: true, color: { argb: COLORS.WHITE_FONT }, size: 10 };
+    recHeader.fill      = solidFill(COLORS.SECTION_FILL);
+    recHeader.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Expected row
+    row++;
+    styleCell(ws.getCell(row, 1), { fill: solidFill(COLORS.RECON_FILL) });
+    ws.getCell(row, 1).value = `Expected  (${entreeCount.toLocaleString()} entrees × ${multiplier})`;
+    styleCell(ws.getCell(row, 2), { fill: solidFill(COLORS.RECON_FILL) });
+    ws.getCell(row, 2).value = '';
+    styleCell(ws.getCell(row, 3), { bold: true, fill: solidFill(COLORS.RECON_FILL), align: 'right' });
+    ws.getCell(row, 3).value = expected;
+
+    // Actual row
+    row++;
+    styleCell(ws.getCell(row, 1), { fill: solidFill(COLORS.RECON_FILL) });
+    ws.getCell(row, 1).value = 'Actual Pairing Total';
+    styleCell(ws.getCell(row, 2), { fill: solidFill(COLORS.RECON_FILL) });
+    ws.getCell(row, 2).value = '';
+    styleCell(ws.getCell(row, 3), { bold: true, fill: solidFill(COLORS.RECON_FILL), align: 'right' });
+    ws.getCell(row, 3).value = actual;
+
+    // Difference / verdict row
+    row++;
+    const diffFill  = isMatch ? COLORS.PASS_FILL : COLORS.FAIL_FILL;
+    const diffFont  = isMatch ? COLORS.PASS_FONT : COLORS.FAIL_FONT;
+    const diffLabel = isMatch
+      ? 'Difference \u2014 MATCH \u2713'
+      : `Difference \u2014 OFF BY ${Math.abs(diff).toLocaleString()} ${diff > 0 ? '(OVER)' : '(UNDER)'}`;
+    styleCell(ws.getCell(row, 1), { bold: true, fill: solidFill(diffFill), fontColor: diffFont });
+    ws.getCell(row, 1).value = diffLabel;
+    styleCell(ws.getCell(row, 2), { bold: true, fill: solidFill(diffFill), fontColor: diffFont });
+    ws.getCell(row, 2).value = '';
+    styleCell(ws.getCell(row, 3), { bold: true, fill: solidFill(diffFill), fontColor: diffFont, align: 'right' });
+    ws.getCell(row, 3).value = diff;
+  }
+
+  // Column widths (match openpyxl settings)
+  ws.getColumn('A').width = 52;
+  ws.getColumn('B').width = 52;
+  ws.getColumn('C').width = 14;
+}
+
+// ── Excel export ───────────────────────────────────────────────────────────
+/**
+ * Builds and downloads a styled .xlsx file.
+ * Port of _build_pick3_excel() from pick3_reports.py, using ExcelJS.
+ */
+async function exportExcel(parentItems, selections, variant) {
+  if (typeof ExcelJS === 'undefined') {
+    throw new Error('Excel library not loaded — check your internet connection and try again.');
+  }
+  if (typeof saveAs === 'undefined') {
+    throw new Error('File save library not loaded — check your internet connection and try again.');
+  }
+
+  // Ensure parentItem field exists on each selection
+  const selWithParent = selections.map(s => ({ ...s, parentItem: s.parentItem || '' }));
+
+  const posParents = parentItems.filter(p => p.itemName.includes(PICK3_ENTREE_SUBSTRING));
+  const oloParents = parentItems.filter(p => p.itemName.includes('Pick 3 (OLO)'));
+  const posSelects = selWithParent.filter(s => s.itemName.includes('(POS Pairing Choice)'));
+  const oloSelects = selWithParent.filter(s => isOloPairingChoice(s.itemName));
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Newk's Pick 3 Report";
+  wb.created = new Date();
+
+  if (variant === 'pos' || variant === 'all') {
+    const ws    = wb.addWorksheet('POS Breakdown');
+    const items = posParents.length ? posParents : parentItems;
+    const pairs = posSelects.length ? posSelects : selWithParent.filter(s => s.itemName.includes('(POS Pairing Choice)'));
+    const posEntreeTotal = items.reduce((s, p) => s + p.quantity, 0);
+    const posActual      = pairs.reduce((s, p) => s + p.quantity, 0);
+    const posValidation  = posEntreeTotal > 0
+      ? { entreeCount: posEntreeTotal, multiplier: 2, expected: posEntreeTotal * 2, actual: posActual }
+      : null;
+    buildExcelSheet(ws, 'In-Store POS Breakdown \u2014 Pick 3', items, pairs, 'Item', 'Pick 3 Entree Item', posValidation);
+  }
+
+  if (variant === 'olo' || variant === 'all') {
+    const ws    = wb.addWorksheet('OLO Breakdown');
+    const items = oloParents.length ? oloParents : parentItems;
+    const pairs = oloSelects.length ? oloSelects : selWithParent.filter(s => isOloPairingChoice(s.itemName));
+    const oloEntreeTotal = items.reduce((s, p) => s + p.quantity, 0);
+    const oloActual      = pairs.reduce((s, p) => s + p.quantity, 0);
+    const oloValidation  = oloEntreeTotal > 0
+      ? { entreeCount: oloEntreeTotal, multiplier: 3, expected: oloEntreeTotal * 3, actual: oloActual }
+      : null;
+    buildExcelSheet(ws, 'OLO Breakdown \u2014 Pick 3', items, pairs, 'Item', 'Pick 3 OLO Item', oloValidation);
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  saveAs(
+    new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    'Pick3_Report.xlsx'
+  );
+}
+
+// ── UI rendering ───────────────────────────────────────────────────────────
+function mkTable(rows, totalPick3, cols) {
+  if (!rows.length) return '<p class="help-text">No data.</p>';
+  const tot = rows.reduce((s, r) => s + (r.quantity || 0), 0);
+  let t = '<div class="tbl-wrap"><table><thead><tr>';
+  cols.forEach(c => t += `<th${c.num ? ' class="num"' : ''}>${esc(c.label)}</th>`);
+  t += '<th class="num">% of Pick 3</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    t += '<tr>';
+    cols.forEach(c => t += `<td${c.num ? ' class="num"' : ''}>${esc(String(c.val(r)))}</td>`);
+    t += `<td class="num">${pct(r.quantity, totalPick3 || tot)}</td></tr>`;
+  });
+  t += `</tbody><tfoot><tr><td>Total</td><td class="num">${fmt(tot)}</td><td></td></tr></tfoot></table></div>`;
+  return t;
+}
+
+function renderCsvResults(data) {
+  lastCsvData = data;
+  const total   = data.totalPick3Quantity || 0;
+  const parents = data.parentItems || [];
+  const sels    = data.selections || [];
+
+  $('csvTitle').textContent = 'Breakdown Results';
+  $('csvSub').textContent   = `Total Pick 3: ${fmt(total)} \u00b7 ${parents.length} items \u00b7 ${sels.length} pairing choices`;
+
+  const posParents = parents.filter(p => p.itemName.includes('Pick 3 Entree'));
+  const oloParents = parents.filter(p => p.itemName.includes('Pick 3 (OLO)'));
+  const posPairs   = sels.filter(s => s.itemName.includes('(POS Pairing Choice)'));
+  const oloPairs   = sels.filter(s => /OLO Pairing Cho(?:ice|cie)/.test(s.itemName));
+
+  const itemCols = [{ label: 'Item', val: r => r.itemName }, { label: 'Qty', num: true, val: r => fmt(r.quantity) }];
+  const pairCols = [{ label: 'Pairing Choice', val: r => r.itemName }, { label: 'Qty', num: true, val: r => fmt(r.quantity) }];
+
+  let leftHtml = '', rightHtml = '';
+
+  if (csvVariant !== 'olo' && posParents.length) {
+    leftHtml += '<p class="sub-head pos">POS \u2014 In-Store</p>' + mkTable(posParents, total, itemCols);
+  }
+  if (csvVariant !== 'pos' && oloParents.length) {
+    leftHtml += '<p class="sub-head olo">OLO \u2014 Online</p>' + mkTable(oloParents, total, itemCols);
+  }
+  if (!leftHtml) leftHtml = mkTable(parents, total, itemCols);
+
+  if (csvVariant !== 'olo' && posPairs.length) {
+    rightHtml += '<p class="sub-head pos">POS Pairings</p>' + mkTable(posPairs, total, pairCols);
+  }
+  if (csvVariant !== 'pos' && oloPairs.length) {
+    rightHtml += '<p class="sub-head olo">OLO Pairings</p>' + mkTable(oloPairs, total, pairCols);
+  }
+  if (!rightHtml) rightHtml = mkTable(sels, total, pairCols);
+
+  $('csvGrid').innerHTML =
+    `<div class="tbl-section"><h3>Pick 3 Item Counts</h3>${leftHtml}</div>` +
+    `<div class="tbl-section"><h3>Pairing Choices</h3>${rightHtml}</div>`;
+
+  // ── Reconciliation / Validation checks ──────────────────────────────────
+  const validationEl = $('csvValidation');
+  const checks = [];
+
+  if (csvVariant !== 'olo' && posParents.length) {
+    const posTotalEntrees = posParents.reduce((s, r) => s + r.quantity, 0);
+    const posExpected     = posTotalEntrees * 2;
+    const posActual       = posPairs.reduce((s, r) => s + r.quantity, 0);
+    const posDiff         = posActual - posExpected;
+    checks.push({ label: 'POS In-Store', entreeTotal: posTotalEntrees, multiplier: 2,
+                  expected: posExpected, actual: posActual, diff: posDiff });
+  }
+
+  if (csvVariant !== 'pos' && oloParents.length) {
+    const oloTotalEntrees = oloParents.reduce((s, r) => s + r.quantity, 0);
+    const oloExpected     = oloTotalEntrees * 3;
+    const oloActual       = oloPairs.reduce((s, r) => s + r.quantity, 0);
+    const oloDiff         = oloActual - oloExpected;
+    checks.push({ label: 'OLO Online', entreeTotal: oloTotalEntrees, multiplier: 3,
+                  expected: oloExpected, actual: oloActual, diff: oloDiff });
+  }
+
+  if (checks.length) {
+    let vHtml = '<div class="validation-panel"><h3>&#9989; Reconciliation Check</h3><div class="checks-row">';
+    checks.forEach(c => {
+      const isMatch = c.diff === 0;
+      const cls     = isMatch ? 'pass' : 'fail';
+      const icon    = isMatch ? '✅' : '❌';
+      const verdict = isMatch
+        ? 'Perfect match!'
+        : (c.diff > 0
+            ? `Over by ${fmt(Math.abs(c.diff))}`
+            : `Under by ${fmt(Math.abs(c.diff))}`);
+      vHtml +=
+        `<div class="check-box ${cls}">` +
+          `<div class="ch-header"><span class="ch-label">${esc(c.label)}</span><span class="ch-icon">${icon}</span></div>` +
+          `<div class="ch-row">${fmt(c.entreeTotal)} entrees &times; ${c.multiplier} = <strong>${fmt(c.expected)}</strong> expected pairings</div>` +
+          `<div class="ch-row">Actual pairing total: <strong>${fmt(c.actual)}</strong></div>` +
+          `<div class="ch-verdict">${verdict}</div>` +
+        `</div>`;
+    });
+    vHtml += '</div></div>';
+    validationEl.innerHTML      = vHtml;
+    validationEl.style.display  = '';
+  } else {
+    validationEl.style.display = 'none';
+  }
+
+  $('csvResults').style.display = 'block';
+  $('csvResults').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Event wiring ───────────────────────────────────────────────────────────
+// Variant tabs
+document.getElementById('csvVariantTabs').querySelectorAll('.vtab').forEach(btn => {
+  btn.addEventListener('click', function () {
+    document.getElementById('csvVariantTabs').querySelectorAll('.vtab').forEach(b => b.classList.remove('active'));
+    this.classList.add('active');
+    csvVariant = this.dataset.v;
+  });
+});
+
+// Load Breakdown button
+$('btnLoad').addEventListener('click', async () => {
+  const slFile  = $('fileSelectedLevels').files[0] || null;
+  const itFile  = $('fileItems').files[0] || null;
+  const modFile = $('fileModifiers').files[0] || null;
+
+  if (!slFile && !itFile) {
+    showStatus('Please select at least All levels.csv (required for pairing accuracy) or Items.csv.', 'error');
+    return;
+  }
+
+  const btn = $('btnLoad');
+  btn.disabled = true;
+  showStatus('Parsing CSV\u2026', 'loading');
+
+  try {
+    const data = await runCsvParsing(slFile, itFile, modFile, csvVariant);
+    lastSlFile = slFile;
+    renderCsvResults(data);
+    $('btnExcel').disabled = !slFile;
+    $('btnCsvExport').style.display = 'inline-flex';
+    showStatus(
+      `Loaded \u2014 ${fmt(data.totalPick3Quantity || 0)} total Pick 3 \u00b7 ` +
+      `${(data.parentItems || []).length} items \u00b7 ${(data.selections || []).length} pairing choices`,
+      'success'
+    );
+  } catch (e) {
+    showStatus('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Export Excel button
+$('btnExcel').addEventListener('click', async () => {
+  const slFile = lastSlFile || $('fileSelectedLevels').files[0] || null;
+  if (!slFile)      { showStatus('Please select All levels.csv first.', 'error'); return; }
+  if (!lastCsvData) { showStatus('Load a breakdown first.', 'error'); return; }
+
+  const btn = $('btnExcel');
+  btn.disabled = true;
+  btn.textContent = '\u23F3 Generating\u2026';
+  showStatus('Building Excel report\u2026', 'loading');
+
+  try {
+    await exportExcel(lastCsvData.parentItems, lastCsvData.selections, csvVariant);
+    showStatus('Excel report downloaded!', 'success');
+  } catch (e) {
+    showStatus('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '&#11015; Export Excel';
+  }
+});
+
+// Export CSV button
+$('btnCsvExport').addEventListener('click', () => {
+  if (!lastCsvData) return;
+  const total = lastCsvData.totalPick3Quantity || 1;
+  const rows  = [['Type', 'Item', 'Qty', '% of Pick 3']];
+  (lastCsvData.parentItems || []).forEach(p => rows.push(['Parent Item', p.itemName, p.quantity, pct(p.quantity, total)]));
+  (lastCsvData.selections  || []).forEach(s => rows.push(['Pairing',     s.itemName, s.quantity, pct(s.quantity, total)]));
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  dlBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'Pick3_Breakdown.csv');
+});
+</script>
+</body>
+</html>

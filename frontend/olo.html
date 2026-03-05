@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Digital Orders by Platform (OLO) - Newk's Back Office</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231E3A5F'/%3E%3C/svg%3E" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c; }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p { margin: 0.5rem 0 0 0; color: #fff; opacity: 0.9; font-size: 0.9rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.5); }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      gap: 1.5rem;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .left-nav {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border: 1px solid #e8e0d5;
+      height: fit-content;
+    }
+    .left-nav h3 { margin: 0 0 1rem 0; color: #C41E3A; font-size: 1rem; font-weight: 700; }
+    .nav-link-item {
+      display: block;
+      padding: 0.5rem 0.75rem;
+      color: #2c2c2c;
+      text-decoration: none;
+      border-radius: 6px;
+      margin-bottom: 0.25rem;
+      font-size: 0.9rem;
+    }
+    .nav-link-item:hover { background: #F0F9FF; color: #C41E3A; }
+    .nav-link-item.active { background: #C41E3A; color: #fff; }
+    .content-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border: 1px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+    }
+    .content-card h2 { margin: 0 0 1rem 0; color: #C41E3A; font-size: 1.25rem; font-weight: 700; }
+    .btn {
+      background: #C41E3A;
+      color: white;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #A01A2E; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-secondary {
+      background: #6B7280;
+      color: white;
+    }
+    .btn-secondary:hover { background: #4B5563; }
+    .batch-list {
+      max-height: 280px;
+      overflow-y: auto;
+      border: 1px solid #e8e0d5;
+      border-radius: 8px;
+      padding: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    .batch-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      margin-bottom: 0.25rem;
+    }
+    .batch-item:hover { background: #F0F9FF; }
+    .batch-item input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+    .batch-item span { font-size: 0.9rem; }
+    .batch-id { font-weight: 600; color: #1E3A5F; }
+    .batch-generated { color: #666; font-size: 0.85rem; }
+    .report-table-wrap { overflow-x: auto; margin-top: 1rem; }
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .report-table th,
+    .report-table td {
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #e8e0d5;
+    }
+    .report-table th {
+      background: #F0F9FF;
+      color: #1E3A5F;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .report-table th:hover { background: #E0F2FE; }
+    .report-table th .sort-icon { opacity: 0.5; margin-left: 0.25rem; font-size: 0.75rem; }
+    .report-table th.sorted-asc .sort-icon::after { content: ' ▲'; opacity: 1; }
+    .report-table th.sorted-desc .sort-icon::after { content: ' ▼'; opacity: 1; }
+    .report-table tr:hover { background: #fafafa; }
+    .report-table .num { text-align: right; }
+    .status { padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-top: 0.5rem; }
+    .status.loading { background: #FEF3C7; color: #92400E; }
+    .status.error { background: #FEE2E2; color: #991B1B; }
+    .status.success { background: #D1FAE5; color: #065F46; }
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    .help-text { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+    .date-inputs { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    .date-inputs label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+    .date-inputs input[type="date"] { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Digital Orders by Platform (OLO)</h1>
+        <p>Run the OLO Order Export report aggregated by platform and location.</p>
+      </div>
+      <a href="/" class="home-btn">&#127968; Home</a>
+    </div>
+  </div>
+
+  <div class="main-layout">
+    <nav class="left-nav">
+      <h3>Reports</h3>
+      <a href="/legacy.html" class="nav-link-item">Reports V1</a>
+      <a href="/olo.html" class="nav-link-item active">Digital Orders by Platform (OLO)</a>
+      <a href="/pick3.html" class="nav-link-item">Pick 3 Report</a>
+    </nav>
+
+    <main>
+      <div class="content-card">
+        <h2>Date range</h2>
+        <p class="help-text">Choose the date range for the report. The app will load the correct OLO batches for those dates automatically.</p>
+        <div class="date-inputs">
+          <label>
+            <span>Start date</span>
+            <input type="date" id="startDate" />
+          </label>
+          <label>
+            <span>End date</span>
+            <input type="date" id="endDate" />
+          </label>
+        </div>
+      </div>
+
+      <div class="content-card">
+        <h2>Run report</h2>
+        <p class="help-text">Results are aggregated by Platform and Client Platform (e.g. iOS, Android, Web, Kiosk). Click column headers to sort.</p>
+        <div class="toolbar">
+          <button type="button" class="btn" id="runReportBtn">Run Digital Orders by Platform</button>
+        </div>
+        <div id="reportStatus" class="status" style="display: none;"></div>
+      </div>
+
+      <div class="content-card" id="resultsCard" style="display: none;">
+        <h2>Results</h2>
+        <div class="toolbar">
+          <button type="button" class="btn btn-secondary" id="exportCsvBtn">Export CSV</button>
+        </div>
+        <div class="report-table-wrap">
+          <table class="report-table" id="reportTable">
+            <thead>
+              <tr>
+                <th data-col="platform" data-type="string">Platform<span class="sort-icon"></span></th>
+                <th data-col="clientPlatform" data-type="string">Client Platform<span class="sort-icon"></span></th>
+                <th data-col="orderCount" data-type="num" class="num">Order count<span class="sort-icon"></span></th>
+                <th data-col="netSales" data-type="num" class="num">Net sales<span class="sort-icon"></span></th>
+              </tr>
+            </thead>
+            <tbody id="reportBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Admin-only page — redirect non-admin users back to home
+    (function checkAdminAccess() {
+      const token = localStorage.getItem('auth_token');
+      const userStr = localStorage.getItem('user');
+      if (!token || !userStr) { window.location.href = '/'; return; }
+      try {
+        const user = JSON.parse(userStr);
+        if (user.role !== 'admin') { window.location.href = '/'; }
+      } catch (e) { window.location.href = '/'; }
+    })();
+
+    const API = window.location.origin;
+    let reportRows = [];
+
+    (function setDefaultDates() {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - 6);
+      document.getElementById('endDate').value = end.toISOString().slice(0, 10);
+      document.getElementById('startDate').value = start.toISOString().slice(0, 10);
+    })();
+
+    function showStatus(elId, message, type) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.textContent = message;
+      el.className = 'status ' + (type || '');
+      el.style.display = 'block';
+    }
+
+    function hideStatus(elId) {
+      const el = document.getElementById(elId);
+      if (el) el.style.display = 'none';
+    }
+
+    document.getElementById('runReportBtn').addEventListener('click', async () => {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      if (!startDate || !endDate) {
+        showStatus('reportStatus', 'Please select both start and end date.', 'error');
+        document.getElementById('reportStatus').style.display = 'block';
+        return;
+      }
+      if (startDate > endDate) {
+        showStatus('reportStatus', 'Start date must be on or before end date.', 'error');
+        document.getElementById('reportStatus').style.display = 'block';
+        return;
+      }
+      const btn = document.getElementById('runReportBtn');
+      btn.disabled = true;
+      hideStatus('reportStatus');
+      showStatus('reportStatus', 'Loading batches for date range, then building report…', 'loading');
+      try {
+        const res = await fetch(API + '/api/olo/digital-orders-by-platform-by-date', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: startDate, end_date: endDate })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showStatus('reportStatus', data.detail || res.statusText || 'Report failed', 'error');
+          return;
+        }
+        reportRows = data.rows || [];
+        renderReportTable(reportRows);
+        document.getElementById('resultsCard').style.display = 'block';
+        const batchInfo = data.batchIds && data.batchIds.length ? ' (' + data.batchIds.length + ' batch(es))' : '';
+        showStatus('reportStatus', 'Report complete. Total orders: ' + (data.totalOrders || 0) + batchInfo, 'success');
+      } catch (e) {
+        showStatus('reportStatus', 'Error: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('exportCsvBtn').addEventListener('click', () => {
+      if (reportRows.length === 0) return;
+      const headers = ['Platform', 'Client Platform', 'Order Count', 'Net Sales'];
+      const rows = reportRows.map(r => [r.platform, r.clientPlatform, r.orderCount, r.netSales]);
+      const csv = [headers.join(',')].concat(rows.map(row => row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'digital_orders_by_platform.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    let sortCol = '';
+    let sortDir = 1; // 1 asc, -1 desc
+
+    function renderReportTable(rows) {
+      const tbody = document.getElementById('reportBody');
+      tbody.innerHTML = rows.map(r => `
+        <tr>
+          <td>${escapeHtml(r.platform)}</td>
+          <td>${escapeHtml(r.clientPlatform)}</td>
+          <td class="num">${formatNum(r.orderCount)}</td>
+          <td class="num">${formatMoney(r.netSales)}</td>
+        </tr>
+      `).join('');
+      document.querySelectorAll('#reportTable thead th').forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+        if (th.dataset.col === sortCol) th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+      });
+    }
+
+    document.getElementById('reportTable').addEventListener('click', (e) => {
+      const th = e.target.closest('th[data-col]');
+      if (!th || !reportRows.length) return;
+      const col = th.dataset.col;
+      const type = th.dataset.type || 'string';
+      if (sortCol === col) sortDir = -sortDir; else { sortCol = col; sortDir = 1; }
+      const sorted = [...reportRows].sort((a, b) => {
+        let va = a[col], vb = b[col];
+        if (type === 'num') { va = Number(va) || 0; vb = Number(vb) || 0; return sortDir * (va - vb); }
+        return sortDir * String(va).localeCompare(String(vb));
+      });
+      reportRows = sorted;
+      renderReportTable(reportRows);
+    });
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+    function formatNum(n) { return Number(n).toLocaleString(); }
+    function formatMoney(n) { return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  </script>
+</body>
+</html>
