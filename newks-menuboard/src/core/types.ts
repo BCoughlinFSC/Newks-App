@@ -4,6 +4,7 @@ export type ModifierOption = {
   id: string;
   name: string;
   priceDeltaCents?: Money;
+  imageUrl?: string;
 };
 
 export type ModifierGroup = {

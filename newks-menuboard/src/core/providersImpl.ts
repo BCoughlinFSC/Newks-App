@@ -72,11 +72,31 @@ type ToastMenuGroup = {
   groups?: ToastMenuGroup[];
 };
 
+/** Toast can send image as a URL string, or { url }, or images[] - see Toast Menus Image/Images schema */
+function resolveImageUrl(obj: {
+  imageUrl?: string;
+  image?: string | { url?: string };
+  images?: string[];
+}): string | undefined {
+  if (Array.isArray(obj.images) && obj.images.length > 0 && typeof obj.images[0] === "string")
+    return obj.images[0];
+  if (obj.imageUrl && typeof obj.imageUrl === "string") return obj.imageUrl;
+  if (obj.image != null) {
+    if (typeof obj.image === "string") return obj.image;
+    if (typeof obj.image === "object" && typeof (obj.image as { url?: string }).url === "string")
+      return (obj.image as { url: string }).url;
+  }
+  return undefined;
+}
+
 type ToastMenuItem = {
   guid?: string;
   id?: string;
   name?: string;
   description?: string;
+  imageUrl?: string;
+  image?: string | { url?: string };
+  images?: string[];
   price?: number;
   basePrice?: number;
   unitPrice?: number;
@@ -110,6 +130,9 @@ type ToastModifierOption = {
   priceAmount?: number;
   amount?: number;
   value?: number;
+  imageUrl?: string;
+  image?: string | { url?: string };
+  images?: string[];
 };
 
 function getId(entity?: { guid?: string; id?: string } | null): string | undefined {
@@ -141,6 +164,11 @@ function flattenGroups(groups: ToastMenuGroup[]): ToastMenuGroup[] {
     stack.push(...nested);
   }
   return out;
+}
+
+function stripParentheticalSegments(name?: string | null): string | undefined {
+  if (!name) return name ?? undefined;
+  return name.replace(/\s*\([^)]*\)/g, "").trim() || name;
 }
 
 function collectItemsFromGroups(groups: ToastMenuGroup[]): { items: ToastMenuItem[]; itemToGroupId: Map<string, string> } {
@@ -196,14 +224,14 @@ function mapToastMenuToMenu(response: ToastMenuResponse): Menu {
   const menus = response.menus ?? [];
   menus.forEach((menu, menuIndex) => {
     const menuId = getId(menu) ?? `menu-${menuIndex + 1}`;
-    const menuName = menu.name ?? `Menu ${menuIndex + 1}`;
     const menuGroups = flattenGroups(menu.menuGroups ?? menu.groups ?? []);
     menuGroups.forEach((group, groupIndex) => {
       const groupId = getId(group) ?? `group-${menuId}-${groupIndex + 1}`;
       const categoryId = `${menuId}:${groupId}`;
       menuCategories.push({
         id: categoryId,
-        name: `${menuName} - ${group.name ?? `Category ${groupIndex + 1}`}`,
+        // Show only the group name (no menu prefix) and strip things like "(OLO)"
+        name: stripParentheticalSegments(group.name) ?? `Category ${groupIndex + 1}`,
         sort: menuCategories.length + 1,
       });
       const groupItems = (group as unknown as { menuItems?: ToastMenuItem[] }).menuItems ?? [];
@@ -258,10 +286,13 @@ function mapToastMenuToMenu(response: ToastMenuResponse): Menu {
       .filter(Boolean)
       .map((group) => mapModifierGroup(group!, modifierOptionById));
 
+    const imageUrl = resolveImageUrl(item);
+
     return {
       id: itemId,
       name: item.name ?? `Item ${index + 1}`,
       description: item.description,
+      imageUrl: imageUrl ?? undefined,
       basePriceCents: normalizeMoneyToCents(item.price ?? item.basePrice ?? item.unitPrice ?? 0),
       modifierGroups: modifierGroups.length > 0 ? modifierGroups : undefined,
       categoryId,
@@ -302,10 +333,12 @@ function mapModifierGroup(group: ToastModifierGroup, optionLookup: Map<string, T
 function mapModifierOption(option: ToastModifierOption, fallbackId: string): ModifierOption {
   const optId = getId(option) ?? fallbackId;
   const priceValue = option.price ?? option.priceAmount ?? option.amount ?? option.value ?? 0;
+  const imageUrl = resolveImageUrl(option);
   return {
     id: optId,
     name: option.name ?? "Option",
     priceDeltaCents: normalizeMoneyToCents(priceValue),
+    imageUrl: imageUrl ?? undefined,
   };
 }
 

@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Full Pairings Report - Newk's Back Office</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231E3A5F'/%3E%3C/svg%3E" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #F8FAFC; color: #2c2c2c; }
+    .header { background: #C41E3A; padding: 1.5rem 2rem; border-bottom: 3px solid #A01A2E; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p  { margin: 0.4rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+    .home-btn  { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem; }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+    .main-layout { display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem; max-width: 1600px; margin: 0 auto; padding: 2rem; }
+    .left-nav { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e0d5; height: fit-content; }
+    .left-nav h3 { margin: 0 0 1rem; color: #C41E3A; font-size: 1rem; font-weight: 700; }
+    .nav-link { display: block; padding: 0.5rem 0.75rem; color: #2c2c2c; text-decoration: none; border-radius: 6px; margin-bottom: 0.25rem; font-size: 0.9rem; }
+    .nav-link:hover  { background: #F0F9FF; color: #C41E3A; }
+    .nav-link.active { background: #C41E3A; color: #fff; }
+    .card { background: #fff; border-radius: 12px; padding: 1.5rem 2rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e0d5; margin-bottom: 1.5rem; }
+    .card h2 { margin: 0 0 0.25rem; color: #C41E3A; font-size: 1.2rem; font-weight: 700; }
+    .card-sub { font-size: 0.85rem; color: #666; margin: 0 0 1.25rem; }
+    .btn { display: inline-flex; align-items: center; gap: 0.4rem; background: #C41E3A; color: #fff; border: none; padding: 0.6rem 1.25rem; border-radius: 6px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    .btn:hover    { background: #A01A2E; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-navy  { background: #1E3A5F; }
+    .btn-navy:hover  { background: #162d4a; }
+    .btn-gray  { background: #6B7280; }
+    .btn-gray:hover  { background: #4B5563; }
+    .vtabs { display: flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; width: fit-content; margin-bottom: 1rem; }
+    .vtab { padding: 0.45rem 1.2rem; border: none; background: #f1f5f9; color: #64748b; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+    .vtab:hover  { background: #e2e8f0; }
+    .vtab.active { background: #C41E3A; color: #fff; }
+    .upload-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin-bottom: 1rem; }
+    .file-field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .file-field label { font-size: 0.8rem; font-weight: 600; color: #374151; }
+    .badge-req { font-size: 0.7rem; background: #DBEAFE; color: #1E40AF; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: 600; }
+    .badge-opt { font-size: 0.7rem; background: #F3F4F6; color: #6B7280; padding: 0.1rem 0.4rem; border-radius: 4px; }
+    .status { padding: 0.55rem 0.9rem; border-radius: 6px; font-size: 0.85rem; margin-top: 0.75rem; display: none; }
+    .status.loading { background: #FEF3C7; color: #92400E; }
+    .status.error   { background: #FEE2E2; color: #991B1B; }
+    .status.success { background: #D1FAE5; color: #065F46; }
+    .action-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .date-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+    .date-row label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+    .date-row input[type="date"] { padding: 0.45rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+    .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+    @media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
+    .tbl-section h3 { margin: 0 0 0.5rem; font-size: 1rem; color: #1E3A5F; font-weight: 700; }
+    .tbl-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    thead th { background: #EFF6FF; color: #1E3A5F; font-weight: 700; padding: 0.5rem 0.75rem; text-align: left; border-bottom: 2px solid #BFDBFE; white-space: nowrap; }
+    thead th.num { text-align: right; }
+    tbody td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #F0F0F0; }
+    tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:nth-child(even) { background: #F8FAFF; }
+    tbody tr:hover { background: #EFF6FF; }
+    tfoot tr td { font-weight: 700; background: #FFF8DC !important; padding: 0.45rem 0.75rem; }
+    .pivot-wrap { overflow-x: auto; margin-top: 0.75rem; }
+    .pivot-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .pivot-table th, .pivot-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #e8e0d5; text-align: left; }
+    .pivot-table th { background: #F0F9FF; color: #1E3A5F; font-weight: 600; white-space: nowrap; }
+    .pivot-table .num { text-align: right; }
+    .pivot-table .total-col { font-weight: 700; }
+    .pivot-table tr.drill-row { cursor: pointer; }
+    .pivot-table tr.drill-row:hover { background: #E0F2FE; }
+    .pivot-table tr.drill-row.selected { background: #F0F9FF; outline: 2px solid #C41E3A; outline-offset: -1px; }
+    .drill-block { border: 1px solid #e8e0d5; border-radius: 8px; padding: 1rem 1.25rem; background: #fafafa; margin-top: 1rem; }
+    .drill-title { font-weight: 700; color: #1E3A5F; font-size: 1rem; margin-bottom: 0.5rem; }
+    .drill-tables { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .drill-col { flex: 1; min-width: 240px; }
+    .drill-caption { font-weight: 700; color: #1E3A5F; font-size: 0.9rem; margin: 0 0 0.4rem; }
+    .prompt-box { color: #6B7280; font-style: italic; padding: 1rem; border: 1px dashed #d1d5db; border-radius: 8px; background: #fafafa; margin-top: 0.75rem; }
+    .toolbar { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 0.75rem 0; }
+    .help-text { font-size: 0.83rem; color: #6B7280; }
+    .section-div { border: none; border-top: 1px solid #e8e0d5; margin: 1.5rem 0; }
+    .sub-head { margin: 1rem 0 0.25rem; font-size: 0.8rem; font-weight: 700; }
+    .sub-head.pos { color: #1E40AF; }
+    .sub-head.olo { color: #9D174D; }
+  </style>
+</head>
+<body>
+<div class="header">
+  <div class="header-content">
+    <div>
+      <h1>Full Pairings Report</h1>
+      <p>Upload Toast Product Mix CSVs for item counts and pairing breakdowns.</p>
+    </div>
+    <a href="/" class="home-btn">&#127968; Home</a>
+  </div>
+</div>
+
+<div class="main-layout">
+  <nav class="left-nav">
+    <h3>Reports</h3>
+    <a href="/legacy.html"        class="nav-link">Reports V1</a>
+    <a href="/olo.html"           class="nav-link hidden" id="oloNavLink">Digital Orders by Platform (OLO)</a>
+    <a href="/pick3.html"         class="nav-link">Pick 3 Report</a>
+    <a href="/pick2.html"         class="nav-link">Pick 2 Report</a>
+    <a href="/full-pairings.html" class="nav-link active">Full Pairings Report</a>
+  </nav>
+
+  <main>
+
+    <!-- ── CSV Upload ─────────────────────────────────────────── -->
+    <div class="card">
+      <h2>Load Toast Product Mix CSVs</h2>
+      <p class="card-sub">
+        Export a <strong>Product Mix</strong> report from Toast, then upload below.
+        <strong>All levels.csv</strong> is required for accurate pairing counts — it contains
+        the parent→pairing link. Items.csv and Modifiers.csv are optional fallbacks.
+      </p>
+
+      <div class="upload-row">
+        <div class="file-field">
+          <label>All levels.csv &nbsp;<span class="badge-req">Required</span></label>
+          <input type="file" id="fileSelectedLevels" accept=".csv" />
+        </div>
+        <div class="file-field">
+          <label>Items.csv &nbsp;<span class="badge-opt">Optional</span></label>
+          <input type="file" id="fileItems" accept=".csv" />
+        </div>
+        <div class="file-field">
+          <label>Modifiers.csv &nbsp;<span class="badge-opt">Optional</span></label>
+          <input type="file" id="fileModifiers" accept=".csv" />
+        </div>
+      </div>
+
+      <div class="vtabs" id="csvVariantTabs">
+        <button class="vtab active" data-v="all">POS + OLO</button>
+        <button class="vtab"        data-v="pos">POS only</button>
+        <button class="vtab"        data-v="olo">OLO only</button>
+      </div>
+
+      <div class="action-row">
+        <button class="btn"       id="btnLoad">&#128196; Load Breakdown</button>
+        <button class="btn btn-navy" id="btnExcel" disabled>&#11015; Export Excel</button>
+        <button class="btn btn-gray" id="btnCsvExport" style="display:none;">&#128196; Export CSV</button>
+      </div>
+      <div id="csvStatus" class="status"></div>
+    </div>
+
+    <!-- ── CSV Results ─────────────────────────────────────────── -->
+    <div class="card" id="csvResults" style="display:none;">
+      <h2 id="csvTitle">Breakdown Results</h2>
+      <p class="card-sub" id="csvSub"></p>
+      <div class="results-grid" id="csvGrid"></div>
+    </div>
+
+    <!-- ── Live API Report ──────────────────────────────────────── -->
+    <div class="card">
+      <h2>Run Live Report via Toast API</h2>
+      <p class="card-sub">Fetches per-store, per-day counts directly from Toast. Requires API credentials configured on the server.</p>
+
+      <div class="date-row">
+        <label>Start date <input type="date" id="startDate" /></label>
+        <label>End date   <input type="date" id="endDate"   /></label>
+      </div>
+
+      <div class="vtabs" id="apiVariantTabs">
+        <button class="vtab active" data-v="pos">Full Pairings (POS)</button>
+        <button class="vtab"        data-v="olo">Full Pairings (OLO)</button>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn"       id="btnRun">&#9654; Run Report</button>
+        <button class="btn btn-gray" id="btnExportSummary" style="display:none;">Export Summary CSV</button>
+        <button class="btn btn-gray" id="btnLoadAll"       style="display:none;">Load All-Stores Drill-Down</button>
+        <button class="btn btn-gray" id="btnExportAll"     style="display:none;">Export All-Stores CSV</button>
+      </div>
+      <div id="apiStatus" class="status"></div>
+    </div>
+
+    <!-- ── API Results ─────────────────────────────────────────── -->
+    <div class="card" id="apiResults" style="display:none;">
+      <h2>Per-Store Per-Day Counts <span id="apiVariantLabel" style="font-weight:400;font-size:1rem;"></span></h2>
+      <p class="help-text">Click any store row to load its pairing breakdown.</p>
+      <div class="pivot-wrap">
+        <table class="pivot-table">
+          <thead><tr id="pivotThead"><th>Store Name</th></tr></thead>
+          <tbody id="pivotBody"></tbody>
+        </table>
+      </div>
+      <hr class="section-div" />
+      <h2 style="color:#C41E3A;font-size:1.1rem;margin:0 0 0.25rem;">Drill-Down</h2>
+      <p class="help-text">Click a store above, or use "Load All-Stores" above the report.</p>
+      <div id="drillContainer"><div class="prompt-box">Click a store row to load its pairing breakdown.</div></div>
+      <div id="allStoresContainer" style="margin-top:1rem;display:none;"></div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// Show OLO nav link only for admin users
+(function() {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    if (user.role === 'admin') document.getElementById('oloNavLink')?.classList.remove('hidden');
+  } catch(e) {}
+})();
+
+const API         = window.location.origin;
+const REPORT_TYPE = 'full_pairings';
+let csvVariant  = 'all';
+let apiVariant  = 'pos';
+let lastCsvData = null;
+let lastSlFile  = null;
+let pivotDates  = [], pivotRows = [], selectedGuid = null;
+let reportStart = '', reportEnd = '';
+let lastAllStores = null;
+
+/* ── Default dates ── */
+(function(){
+  const e = new Date(), s = new Date();
+  s.setDate(s.getDate()-6);
+  document.getElementById('endDate').value   = e.toISOString().slice(0,10);
+  document.getElementById('startDate').value = s.toISOString().slice(0,10);
+})();
+
+/* ── Variant tabs ── */
+function initTabs(tabsId, onChange) {
+  document.getElementById(tabsId).querySelectorAll('.vtab').forEach(btn => {
+    btn.addEventListener('click', function(){
+      document.getElementById(tabsId).querySelectorAll('.vtab').forEach(b=>b.classList.remove('active'));
+      this.classList.add('active');
+      onChange(this.dataset.v);
+    });
+  });
+}
+initTabs('csvVariantTabs', v => { csvVariant = v; });
+initTabs('apiVariantTabs', v => { apiVariant = v; });
+
+/* ── Helpers ── */
+const $ = id => document.getElementById(id);
+function showStatus(id, msg, type){const e=$(id);e.textContent=msg;e.className='status '+type;e.style.display='block';}
+function hideStatus(id){$(id).style.display='none';}
+function fmt(n){return Number(n||0).toLocaleString();}
+function pct(q,t){return t?Math.round(q/t*100)+'%':'–';}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function fmtDate(d){const s=String(d||'');return s.length===8?s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6):s;}
+function dlBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
+
+/* ── Build a simple qty table ── */
+function mkTable(rows, totalFP, cols){
+  if(!rows.length) return '<p class="help-text">No data.</p>';
+  const tot = rows.reduce((s,r)=>s+(r.quantity||0),0);
+  let t='<div class="tbl-wrap"><table><thead><tr>';
+  cols.forEach(c=>t+=`<th${c.num?' class="num"':''}>${esc(c.label)}</th>`);
+  t+='<th class="num">% of Total</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    t+=`<tr>`;
+    cols.forEach(c=>t+=`<td${c.num?' class="num"':''}>${esc(String(c.val(r)))}</td>`);
+    t+=`<td class="num">${pct(r.quantity,totalFP||tot)}</td></tr>`;
+  });
+  t+=`</tbody><tfoot><tr><td>Total</td><td class="num">${fmt(tot)}</td><td></td></tr></tfoot></table></div>`;
+  return t;
+}
+
+/* ── Render CSV results ── */
+function renderCsvResults(data){
+  lastCsvData = data;
+  const total    = data.totalPick3Quantity||0;
+  const parents  = data.parentItems||[];
+  const sels     = data.selections||[];
+  $('csvTitle').textContent = 'Breakdown Results';
+  $('csvSub').textContent   = `Total Full Pairings: ${fmt(total)} · ${parents.length} items · ${sels.length} pairing choices`;
+
+  const posParents = parents.filter(p=>p.itemName.includes('Full Pairing Entree'));
+  const oloParents = parents.filter(p=>p.itemName.includes('Full Value Pairings (OLO)'));
+  const posPairs   = sels.filter(s=>s.itemName.includes('(POS Pairing Choice)'));
+  const oloPairs   = sels.filter(s=>/OLO Pairing Cho(?:ice|cie)/.test(s.itemName));
+
+  const itemCols   = [{label:'Item',val:r=>r.itemName},{label:'Qty',num:true,val:r=>fmt(r.quantity)}];
+  const pairCols   = [{label:'Pairing Choice',val:r=>r.itemName},{label:'Qty',num:true,val:r=>fmt(r.quantity)}];
+
+  let leftHtml='', rightHtml='';
+
+  if(csvVariant!=='olo' && posParents.length){
+    leftHtml += '<p class="sub-head pos">POS — In-Store</p>' + mkTable(posParents, total, itemCols);
+  }
+  if(csvVariant!=='pos' && oloParents.length){
+    leftHtml += '<p class="sub-head olo">OLO — Online</p>' + mkTable(oloParents, total, itemCols);
+  }
+  if(!leftHtml) leftHtml = mkTable(parents, total, itemCols);
+
+  if(csvVariant!=='olo' && posPairs.length){
+    rightHtml += '<p class="sub-head pos">POS Pairings</p>' + mkTable(posPairs, total, pairCols);
+  }
+  if(csvVariant!=='pos' && oloPairs.length){
+    rightHtml += '<p class="sub-head olo">OLO Pairings</p>' + mkTable(oloPairs, total, pairCols);
+  }
+  if(!rightHtml) rightHtml = mkTable(sels, total, pairCols);
+
+  $('csvGrid').innerHTML =
+    `<div class="tbl-section"><h3>Full Pairings Item Counts</h3>${leftHtml}</div>` +
+    `<div class="tbl-section"><h3>Pairing Choices</h3>${rightHtml}</div>`;
+
+  $('csvResults').style.display='block';
+  $('csvResults').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+/* ── Load CSV ── */
+$('btnLoad').addEventListener('click', async()=>{
+  const slFile  = $('fileSelectedLevels').files[0];
+  const itFile  = $('fileItems').files[0];
+  const modFile = $('fileModifiers').files[0];
+  if(!slFile && !itFile){ showStatus('csvStatus','Please select at least All levels.csv (required for pairing accuracy) or Items.csv.','error'); return; }
+
+  const btn = $('btnLoad');
+  btn.disabled = true;
+  showStatus('csvStatus','Parsing CSV…','loading');
+  try{
+    const form = new FormData();
+    if(slFile){  form.append('selected_levels_file', slFile); lastSlFile = slFile; }
+    if(itFile)   form.append('file', itFile);
+    if(modFile)  form.append('modifiers_file', modFile);
+    const res  = await fetch(`${API}/api/reports/pick3/from-csv?variant=${encodeURIComponent(csvVariant)}&report_type=${REPORT_TYPE}`,{method:'POST',body:form});
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){ showStatus('csvStatus', data.detail||res.statusText||'Upload failed','error'); return; }
+    renderCsvResults(data);
+    $('btnExcel').disabled = !slFile;
+    $('btnCsvExport').style.display = 'inline-flex';
+    showStatus('csvStatus',`Loaded — ${fmt(data.totalPick3Quantity||0)} total Full Pairings · ${(data.parentItems||[]).length} items · ${(data.selections||[]).length} pairing choices`,'success');
+  }catch(e){ showStatus('csvStatus','Error: '+e.message,'error'); }
+  finally{ btn.disabled=false; }
+});
+
+/* ── Export Excel ── */
+$('btnExcel').addEventListener('click', async()=>{
+  const slFile = lastSlFile || $('fileSelectedLevels').files[0];
+  if(!slFile){ showStatus('csvStatus','Please select All levels.csv first.','error'); return; }
+  const btn = $('btnExcel');
+  btn.disabled=true; btn.textContent='⏳ Generating…';
+  showStatus('csvStatus','Building Excel report…','loading');
+  try{
+    const form = new FormData();
+    form.append('file', slFile);
+    const res = await fetch(`${API}/api/reports/pick3/excel?variant=${encodeURIComponent(csvVariant)}&report_type=${REPORT_TYPE}`,{method:'POST',body:form});
+    if(!res.ok){ const e=await res.json().catch(()=>({})); showStatus('csvStatus',e.detail||res.statusText||'Export failed','error'); return; }
+    dlBlob(await res.blob(), 'FullPairings_Report.xlsx');
+    showStatus('csvStatus','Excel report downloaded!','success');
+  }catch(e){ showStatus('csvStatus','Error: '+e.message,'error'); }
+  finally{ btn.disabled=false; btn.innerHTML='&#11015; Export Excel'; }
+});
+
+/* ── Export CSV (from loaded data) ── */
+$('btnCsvExport').addEventListener('click',()=>{
+  if(!lastCsvData) return;
+  const total = lastCsvData.totalPick3Quantity||1;
+  const rows  = [['Type','Item','Qty','% of Total']];
+  (lastCsvData.parentItems||[]).forEach(p=>rows.push(['Parent Item',p.itemName,p.quantity,pct(p.quantity,total)]));
+  (lastCsvData.selections||[]).forEach(s=>rows.push(['Pairing',s.itemName,s.quantity,pct(s.quantity,total)]));
+  const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),'FullPairings_Breakdown.csv');
+});
+
+/* ── Run API Report ── */
+$('btnRun').addEventListener('click', async()=>{
+  const start=$('startDate').value, end=$('endDate').value;
+  if(!start||!end){showStatus('apiStatus','Select both dates.','error');return;}
+  if(start>end){showStatus('apiStatus','Start must be before end.','error');return;}
+  const btn=$('btnRun'); btn.disabled=true;
+  showStatus('apiStatus',`Loading Full Pairings (${apiVariant.toUpperCase()})…`,'loading');
+  try{
+    const res  = await fetch(`${API}/api/reports/pick3`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:start,end_date:end,variant:apiVariant,report_type:REPORT_TYPE})});
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){showStatus('apiStatus',data.detail||res.statusText,'error');return;}
+    reportStart=start; reportEnd=end;
+    renderPivot(data.summary||[]);
+    $('apiResults').style.display='block';
+    $('apiVariantLabel').textContent = apiVariant==='olo'?'(OLO)':'(POS)';
+    $('btnExportSummary').style.display='inline-flex';
+    $('btnLoadAll').style.display='inline-flex';
+    $('drillContainer').innerHTML='<div class="prompt-box">Click a store row to load its pairing breakdown.</div>';
+    $('allStoresContainer').style.display='none';
+    showStatus('apiStatus',`Report loaded. ${new Set((data.summary||[]).map(r=>r.restaurantGuid)).size} stores, ${pivotDates.length} dates.`,'success');
+  }catch(e){showStatus('apiStatus','Error: '+e.message,'error');}
+  finally{btn.disabled=false;}
+});
+
+function renderPivot(rows){
+  const dates = [...new Set(rows.map(r=>r.businessDate))].sort();
+  pivotDates = dates;
+  const byStore={};
+  rows.forEach(r=>{
+    if(!byStore[r.restaurantGuid]) byStore[r.restaurantGuid]={name:r.restaurantName,guid:r.restaurantGuid,dq:{},total:0};
+    byStore[r.restaurantGuid].dq[r.businessDate]=r.pick3Total;
+    byStore[r.restaurantGuid].total+=r.pick3Total;
+  });
+  pivotRows = Object.values(byStore).sort((a,b)=>a.name.localeCompare(b.name));
+  $('pivotThead').innerHTML='<th>Store Name</th>'+dates.map(d=>`<th class="num">${esc(fmtDate(d))}</th>`).join('')+'<th class="num total-col">Total</th>';
+  $('pivotBody').innerHTML = pivotRows.map(s=>`
+    <tr class="drill-row${s.guid===selectedGuid?' selected':''}" data-guid="${esc(s.guid)}" data-name="${esc(s.name)}">
+      <td>${esc(s.name)}</td>${dates.map(d=>`<td class="num">${s.dq[d]!==undefined?fmt(s.dq[d]):''}</td>`).join('')}
+      <td class="num total-col">${fmt(s.total)}</td>
+    </tr>`).join('');
+  $('pivotBody').querySelectorAll('tr.drill-row').forEach(tr=>{
+    tr.addEventListener('click',function(){
+      const guid=this.dataset.guid,name=this.dataset.name;
+      if(!confirm(`Load pairing drill-down for ${name}?`)) return;
+      selectedGuid=guid;
+      document.querySelectorAll('#pivotBody tr').forEach(r=>r.classList.remove('selected'));
+      this.classList.add('selected');
+      loadDrillDown(guid);
+    });
+  });
+}
+
+async function loadDrillDown(guid){
+  const c=$('drillContainer');
+  c.innerHTML='<div class="prompt-box">Loading pairing counts…</div>';
+  try{
+    const res  = await fetch(`${API}/api/reports/pick3/drill-down-orders`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:reportStart,end_date:reportEnd,restaurant_guid:guid,variant:apiVariant,report_type:REPORT_TYPE})});
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){c.innerHTML=`<div class="prompt-box">Failed: ${esc(data.detail||res.statusText)}</div>`;return;}
+    renderDrillBlock(c, data.restaurantName||'Store', data);
+  }catch(e){c.innerHTML=`<div class="prompt-box">Error: ${esc(e.message)}</div>`;}
+}
+
+function renderDrillBlock(container, title, data){
+  const total  = data.totalPick3Quantity||1;
+  const parents= data.parentItems||[];
+  const sels   = data.selections||[];
+  const cols   = [{label:'Item',val:r=>r.itemName},{label:'Qty',num:true,val:r=>fmt(r.quantity)}];
+  let html=`<div class="drill-block"><div class="drill-title">${esc(title)}</div><p class="help-text">Total Full Pairings: ${fmt(total)}</p><div class="drill-tables">`;
+  html+=`<div class="drill-col"><div class="drill-caption">Full Pairing Entree</div>${mkTable(parents,total,cols)}</div>`;
+  html+=`<div class="drill-col"><div class="drill-caption">Pairing Choices</div>${mkTable(sels,total,cols)}</div>`;
+  html+='</div></div>';
+  container.innerHTML=html;
+}
+
+/* ── All-Stores Drill-Down ── */
+$('btnLoadAll').addEventListener('click', async()=>{
+  const btn=$('btnLoadAll'), c=$('allStoresContainer');
+  btn.disabled=true; c.style.display='block';
+  c.innerHTML='<div class="prompt-box">Loading all stores… this may take 2–4 minutes.</div>';
+  try{
+    const res  = await fetch(`${API}/api/reports/pick3/drill-down-all-stores`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:reportStart,end_date:reportEnd,variant:apiVariant,report_type:REPORT_TYPE})});
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){c.innerHTML=`<div class="prompt-box">Failed: ${esc(data.detail||res.statusText)}</div>`;return;}
+    lastAllStores=data;
+    const stores=data.stores||[];
+    const pT={},sT={};let totAll=0;
+    stores.forEach(s=>{
+      totAll+=s.totalPick3Quantity||0;
+      (s.parentItems||[]).forEach(p=>{pT[p.itemName]=(pT[p.itemName]||0)+p.quantity;});
+      (s.selections||[]).forEach(sel=>{sT[sel.itemName]=(sT[sel.itemName]||0)+sel.quantity;});
+    });
+    renderDrillBlock(c,`All stores combined (${stores.length} locations)`,{
+      totalPick3Quantity:totAll,
+      parentItems:Object.entries(pT).map(([n,q])=>({itemName:n,quantity:q})).sort((a,b)=>b.quantity-a.quantity),
+      selections: Object.entries(sT).map(([n,q])=>({itemName:n,quantity:q})).sort((a,b)=>b.quantity-a.quantity),
+    });
+    $('btnExportAll').style.display='inline-flex';
+  }catch(e){c.innerHTML=`<div class="prompt-box">Error: ${esc(e.message)}</div>`;}
+  finally{btn.disabled=false;}
+});
+
+/* ── Export Summary CSV ── */
+$('btnExportSummary').addEventListener('click',()=>{
+  if(!pivotRows.length) return;
+  const hdr=['Store',...pivotDates.map(fmtDate),'Total'];
+  const rows=pivotRows.map(s=>[s.name,...pivotDates.map(d=>s.dq[d]??''),s.total]);
+  const csv=[hdr,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),'full_pairings_summary.csv');
+});
+
+/* ── Export All-Stores CSV ── */
+$('btnExportAll').addEventListener('click',()=>{
+  if(!lastAllStores) return;
+  const stores=lastAllStores.stores||[];
+  const pT={},sT={};let tot=0;
+  stores.forEach(s=>{tot+=s.totalPick3Quantity||0;(s.parentItems||[]).forEach(p=>{pT[p.itemName]=(pT[p.itemName]||0)+p.quantity;});(s.selections||[]).forEach(sel=>{sT[sel.itemName]=(sT[sel.itemName]||0)+sel.quantity;});});
+  const rows=[['Type','Item','Qty','% of Total']];
+  Object.entries(pT).sort((a,b)=>b[1]-a[1]).forEach(([n,q])=>rows.push(['Parent Item',n,q,pct(q,tot)]));
+  Object.entries(sT).sort((a,b)=>b[1]-a[1]).forEach(([n,q])=>rows.push(['Pairing',n,q,pct(q,tot)]));
+  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),'full_pairings_all_stores.csv');
+});
+</script>
+</body>
+</html>

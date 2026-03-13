@@ -304,6 +304,8 @@
     .results-actions { display: flex; gap: 0.5rem; align-items: center; }
     .results-summary { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
     .table-wrap { overflow-x: auto; border-radius: 6px; }
+    /* overflow-x: auto collapses table width to content in some browsers; min-width forces fill */
+    #resultsTable { min-width: 100%; }
 
     /* Toast column visibility toggle */
     .toast-cols-hidden .toast-col { display: none; }
@@ -515,9 +517,6 @@
     }
     .diag-banner a { color: #C41E3A; text-decoration: underline; }
 
-    /* Debug info */
-    .debug-info { font-size: 0.78rem; color: #9ca3af; margin-bottom: 0.5rem; font-family: monospace; }
-
     /* Floating help button */
     .help-fab {
       position: fixed; bottom: 2rem; right: 2rem;
@@ -552,14 +551,6 @@
     .yoy-sub select:disabled { opacity: 0.5; }
     .yoy-hint { font-size: 0.78rem; color: #9ca3af; margin-left: 1.5rem; }
 
-    /* Debug tag mapping */
-    #debugTagMappingSection { margin-bottom: 0.75rem; }
-    #debugTagMappingSection textarea {
-      width: 100%; height: 160px; font-size: 0.75rem;
-      font-family: monospace; padding: 0.5rem;
-      border: 1px solid #D1D5DB; border-radius: 4px;
-      background: #F8FAFC; color: #2c2c2c; resize: vertical;
-    }
   </style>
   <!-- xlsx-js-style: SheetJS + free cell-level styling for Excel export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
@@ -573,7 +564,10 @@
         <h1>Reports V1</h1>
         <p>Report Builder – Legacy reporting with full customization</p>
       </div>
-      <a href="/" class="home-btn">&#127968; Home</a>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <a href="/toast-reporting-guide.html" class="home-btn">&#128214; Toast Guide</a>
+        <a href="/" class="home-btn">&#127968; Home</a>
+      </div>
     </div>
   </div>
 
@@ -588,10 +582,12 @@
         <h3 style="margin: 0 0 0.75rem 0; color: #C41E3A; font-size: 0.95rem; font-weight: 700;">Navigation</h3>
         <div class="nav-section-label">Reports</div>
         <a href="/legacy.html" class="nav-link-item active">📋 Reports V1</a>
+        <a href="/toast-reporting-guide.html" class="nav-link-item">📘 Toast Reporting Guide</a>
         <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink">📱 Digital Orders by Platform (OLO)</a>
         <a href="/pick3.html" class="nav-link-item">📊 Pick 3 Report</a>
         <div class="nav-section-label hidden" id="dataNavSection" style="margin-top: 0.5rem;">Data</div>
         <a href="/mapping.html" class="nav-link-item hidden" id="mappingNavLink">🗂 Mapping Table</a>
+        <a href="/msi-discrepancy.html" class="nav-link-item hidden" id="msiDiscrepancyNavLink">🐒 MSI Discrepancy</a>
       </div>
 
       <div class="sidebar-card">
@@ -647,7 +643,8 @@
           <div class="form-group">
             <label>Report Type</label>
             <select id="reportType">
-              <option value="metrics">Metrics Report (Sales, Guest Count, etc.)</option>
+              <option value="sales_summary">Sales Summary (Orders, Revenue, Discounts, Voids, Cash/Card)</option>
+              <option value="metrics">Net Sales Report (Toast vs Newk's by Date)</option>
               <option value="menu">Menu Performance (Item-level Sales)</option>
             </select>
           </div>
@@ -758,13 +755,6 @@
           <button class="btn-danger hidden" id="deleteReportBtn">🗑 Delete Report</button>
         </div>
 
-        <div style="margin-top: 0.65rem;">
-          <label style="font-size: 0.82rem; color: #555c7b; cursor: pointer; display: flex; align-items: center; gap: 0.4rem;">
-            <input type="checkbox" id="debugTagMapping" style="margin: 0;" />
-            Include tag/mapping debug (for troubleshooting – run report then copy debug from Results)
-          </label>
-        </div>
-
         <div class="status hidden" id="builderStatus"></div>
       </div>
 
@@ -812,9 +802,6 @@
           <input id="menuItemFilterInput" type="text" placeholder="Type to filter menu items..." />
           <button class="btn-secondary" id="menuItemFilterClear" style="padding: 0.35rem 0.75rem;">Clear</button>
         </div>
-
-        <div class="debug-info" id="debugInfo"></div>
-        <div id="debugTagMappingSection" style="display: none;"></div>
 
         <div class="table-wrap">
           <table id="resultsTable">
@@ -1031,6 +1018,7 @@
         document.getElementById('oloNavLink')?.classList.toggle('hidden', !isAdmin);
         document.getElementById('dataNavSection')?.classList.toggle('hidden', !isAdmin);
         document.getElementById('mappingNavLink')?.classList.toggle('hidden', !isAdmin);
+        document.getElementById('msiDiscrepancyNavLink')?.classList.toggle('hidden', !isAdmin);
         document.getElementById('toastPricingExportBtn')?.classList.toggle('hidden', !isAdmin);
         document.getElementById('authModal').classList.add('hidden');
       } else {
@@ -1042,6 +1030,7 @@
         document.getElementById('oloNavLink')?.classList.add('hidden');
         document.getElementById('dataNavSection')?.classList.add('hidden');
         document.getElementById('mappingNavLink')?.classList.add('hidden');
+        document.getElementById('msiDiscrepancyNavLink')?.classList.add('hidden');
       }
     }
 
@@ -1088,15 +1077,46 @@
     // ──────────────────────────────────────────────────────────
     // Locations
     // ──────────────────────────────────────────────────────────
-    async function loadLocations() {
+    async function loadLocations(forceRefresh = false) {
       const grid = document.getElementById('locationsGrid');
       const diagEl = document.getElementById('locationsDiag');
       if (grid) grid.innerHTML = '<div style="padding: 0.25rem; color: #555c7b; font-size: 0.85rem;">Loading locations…</div>';
       if (diagEl) diagEl.classList.add('hidden');
+      const CACHE_KEY = 'toastLocationsCache';
+      const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+      if (!forceRefresh) {
+        try {
+          const raw = window.localStorage.getItem(CACHE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.locations) && typeof parsed.timestamp === 'number') {
+              const age = Date.now() - parsed.timestamp;
+              if (age >= 0 && age < CACHE_TTL_MS) {
+                locations = parsed.locations;
+                renderLocations();
+                // Show a "filtered" note if the user has assigned restaurants
+                if (currentUser?.role !== 'admin' && currentUser?.assignedRestaurants?.length > 0) {
+                  const el = document.getElementById('locationCount');
+                  if (el) el.textContent = `${locations.length} location(s) — filtered`;
+                }
+                return;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to read cached locations; falling back to network.', e);
+        }
+      }
       try {
         const resp = await fetch('/locations', { headers: authToken ? getAuthHeaders() : {} });
         if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
         locations = await resp.json();
+        try {
+          window.localStorage.setItem(CACHE_KEY, JSON.stringify({ locations, timestamp: Date.now() }));
+        } catch (e) {
+          console.warn('Failed to cache locations in localStorage.', e);
+        }
         renderLocations();
         // Show a "filtered" note if the user has assigned restaurants
         if (currentUser?.role !== 'admin' && currentUser?.assignedRestaurants?.length > 0) {
@@ -1439,7 +1459,7 @@
       document.getElementById('builderTitle').textContent = 'Report Builder – New Report';
       document.getElementById('reportName').value = '';
       document.getElementById('reportDescription').value = '';
-      document.getElementById('reportType').value = 'metrics';
+      document.getElementById('reportType').value = 'sales_summary';
       document.getElementById('dateRangeType').value = 'last_7_days';
       document.getElementById('selectAllLocations').checked = true;
       toggleAllLocations();
@@ -1521,8 +1541,7 @@
         groupBy: [],
         itemTags: selectedItemTags,
         includeZeroSales: document.getElementById('includeZeroSales')?.checked || false,
-        yoyEnabled: document.getElementById('enableYoY')?.checked || false,
-        debug: document.getElementById('debugTagMapping')?.checked || false
+        yoyEnabled: document.getElementById('enableYoY')?.checked || false
       };
     }
 
@@ -1563,7 +1582,6 @@
         if (!resp.ok) { const error = await resp.text(); throw new Error(error); }
         currentResults = await resp.json();
         lastReportConfig = config;   // store for labor KPI panel
-        updateDebugInfo(currentResults, config, backendVersion, reportTypeReceived, itemTagsCount, menuPath);
         renderResults(currentResults, config);
         const rowCount = Array.isArray(currentResults)
           ? currentResults.length
@@ -1741,69 +1759,6 @@
       if (key === 'businessDate') return value;
       if (key === 'quantity' || key.includes('Qty') || key.includes('quantity')) return typeof value === 'number' ? value.toLocaleString() : (value || '0');
       return value || '';
-    }
-
-    function updateDebugInfo(results, config, backendVersion, reportTypeReceived, itemTagsCount, menuPath) {
-      const debugEl = document.getElementById('debugInfo');
-      if (!debugEl) return;
-      const parts = [
-        `reportType=${config?.reportType || 'unknown'}`,
-        `itemTags=${config?.itemTags?.length || 0}`,
-        `resultType=${Array.isArray(results) ? 'array' : typeof results}`,
-        backendVersion ? `backend=${backendVersion}` : 'backend=unknown'
-      ];
-      if (reportTypeReceived) parts.push(`backendReportType=${reportTypeReceived}`);
-      if (itemTagsCount != null) parts.push(`backendItemTags=${itemTagsCount}`);
-      if (menuPath) parts.push(`menuPath=${menuPath}`);
-      if (Array.isArray(results)) { parts.push(`rows=${results.length}`); }
-      else if (results && typeof results === 'object') {
-        parts.push(`keys=${Object.keys(results).join('|')}`);
-        if (results.yoyInfo?.debug) {
-          const y = results.yoyInfo.debug;
-          parts.push(`yoy(alohaNonZero=${y.alohaNonZeroItems??'n/a'} matchedTotal=${y.matchedTotal??'n/a'})`);
-          const sd = y.splitDebug;
-          if (sd) {
-            const entered = sd.blockEntered ? '✅entered' : '❌skipped';
-            const oloM  = sd.oloModes?.length  ?? '?';
-            const insM  = sd.instoreModes?.length ?? '?';
-            const oloR  = sd.oloAlohaRows  ?? '?';
-            const insR  = sd.instoreAlohaRows ?? '?';
-            const oloMtch = sd.oloMatchedCount ?? '?';
-            const insMtch = sd.instoreMatchedCount ?? '?';
-            parts.push(`split(${entered} oloModes=${oloM} inModes=${insM} oloAlohaRows=${oloR} inAlohaRows=${insR} oloMatched=${oloMtch} inMatched=${insMtch})`);
-          }
-        }
-      }
-      debugEl.textContent = `Debug: ${parts.join(' • ')}`;
-
-      const tagDebugSection = document.getElementById('debugTagMappingSection');
-      if (tagDebugSection && results?.debugInfo?.tagMappingDebug) {
-        const d = results.debugInfo.tagMappingDebug;
-        tagDebugSection.style.display = 'block';
-        let html = '<div style="border:1px solid #444b6b;border-radius:8px;padding:0.75rem;background:#0d1121;">';
-        html += '<div style="font-weight:600;margin-bottom:0.5rem;color:#a0b0d0;">Tag / mapping debug (share to troubleshoot)</div>';
-        html += `<p style="margin:0 0 0.5rem;font-size:0.82rem;color:#a0b0d0;">Fallback hits: ${d.consolidatedFallbackHits??'n/a'} • Rows from Toast: ${d.totalAnalyticsRows??'n/a'} • Rows included: ${d.totalFilteredRows??'n/a'}</p>`;
-        if (d.targetItems?.length) {
-          html += '<div style="margin-bottom:0.5rem;font-size:0.82rem;color:#a0b0d0;"><strong>Target items:</strong><ul style="margin:0.25rem 0 0 1rem;">';
-          d.targetItems.forEach(t => {
-            html += `<li>${t.name||''} → inAnalytics: ${t.inAnalyticsRows}, inFiltered: ${t.inFilteredRows}, tagFromMap: ${t.tagFromMappingTable||'null'}</li>`;
-          });
-          html += '</ul></div>';
-        }
-        html += '<textarea id="debugTagMappingJson" readonly></textarea>';
-        html += '<button type="button" id="copyTagMappingDebugBtn" style="margin-top:0.35rem;padding:0.35rem 0.75rem;font-size:0.82rem;cursor:pointer;background:#444b6b;border:none;color:#f4f4f4;border-radius:4px;">Copy debug to clipboard</button>';
-        html += '</div>';
-        tagDebugSection.innerHTML = html;
-        const ta = document.getElementById('debugTagMappingJson');
-        if (ta) ta.value = JSON.stringify(d, null, 2);
-        document.getElementById('copyTagMappingDebugBtn').onclick = () => {
-          const t = document.getElementById('debugTagMappingJson');
-          if (t) { t.select(); document.execCommand('copy'); showStatus('success', 'Debug info copied'); }
-        };
-      } else if (tagDebugSection) {
-        tagDebugSection.style.display = 'none';
-        tagDebugSection.innerHTML = '';
-      }
     }
 
     // ──────────────────────────────────────────────────────────
@@ -2009,6 +1964,11 @@
       toggleBtn = document.getElementById('toggleDailyColumnsBtn');
       if (toggleBtn) toggleBtn.classList.add('hidden');
       if (results && typeof results==='object' && !Array.isArray(results) &&
+          results.hasOwnProperty('summaryTable')) {
+        renderSalesSummary(results, config);
+        return;
+      }
+      if (results && typeof results==='object' && !Array.isArray(results) &&
           results.hasOwnProperty('pivotTable') && results.hasOwnProperty('totals')) {
         renderPivotResults(results, config);
         return;
@@ -2023,6 +1983,76 @@
       body.innerHTML = results.map(row=>`<tr>${keys.map(k=>`<td>${formatCell(k,row[k])}</td>`).join('')}</tr>`).join('');
       document.getElementById('exportBtn').classList.remove('hidden');
       document.getElementById('resultsSummary').textContent = `${results.length} rows`;
+    }
+
+    function renderSalesSummary(results, config) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      const rows  = results.summaryTable  || [];
+      const tot   = results.summaryTotals || {};
+
+      if (rows.length === 0) {
+        head.innerHTML=''; body.innerHTML='<tr><td colspan="100" class="empty-state">No data found</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        document.getElementById('resultsSummary').textContent='0 rows';
+        return;
+      }
+
+      // Style constants
+      const thNavy = 'background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
+      const thNavyL = 'background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
+      const thGreen = 'background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;';
+      const tdTot   = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
+      const tdTotL  = 'text-align:left;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
+      const tdGrnT  = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #A7F3D0;background:#ECFDF5;';
+      const tdRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;';
+      const tdRowL  = 'padding:0.5rem 0.75rem;text-align:left;border:1px solid #E5E7EB;';
+
+      const expandId = 'ss-expand-' + Date.now();
+      let html = '';
+
+      // Header row
+      html += `<tr>
+        <th style="${thNavyL}">Location</th>
+        <th style="${thNavy}">Orders</th>
+        <th style="${thGreen}">Newk's Net Sales</th>
+        <th style="${thNavy}">Avg Ticket</th>
+        <th style="${thNavy}">Discounts</th>
+        <th style="${thNavy}">Voids</th>
+        <th style="${thNavy}">Cash</th>
+        <th style="${thNavy}">Card</th>
+      </tr>`;
+
+      // Totals row (expandable)
+      html += `<tr class="expandable-header" data-expand-id="${expandId}" style="cursor:pointer;background:#EFF6FF;border:1px solid #BFDBFE;">
+        <td style="${tdTotL}"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations Totals:</td>
+        <td style="${tdTot}">${(tot.orders||0).toLocaleString()}</td>
+        <td style="${tdGrnT}">${formatCell('Sales', tot.netSales||0)}</td>
+        <td style="${tdTot}">${formatCell('Sales', tot.avgTicket||0)}</td>
+        <td style="${tdTot}">${formatCell('Sales', tot.discounts||0)}</td>
+        <td style="${tdTot}">${(tot.voids||0).toLocaleString()}</td>
+        <td style="${tdTot}">${formatCell('Sales', tot.cash||0)}</td>
+        <td style="${tdTot}">${formatCell('Sales', tot.card||0)}</td>
+      </tr>`;
+
+      // Location rows (hidden, expandable)
+      rows.forEach(row => {
+        html += `<tr class="location-row" data-expand-id="${expandId}" style="display:none;">
+          <td style="${tdRowL} padding-left:2.5rem;">${row.restaurantName||''}</td>
+          <td style="${tdRow}">${(row.orders||0).toLocaleString()}</td>
+          <td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;">${formatCell('Sales', row.netSales||0)}</td>
+          <td style="${tdRow}">${formatCell('Sales', row.avgTicket||0)}</td>
+          <td style="${tdRow}">${formatCell('Sales', row.discounts||0)}</td>
+          <td style="${tdRow}">${(row.voids||0).toLocaleString()}</td>
+          <td style="${tdRow}">${formatCell('Sales', row.cash||0)}</td>
+          <td style="${tdRow}">${formatCell('Sales', row.card||0)}</td>
+        </tr>`;
+      });
+
+      head.innerHTML=''; body.innerHTML=html;
+      document.getElementById('exportBtn').classList.remove('hidden');
+      document.getElementById('resultsSummary').textContent =
+        `${rows.length} locations • ${(tot.orders||0).toLocaleString()} orders • ${formatCell('Sales', tot.netSales||0)} Newk's Net Sales`;
     }
 
     function renderPivotResults(results, config) {
@@ -2136,100 +2166,6 @@
           });
         });
 
-        // ── OLO/In-Store Split Debug Panel (built now, injected after body.innerHTML below) ─────
-        let _splitDebugHtml = '';
-        if (results.yoyInfo?.debug?.splitDebug) {
-          const sd = results.yoyInfo.debug.splitDebug;
-          const bc = sd.blockConditions || {};
-          const pill = (ok, label) => `<span style="display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:700;background:${ok?'#DCFCE7':'#FEE2E2'};color:${ok?'#166534':'#991B1B'};margin:2px;">${label}</span>`;
-          let dbHtml = `<div id="splitDebugPanel" style="margin:12px 0;border:1.5px dashed #CBD5E1;border-radius:8px;background:#F8FAFC;overflow:hidden;">`;
-          dbHtml += `<div onclick="const b=document.getElementById('splitDebugBody');b.style.display=b.style.display==='none'?'block':'none';" style="padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#475569;user-select:none;">`;
-          dbHtml += `🔍 OLO/In-Store Split Debug <span style="font-weight:400;color:#94A3B8;">(click to toggle)</span></div>`;
-          dbHtml += `<div id="splitDebugBody" style="display:none;padding:10px 14px;font-size:11.5px;line-height:1.7;color:#334155;border-top:1px solid #E2E8F0;">`;
-
-          // Gate conditions
-          dbHtml += `<div style="margin-bottom:8px;"><strong>Block conditions:</strong> `;
-          dbHtml += pill(bc.hasOrderModeSplit,  `orderModeSplit in result: ${bc.hasOrderModeSplit}`);
-          dbHtml += pill(bc.hasOrderModeColumn, `OrderMode column in Aloha: ${bc.hasOrderModeColumn}`);
-          dbHtml += pill(!bc.omFilterActive,    `om_filter inactive: ${!bc.omFilterActive}`);
-          dbHtml += pill(sd.blockEntered,       `block entered: ${sd.blockEntered}`);
-          dbHtml += `</div>`;
-
-          if (sd.skippedReasons?.length) {
-            dbHtml += `<div style="color:#B91C1C;margin-bottom:6px;"><strong>⛔ Skipped because:</strong> ${sd.skippedReasons.join('; ')}</div>`;
-          }
-
-          // Aloha order modes in the data
-          if (bc.distinctOrderModesInAloha?.length) {
-            dbHtml += `<div style="margin-bottom:6px;"><strong>Distinct order modes in Aloha data (${(bc.alohaRowCount||0).toLocaleString()} rows):</strong><br>`;
-            dbHtml += bc.distinctOrderModesInAloha.map(m=>`<code style="background:#E2E8F0;padding:1px 5px;border-radius:4px;margin:2px;display:inline-block;">${m||'(blank)'}</code>`).join(' ');
-            dbHtml += `</div>`;
-          }
-
-          // Mapping info
-          if (sd.blockEntered) {
-            dbHtml += pill(sd.omMappingFound, `order mode mapping found: ${sd.omMappingFound} (${sd.omMappingCount} entries)`);
-            dbHtml += `<br>`;
-          }
-
-          if (sd.oloModes !== undefined) {
-            dbHtml += `<div style="margin-top:8px;"><strong>OLO channels looked for:</strong> ${(sd.oloChannelLabels||[]).map(c=>`<em>${c}</em>`).join(', ')}<br>`;
-            dbHtml += `<strong>Aloha modes mapped → OLO (${sd.oloModes.length}):</strong> `;
-            dbHtml += sd.oloModes.length ? sd.oloModes.map(m=>`<code style="background:#FEF9C3;padding:1px 5px;border-radius:4px;">${m}</code>`).join(' ') : '<span style="color:#B91C1C">none — nothing is mapped to OLO channels!</span>';
-            dbHtml += `</div>`;
-            dbHtml += `<div><strong>Aloha rows matching OLO modes:</strong> ${pill((sd.oloAlohaRows||0)>0, `${sd.oloAlohaRows||0} rows / ${sd.oloAlohaItems||0} distinct items`)}</div>`;
-          }
-          if (sd.oloSkipped) dbHtml += `<div style="color:#B91C1C">⛔ OLO enrichment skipped: ${sd.oloSkipped}</div>`;
-
-          if (sd.instoreModes !== undefined) {
-            dbHtml += `<div style="margin-top:6px;"><strong>In-Store channels looked for:</strong> ${(sd.instoreChannelLabels||[]).map(c=>`<em>${c}</em>`).join(', ')}<br>`;
-            dbHtml += `<strong>Aloha modes mapped → In-Store (${sd.instoreModes.length}):</strong> `;
-            dbHtml += sd.instoreModes.length ? sd.instoreModes.map(m=>`<code style="background:#DBEAFE;padding:1px 5px;border-radius:4px;">${m}</code>`).join(' ') : '<span style="color:#B91C1C">none — nothing is mapped to In-Store channels!</span>';
-            dbHtml += `</div>`;
-            dbHtml += `<div><strong>Aloha rows matching In-Store modes:</strong> ${pill((sd.instoreAlohaRows||0)>0, `${sd.instoreAlohaRows||0} rows / ${sd.instoreAlohaItems||0} distinct items`)}</div>`;
-          }
-          if (sd.instoreSkipped) dbHtml += `<div style="color:#B91C1C">⛔ In-Store enrichment skipped: ${sd.instoreSkipped}</div>`;
-
-          // Post-enrichment item counts
-          if (sd.oloItemCount !== undefined) {
-            dbHtml += `<div style="margin-top:8px;border-top:1px solid #E2E8F0;padding-top:6px;">`;
-            dbHtml += `<strong>After enrichment — OLO items:</strong> ${sd.oloItemCount} total, `;
-            dbHtml += pill(sd.oloMatchedCount > 0, `${sd.oloMatchedCount} matched Aloha qty`);
-            dbHtml += `<br><strong>After enrichment — In-Store items:</strong> ${sd.instoreItemCount} total, `;
-            dbHtml += pill(sd.instoreMatchedCount > 0, `${sd.instoreMatchedCount} matched Aloha qty`);
-            dbHtml += `</div>`;
-          }
-
-          // Sample rows table
-          const renderSample = (label, items) => {
-            if (!items?.length) return '';
-            let s = `<div style="margin-top:8px;"><strong>${label} (first ${items.length}):</strong><table style="width:100%;border-collapse:collapse;font-size:10.5px;margin-top:4px;">`;
-            s += `<tr style="background:#E2E8F0;"><th style="padding:2px 6px;text-align:left;">Name</th><th style="padding:2px 6px;text-align:left;">GUID(8)</th><th style="padding:2px 6px;text-align:right;">alohaQty</th><th style="padding:2px 6px;text-align:left;">alohaName</th><th style="padding:2px 6px;text-align:left;">matchSrc</th></tr>`;
-            items.forEach(r => {
-              const ok = r.alohaQty > 0;
-              s += `<tr style="background:${ok?'#F0FDF4':'#FFF7F7'};">`;
-              s += `<td style="padding:2px 6px;">${r.name||'?'}</td>`;
-              s += `<td style="padding:2px 6px;font-family:monospace;">${r.guid||''}</td>`;
-              s += `<td style="padding:2px 6px;text-align:right;font-weight:${ok?700:400};color:${ok?'#166534':'#9CA3AF'};">${r.alohaQty??0}</td>`;
-              s += `<td style="padding:2px 6px;">${r.alohaName||'—'}</td>`;
-              s += `<td style="padding:2px 6px;color:#6B7280;">${r.matchSrc||'—'}</td>`;
-              s += `</tr>`;
-            });
-            s += `</table></div>`;
-            return s;
-          };
-          dbHtml += renderSample('OLO sample items', sd.oloSample);
-          dbHtml += renderSample('In-Store sample items', sd.instoreSample);
-
-          // Raw JSON toggle
-          const rawJson = JSON.stringify(sd, null, 2).replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          dbHtml += `<div style="margin-top:8px;"><a href="#" onclick="event.preventDefault();const el=document.getElementById('splitRawJson');el.style.display=el.style.display==='none'?'block':'none';" style="font-size:10.5px;color:#6366F1;">▶ show raw splitDebug JSON</a>`;
-          dbHtml += `<pre id="splitRawJson" style="display:none;font-size:10px;background:#1e293b;color:#e2e8f0;padding:8px;border-radius:6px;overflow:auto;max-height:300px;">${rawJson}</pre></div>`;
-
-          dbHtml += `</div></div>`;
-          _splitDebugHtml = dbHtml;   // will be injected after body.innerHTML is set below
-        }
-
         // ── Order Mode Split: In-Store vs OLO ──────────────────────────────────
         const orderModeSplit = results.orderModeSplit;
         if (orderModeSplit) {
@@ -2323,77 +2259,11 @@
             return mHtml;
           };
 
-          // Build modeInfo objects from splitDebug so each section shows which Aloha order modes are counted
-          const _sd = results.yoyInfo?.debug?.splitDebug;
-          const _distinctInData = new Set(_sd?.blockConditions?.distinctOrderModesInAloha || []);
-
-          const instoreModeInfo = _sd ? {
-            modes:        _sd.instoreModes  || [],
-            modesPresent: (_sd.instoreModes  || []).filter(m => _distinctInData.has(m)),
-            rowCount:     _sd.instoreAlohaRows || 0,
-            pillBg:   '#A7F3D0', pillText: '#065F46',
-            labelCol: '#065F46', rowsBg:   '#ECFDF5',
-          } : null;
-
-          const oloModeInfo = _sd ? {
-            modes:        _sd.oloModes  || [],
-            modesPresent: (_sd.oloModes  || []).filter(m => _distinctInData.has(m)),
-            rowCount:     _sd.oloAlohaRows || 0,
-            pillBg:   '#FED7AA', pillText: '#7C2D12',
-            labelCol: '#92400E', rowsBg:   '#FFF7ED',
-          } : null;
-
-          html += buildModeSection(inStoreItems, '&#127978; In-Store', '#065F46', '#047857', '#ECFDF5', instoreModeInfo);
-          html += buildModeSection(oloItems, '&#128241; Online Ordering (OLO)', '#7C2D12', '#92400E', '#FFF7ED', oloModeInfo);
-        }
-
-        // ── Per-Store / Per-Day Weighted (EE Item Equivalents) ─────────────────
-        const psdw = results.perStoreDayWeighted;
-        if (psdw && psdw.rows && psdw.rows.length > 0) {
-          const wDates = [...(psdw.dateColumns || sortedDates)].sort();
-
-          html += '<tr><td colspan="100" style="height:24px;border:none;background:#f8fafc;"></td></tr>';
-          html += `<tr><td colspan="100" style="padding:0.6rem 0.75rem;background:#1E3A5F;color:white;font-size:0.95rem;font-weight:700;border:none;">&#9878;&#65039; Per Store / Per Day — Item Equivalents (EE Weighted)</td></tr>`;
-
-          if (psdw.missingEETags && psdw.missingEETags.length > 0) {
-            const missingList = psdw.missingEETags.map(n => `<em>${n.replace(/</g,'&lt;')}</em>`).join(', ');
-            html += `<tr><td colspan="100" style="padding:0.6rem 0.75rem;background:#FEF3C7;color:#92400E;border:1px solid #FCD34D;font-size:0.83rem;">
-              &#9888;&#65039; <strong>Missing EE tag</strong> — the following items have no EE weight tag and are excluded from item equivalent counts: ${missingList}
-            </td></tr>`;
-          }
-
-          html += `<tr>
-            <th style="background:#1E3A5F;color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">Store</th>
-            <th style="background:#1E3A5F;color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">Tag</th>
-            <th style="background:#1E3A5F;color:white;text-align:right;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">Total (EE)</th>`;
-          wDates.forEach(d => {
-            html += `<th style="background:#1E3A5F;color:white;text-align:right;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #162d4a;">${formatDateHeader(d)}</th>`;
-          });
-          html += '</tr>';
-
-          let lastStoreName = null;
-          psdw.rows.forEach(row => {
-            const isNewStore = row.restaurantName !== lastStoreName;
-            lastStoreName = row.restaurantName;
-            const rowBg = isNewStore ? '#EFF6FF' : 'white';
-            html += `<tr>
-              <td style="padding:0.45rem 0.75rem;border:1px solid #E5E7EB;background:${rowBg};font-weight:${isNewStore ? '600' : 'normal'};">${isNewStore ? (row.restaurantName || '') : ''}</td>
-              <td style="padding:0.45rem 0.75rem;border:1px solid #E5E7EB;">${row.itemTagName || ''}</td>
-              <td style="padding:0.45rem 0.75rem;text-align:right;border:1px solid #E5E7EB;font-variant-numeric:tabular-nums;">${(row.totalWeightedQty ?? 0).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:2})}</td>`;
-            wDates.forEach(d => {
-              const v = row.daily?.[d] ?? 0;
-              html += `<td style="padding:0.45rem 0.75rem;text-align:right;border:1px solid #E5E7EB;font-variant-numeric:tabular-nums;">${v ? v.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:2}) : ''}</td>`;
-            });
-            html += '</tr>';
-          });
+          html += buildModeSection(inStoreItems, '&#127978; In-Store', '#065F46', '#047857', '#ECFDF5', null);
+          html += buildModeSection(oloItems, '&#128241; Online Ordering (OLO)', '#7C2D12', '#92400E', '#FFF7ED', null);
         }
 
         head.innerHTML=''; body.innerHTML=html;
-        // Inject split debug panel outside the <table> (can't put a <div> inside <tbody>)
-        if (_splitDebugHtml) {
-          const _tbl = body.closest('table');
-          if (_tbl) _tbl.insertAdjacentHTML('afterend', _splitDebugHtml);
-        }
         setTimeout(() => {
           body.querySelectorAll('.menu-mix-sort').forEach(h => {
             h.addEventListener('click', function(e) {
@@ -2409,13 +2279,10 @@
         const _hasModeData = !!(results.orderModeSplit && (
           (results.orderModeSplit.inStore?.itemBreakdownDaily?.length > 0) ||
           (results.orderModeSplit.olo?.itemBreakdownDaily?.length > 0)));
-        const _hasEEData = !!(results.perStoreDayWeighted?.rows?.length > 0);
-        const _missingEE = results.perStoreDayWeighted?.missingEETags?.length || 0;
         let _summaryParts = [`${cnt} items across ${sortedTags.length} tags`];
         if (!showDaily) _summaryParts.push('daily columns hidden');
         if (filterActive) _summaryParts.push('filtered');
         if (_hasModeData) _summaryParts.push('order mode split below');
-        if (_hasEEData) _summaryParts.push(`EE weighted below${_missingEE > 0 ? ` (${_missingEE} items missing EE tag)` : ''}`);
         document.getElementById('resultsSummary').textContent = _summaryParts.join(' • ');
         return;
       }
@@ -2760,7 +2627,32 @@
       }
 
       // ── Route by result shape ──────────────────────────────────────────────
-      if (currentResults.pivotTable !== undefined) {
+
+      // ── Sales Summary export ──────────────────────────────────────────────
+      if (currentResults.summaryTable !== undefined) {
+        const rows = currentResults.summaryTable || [];
+        const tot  = currentResults.summaryTotals || {};
+        const hdr = [
+          c('Location', S.navyL), c('Orders', S.navyR), c("Newk's Net Sales", S.navyR),
+          c('Avg Ticket', S.navyR), c('Discounts', S.navyR), c('Voids', S.navyR),
+          c('Cash', S.navyR), c('Card', S.navyR),
+        ];
+        const totRow = [
+          c('TOTAL', S.navyL), n(tot.orders||0, S.navyR), n(tot.netSales||0, S.navyR),
+          n(tot.avgTicket||0, S.navyR), n(tot.discounts||0, S.navyR), n(tot.voids||0, S.navyR),
+          n(tot.cash||0, S.navyR), n(tot.card||0, S.navyR),
+        ];
+        const dataRows = rows.map((row, idx) => {
+          const alt = idx % 2 === 1;
+          const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+          return [
+            c(row.restaurantName||'', dL), n(row.orders||0, dR), n(row.netSales||0, dR),
+            n(row.avgTicket||0, dR), n(row.discounts||0, dR), n(row.voids||0, dR),
+            n(row.cash||0, dR), n(row.card||0, dR),
+          ];
+        });
+        addWS(WB, [hdr, totRow, ...dataRows], 'Sales Summary');
+      } else if (currentResults.pivotTable !== undefined) {
         const pivotTable        = currentResults.pivotTable || [];
         const totals            = currentResults.totals || [];
         const itemBreakdownDaily= currentResults.itemBreakdownDaily || [];
@@ -2800,35 +2692,6 @@
           if (oloItems.length > 0)
             addWS(WB, buildBreakdownSheet(oloItems, sortedDates, hasAloha, collapseAloha,
               S.orangeL, S.orangeR, S.lOrangL, S.lOrangR), 'OLO');
-
-          // Sheet: EE Weighted
-          const psdw = currentResults.perStoreDayWeighted;
-          if (psdw?.rows?.length > 0) {
-            const wDates = [...(psdw.dateColumns || sortedDates)].sort();
-            const wRows = [];
-            if (psdw.missingEETags?.length > 0) {
-              wRows.push([c(`⚠ Missing EE tag — excluded from weighted counts: ${psdw.missingEETags.join(', ')}`, S.warnL)]);
-              wRows.push([blank()]);
-            }
-            const wHdr = [c('Store', S.navyL), c('Tag', S.navyL), c('Total (EE)', S.navyR)];
-            wDates.forEach(d => wHdr.push(c(formatDateHeader(d), S.navyR)));
-            wRows.push(wHdr);
-            let lastStore = null;
-            psdw.rows.forEach((row, idx) => {
-              const alt = idx % 2 === 1;
-              const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
-              const isNew = row.restaurantName !== lastStore;
-              if (isNew) lastStore = row.restaurantName;
-              const r = [
-                c(isNew ? row.restaurantName || '' : '', isNew ? S.dLbld : dL),
-                c(row.itemTagName || '', dL),
-                n(row.totalWeightedQty || 0, dR),
-              ];
-              wDates.forEach(d => r.push(n(row.daily?.[d] || 0, dR)));
-              wRows.push(r);
-            });
-            addWS(WB, wRows, 'EE Weighted');
-          }
 
         // ── Compact item totals ────────────────────────────────────────────
         } else if (itemTotals.length > 0 && !isMetrics) {
@@ -2990,7 +2853,7 @@
       document.getElementById('customEndDate').addEventListener('change', updateAlohaRangeWarning);
       document.getElementById('selectAllLocations').addEventListener('change', toggleAllLocations);
       document.getElementById('enableYoY').addEventListener('change', updateYoYControls);
-      document.getElementById('retryLocationsBtn').addEventListener('click', loadLocations);
+      document.getElementById('retryLocationsBtn').addEventListener('click', () => loadLocations(true));
 
       const menuItemFilterInput = document.getElementById('menuItemFilterInput');
       menuItemFilterInput.addEventListener('input', () => {

@@ -1,26 +1,26 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./app.css";
-import {
-  ApiError,
-  ApiMenuProvider,
-  MockOrderSubmitter,
-  SimplePricingProvider,
-  ToastMenuProvider,
-  ToastPricingProvider,
-} from "./kiosk/providersImpl";
-import { Menu, Cart, Pricing, MenuItem, ModifierGroup } from "./kiosk/types";
-import { addLine, buildCartLine, clearCart, getItem, removeLine, setQty } from "./kiosk/cartLogic";
-import { formatMoney } from "./kiosk/money";
+import { ApiError, ApiMenuProvider, ToastMenuProvider } from "./core/providersImpl";
+import { Menu } from "./core/types";
 import newksLogo from "./assets/newks-logo.svg";
-
-type Screen = "menu" | "item" | "checkout" | "success";
-
-const IDLE_MS = 2 * 60 * 1000;
+import { loadBoardConfig, saveBoardConfig, loadBoardConfigFromServer, saveBoardConfigToServer } from "./menuBoard/utils/storage";
+import type { BoardConfig } from "./menuBoard/types";
+import { MenuBoardPage } from "./menuBoard/components/MenuBoardPage";
+import { SetupWizard } from "./menuBoard/components/SetupWizard";
+import { mergeMenuWithConfig } from "./menuBoard/utils/mergeMenuWithConfig";
 
 type LocationOption = {
   id: string;
   name: string;
   externalId?: string;
+};
+
+const LOCATIONS_CACHE_KEY = "toastLocationsCache";
+const LOCATIONS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+type LocationsCache = {
+  timestamp: number;
+  locations: LocationOption[];
 };
 
 export default function App() {
@@ -38,6 +38,8 @@ export default function App() {
   const [menuReloadKey, setMenuReloadKey] = useState(0);
   const [lastToastError, setLastToastError] = useState<string | null>(null);
   const [lastToastErrorDetails, setLastToastErrorDetails] = useState<string | null>(null);
+  const [boardConfig, setBoardConfig] = useState<BoardConfig>(() => loadBoardConfig());
+
   useEffect(() => {
     setSavedLocationId(localStorage.getItem("toastLocationId"));
   }, []);
@@ -51,80 +53,64 @@ export default function App() {
     () => (demoMode ? new ApiMenuProvider() : new ToastMenuProvider({ locationId: menuLocationId })),
     [demoMode, menuLocationId]
   );
-  const pricingProvider = useMemo(
-    () => (demoMode ? new SimplePricingProvider() : new ToastPricingProvider({ locationId })),
-    [demoMode, locationId]
-  );
-  const submitter = useMemo(() => new MockOrderSubmitter(), []);
 
   const [menu, setMenu] = useState<Menu | null>(null);
-  const [cart, setCart] = useState<Cart>({ lines: [] });
-  const [pricing, setPricing] = useState<Pricing>({
-    subtotalCents: 0,
-    taxCents: 0,
-    feesCents: 0,
-    totalCents: 0,
-  });
-
-  const [screen, setScreen] = useState<Screen>("menu");
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
-  const [orderId, setOrderId] = useState<string>("");
-
-  const itemById = useMemo(() => {
-    const map = new Map<string, MenuItem>();
-    (menu?.items ?? []).forEach((item) => map.set(item.id, item));
-    return map;
-  }, [menu]);
-
-  const activeItem: MenuItem | null = activeItemId ? itemById.get(activeItemId) ?? null : null;
 
   function resetForLocationChange() {
     localStorage.removeItem("toastLocationId");
     setLocationId(null);
+    setSavedLocationId(null);
     setGateSelection("");
     setMenu(null);
-    setCart(clearCart());
-    setPricing({ subtotalCents: 0, taxCents: 0, feesCents: 0, totalCents: 0 });
-    setScreen("menu");
-    setActiveItemId(null);
   }
 
   function applyDemoMode(next: boolean) {
     setDemoMode(next);
     setMenuReloadKey((k) => k + 1);
     setLocationReloadKey((k) => k + 1);
-    setCart(clearCart());
-    setPricing({ subtotalCents: 0, taxCents: 0, feesCents: 0, totalCents: 0 });
-    setScreen("menu");
-    setActiveItemId(null);
   }
 
-  // idle reset
-  const idleTimer = useRef<number | null>(null);
-  function resetIdle() {
-    if (idleTimer.current) window.clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(() => {
-      setCart(clearCart());
-      setScreen("menu");
-      setActiveItemId(null);
-      setAttractMode(true);
-    }, IDLE_MS);
-  }
+  // Save config to localStorage always, and to server when locationId is available
+  const [configVersion, setConfigVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    resetIdle();
+    saveBoardConfig(boardConfig);
+    // Also save to server if we have a location
+    if (locationId) {
+      saveBoardConfigToServer(locationId, boardConfig).then((result) => {
+        if (result.version) setConfigVersion(result.version);
+      });
+    }
+  }, [boardConfig, locationId]);
+
+  // Load config from server when locationId changes
+  useEffect(() => {
+    if (!locationId) return;
+    let cancelled = false;
+    loadBoardConfigFromServer(locationId).then(({ config, version }) => {
+      if (cancelled) return;
+      if (config) {
+        setBoardConfig(config);
+        setConfigVersion(version);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [locationId]);
+
+  useEffect(() => {
     const handler = () => {
       setAttractMode(false);
-      resetIdle();
     };
     window.addEventListener("pointerdown", handler);
     window.addEventListener("keydown", handler);
     return () => {
       window.removeEventListener("pointerdown", handler);
       window.removeEventListener("keydown", handler);
-      if (idleTimer.current) window.clearTimeout(idleTimer.current);
     };
   }, []);
+
+  // No-op idle reset — preserves the call-site in AttractScreen without breaking things
+  function resetIdle() {}
 
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +152,31 @@ export default function App() {
         cancelled = true;
       };
     }
+    // Try cached locations first to avoid calling Toast on every refresh
+    try {
+      const raw = localStorage.getItem(LOCATIONS_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as LocationsCache;
+        if (parsed && Array.isArray(parsed.locations) && typeof parsed.timestamp === "number") {
+          const age = Date.now() - parsed.timestamp;
+          if (age >= 0 && age < LOCATIONS_CACHE_TTL_MS) {
+            const list = parsed.locations;
+            setLocations(list);
+            if (!gateSelection && savedLocationId && list.some((loc) => loc.id === savedLocationId)) {
+              setGateSelection(savedLocationId);
+            }
+            setLocationReady(true);
+            setLocationError(null);
+            return () => {
+              cancelled = true;
+            };
+          }
+        }
+      }
+    } catch {
+      // Ignore cache errors and fall back to network
+    }
+
     fetch("/api/toast/locations")
       .then(async (res) => {
         if (!res.ok) {
@@ -178,6 +189,12 @@ export default function App() {
         if (cancelled) return;
         const list = Array.isArray(data) ? data : [];
         setLocations(list);
+        try {
+          const cache: LocationsCache = { timestamp: Date.now(), locations: list };
+          localStorage.setItem(LOCATIONS_CACHE_KEY, JSON.stringify(cache));
+        } catch {
+          // Ignore cache write failures
+        }
         if (!gateSelection && savedLocationId && list.some((loc) => loc.id === savedLocationId)) {
           setGateSelection(savedLocationId);
         }
@@ -197,6 +214,15 @@ export default function App() {
     };
   }, [demoMode, locationReloadKey]);
 
+  // Automatically reuse a previously saved location on reload if it is still valid
+  useEffect(() => {
+    if (!locationReady) return;
+    if (locationId) return;
+    if (!savedLocationId) return;
+    if (!locations.some((loc) => loc.id === savedLocationId)) return;
+    setLocationId(savedLocationId);
+  }, [locationReady, locationId, savedLocationId, locations]);
+
   useEffect(() => {
     if (locationId) {
       localStorage.setItem("toastLocationId", locationId);
@@ -211,23 +237,6 @@ export default function App() {
       setLastToastErrorDetails(null);
     }
   }, [locationId]);
-
-  useEffect(() => {
-    if (!menu) return;
-    pricingProvider
-      .priceCart({ menu, cart })
-      .then(setPricing)
-      .catch(console.error);
-  }, [menu, cart, pricingProvider]);
-
-  useEffect(() => {
-    if (!activeItemId) return;
-    if (!activeItem) {
-      console.warn(`Selected item not found: ${activeItemId}`);
-      setActiveItemId(null);
-      setScreen("menu");
-    }
-  }, [activeItemId, activeItem]);
 
   if (attractMode) {
     return (
@@ -384,127 +393,33 @@ export default function App() {
       </div>
     );
 
+  // Show setup wizard on first run (no setupComplete flag)
+  if (!boardConfig.setupComplete) {
+    const wizardVm = mergeMenuWithConfig(menu, boardConfig);
+    return (
+      <SetupWizard
+        menu={menu}
+        boardConfig={boardConfig}
+        viewModel={wizardVm}
+        onComplete={(config) => setBoardConfig(config)}
+        onSkip={() => setBoardConfig({ ...boardConfig, setupComplete: true })}
+      />
+    );
+  }
+
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="brand">
-          <img className="logoMark" src={newksLogo} alt="Newk's" />
-          <div>
-            <div className="title">Newk&#39;s Kiosk</div>
-            <div className="subtitle">Tap to order • Pay at counter</div>
-          </div>
-        </div>
-        <div className="topbarRight">
-          <div className={`statusTag ${demoMode ? "demo" : "live"}`}>
-            {demoMode ? "Demo Mode" : "Live Menu"}
-          </div>
-          <button className="btn ghost tinyBtn" onClick={() => setShowSettings(true)}>
-            Settings
-          </button>
-          <div className="location">
-            {locations.length > 1 ? (
-              <label className="locationSelect">
-                <span className="muted tiny">Location</span>
-                <select
-                  className="select"
-                  value={locationId ?? ""}
-                  onChange={(e) => setLocationId(e.target.value || null)}
-                >
-                  {locations.map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      {loc.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : locations.length === 1 ? (
-              <div className="locationLabel">
-                <div className="muted tiny">Location</div>
-                <div>{locations[0].name}</div>
-              </div>
-            ) : (
-              <div className="locationLabel">
-                <div className="muted tiny">Location</div>
-                <div className="muted">Loading…</div>
-              </div>
-            )}
-            <button className="btn ghost tinyBtn" onClick={resetForLocationChange}>
-              Change
-            </button>
-          </div>
-
-          <div className="totals">
-            <div className="totalLine">
-              <span>Cart</span>
-              <b>{formatMoney(pricing.totalCents)}</b>
-            </div>
-            <button className="btn ghost" onClick={() => setCart(clearCart())} disabled={cart.lines.length === 0}>
-              Clear
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="main">
-        <section className="content">
-          {screen === "menu" && (
-            <MenuScreen
-              menu={menu}
-              onSelectItem={(id) => {
-                setActiveItemId(id);
-                setScreen("item");
-              }}
-            />
-          )}
-
-          {screen === "item" && activeItem && (
-            <ItemScreen
-              item={activeItem}
-              onBack={() => setScreen("menu")}
-              onAdd={(selections) => {
-                const line = buildCartLine(menu, activeItem.id, selections);
-                setCart((c) => addLine(c, line));
-                setScreen("menu");
-              }}
-            />
-          )}
-
-          {screen === "checkout" && (
-            <CheckoutScreen
-              pricing={pricing}
-              cart={cart}
-              onBack={() => setScreen("menu")}
-              onPlaceOrder={async () => {
-                if (!menu || cart.lines.length === 0) return;
-                const res = await submitter.submit({ menu, cart, pricing });
-                setOrderId(res.orderId);
-                setCart(clearCart());
-                setScreen("success");
-              }}
-            />
-          )}
-
-          {screen === "success" && (
-            <SuccessScreen
-              orderId={orderId}
-              onDone={() => {
-                setOrderId("");
-                setScreen("menu");
-              }}
-            />
-          )}
-        </section>
-
-        <aside className="cart">
-          <CartPanel
-            cart={cart}
-            pricing={pricing}
-            onQty={(lineId, qty) => setCart((c) => setQty(c, lineId, qty))}
-            onRemove={(lineId) => setCart((c) => removeLine(c, lineId))}
-            onCheckout={() => setScreen("checkout")}
-          />
-        </aside>
-      </main>
+      <MenuBoardPage
+        menu={menu}
+        boardConfig={boardConfig}
+        onBoardConfigChange={setBoardConfig}
+        locationName={locations.find((l) => l.id === locationId)?.name ?? null}
+        demoMode={demoMode}
+        onResetLocation={resetForLocationChange}
+        locationId={locationId}
+        configVersion={configVersion}
+        onMenuRefresh={() => setMenuReloadKey((k) => k + 1)}
+      />
       {showSettings && (
         <SettingsModal
           locations={locations}
@@ -664,6 +579,14 @@ function SettingsModal({
   debugInfo: string | null;
   debugLoading: boolean;
 }) {
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true">
       <div className="modal">
@@ -744,325 +667,3 @@ function SettingsModal({
   );
 }
 
-function MenuScreen({ menu, onSelectItem }: { menu: Menu; onSelectItem: (itemId: string) => void }) {
-  const categories = useMemo(
-    () => [...menu.categories].sort((a, b) => (a.sort ?? 999) - (b.sort ?? 999)),
-    [menu.categories]
-  );
-
-  const menuGroups = useMemo(() => {
-    const grouped = new Map<string, { id: string; name: string; sort?: number }[]>();
-    categories.forEach((cat) => {
-      const parts = cat.name.split(" - ");
-      const menuName = parts.length > 1 ? parts[0] : "Menu";
-      const groupName = parts.length > 1 ? parts.slice(1).join(" - ") : cat.name;
-      const entry = { id: cat.id, name: groupName, sort: cat.sort };
-      const existing = grouped.get(menuName) ?? [];
-      existing.push(entry);
-      grouped.set(menuName, existing);
-    });
-    for (const [key, list] of grouped.entries()) {
-      list.sort((a, b) => (a.sort ?? 999) - (b.sort ?? 999));
-      grouped.set(key, list);
-    }
-    return grouped;
-  }, [categories]);
-
-  const menuNames = useMemo(() => Array.from(menuGroups.keys()), [menuGroups]);
-  const [activeMenu, setActiveMenu] = useState(menuNames[0] ?? "Menu");
-  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!menuNames.includes(activeMenu)) {
-      setActiveMenu(menuNames[0] ?? "Menu");
-    }
-  }, [activeMenu, menuNames]);
-
-  useEffect(() => {
-    setActiveCategoryId(null);
-  }, [activeMenu]);
-
-  const activeGroups = menuGroups.get(activeMenu) ?? [];
-  const activeCategory = categories.find((cat) => cat.id === activeCategoryId) ?? null;
-  const activeItems = activeCategory
-    ? menu.items.filter((i) => i.categoryId === activeCategory.id)
-    : [];
-
-  return (
-    <div>
-      {menuNames.length > 1 && (
-        <div className="menuTabs">
-          {menuNames.map((name) => (
-            <button
-              key={name}
-              className={`menuTab ${name === activeMenu ? "active" : ""}`}
-              onClick={() => {
-                setActiveMenu(name);
-                setActiveCategoryId(null);
-              }}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {!activeCategory && (
-        <div>
-          <div className="menuHeader">
-            <h2>{activeMenu}</h2>
-            <div className="muted">Choose a category</div>
-          </div>
-          <div className="menuGroupGrid">
-            {activeGroups.map((group) => (
-              <button
-                key={group.id}
-                className="menuGroupCard"
-                onClick={() => setActiveCategoryId(group.id)}
-              >
-                <div className="cardTitle">{group.name}</div>
-                <div className="muted">Tap to view items</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {activeCategory && (
-        <div className="section">
-          <div className="menuHeader">
-            <button className="btn ghost" onClick={() => setActiveCategoryId(null)}>
-              ← Back to categories
-            </button>
-            <div>
-              <h2>{activeCategory.name}</h2>
-              <div className="muted">{activeMenu}</div>
-            </div>
-          </div>
-          <div className="grid">
-            {activeItems.map((it) => (
-              <button key={it.id} className="card" onClick={() => onSelectItem(it.id)}>
-                <div className="cardTitle">{it.name}</div>
-                {it.description && <div className="cardDesc">{it.description}</div>}
-                <div className="cardPrice">{formatMoney(it.basePriceCents)}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ItemScreen({
-  item,
-  onBack,
-  onAdd,
-}: {
-  item: MenuItem;
-  onBack: () => void;
-  onAdd: (selections: { groupId: string; optionIds: string[] }[]) => void;
-}) {
-  const groups = item.modifierGroups ?? [];
-  const [selected, setSelected] = useState<Record<string, string[]>>(() => {
-    const init: Record<string, string[]> = {};
-    for (const g of groups) init[g.id] = [];
-    return init;
-  });
-
-  function toggle(group: ModifierGroup, optId: string) {
-    setSelected((prev) => {
-      const cur = prev[group.id] ?? [];
-      const isSingle = (group.maxSelect ?? 1) === 1;
-      let next: string[] = cur;
-
-      if (isSingle) {
-        next = [optId];
-      } else {
-        next = cur.includes(optId) ? cur.filter((x) => x !== optId) : [...cur, optId];
-        const max = group.maxSelect ?? 999;
-        if (next.length > max) next = next.slice(next.length - max);
-      }
-
-      return { ...prev, [group.id]: next };
-    });
-  }
-
-  const selections = groups.map((g) => ({ groupId: g.id, optionIds: selected[g.id] ?? [] }));
-  const missingRequired = groups.some((g) => (g.minSelect ?? 0) > (selected[g.id]?.length ?? 0));
-
-  return (
-    <div className="itemScreen">
-      <div className="itemHeader">
-        <button className="btn ghost" onClick={onBack}>
-          ← Menu
-        </button>
-        <div>
-          <h2 style={{ margin: "8px 0 0" }}>{item.name}</h2>
-          {item.description && <div className="muted">{item.description}</div>}
-        </div>
-      </div>
-
-      {groups.map((g) => (
-        <div key={g.id} className="modGroup">
-          <div className="modTitle">
-            <b>{g.name}</b>
-            <span className="muted">
-              {(g.minSelect ?? 0) > 0 ? `Required • ` : ""}
-              {`Choose up to ${g.maxSelect ?? 1}`}
-            </span>
-          </div>
-
-          <div className="modOptions">
-            {g.options.map((o) => {
-              const on = (selected[g.id] ?? []).includes(o.id);
-              return (
-                <button key={o.id} className={`chip ${on ? "on" : ""}`} onClick={() => toggle(g, o.id)}>
-                  <span>{o.name}</span>
-                  {(o.priceDeltaCents ?? 0) !== 0 && <span className="muted">+{formatMoney(o.priceDeltaCents ?? 0)}</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-
-      <div className="itemFooter">
-        <button className="btn primary" disabled={missingRequired} onClick={() => onAdd(selections)}>
-          Add to cart • {formatMoney(item.basePriceCents)}
-        </button>
-        {missingRequired && <div className="warn">Please select required options.</div>}
-      </div>
-    </div>
-  );
-}
-
-function CartPanel({
-  cart,
-  pricing,
-  onQty,
-  onRemove,
-  onCheckout,
-}: {
-  cart: Cart;
-  pricing: Pricing;
-  onQty: (lineId: string, qty: number) => void;
-  onRemove: (lineId: string) => void;
-  onCheckout: () => void;
-}) {
-  return (
-    <div className="cartPanel">
-      <h3>Your Cart</h3>
-
-      {cart.lines.length === 0 ? (
-        <div className="muted">Add items to begin.</div>
-      ) : (
-        <div className="cartLines">
-          {cart.lines.map((l) => (
-            <div key={l.lineId} className="cartLine">
-              <div className="cartLineTop">
-                <div>
-                  <b>{l.name}</b>
-                  <div className="muted">{formatMoney(l.basePriceCents + l.selectionsPriceCents)} each</div>
-                </div>
-                <div className="right">
-                  <b>{formatMoney(l.lineTotalCents)}</b>
-                </div>
-              </div>
-
-              <div className="cartLineBottom">
-                <div className="qty">
-                  <button className="btn ghost" onClick={() => onQty(l.lineId, l.qty - 1)}>
-                    -
-                  </button>
-                  <div className="qtyNum">{l.qty}</div>
-                  <button className="btn ghost" onClick={() => onQty(l.lineId, l.qty + 1)}>
-                    +
-                  </button>
-                </div>
-                <button className="btn ghost danger" onClick={() => onRemove(l.lineId)}>
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="summary">
-        <div className="row">
-          <span>Subtotal</span>
-          <span>{formatMoney(pricing.subtotalCents)}</span>
-        </div>
-        <div className="row">
-          <span>Tax</span>
-          <span>{formatMoney(pricing.taxCents)}</span>
-        </div>
-        <div className="row">
-          <span>Fees</span>
-          <span>{formatMoney(pricing.feesCents)}</span>
-        </div>
-        <div className="row total">
-          <span>Total</span>
-          <span>{formatMoney(pricing.totalCents)}</span>
-        </div>
-      </div>
-
-      <button className="btn primary big" onClick={onCheckout} disabled={cart.lines.length === 0}>
-        Checkout
-      </button>
-
-      <div className="muted tiny">Demo mode: payment + POS submission are simulated.</div>
-    </div>
-  );
-}
-
-function CheckoutScreen({
-  pricing,
-  cart,
-  onBack,
-  onPlaceOrder,
-}: {
-  pricing: Pricing;
-  cart: Cart;
-  onBack: () => void;
-  onPlaceOrder: () => Promise<void>;
-}) {
-  return (
-    <div className="checkout">
-      <button className="btn ghost" onClick={onBack}>
-        ← Back
-      </button>
-      <h2>Checkout (Demo)</h2>
-      <div className="muted">We’re simulating payment here. Later: wire to Olo ordering + payments.</div>
-
-      <div className="checkoutBox">
-        <div className="row">
-          <span>Items</span>
-          <b>{cart.lines.reduce((n, l) => n + l.qty, 0)}</b>
-        </div>
-        <div className="row">
-          <span>Total</span>
-          <b>{formatMoney(pricing.totalCents)}</b>
-        </div>
-      </div>
-
-      <button className="btn primary big" onClick={onPlaceOrder} disabled={cart.lines.length === 0}>
-        Place Order (Demo)
-      </button>
-    </div>
-  );
-}
-
-function SuccessScreen({ orderId, onDone }: { orderId: string; onDone: () => void }) {
-  return (
-    <div className="success">
-      <h2>Order Submitted ✅</h2>
-      <div className="muted">Demo order ID:</div>
-      <div className="orderId">{orderId}</div>
-      <button className="btn primary big" onClick={onDone}>
-        Start New Order
-      </button>
-    </div>
-  );
-}

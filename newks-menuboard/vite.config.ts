@@ -3,16 +3,17 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],
-  base: command === "build" ? "/kiosk/" : "/",
+  base: command === "build" ? "/menuboard/" : "/",
   build: {
-    outDir: "../backend/kiosk",
+    outDir: "../backend/menuboard",
     emptyOutDir: true,
   },
   server: {
     port: 5173,
     host: true,
     proxy: {
-      "/api": "http://localhost:8787"
+      "/api": "http://localhost:8787",
+      "/uploads": "http://localhost:8787"
     }
   }
 }));

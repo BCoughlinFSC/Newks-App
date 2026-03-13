@@ -1,12 +1,25 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID, createHash } from "node:crypto";
+import { join, extname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { mockMenu } from "./mockMenu.js";
 import { mockToastMenu } from "./mockToastMenu.js";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const UPLOADS_DIR = join(__dirname, "..", "public", "uploads");
+mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const CONFIGS_DIR = join(__dirname, "data", "board-configs");
+mkdirSync(CONFIGS_DIR, { recursive: true });
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+// Serve uploaded files statically
+app.use("/uploads", express.static(UPLOADS_DIR));
 
 const PORT = Number(process.env.PORT ?? 8787);
 const FORCE_DEMO = (process.env.TOAST_FORCE_DEMO ?? "").toLowerCase() === "true";
@@ -749,6 +762,201 @@ app.get("/api/debug/menu", async (req, res) => {
   }
 });
 
+// ── File upload for menu board assets (logos, promo images, videos) ──
+const ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".mp4", ".webm"]);
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+
+app.post("/api/uploads/menu-board", requireAdmin, (req, res) => {
+  const contentType = req.headers["content-type"] ?? "";
+  if (!contentType.includes("multipart/form-data")) {
+    return res.status(400).json({ error: "Content-Type must be multipart/form-data" });
+  }
+
+  const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
+  if (!boundaryMatch) {
+    return res.status(400).json({ error: "Missing boundary in Content-Type" });
+  }
+
+  const chunks = [];
+  let totalSize = 0;
+  let aborted = false;
+
+  req.on("data", (chunk) => {
+    totalSize += chunk.length;
+    if (totalSize > MAX_UPLOAD_BYTES && !aborted) {
+      aborted = true;
+      req.destroy();
+      return res.status(413).json({ error: "File too large (max 50 MB)" });
+    }
+    chunks.push(chunk);
+  });
+
+  req.on("end", () => {
+    if (aborted || res.headersSent) return;
+    try {
+      const buffer = Buffer.concat(chunks);
+      const boundary = boundaryMatch[1];
+
+      // Find the file part
+      const boundaryBuf = Buffer.from(`--${boundary}`);
+      const parts = [];
+      let start = 0;
+      while (true) {
+        const idx = buffer.indexOf(boundaryBuf, start);
+        if (idx === -1) break;
+        if (start > 0) parts.push(buffer.subarray(start, idx));
+        start = idx + boundaryBuf.length;
+      }
+
+      let filename = null;
+      let fileData = null;
+      for (const part of parts) {
+        const headerEnd = part.indexOf("\r\n\r\n");
+        if (headerEnd === -1) continue;
+        const headerStr = part.subarray(0, headerEnd).toString();
+        const fnMatch = headerStr.match(/filename="([^"]+)"/);
+        if (fnMatch) {
+          filename = fnMatch[1];
+          // Skip the \r\n\r\n header separator and trim trailing \r\n
+          fileData = part.subarray(headerEnd + 4);
+          if (fileData.length >= 2 && fileData[fileData.length - 2] === 0x0d && fileData[fileData.length - 1] === 0x0a) {
+            fileData = fileData.subarray(0, fileData.length - 2);
+          }
+          break;
+        }
+      }
+
+      if (!filename || !fileData || fileData.length === 0) {
+        return res.status(400).json({ error: "No file found in upload" });
+      }
+
+      const ext = extname(filename).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return res.status(400).json({ error: `File type ${ext} not allowed. Use: ${[...ALLOWED_EXTENSIONS].join(", ")}` });
+      }
+
+      const savedName = `${randomUUID()}${ext}`;
+      const savedPath = join(UPLOADS_DIR, savedName);
+      const ws = createWriteStream(savedPath);
+      ws.end(fileData);
+      ws.on("finish", () => {
+        const url = `/uploads/${savedName}`;
+        console.log(`Upload saved: ${savedName} (${fileData.length} bytes)`);
+        return res.json({ url });
+      });
+      ws.on("error", (err) => {
+        console.error("Upload write error", err);
+        return res.status(500).json({ error: "Failed to save file" });
+      });
+    } catch (err) {
+      console.error("Upload parse error", err);
+      return res.status(500).json({ error: "Upload processing failed" });
+    }
+  });
+});
+
+// ── Admin auth middleware ──
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "";
+
+function requireAdmin(req, res, next) {
+  // If no ADMIN_TOKEN is set, allow all requests (dev mode)
+  if (!ADMIN_TOKEN) return next();
+  const authHeader = req.headers.authorization ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (token === ADMIN_TOKEN) return next();
+  return res.status(401).json({ error: "Unauthorized. Admin token required." });
+}
+
+// ── Board config API ──
+function sanitizeLocationId(id) {
+  // Allow UUIDs and simple alphanumeric+hyphen IDs
+  return id.replace(/[^a-zA-Z0-9\-_]/g, "");
+}
+
+// GET config (public — TVs can read without auth)
+app.get("/api/board-config/:locationId", (req, res) => {
+  const locId = sanitizeLocationId(req.params.locationId);
+  if (!locId) return res.status(400).json({ error: "Invalid location ID" });
+
+  const configPath = join(CONFIGS_DIR, `${locId}.json`);
+  if (!existsSync(configPath)) {
+    return res.json({ config: null, version: null });
+  }
+  try {
+    const raw = readFileSync(configPath, "utf-8");
+    const data = JSON.parse(raw);
+    const version = createHash("md5").update(raw).digest("hex").slice(0, 12);
+    return res.json({ config: data, version });
+  } catch (err) {
+    console.error(`Config read error for ${locId}:`, err);
+    return res.status(500).json({ error: "Failed to read config" });
+  }
+});
+
+// GET config version only (lightweight polling endpoint)
+app.get("/api/board-config/:locationId/version", (req, res) => {
+  const locId = sanitizeLocationId(req.params.locationId);
+  if (!locId) return res.status(400).json({ error: "Invalid location ID" });
+
+  const configPath = join(CONFIGS_DIR, `${locId}.json`);
+  if (!existsSync(configPath)) {
+    return res.json({ version: null });
+  }
+  try {
+    const raw = readFileSync(configPath, "utf-8");
+    const version = createHash("md5").update(raw).digest("hex").slice(0, 12);
+    return res.json({ version });
+  } catch (err) {
+    return res.json({ version: null });
+  }
+});
+
+// POST config (admin only)
+app.post("/api/board-config/:locationId", requireAdmin, (req, res) => {
+  const locId = sanitizeLocationId(req.params.locationId);
+  if (!locId) return res.status(400).json({ error: "Invalid location ID" });
+
+  const config = req.body;
+  if (!config || typeof config !== "object") {
+    return res.status(400).json({ error: "Request body must be a JSON object" });
+  }
+
+  const configPath = join(CONFIGS_DIR, `${locId}.json`);
+  try {
+    const raw = JSON.stringify(config, null, 2);
+    writeFileSync(configPath, raw, "utf-8");
+    const version = createHash("md5").update(raw).digest("hex").slice(0, 12);
+    console.log(`Config saved for location ${locId} (version: ${version})`);
+    return res.json({ ok: true, version });
+  } catch (err) {
+    console.error(`Config write error for ${locId}:`, err);
+    return res.status(500).json({ error: "Failed to save config" });
+  }
+});
+
+// ── Production static file serving ──
+const MENUBOARD_BUILD_DIR = join(__dirname, "..", "..", "backend", "menuboard");
+const isProduction = process.env.NODE_ENV === "production";
+
+if (isProduction && existsSync(MENUBOARD_BUILD_DIR)) {
+  console.log(`Serving production build from ${MENUBOARD_BUILD_DIR}`);
+  app.use("/menuboard", express.static(MENUBOARD_BUILD_DIR));
+  // SPA fallback: any /menuboard/* route that doesn't match a file → index.html
+  app.get("/menuboard/*", (req, res) => {
+    res.sendFile(join(MENUBOARD_BUILD_DIR, "index.html"));
+  });
+} else if (isProduction) {
+  console.warn("Production mode but no build found at", MENUBOARD_BUILD_DIR);
+}
+
 app.listen(PORT, () => {
-  console.log(`Kiosk backend listening on http://localhost:${PORT}`);
+  console.log(`Menu board backend listening on http://localhost:${PORT}`);
+  if (ADMIN_TOKEN) {
+    console.log("Admin auth enabled (ADMIN_TOKEN is set)");
+  } else {
+    console.log("Admin auth disabled (no ADMIN_TOKEN — all writes allowed)");
+  }
+  if (isProduction) {
+    console.log(`Production mode — serving built app at /menuboard/`);
+  }
 });

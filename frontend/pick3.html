@@ -96,9 +96,11 @@
 <div class="main-layout">
   <nav class="left-nav">
     <h3>Reports</h3>
-    <a href="/legacy.html" class="nav-link">Reports V1</a>
-    <a href="/olo.html"    class="nav-link hidden" id="oloNavLink">Digital Orders by Platform (OLO)</a>
-    <a href="/pick3.html"  class="nav-link active">Pick 3 Report</a>
+    <a href="/legacy.html"        class="nav-link">Reports V1</a>
+    <a href="/olo.html"           class="nav-link hidden" id="oloNavLink">Digital Orders by Platform (OLO)</a>
+    <a href="/pick3.html"         class="nav-link active">Pick 3 Report</a>
+    <a href="/pick2.html"         class="nav-link">Pick 2 Report</a>
+    <a href="/full-pairings.html" class="nav-link">Full Pairings Report</a>
   </nav>
 
   <main>
@@ -108,13 +110,13 @@
       <h2>Load Toast Product Mix CSVs</h2>
       <p class="card-sub">
         Export a <strong>Product Mix</strong> report from Toast, then upload below.
-        <strong>Selected_levels.csv</strong> is required for accurate pairing counts — it contains
+        <strong>All levels.csv</strong> is required for accurate pairing counts — it contains
         the parent→pairing link. Items.csv and Modifiers.csv are optional fallbacks.
       </p>
 
       <div class="upload-row">
         <div class="file-field">
-          <label>Selected_levels.csv &nbsp;<span class="badge-req">Required</span></label>
+          <label>All levels.csv &nbsp;<span class="badge-req">Required</span></label>
           <input type="file" id="fileSelectedLevels" accept=".csv" />
         </div>
         <div class="file-field">
@@ -307,7 +309,7 @@ $('btnLoad').addEventListener('click', async()=>{
   const slFile  = $('fileSelectedLevels').files[0];
   const itFile  = $('fileItems').files[0];
   const modFile = $('fileModifiers').files[0];
-  if(!slFile && !itFile){ showStatus('csvStatus','Please select at least Selected_levels.csv (required for pairing accuracy) or Items.csv.','error'); return; }
+  if(!slFile && !itFile){ showStatus('csvStatus','Please select at least All levels.csv (required for pairing accuracy) or Items.csv.','error'); return; }
 
   const btn = $('btnLoad');
   btn.disabled = true;
@@ -331,7 +333,7 @@ $('btnLoad').addEventListener('click', async()=>{
 /* ── Export Excel ── */
 $('btnExcel').addEventListener('click', async()=>{
   const slFile = lastSlFile || $('fileSelectedLevels').files[0];
-  if(!slFile){ showStatus('csvStatus','Please select Selected_levels.csv first.','error'); return; }
+  if(!slFile){ showStatus('csvStatus','Please select All levels.csv first.','error'); return; }
   const btn = $('btnExcel');
   btn.disabled=true; btn.textContent='⏳ Generating…';
   showStatus('csvStatus','Building Excel report…','loading');

@@ -41,12 +41,22 @@ backend/main.py.bak
 *.LNK
 *.lnk
 
-# Kiosk project dependencies (auto-generated, never commit)
-newks-kiosk/node_modules/
-newks-kiosk/dist/
+# Node dependencies (auto-generated, never commit)
+node_modules/
+dist/
 
 # Claude worktrees (local dev artifacts)
+*/.claude/worktrees/
 .claude/worktrees/
+
+# Menuboard uploads & large assets (user-uploaded media, not in source control)
+backend/menuboard/uploads/
+newks-menuboard/public/uploads/
+newks-menuboard/public/assets/*.mp4
+backend/menuboard/assets/*.mp4
+
+# Claude local settings (per-project, not shared)
+*/.claude/settings.local.json
 
 # Live user database — never overwrite production data via git pull
 backend/users.json

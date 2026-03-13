@@ -75,6 +75,39 @@ PICK3_PREMOD_PREFIXES = ("add ", "no ", "extra ")
 # Matches both correct spelling "(OLO Pairing Choice)" AND known Toast typo "(OLO Pairing Chocie)"
 _OLO_PAIRING_RE = re.compile(r"OLO Pairing Cho(?:ice|cie)", re.IGNORECASE)
 
+# ---------------------------------------------------------------------------
+# Report configs — parameterises this router for Pick 2 / Full Pairings too
+# ---------------------------------------------------------------------------
+
+REPORT_CONFIGS: Dict[str, Dict] = {
+    "pick3": {
+        "pos_parent":              "(Pick 3 Entree)",
+        "olo_parent":              "Pick 3 (OLO)",
+        "olo_item_guid":           "e7adf8e6-5511-4e34-a45d-1a388996ad2f",
+        "max_pairings_per_entree": 3,
+        "display_name":            "Pick 3",
+    },
+    "pick2": {
+        "pos_parent":              "(Half Pairing Entree)",
+        "olo_parent":              "Pick 2 (OLO)",
+        "olo_item_guid":           None,
+        "max_pairings_per_entree": 2,
+        "display_name":            "Pick 2",
+    },
+    "full_pairings": {
+        "pos_parent":              "(Full Pairing Entree)",
+        "olo_parent":              "Full Value Pairings (OLO)",
+        "olo_item_guid":           None,
+        "max_pairings_per_entree": 2,
+        "display_name":            "Full Pairings",
+    },
+}
+
+
+def _get_config(report_type: str) -> Dict:
+    """Return config dict for the given report_type, defaulting to pick3."""
+    return REPORT_CONFIGS.get(report_type) or REPORT_CONFIGS["pick3"]
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -85,6 +118,7 @@ class Pick3ReportRequest(BaseModel):
     end_date: str
     restaurantIds: List[str] = []
     variant: str = "pos"
+    report_type: str = "pick3"
 
 
 class Pick3DrillDownOrdersRequest(BaseModel):
@@ -93,6 +127,7 @@ class Pick3DrillDownOrdersRequest(BaseModel):
     restaurant_guid: str
     variant: str = "pos"
     debug: bool = False
+    report_type: str = "pick3"
 
 
 class Pick3DrillDownAllStoresRequest(BaseModel):
@@ -100,6 +135,7 @@ class Pick3DrillDownAllStoresRequest(BaseModel):
     end_date: str
     restaurant_ids: Optional[List[str]] = None
     variant: str = "pos"
+    report_type: str = "pick3"
 
 
 # ---------------------------------------------------------------------------
@@ -142,16 +178,17 @@ def _normalize_modifier_name(mod_name: str) -> str:
     return mod_name
 
 
-def _is_pick3_selection(sel: Dict, variant: str) -> bool:
-    """True if this order selection counts as Pick 3 for the given variant."""
+def _is_pick3_selection(sel: Dict, variant: str, cfg: Dict) -> bool:
+    """True if this order selection counts as a pairing entree for the given variant."""
     if variant == "olo":
         display_name = (sel.get("displayName") or "").strip()
-        if "Pick 3 (OLO)" in display_name:
+        if cfg["olo_parent"] in display_name:
             return True
         item = sel.get("item")
         guid = (item.get("guid") if isinstance(item, dict) else item) if item else ""
-        return bool(guid and str(guid).strip().lower() == PICK3_OLO_ITEM_GUID.lower())
-    return PICK3_ENTREE_SUBSTRING in (sel.get("displayName") or "")
+        olo_guid = cfg.get("olo_item_guid")
+        return bool(olo_guid and guid and str(guid).strip().lower() == olo_guid.lower())
+    return cfg["pos_parent"] in (sel.get("displayName") or "")
 
 
 def _normalize_variant(v: Optional[str], choices=("pos", "olo")) -> str:
@@ -214,12 +251,14 @@ def _detect_selected_levels_columns(header: List[str]) -> Tuple[Optional[int], .
     return col_type, col_item, col_modifier, col_qty
 
 
-def _parse_selected_levels_csv(raw: bytes, variant: str) -> Dict:
+def _parse_selected_levels_csv(raw: bytes, variant: str, cfg: Optional[Dict] = None) -> Dict:
     """
     Parse a Toast Product Mix Selected_levels.csv and return
     {totalPick3Quantity, parentItems, selections, pairingSource}.
     variant: "pos" | "olo" | "all"
     """
+    if cfg is None:
+        cfg = REPORT_CONFIGS["pick3"]
     try:
         text = raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
     except UnicodeDecodeError:
@@ -253,10 +292,10 @@ def _parse_selected_levels_csv(raw: bytes, variant: str) -> Dict:
         if not name:
             return False
         if variant == "olo":
-            return "Pick 3 (OLO)" in name
+            return cfg["olo_parent"] in name
         if variant == "pos":
-            return PICK3_ENTREE_SUBSTRING in name
-        return PICK3_ENTREE_SUBSTRING in name or "Pick 3 (OLO)" in name
+            return cfg["pos_parent"] in name
+        return cfg["pos_parent"] in name or cfg["olo_parent"] in name
 
     def is_valid_pairing(mod: str) -> bool:
         if not mod or "(Side)" in mod or _is_pick3_premod_name(mod):
@@ -290,9 +329,9 @@ def _parse_selected_levels_csv(raw: bytes, variant: str) -> Dict:
                 parent_totals[item_name] = parent_totals.get(item_name, 0.0) + qty
 
     total_pick3 = sum(parent_totals.values())
-    # Safety cap: pairings can't exceed 3× total Pick 3 orders
+    # Safety cap: pairings can't exceed max_pairings_per_entree × total orders
     total_pairings = sum(pairing_totals.values())
-    max_pairings = 3.0 * total_pick3 if total_pick3 else 0
+    max_pairings = cfg["max_pairings_per_entree"] * total_pick3 if total_pick3 else 0
     if max_pairings > 0 and total_pairings > max_pairings:
         scale = max_pairings / total_pairings
         pairing_totals = {n: q * scale for n, q in pairing_totals.items()}
@@ -318,8 +357,11 @@ async def _compute_pick3_drill_down_for_store(
     start_date: date,
     end_date: date,
     variant: str = "pos",
+    cfg: Optional[Dict] = None,
 ) -> Dict:
-    """Fetch orders for one store, aggregate Pick 3 parent items and pairing selections."""
+    """Fetch orders for one store, aggregate pairing entree counts and pairing selections."""
+    if cfg is None:
+        cfg = REPORT_CONFIGS["pick3"]
     variant = _normalize_variant(variant, ("pos", "olo"))
     start_bdate = int(to_business_date(start_date))
     end_bdate = int(to_business_date(end_date))
@@ -340,7 +382,7 @@ async def _compute_pick3_drill_down_for_store(
             continue
         for check in order.get("checks") or []:
             for sel in check.get("selections") or []:
-                if not _is_pick3_selection(sel, variant):
+                if not _is_pick3_selection(sel, variant, cfg):
                     continue
                 display_name = (sel.get("displayName") or "").strip()
                 sel_qty = int(sel.get("quantity", 1) or 1)
@@ -367,7 +409,7 @@ async def _compute_pick3_drill_down_for_store(
                             continue
                     mod_qty = int(mod.get("quantity", 1) or 1)
                     sel_pairings.append((mod_name, mod_qty))
-                max_p = sel_qty * 3
+                max_p = sel_qty * cfg["max_pairings_per_entree"]
                 total_p = sum(q for _, q in sel_pairings)
                 if total_p > max_p > 0:
                     scale = max_p / total_p
@@ -394,12 +436,14 @@ async def _compute_pick3_drill_down_for_store(
     }
 
 
-def _build_pick3_excel(parent_items: List[Dict], selections: List[Dict], variant: str) -> bytes:
+def _build_pick3_excel(parent_items: List[Dict], selections: List[Dict], variant: str, cfg: Optional[Dict] = None) -> bytes:
     """
-    Build a styled Excel workbook from parsed Pick 3 data.
+    Build a styled Excel workbook from parsed pairing report data.
     Returns the .xlsx file as bytes.
     variant: "pos" | "olo" | "all"
     """
+    if cfg is None:
+        cfg = REPORT_CONFIGS["pick3"]
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -483,8 +527,8 @@ def _build_pick3_excel(parent_items: List[Dict], selections: List[Dict], variant
     # ----------------------------------------------------------------
     pos_selections = [s for s in selections if "(POS Pairing Choice)" in s["itemName"]]
     olo_selections = [s for s in selections if _is_olo_pairing_choice(s["itemName"])]
-    pos_parents    = [p for p in parent_items if PICK3_ENTREE_SUBSTRING in p["itemName"]]
-    olo_parents    = [p for p in parent_items if "Pick 3 (OLO)" in p["itemName"]]
+    pos_parents    = [p for p in parent_items if cfg["pos_parent"] in p["itemName"]]
+    olo_parents    = [p for p in parent_items if cfg["olo_parent"] in p["itemName"]]
 
     # Add a parentItem label to each pairing row (blank — we show all combined)
     for s in selections:
@@ -497,8 +541,8 @@ def _build_pick3_excel(parent_items: List[Dict], selections: List[Dict], variant
         ws.title = "POS Breakdown"
         items = pos_parents if pos_parents else parent_items
         pairs = pos_selections if pos_selections else [s for s in selections if "(POS Pairing Choice)" in s["itemName"]]
-        _build_sheet(ws, "In-Store POS Breakdown — Pick 3", items, pairs,
-                     "Item", "Pick 3 Entree Item")
+        _build_sheet(ws, f"In-Store POS Breakdown — {cfg['display_name']}", items, pairs,
+                     "Item", f"{cfg['display_name']} Entree Item")
 
     if variant in ("olo", "all"):
         ws2 = wb.create_sheet("OLO Breakdown") if variant == "all" else wb.active
@@ -506,8 +550,8 @@ def _build_pick3_excel(parent_items: List[Dict], selections: List[Dict], variant
             ws2.title = "OLO Breakdown"
         items = olo_parents if olo_parents else parent_items
         pairs = olo_selections if olo_selections else [s for s in selections if _is_olo_pairing_choice(s["itemName"])]
-        _build_sheet(ws2, "OLO Breakdown — Pick 3", items, pairs,
-                     "Item", "Pick 3 OLO Item")
+        _build_sheet(ws2, f"OLO Breakdown — {cfg['display_name']}", items, pairs,
+                     "Item", f"{cfg['display_name']} OLO Item")
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -521,7 +565,8 @@ def _build_pick3_excel(parent_items: List[Dict], selections: List[Dict], variant
 
 @router.post("/api/reports/pick3")
 async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
-    """Per-store per-day Pick 3 counts from the Toast menu report API."""
+    """Per-store per-day pairing entree counts from the Toast menu report API."""
+    cfg = _get_config(request.report_type)
     try:
         async with httpx.AsyncClient(timeout=180.0) as client:
             restaurant_ids = list(request.restaurantIds) if request.restaurantIds else []
@@ -563,13 +608,14 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             all_menu_rows = await _fetch_menu_chunked(["MENU_ITEM"])
             summary_agg: Dict[Tuple, Dict] = {}
             parent_items_agg: Dict[Tuple, Dict[str, int]] = {}
+            olo_guid_lower = (cfg["olo_item_guid"] or "").lower()
             for row in all_menu_rows:
                 name  = (row.get("menuItemName") or "").strip()
                 mguid = (row.get("menuItemGuid") or "").strip().lower()
                 if variant == "olo":
-                    is_p3 = "Pick 3 (OLO)" in name or mguid == PICK3_OLO_ITEM_GUID.lower()
+                    is_p3 = cfg["olo_parent"] in name or (olo_guid_lower and mguid == olo_guid_lower)
                 else:
-                    is_p3 = PICK3_ENTREE_SUBSTRING in name
+                    is_p3 = cfg["pos_parent"] in name
                 if not is_p3:
                     continue
                 rguid = row.get("restaurantGuid", "")
@@ -601,9 +647,9 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
                 parent_name = (row.get("menuItemName") or "").strip()
                 parent_guid = (row.get("menuItemGuid") or "").strip().lower()
                 if variant == "olo":
-                    is_p3 = "Pick 3 (OLO)" in parent_name or parent_guid == PICK3_OLO_ITEM_GUID.lower()
+                    is_p3 = cfg["olo_parent"] in parent_name or (olo_guid_lower and parent_guid == olo_guid_lower)
                 else:
-                    is_p3 = PICK3_ENTREE_SUBSTRING in parent_name
+                    is_p3 = cfg["pos_parent"] in parent_name
                 if not is_p3:
                     continue
                 mod_name = _normalize_modifier_name((row.get("modifierName") or row.get("modifierOptionName") or "").strip())
@@ -652,6 +698,7 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
 @router.post("/api/reports/pick3/drill-down-orders")
 async def pick3_drill_down_orders(request: Pick3DrillDownOrdersRequest = Body(...)):
     """Order-level pairing drill-down for a single store."""
+    cfg = _get_config(request.report_type)
     try:
         start_date = datetime.strptime(request.start_date, "%Y-%m-%d").date()
         end_date   = datetime.strptime(request.end_date,   "%Y-%m-%d").date()
@@ -666,7 +713,7 @@ async def pick3_drill_down_orders(request: Pick3DrillDownOrdersRequest = Body(..
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             variant = _normalize_variant(request.variant, ("pos", "olo"))
-            result  = await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant)
+            result  = await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant, cfg)
             locs    = await get_all_active_locations(client)
             rname   = next((format_location_display_name(l) for l in locs if l.restaurantGuid == rguid), "Unknown")
             out: Dict = {
@@ -696,7 +743,7 @@ async def pick3_drill_down_orders(request: Pick3DrillDownOrdersRequest = Body(..
                         int(sel.get("quantity", 1) or 1)
                         for check in (order.get("checks") or [])
                         for sel in (check.get("selections") or [])
-                        if _is_pick3_selection(sel, variant)
+                        if _is_pick3_selection(sel, variant, cfg)
                     )
                     if p3 > 0:
                         debug_orders.append({"orderGuid": (order.get("guid") or "")[:8], "businessDate": obd_str, "pick3Count": p3})
@@ -718,7 +765,8 @@ async def pick3_drill_down_orders(request: Pick3DrillDownOrdersRequest = Body(..
 
 @router.post("/api/reports/pick3/drill-down-all-stores")
 async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = Body(...)):
-    """Parallel Pick 3 order-level drill-down for all stores."""
+    """Parallel order-level pairing drill-down for all stores."""
+    cfg = _get_config(request.report_type)
     try:
         start_date = datetime.strptime(request.start_date, "%Y-%m-%d").date()
         end_date   = datetime.strptime(request.end_date,   "%Y-%m-%d").date()
@@ -752,7 +800,7 @@ async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = 
             async def one_store(rguid: str):
                 async with sem:
                     try:
-                        return await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant)
+                        return await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant, cfg)
                     except Exception as e:
                         logger.warning("Pick3 all-stores: %s: %s", rguid[:8], e)
                         return {"restaurantGuid": rguid, "totalPick3Quantity": 0, "parentItems": [], "selections": []}
@@ -785,12 +833,14 @@ async def pick3_breakdown_from_csv(
     modifiers_file: Optional[UploadFile] = File(None, description="Toast Product Mix Modifiers.csv"),
     selected_levels_file: Optional[UploadFile] = File(None, description="Toast Product Mix Selected_levels.csv"),
     variant: str = Query("pos", description="pos | olo | all"),
+    report_type: str = Query("pick3", description="pick3 | pick2 | full_pairings"),
 ):
     """
     Parse Toast Product Mix CSV exports.
     Selected_levels.csv (recommended) gives accurate parent→pairing counts.
     Falls back to Items.csv + optional Modifiers.csv.
     """
+    cfg = _get_config(report_type)
     variant = (variant or "pos").strip().lower()
     if variant not in ("pos", "olo", "all"):
         variant = "pos"
@@ -806,7 +856,7 @@ async def pick3_breakdown_from_csv(
         raw = await selected_levels_file.read()
         if len(raw) > 20 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Selected_levels file too large (max 20 MB).")
-        return _parse_selected_levels_csv(raw, variant)
+        return _parse_selected_levels_csv(raw, variant, cfg)
 
     # --- Items.csv (+ optional Modifiers.csv) path ---
     raw = await file.read()
@@ -837,9 +887,9 @@ async def pick3_breakdown_from_csv(
     def is_pick3_item(name: str) -> bool:
         if not name:
             return False
-        if variant == "pos":  return PICK3_ENTREE_SUBSTRING in name
-        if variant == "olo":  return "Pick 3 (OLO)" in name
-        return PICK3_ENTREE_SUBSTRING in name or "Pick 3 (OLO)" in name
+        if variant == "pos":  return cfg["pos_parent"] in name
+        if variant == "olo":  return cfg["olo_parent"] in name
+        return cfg["pos_parent"] in name or cfg["olo_parent"] in name
 
     parent_totals: Dict[str, float] = {}
     pick3_master_ids: set = set()
@@ -895,7 +945,7 @@ async def pick3_breakdown_from_csv(
                             pt[mod_name] = pt.get(mod_name, 0.0) + qty
                     total_p3  = sum(parent_totals.values())
                     total_raw = sum(pt.values())
-                    max_p     = 3.0 * total_p3 if total_p3 else 0
+                    max_p     = cfg["max_pairings_per_entree"] * total_p3 if total_p3 else 0
                     if max_p > 0 and total_raw > max_p:
                         scale = max_p / total_raw
                         pt = {n: q * scale for n, q in pt.items()}
@@ -923,11 +973,13 @@ async def pick3_breakdown_from_csv(
 async def pick3_excel_from_selected_levels(
     file: UploadFile = File(..., description="Toast Product Mix Selected_levels.csv"),
     variant: str = Query("all", description="pos | olo | all"),
+    report_type: str = Query("pick3", description="pick3 | pick2 | full_pairings"),
 ):
     """
     Generate a styled two-tab Excel report (POS + OLO) from Selected_levels.csv.
     Returns a downloadable .xlsx file.
     """
+    cfg = _get_config(report_type)
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Please upload Selected_levels.csv.")
     variant = (variant or "all").strip().lower()
@@ -939,11 +991,12 @@ async def pick3_excel_from_selected_levels(
         raise HTTPException(status_code=400, detail="File too large (max 20 MB).")
 
     # Parse with variant="all" so we get both POS and OLO in one pass
-    data = _parse_selected_levels_csv(raw, variant)
+    data = _parse_selected_levels_csv(raw, variant, cfg)
 
-    xlsx_bytes = _build_pick3_excel(data["parentItems"], data["selections"], variant)
+    xlsx_bytes = _build_pick3_excel(data["parentItems"], data["selections"], variant, cfg)
+    safe_name  = cfg["display_name"].replace(" ", "")
     return StreamingResponse(
         io.BytesIO(xlsx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="Pick3_Report.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_Report.xlsx"'},
     )

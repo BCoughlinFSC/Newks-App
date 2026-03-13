@@ -1,5 +1,5 @@
 {
-  "name": "rooted-kiosk",
+  "name": "newks-menuboard",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,7 +7,9 @@
     "dev": "vite",
     "dev:server": "node server/index.js",
     "build": "tsc -b && vite build",
-    "build:kiosk": "tsc -b && vite build",
+    "build:menuboard": "tsc -b && vite build",
+    "build:prod": "tsc -b && vite build",
+    "start": "node server/index.js",
     "preview": "vite preview"
   },
   "dependencies": {

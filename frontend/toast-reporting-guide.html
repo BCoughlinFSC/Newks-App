@@ -1,0 +1,1539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Toast POS Reporting Guide — Newk's Eatery</title>
+  <style>
+    /* ─── Tokens ─────────────────────────────────────────────────────────── */
+    :root {
+      --red:        #C41E3A;
+      --red-dark:   #9e1830;
+      --red-light:  #fef2f3;
+      --red-mid:    #fcdfe1;
+      --navy:       #1E3A5F;
+      --navy-dark:  #152a47;
+      --navy-light: #eef2f7;
+      --navy-mid:   #d2dce9;
+      --cream:      #faf8f5;
+      --white:      #ffffff;
+      --text:       #1a1a1a;
+      --text-mid:   #374151;
+      --muted:      #6b7280;
+      --border:     #e5e0d8;
+      --border-2:   #d1ccbf;
+      --gold:       #d97706;
+      --gold-light: #fef9ee;
+      --gold-mid:   #fde68a;
+      --green:      #047857;
+      --green-light:#ecfdf5;
+      --shadow-sm:  0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.05);
+      --shadow-md:  0 4px 12px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.05);
+      --r-sm: 8px;
+      --r-md: 12px;
+      --r-lg: 16px;
+    }
+
+    /* ─── Base ───────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--cream);
+      color: var(--text);
+      display: grid;
+      grid-template-columns: 268px 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    /* ─── Top Banner ─────────────────────────────────────────────────────── */
+    .top-banner {
+      grid-column: 1 / -1;
+      background: linear-gradient(135deg, var(--navy-dark) 0%, var(--navy) 55%, #2a4f7a 100%);
+      padding: 0;
+      display: flex;
+      align-items: stretch;
+      border-bottom: 3px solid var(--red);
+    }
+    .banner-logo-area {
+      background: var(--red);
+      padding: 18px 28px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      min-width: 268px;
+      border-right: 3px solid rgba(255,255,255,.12);
+    }
+    .banner-logo-wordmark {
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 1.5px;
+      color: #fff;
+      text-transform: uppercase;
+    }
+    .banner-logo-sub {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: rgba(255,255,255,.75);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+    .banner-text-area {
+      padding: 18px 28px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .banner-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      margin: 0;
+      line-height: 1.2;
+    }
+    .banner-subtitle {
+      font-size: 13px;
+      color: rgba(255,255,255,.65);
+      margin: 4px 0 0;
+    }
+    .banner-version {
+      margin-left: auto;
+      padding: 18px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 4px;
+    }
+    .banner-badge {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      color: rgba(255,255,255,.55);
+      text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,.2);
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    /* ─── Sidebar ────────────────────────────────────────────────────────── */
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      background: var(--navy-dark);
+      padding: 0 0 24px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.15) transparent;
+    }
+    .sidebar-search {
+      padding: 16px 14px 10px;
+      position: sticky;
+      top: 0;
+      background: var(--navy-dark);
+      z-index: 10;
+    }
+    .sidebar-search input {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.15);
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s, background .2s;
+    }
+    .sidebar-search input::placeholder { color: rgba(255,255,255,.4); }
+    .sidebar-search input:focus { border-color: var(--red); background: rgba(255,255,255,.12); }
+
+    .nav-group { padding: 0 10px 2px; }
+    .nav-group-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.35);
+      padding: 12px 6px 4px;
+      display: block;
+    }
+    .nav-group a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: var(--r-sm);
+      text-decoration: none;
+      font-size: 13px;
+      color: rgba(255,255,255,.72);
+      transition: background .15s, color .15s;
+      line-height: 1.3;
+    }
+    .nav-group a:hover { background: rgba(255,255,255,.08); color: #fff; }
+    .nav-group a.active { background: rgba(196,30,58,.25); color: #fff; border-left: 2px solid var(--red); }
+    .nav-icon { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
+
+    /* ─── Main Content ───────────────────────────────────────────────────── */
+    main {
+      padding: 24px 28px 48px;
+      min-width: 0;
+      max-width: 900px;
+    }
+
+    /* ─── Section Wrapper ────────────────────────────────────────────────── */
+    .guide-section {
+      margin-bottom: 28px;
+      scroll-margin-top: 20px;
+    }
+
+    /* ─── Section Headers ────────────────────────────────────────────────── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 14px;
+    }
+    .section-icon {
+      width: 38px; height: 38px;
+      border-radius: var(--r-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .section-icon.red  { background: var(--red-light); }
+    .section-icon.navy { background: var(--navy-light); }
+    .section-icon.gold { background: var(--gold-light); }
+    .section-icon.green { background: var(--green-light); }
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--navy);
+      margin: 0;
+      line-height: 1.25;
+    }
+    .section-title small {
+      display: block;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+    .section-divider {
+      height: 2px;
+      background: linear-gradient(to right, var(--red), transparent);
+      border: none;
+      margin: 0 0 16px;
+      border-radius: 2px;
+    }
+
+    /* ─── Cards ──────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .card-header {
+      padding: 12px 16px;
+      background: var(--cream);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--navy);
+    }
+    .card-body { padding: 16px; }
+    .card.accent-red  { border-left: 4px solid var(--red); }
+    .card.accent-navy { border-left: 4px solid var(--navy); }
+    .card.accent-gold { border-left: 4px solid var(--gold); }
+    .card.accent-green { border-left: 4px solid var(--green); }
+
+    /* ─── Card Grid ──────────────────────────────────────────────────────── */
+    .card-grid { display: grid; gap: 12px; }
+    .card-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+    .card-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .concept-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .concept-card-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .concept-card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--navy);
+      margin: 0 0 4px;
+    }
+    .concept-card-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .concept-card p { font-size: 13px; color: var(--text-mid); margin: 0 0 8px; line-height: 1.5; }
+    .concept-card ul { margin: 0; padding-left: 16px; }
+    .concept-card li { font-size: 13px; color: var(--text-mid); margin-bottom: 4px; line-height: 1.45; }
+
+    /* ─── Callout Boxes ──────────────────────────────────────────────────── */
+    .callout {
+      border-radius: var(--r-md);
+      padding: 14px 16px;
+      margin: 12px 0;
+      display: flex;
+      gap: 12px;
+      font-size: 13.5px;
+      line-height: 1.55;
+    }
+    .callout-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .callout-body strong { display: block; margin-bottom: 3px; font-size: 13.5px; }
+    .callout.red    { background: var(--red-light); border: 1px solid var(--red-mid); color: #7f1d1d; }
+    .callout.gold   { background: var(--gold-light); border: 1px solid var(--gold-mid); color: #78350f; }
+    .callout.navy   { background: var(--navy-light); border: 1px solid var(--navy-mid); color: var(--navy-dark); }
+    .callout.green  { background: var(--green-light); border: 1px solid #a7f3d0; color: #064e3b; }
+
+    /* ─── Tables ─────────────────────────────────────────────────────────── */
+    .tablewrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      margin: 12px 0;
+      box-shadow: var(--shadow-sm);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: var(--navy); }
+    thead th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .4px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.9);
+      white-space: nowrap;
+    }
+    thead th:first-child { border-radius: var(--r-md) 0 0 0; }
+    thead th:last-child  { border-radius: 0 var(--r-md) 0 0; }
+    tbody tr:nth-child(even) { background: #f9f8f6; }
+    tbody tr:hover { background: var(--navy-light); }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+    tr:last-child td { border-bottom: none; }
+    td strong { color: var(--navy); }
+    td .pill {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+    td .pill.red   { background: var(--red-light); color: var(--red-dark); border: 1px solid var(--red-mid); }
+    td .pill.navy  { background: var(--navy-light); color: var(--navy); border: 1px solid var(--navy-mid); }
+    td .pill.green { background: var(--green-light); color: var(--green); border: 1px solid #a7f3d0; }
+
+    /* ─── Comparison Table ───────────────────────────────────────────────── */
+    .compare-table thead th.aloha-col { background: #374151; }
+    .compare-table thead th.toast-col { background: var(--red); }
+    .compare-table td.metric-col { font-weight: 700; color: var(--navy); background: var(--navy-light); width: 140px; }
+
+    /* ─── Checklists ─────────────────────────────────────────────────────── */
+    .checklist {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 6px;
+    }
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 9px 12px;
+      background: var(--cream);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      font-size: 13.5px;
+      line-height: 1.45;
+      color: var(--text-mid);
+    }
+    .checklist li .check-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .checklist.daily li .check-icon  { color: var(--red); }
+    .checklist.weekly li .check-icon { color: var(--navy); }
+    .checklist.monthly li .check-icon { color: var(--gold); }
+
+    /* ─── Period Cards ───────────────────────────────────────────────────── */
+    .period-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+    .period-card-head {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .period-card-head.red   { background: var(--red);  color: #fff; }
+    .period-card-head.navy  { background: var(--navy); color: #fff; }
+    .period-card-head.gold  { background: var(--gold); color: #fff; }
+    .period-card-body { padding: 14px 16px; }
+
+    /* ─── Challenge Cards ────────────────────────────────────────────────── */
+    .challenge-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 12px;
+    }
+    .challenge-q {
+      padding: 12px 16px;
+      background: #fff8f8;
+      border-bottom: 1px solid var(--red-mid);
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 14px;
+      color: #7f1d1d;
+    }
+    .challenge-a {
+      padding: 12px 16px;
+      font-size: 13.5px;
+      color: var(--text-mid);
+      line-height: 1.55;
+    }
+    .challenge-a strong { color: var(--green); }
+
+    /* ─── Insight Cards ──────────────────────────────────────────────────── */
+    .insight-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 12px;
+    }
+    .insight-head {
+      padding: 12px 16px;
+      background: linear-gradient(to right, var(--navy-light), var(--white));
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .insight-num {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--navy);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .insight-title { font-size: 15px; font-weight: 700; color: var(--navy); }
+    .insight-body { padding: 14px 16px; }
+    .insight-body p { margin: 0 0 10px; font-size: 13.5px; color: var(--text-mid); line-height: 1.55; }
+    .insight-body p:last-child { margin-bottom: 0; }
+    .insight-body ul { margin: 8px 0; padding-left: 20px; }
+    .insight-body li { font-size: 13.5px; color: var(--text-mid); margin-bottom: 5px; line-height: 1.45; }
+
+    /* ─── Report Location Pill ───────────────────────────────────────────── */
+    .report-path {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--navy);
+      background: var(--navy-light);
+      border: 1px solid var(--navy-mid);
+      border-radius: 6px;
+      padding: 2px 8px;
+    }
+    .report-path .sep { color: var(--muted); font-weight: 400; }
+
+    /* ─── Support Contacts ───────────────────────────────────────────────── */
+    .contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .contact-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .contact-card-title { font-size: 14px; font-weight: 700; color: var(--navy); margin: 0 0 8px; }
+    .contact-card p { font-size: 13px; color: var(--text-mid); margin: 4px 0; line-height: 1.5; }
+    .contact-card a { color: var(--red); text-decoration: none; font-weight: 600; }
+    .contact-card a:hover { text-decoration: underline; }
+
+    /* ─── Images ─────────────────────────────────────────────────────────── */
+    .guide-figure {
+      margin: 14px 0;
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      overflow: hidden;
+      background: var(--white);
+      box-shadow: var(--shadow-sm);
+    }
+    .guide-figure img { width: 100%; height: auto; display: block; }
+    .guide-figure figcaption {
+      padding: 7px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--cream);
+      border-top: 1px solid var(--border);
+    }
+
+    /* ─── Tag / Badge ────────────────────────────────────────────────────── */
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      white-space: nowrap;
+      margin-bottom: 10px;
+    }
+    .tag.red   { background: var(--red-light); color: var(--red); border: 1px solid var(--red-mid); }
+    .tag.navy  { background: var(--navy-light); color: var(--navy); border: 1px solid var(--navy-mid); }
+    .tag.gold  { background: var(--gold-light); color: var(--gold); border: 1px solid var(--gold-mid); }
+    .tag.green { background: var(--green-light); color: var(--green); border: 1px solid #a7f3d0; }
+
+    /* ─── Matrix Table ───────────────────────────────────────────────────── */
+    .matrix-table { width: 100%; }
+    .matrix-table th { font-size: 12px; text-align: center; }
+    .matrix-table td { text-align: center; font-size: 13px; }
+    .matrix-table td.row-label { text-align: left; font-weight: 600; color: var(--navy); background: var(--navy-light); }
+
+    /* ─── Prose ──────────────────────────────────────────────────────────── */
+    p { margin: 10px 0; line-height: 1.6; font-size: 14px; color: var(--text-mid); }
+    strong { color: var(--text); }
+
+    /* ─── Responsive ─────────────────────────────────────────────────────── */
+    @media (max-width: 960px) {
+      body { grid-template-columns: 1fr; }
+      .top-banner { flex-wrap: wrap; }
+      .banner-logo-area { min-width: auto; width: 100%; }
+      aside { position: relative; height: auto; max-height: 280px; }
+      .card-grid.cols-3 { grid-template-columns: 1fr 1fr; }
+      .contact-grid { grid-template-columns: 1fr; }
+      main { padding: 16px; }
+    }
+    @media (max-width: 600px) {
+      .card-grid.cols-2,
+      .card-grid.cols-3 { grid-template-columns: 1fr; }
+    }
+
+    /* ─── Print ──────────────────────────────────────────────────────────── */
+    @media print {
+      body { display: block; background: #fff; color: #000; }
+      aside, .sidebar-search { display: none; }
+      .top-banner { display: block; break-after: avoid; }
+      .banner-logo-area { background: #c41e3a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      main { max-width: 100%; padding: 0; }
+      .guide-section { break-inside: avoid; }
+      .card, .insight-card, .challenge-card, .period-card { break-inside: avoid; box-shadow: none; border: 1px solid #ccc; }
+      thead { background: #1e3a5f !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Top Banner ─────────────────────────────────────────────────────── -->
+  <header class="top-banner">
+    <div class="banner-logo-area">
+      <div class="banner-logo-wordmark">Newk's Eatery</div>
+      <div class="banner-logo-sub">Operations &amp; Reporting</div>
+    </div>
+    <div class="banner-text-area">
+      <h1 class="banner-title">Toast POS Reporting Guide</h1>
+      <p class="banner-subtitle">Transition Reference · Daily Operations · Manager Training</p>
+    </div>
+    <div class="banner-version">
+      <span class="banner-badge">Aloha → Toast</span>
+      <span class="banner-badge">2025 Edition</span>
+    </div>
+  </header>
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+  <aside>
+    <div class="sidebar-search">
+      <input id="searchInput" type="search" placeholder="🔍  Search this guide…" />
+    </div>
+
+    <div class="nav-group">
+      <span class="nav-group-label">Getting Started</span>
+      <a href="#terminology"><span class="nav-icon">🔄</span> Aloha → Toast Terminology</a>
+      <a href="#tax-handling"><span class="nav-icon">⚠️</span> Tax Handling Note</a>
+      <a href="#finding-reports"><span class="nav-icon">🔍</span> Finding Your Reports</a>
+    </div>
+
+    <div class="nav-group">
+      <span class="nav-group-label">Core Concepts</span>
+      <a href="#toast-concepts"><span class="nav-icon">🏗️</span> Toast Organizational Concepts</a>
+      <a href="#sales-summary-breakdown"><span class="nav-icon">📊</span> Sales Summary Breakdown</a>
+      <a href="#cash-management"><span class="nav-icon">💵</span> Cash Management</a>
+    </div>
+
+    <div class="nav-group">
+      <span class="nav-group-label">Reports & Insights</span>
+      <a href="#essential-reports"><span class="nav-icon">📋</span> Essential Daily Reports</a>
+      <a href="#high-value-insights"><span class="nav-icon">💡</span> High-Value Insights</a>
+      <a href="#toast-now"><span class="nav-icon">📱</span> Toast Now Mobile App</a>
+    </div>
+
+    <div class="nav-group">
+      <span class="nav-group-label">Best Practices</span>
+      <a href="#best-practices"><span class="nav-icon">✅</span> Reporting Checklists</a>
+      <a href="#transition-challenges"><span class="nav-icon">🔧</span> Transition Challenges</a>
+      <a href="#support"><span class="nav-icon">🆘</span> Support &amp; Resources</a>
+    </div>
+  </aside>
+
+  <!-- ── Main Content ─────────────────────────────────────────────────────── -->
+  <main id="main">
+
+    <!-- 1. TERMINOLOGY -->
+    <div class="guide-section" id="terminology">
+      <div class="section-header">
+        <div class="section-icon red">🔄</div>
+        <h2 class="section-title">
+          Sales Terminology: Aloha vs Toast
+          <small>How key metrics are defined differently between the two systems</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <p>Understanding how Toast defines sales metrics is essential for accurate reporting and comparison to your historical Aloha data. The two systems use the same words but calculate them differently — especially around taxes and discounts.</p>
+
+      <div class="tablewrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th style="background:#374151; width:120px;">Metric</th>
+              <th class="aloha-col">Aloha Definition</th>
+              <th class="toast-col">Toast Definition</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="metric-col"><strong>Gross Sales</strong></td>
+              <td>Total amount of Item Sales including Order Mode Charges, Surcharges, and <strong>all Taxes</strong></td>
+              <td><strong>Net Sales + Discounts</strong> — identifies value before deductions; <em>excludes taxes</em></td>
+            </tr>
+            <tr>
+              <td class="metric-col"><strong>Item Sales</strong></td>
+              <td>Price of item only; includes inclusive taxes; excludes exclusive taxes, promos, and comps</td>
+              <td><strong>Menu Price (Before Discounts)</strong> — the regular sticker price of items as they appear on your menu, before any discounts, promos, or comps are applied</td>
+            </tr>
+            <tr>
+              <td class="metric-col"><strong>Net Sales</strong></td>
+              <td>Item Sales + Order Mode Charges + Surcharges − Inclusive Taxes − Comps − Promos</td>
+              <td><strong>Net Sales (Before Tax)</strong> — what guests actually paid for food and service charges after all discounts, promos, loyalty rewards, and credits are applied. Your true revenue before tax.</td>
+            </tr>
+            <tr>
+              <td class="metric-col"><strong>Taxes</strong></td>
+              <td>Supports inclusive and exclusive taxes; included in Gross Sales totals</td>
+              <td><strong>Sales Tax Collected</strong> — total tax collected from guests, broken out by tax rate. This is money collected on behalf of the state — it is <em>not revenue</em>. Toast <u>excludes</u> tax from Gross/Net Sales.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- 2. TAX HANDLING -->
+    <div class="guide-section" id="tax-handling">
+      <div class="section-header">
+        <div class="section-icon gold">⚠️</div>
+        <h2 class="section-title">
+          Important Note on Tax Handling
+          <small>Why your Toast totals may look lower than Aloha</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <div class="callout gold">
+        <span class="callout-icon">⚠️</span>
+        <div class="callout-body">
+          <strong>This is the #1 source of confusion during the Aloha → Toast transition.</strong>
+          Toast follows standard GAAP accounting principles where <strong>taxes are NOT included in Gross or Net Sales</strong> because they are collected on behalf of the government and represent a liability, not revenue.
+          <br /><br />
+          This differs from many Aloha configurations where taxes <em>were</em> included in Gross Sales totals. If your daily totals look lower in Toast, this is almost certainly why — not a system error.
+        </div>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Scenario</th><th>Aloha</th><th>Toast</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>$1,000 food + $80 tax</td>
+              <td>Gross Sales = <strong>$1,080</strong> (tax included)</td>
+              <td>Gross Sales = <strong>$1,000</strong> (tax shown separately)</td>
+            </tr>
+            <tr>
+              <td>Where does tax appear?</td>
+              <td>Rolled into Gross Sales total</td>
+              <td>Separate "Tax" line item in Sales Summary</td>
+            </tr>
+            <tr>
+              <td>What to compare YoY</td>
+              <td>Gross Sales (includes tax)</td>
+              <td><strong>Net Sales</strong> (exclude tax for true comparison)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3. FINDING YOUR REPORTS -->
+    <div class="guide-section" id="finding-reports">
+      <div class="section-header">
+        <div class="section-icon navy">🔍</div>
+        <h2 class="section-title">
+          Finding Your Reports in Toast
+          <small>All reports live at central.toasttab.com or the Toast Now mobile app</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <p>Every report you ran in Aloha has a Toast equivalent — they're just organized differently. Use the table below as your cheat sheet. All web reports are accessed at <strong>central.toasttab.com → Reports</strong>.</p>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Report Type</th>
+              <th>Aloha Location</th>
+              <th>Toast Location</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Sales Summary</strong></td>
+              <td>Aloha CFC › Sales Summary Report</td>
+              <td><span class="report-path">Reports <span class="sep">›</span> Sales <span class="sep">›</span> Sales Summary</span></td>
+            </tr>
+            <tr>
+              <td><strong>Product Mix / Item Sales</strong></td>
+              <td>Aloha CFC › Item Sales Report</td>
+              <td><span class="report-path">Reports <span class="sep">›</span> Menu <span class="sep">›</span> Menu Product Mix</span></td>
+            </tr>
+            <tr>
+              <td><strong>Labor Reports</strong></td>
+              <td>Aloha CFC › Labor Reports</td>
+              <td><span class="report-path">Reports <span class="sep">›</span> Labor <span class="sep">›</span> Labor Summary / Labor Cost Breakdown</span></td>
+            </tr>
+            <tr>
+              <td><strong>Cash Management</strong></td>
+              <td>Aloha CFC › Cash Reports</td>
+              <td><span class="report-path">Reports <span class="sep">›</span> Sales <span class="sep">›</span> Cash Drawer Overview / Cash Drawer History</span></td>
+            </tr>
+            <tr>
+              <td><strong>Payment Summary</strong></td>
+              <td>Aloha CFC › Tender Media Report</td>
+              <td><span class="report-path">Reports <span class="sep">›</span> Sales <span class="sep">›</span> Payments</span></td>
+            </tr>
+            <tr>
+              <td><strong>Order Details</strong></td>
+              <td>Aloha CFC › Transaction Report</td>
+              <td><span class="report-path">Reports <span class="sep">›</span> Sales <span class="sep">›</span> Order Details</span></td>
+            </tr>
+            <tr>
+              <td><strong>End of Day</strong></td>
+              <td>Aloha POS › Manager EOD Report</td>
+              <td>POS Device › Close Out Day <em>or</em> Toast Now App › Daily Summary</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 4. ORGANIZATIONAL CONCEPTS -->
+    <div class="guide-section" id="toast-concepts">
+      <div class="section-header">
+        <div class="section-icon navy">🏗️</div>
+        <h2 class="section-title">
+          Understanding Toast Organizational Concepts
+          <small>Three key data dimensions that control how your sales are grouped and filtered</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <p>Toast uses three key dimensions to organize sales data. Understanding all three is critical for accurate reporting and for filtering your reports correctly.</p>
+
+      <div class="card-grid cols-3">
+        <div class="concept-card" style="border-top: 3px solid var(--red);">
+          <span class="concept-card-icon">🏷️</span>
+          <div class="concept-card-label">Dimension 1</div>
+          <div class="concept-card-title">Sales Categories</div>
+          <p>Revenue classification — where sales are credited. Every menu item belongs to <strong>one</strong> Sales Category.</p>
+          <ul>
+            <li>Caesar Salad → <strong>Food</strong></li>
+            <li>Draft Beer → <strong>Beverage</strong></li>
+            <li>Catering Package → <strong>Other</strong></li>
+          </ul>
+          <div style="margin-top:10px;">
+            <span class="tag red">Similar to Aloha Sales Types</span>
+          </div>
+        </div>
+
+        <div class="concept-card" style="border-top: 3px solid var(--navy);">
+          <span class="concept-card-icon">🏪</span>
+          <div class="concept-card-label">Dimension 2</div>
+          <div class="concept-card-title">Revenue Centers</div>
+          <p>Physical service areas within your restaurant tracked separately to show which area generates the most revenue.</p>
+          <ul>
+            <li>Bar</li>
+            <li>Dining Room</li>
+            <li>Patio / Drive-Thru</li>
+            <li>Takeout Counter</li>
+          </ul>
+          <div style="margin-top:10px;">
+            <span class="tag navy">Filter in Sales Summary</span>
+          </div>
+        </div>
+
+        <div class="concept-card" style="border-top: 3px solid var(--gold);">
+          <span class="concept-card-icon">🚗</span>
+          <div class="concept-card-label">Dimension 3</div>
+          <div class="concept-card-title">Dining Options</div>
+          <p>How the order is fulfilled. <strong>Most important filter</strong> for understanding your business channel mix.</p>
+          <ul>
+            <li>Dine In</li>
+            <li>Takeout / Curbside</li>
+            <li>Delivery</li>
+            <li>Online / OLO</li>
+          </ul>
+          <div style="margin-top:10px;">
+            <span class="tag gold">Critical for channel analysis</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout navy" style="margin-top:14px;">
+        <span class="callout-icon">💡</span>
+        <div class="callout-body">
+          <strong>Why this matters:</strong> When you filter a report in Toast, you're always filtering by one or more of these three dimensions. Knowing which dimension holds the data you need will save you significant time.
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. SALES SUMMARY BREAKDOWN -->
+    <div class="guide-section" id="sales-summary-breakdown">
+      <div class="section-header">
+        <div class="section-icon red">📊</div>
+        <h2 class="section-title">
+          Toast Sales Summary Breakdown
+          <small>Deferred Sales, Service Charges, and Fees</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <p>The Toast Sales Summary has several line items that don't exist in Aloha. Here's what each one means and where to find detailed breakdowns.</p>
+
+      <!-- Sales Categories -->
+      <div class="card accent-navy" style="margin-bottom:14px;">
+        <div class="card-header">📂 Sales Categories in the Summary</div>
+        <div class="card-body">
+          <p style="margin-top:0;">Sales categories in Toast are very descriptive, so you can see detailed breakdowns by revenue type (Food, Beverage, Beer, Wine, Spirits, etc.). The Sales Summary groups all sales by category first, then by Dining Option.</p>
+          <figure class="guide-figure">
+            <img src="toast_reporting_guide_assets/img_002.png" alt="Toast Sales Summary — Sales Category Breakdown" />
+            <figcaption>Sales Summary: Sales Category breakdown view</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <!-- Deferred Sales -->
+      <div class="card accent-gold" style="margin-bottom:14px;">
+        <div class="card-header">⏸️ Deferred Sales &amp; Paid In Total</div>
+        <div class="card-body">
+          <div class="card-grid cols-2" style="margin-bottom:12px;">
+            <div>
+              <div class="tag gold">Deferred Sales</div>
+              <p style="margin-top:6px;">Net amount of sales (gift cards, house accounts, prepaid orders) that were <strong>sold</strong> on a given day but <strong>excluded from Net Sales</strong> because payment is for a future date or event.</p>
+            </div>
+            <div>
+              <div class="tag navy">Paid In Total</div>
+              <p style="margin-top:6px;">Payments <strong>received</strong> in your chosen date range for orders that fall <strong>outside</strong> that date range — e.g., a prepaid future order, catering invoice, or private event deposit.</p>
+            </div>
+          </div>
+
+          <p>You can see a deferred breakdown in the Revenue Summary and in its own section on the Sales Summary:</p>
+          <figure class="guide-figure">
+            <img src="toast_reporting_guide_assets/img_003.png" alt="Deferred Sales breakdown" />
+            <figcaption>Deferred Sales section in the Sales Summary</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <!-- Where to find deferred revenue -->
+      <div class="card accent-red" style="margin-bottom:14px;">
+        <div class="card-header">🔍 Where to Find Deferred Revenue Figures</div>
+        <div class="card-body">
+          <p style="margin-top:0;">To find specific figures for deferred revenue items, use the <strong>Order Details Report</strong> and filter by Menu Group = <strong>OLO Only Items</strong>:</p>
+          <p><span class="report-path">Reports <span class="sep">›</span> Sales <span class="sep">›</span> Order Details</span> → Filter: Menu Group = OLO Only Items</p>
+          <figure class="guide-figure">
+            <img src="toast_reporting_guide_assets/img_005.png" alt="Order Details Report — OLO filter" />
+            <figcaption>Order Details Report filtered by OLO Only Items</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <!-- Service Charges -->
+      <div class="card accent-navy">
+        <div class="card-header">💼 Service Charges (Non-Menu Fees)</div>
+        <div class="card-body">
+          <p style="margin-top:0;">Other fees and charges that <strong>do not report to menu sales categories</strong> appear as Service Charges in the Sales Summary. These are typically auto-gratuity, catering service fees, or other restaurant-defined charges.</p>
+          <figure class="guide-figure">
+            <img src="toast_reporting_guide_assets/img_008.png" alt="Service Charges in Sales Summary" />
+            <figcaption>Service Charges section in the Sales Summary</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. CASH MANAGEMENT -->
+    <div class="guide-section" id="cash-management">
+      <div class="section-header">
+        <div class="section-icon green">💵</div>
+        <h2 class="section-title">
+          Cash Management Reporting
+          <small>Cash Summary, Cash Activity, and Drawer Reconciliation</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <div class="card-grid cols-2" style="margin-bottom:14px;">
+        <!-- Cash Summary -->
+        <div class="card accent-green">
+          <div class="card-header">📥 Cash Summary</div>
+          <div class="card-body">
+            <p style="margin-top:0;">Displays at a glance:</p>
+            <ul style="margin:0 0 10px; padding-left:18px; font-size:13.5px; color:var(--text-mid);">
+              <li>Expected closeout cash</li>
+              <li>Actual closeout cash</li>
+              <li>Overage / Shortage amounts</li>
+              <li>Expected deposit vs Actual deposit</li>
+              <li>Deposit overage / shortage</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Cash Activity Summary -->
+        <div class="card accent-navy">
+          <div class="card-header">📋 Cash Activity Summary</div>
+          <div class="card-body">
+            <p style="margin-top:0;">Displays:</p>
+            <ul style="margin:0 0 10px; padding-left:18px; font-size:13.5px; color:var(--text-mid);">
+              <li>Total cash payments</li>
+              <li>Cash adjustments</li>
+              <li>Refunds</li>
+              <li>Cash before tipouts</li>
+              <li>Credit / non-cash tips</li>
+              <li>Tips withheld</li>
+              <li>Total cash</li>
+            </ul>
+            <figure class="guide-figure" style="margin:10px 0 0;">
+              <img src="toast_reporting_guide_assets/img_009.png" alt="Cash Activity Summary" />
+              <figcaption>Cash Activity Summary panel</figcaption>
+            </figure>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout gold" style="margin-top:14px;">
+        <span class="callout-icon">⚠️</span>
+        <div class="callout-body">
+          <strong>Manager Action Required for Accuracy</strong> — The <strong>Actual Closeout Cash</strong> figure is entered by a manager and will show a discrepancy if the cash drawer is never formally closed. Make sure managers close drawers at end of shift. Differences between expected and actual deposit may also reflect a cash adjustment (void, payout, or refund) — these link directly to Cash Drawer History.
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
+        <figure class="guide-figure" style="margin:0;">
+          <img src="toast_reporting_guide_assets/img_010.png" alt="Cash drawer close process" />
+          <figcaption>How to close a cash drawer to capture Actual Closeout Cash</figcaption>
+        </figure>
+        <figure class="guide-figure" style="margin:0;">
+          <img src="toast_reporting_guide_assets/img_011.png" alt="Cash drawer overview" />
+          <figcaption>Cash Drawer Overview across locations</figcaption>
+        </figure>
+      </div>
+
+      <!-- Cash Drawer Reports Table -->
+      <div style="margin-top:16px;">
+        <div class="section-header" style="margin-bottom:10px;">
+          <h3 style="font-size:15px; font-weight:700; color:var(--navy); margin:0;">Available Cash Reports</h3>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Report Name</th>
+                <th>Description</th>
+                <th>Best For</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Cash Activity Audit</strong></td>
+                <td>All cash activity over a chosen date range — every payment, adjustment, and refund</td>
+                <td><span class="pill navy">Multi-day review</span></td>
+              </tr>
+              <tr>
+                <td><strong>Cash Drawer Overview</strong></td>
+                <td>Cash activity across multiple restaurants on a single day. Requires restaurant group setup.</td>
+                <td><span class="pill navy">Multi-location</span></td>
+              </tr>
+              <tr>
+                <td><strong>Drawer History</strong></td>
+                <td>Complete overview of all cash activity at a single location on a single day</td>
+                <td><span class="pill red">Daily EOD</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. ESSENTIAL REPORTS -->
+    <div class="guide-section" id="essential-reports">
+      <div class="section-header">
+        <div class="section-icon red">📋</div>
+        <h2 class="section-title">
+          Essential Toast Reports for Daily Operations
+          <small>The two reports you'll use every single day</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <!-- Sales Summary Report -->
+      <div class="card accent-red" style="margin-bottom:14px;">
+        <div class="card-header">
+          📊 Sales Summary Report
+          <span style="margin-left:auto; font-weight:400; font-size:12px; color:var(--muted);">Your primary daily sales report</span>
+        </div>
+        <div class="card-body">
+          <p style="margin-top:0;">
+            <span class="report-path">Reports <span class="sep">›</span> Sales <span class="sep">›</span> Sales Summary</span>
+          </p>
+
+          <div class="card-grid cols-2">
+            <div>
+              <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin-bottom:8px;">Key Metrics Displayed</div>
+              <ul style="margin:0; padding-left:18px; font-size:13.5px; color:var(--text-mid);">
+                <li>Net Sales <em>(primary revenue metric)</em></li>
+                <li>Gross Sales <em>(Net Sales + Discounts)</em></li>
+                <li>Discounts &amp; Comps breakdown</li>
+                <li>Gratuity / Service Charges</li>
+                <li>Tax Amount (by tax rate)</li>
+                <li>Tips (credit card tips)</li>
+                <li>Sales by Dining Option</li>
+                <li>Sales by Revenue Center</li>
+                <li>Sales by Sales Category</li>
+              </ul>
+            </div>
+            <div>
+              <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin-bottom:8px;">Export Feature</div>
+              <p style="font-size:13.5px; color:var(--text-mid); margin:0 0 10px;">Export to Excel gives you <strong>3 tabs</strong>:</p>
+              <ul style="margin:0; padding-left:18px; font-size:13.5px; color:var(--text-mid);">
+                <li><strong>Summary</strong> — top-level totals</li>
+                <li><strong>Hourly Sales</strong> — spreadsheet of sales by hour</li>
+                <li><strong>Details</strong> — full line-item detail</li>
+              </ul>
+              <div class="callout green" style="margin-top:12px;">
+                <span class="callout-icon">💡</span>
+                <div class="callout-body">The <strong>Hourly Sales</strong> tab is invaluable for labor scheduling — compare actual sales by hour to your scheduled labor hours to find over/under-staffed periods.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Menu Product Mix -->
+      <div class="card accent-navy">
+        <div class="card-header">
+          🍽️ Menu Product Mix Report
+          <span style="margin-left:auto; font-weight:400; font-size:12px; color:var(--muted);">Your item-level sales analysis</span>
+        </div>
+        <div class="card-body">
+          <p style="margin-top:0;">
+            <span class="report-path">Reports <span class="sep">›</span> Menu <span class="sep">›</span> Menu Product Mix</span>
+          </p>
+
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin-bottom:10px;">Four Critical Views</div>
+
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>View</th><th>What It Shows</th><th>Use It To…</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><strong>Top Groups</strong></td>
+                  <td>Sales by menu group (Appetizers, Entrees, Beverages, etc.)</td>
+                  <td>Understand category performance across the menu</td>
+                </tr>
+                <tr>
+                  <td><strong>Top Items</strong></td>
+                  <td>Individual item performance: quantity sold + revenue</td>
+                  <td>Identify bestsellers and slow movers</td>
+                </tr>
+                <tr>
+                  <td><strong>Top Modifiers</strong></td>
+                  <td>Most popular modifications — add-ons, substitutions</td>
+                  <td>Evaluate upsell opportunities and pricing</td>
+                </tr>
+                <tr>
+                  <td><strong>86 Report</strong></td>
+                  <td>Out-of-stock items and how long they were 86'd</td>
+                  <td>Identify ordering and prep issues</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="callout navy" style="margin-top:12px;">
+            <span class="callout-icon">💡</span>
+            <div class="callout-body">Use the <strong>Show/Hide Columns</strong> button to customize your view and focus on the metrics that matter most. You can add item mix %, revenue per item, and more.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. HIGH-VALUE INSIGHTS -->
+    <div class="guide-section" id="high-value-insights">
+      <div class="section-header">
+        <div class="section-icon gold">💡</div>
+        <h2 class="section-title">
+          High-Value Reporting Insights for Restaurant Success
+          <small>Beyond basic sales tracking — use data to optimize profitability</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <p>These five reporting strategies will help you optimize profitability, control costs, and make data-driven decisions with Toast.</p>
+
+      <!-- 1. Labor -->
+      <div class="insight-card">
+        <div class="insight-head">
+          <div class="insight-num">1</div>
+          <div class="insight-title">Labor Cost % by Daypart</div>
+        </div>
+        <div class="insight-body">
+          <p>Don't just look at daily labor percentage — break it down by meal period using the Sales Summary hourly export combined with labor reports.</p>
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:10px 0 6px;">Action Steps</div>
+          <ul>
+            <li>Export Sales Summary with hourly breakdown</li>
+            <li>Compare sales by hour to scheduled labor hours</li>
+            <li>Identify over-staffed or under-staffed periods</li>
+            <li>Adjust future schedules based on traffic patterns</li>
+          </ul>
+          <div class="callout gold" style="margin-top:10px;">
+            <span class="callout-icon">🔍</span>
+            <div class="callout-body"><strong>Common Finding:</strong> Many restaurants are over-staffed during the 2–4 PM window between lunch and dinner rushes, creating unnecessary labor expenses. The hourly export will make this visible immediately.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Product Mix Engineering -->
+      <div class="insight-card">
+        <div class="insight-head">
+          <div class="insight-num">2</div>
+          <div class="insight-title">Product Mix Engineering</div>
+        </div>
+        <div class="insight-body">
+          <p>Use the Menu Product Mix report to identify high-margin items and promote them strategically. Classify every item into one of four quadrants:</p>
+
+          <div class="tablewrap">
+            <table class="matrix-table">
+              <thead>
+                <tr>
+                  <th style="background:var(--navy);">Item Type</th>
+                  <th style="background:var(--navy);">Popularity</th>
+                  <th style="background:var(--navy);">Margin</th>
+                  <th style="background:var(--navy);">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="row-label">⭐ Star</td>
+                  <td><span class="pill green">High</span></td>
+                  <td><span class="pill green">High</span></td>
+                  <td>Feature prominently — these are your best items</td>
+                </tr>
+                <tr>
+                  <td class="row-label">🐴 Plow Horse</td>
+                  <td><span class="pill green">High</span></td>
+                  <td><span class="pill red">Low</span></td>
+                  <td>Consider price increases — guests will accept it</td>
+                </tr>
+                <tr>
+                  <td class="row-label">🧩 Puzzle</td>
+                  <td><span class="pill red">Low</span></td>
+                  <td><span class="pill green">High</span></td>
+                  <td>Train staff to upsell — great margin, just needs visibility</td>
+                </tr>
+                <tr>
+                  <td class="row-label">🐕 Dog</td>
+                  <td><span class="pill red">Low</span></td>
+                  <td><span class="pill red">Low</span></td>
+                  <td>Consider removing from menu — not earning its spot</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Check Average -->
+      <div class="insight-card">
+        <div class="insight-head">
+          <div class="insight-num">3</div>
+          <div class="insight-title">Check Average &amp; Upsell Tracking</div>
+        </div>
+        <div class="insight-body">
+          <p>Monitor average check size in the Sales Summary under <strong>Orders › Average Check</strong>. Track this by dining option to understand channel performance.</p>
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:10px 0 6px;">Benchmarks</div>
+          <ul>
+            <li>Dine-in check average should be <strong>20–30% higher</strong> than takeout</li>
+            <li>Track the <strong>Top Modifiers</strong> report to see if add-ons (extra protein, premium sides) are being sold</li>
+          </ul>
+          <div class="callout gold" style="margin-top:10px;">
+            <span class="callout-icon">💡</span>
+            <div class="callout-body">If check averages are declining, focus on suggestive selling training and review modifier pricing strategy.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Discount Control -->
+      <div class="insight-card">
+        <div class="insight-head">
+          <div class="insight-num">4</div>
+          <div class="insight-title">Discount &amp; Comp Control</div>
+        </div>
+        <div class="insight-body">
+          <p>Toast tracks every discount and comp by employee in the Sales Summary. Set clear policies and monitor regularly.</p>
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:10px 0 6px;">🚩 Red Flags</div>
+          <ul>
+            <li>Discounts exceeding <strong>3–5%</strong> of gross sales</li>
+            <li>Individual employee discount rates significantly higher than team average</li>
+            <li>Increasing discount trends without corresponding customer satisfaction improvements</li>
+          </ul>
+          <p style="margin-top:10px;">
+            Access detailed discount reports: <span class="report-path">Reports <span class="sep">›</span> Sales <span class="sep">›</span> Order Details</span> → filter by discounts/voids
+          </p>
+        </div>
+      </div>
+
+      <!-- 5. DoD/WoW -->
+      <div class="insight-card">
+        <div class="insight-head">
+          <div class="insight-num">5</div>
+          <div class="insight-title">Day-Over-Day &amp; Week-Over-Week Comparisons</div>
+        </div>
+        <div class="insight-body">
+          <p>Toast Now mobile app provides instant comparisons to same day last week and last year. Use this for quick trend identification throughout the day.</p>
+          <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:10px 0 6px;">What to Watch</div>
+          <ul>
+            <li>Sales variance <strong>&gt;10% week-over-week</strong> requires investigation</li>
+            <li>Traffic count (# of checks) declining while check average is rising = possible pricing sensitivity issue</li>
+            <li>Labor cost % increasing while sales are flat = scheduling inefficiency</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9. TOAST NOW APP -->
+    <div class="guide-section" id="toast-now">
+      <div class="section-header">
+        <div class="section-icon navy">📱</div>
+        <h2 class="section-title">
+          Toast Now Mobile App
+          <small>Real-time management in your pocket</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <div class="card-grid cols-2">
+        <div class="card accent-red">
+          <div class="card-header">📱 What It Does</div>
+          <div class="card-body">
+            <p style="margin-top:0;">The Toast Now app puts critical reporting and controls in your pocket. Download from the App Store or Google Play to manage operations on the go.</p>
+            <ul style="margin:0; padding-left:18px; font-size:13.5px; color:var(--text-mid);">
+              <li>Real-time sales dashboard with hourly breakdowns</li>
+              <li>Labor cost tracking with hour-by-hour comparisons</li>
+              <li>Multi-location view (switch between stores instantly)</li>
+              <li>Clock-in / clock-out management</li>
+              <li>Same-day-last-week and same-day-last-year comparisons</li>
+              <li>Daily Summary for quick EOD review</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card accent-green">
+          <div class="card-header">✅ Manager Best Practice</div>
+          <div class="card-body">
+            <p style="margin-top:0;">Check Toast Now at three key times each day to catch issues before they become problems:</p>
+            <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+              <div style="display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--cream); border:1px solid var(--border); border-radius:8px;">
+                <span style="font-size:18px;">☀️</span>
+                <div>
+                  <strong style="font-size:13px;">11 AM</strong>
+                  <div style="font-size:12px; color:var(--muted);">Check lunch build — adjust staffing now if needed</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--cream); border:1px solid var(--border); border-radius:8px;">
+                <span style="font-size:18px;">🕑</span>
+                <div>
+                  <strong style="font-size:13px;">2 PM</strong>
+                  <div style="font-size:12px; color:var(--muted);">Review lunch total — identify over/under-staffing patterns</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--cream); border:1px solid var(--border); border-radius:8px;">
+                <span style="font-size:18px;">🌆</span>
+                <div>
+                  <strong style="font-size:13px;">5 PM</strong>
+                  <div style="font-size:12px; color:var(--muted);">Monitor dinner build — real-time labor vs forecast</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10. BEST PRACTICES / CHECKLISTS -->
+    <div class="guide-section" id="best-practices">
+      <div class="section-header">
+        <div class="section-icon green">✅</div>
+        <h2 class="section-title">
+          Toast Reporting Best Practices
+          <small>Daily, Weekly, and Monthly checklists for every manager</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <div class="card-grid cols-3">
+
+        <!-- Daily -->
+        <div class="period-card">
+          <div class="period-card-head red">
+            <span>📅</span> Daily Review
+          </div>
+          <div class="period-card-body">
+            <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">Every morning or end of day, complete these tasks:</p>
+            <ul class="checklist daily">
+              <li><span class="check-icon">☐</span> Review Sales Summary for previous day's Net Sales vs target</li>
+              <li><span class="check-icon">☐</span> Review discounts and voids by employee — address anomalies immediately</li>
+              <li><span class="check-icon">☐</span> Compare actual cash drawer to expected in Drawer History</li>
+              <li><span class="check-icon">☐</span> Note any major sales variance from same day last week</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Weekly -->
+        <div class="period-card">
+          <div class="period-card-head navy">
+            <span>📆</span> Weekly Deep Dive
+          </div>
+          <div class="period-card-body">
+            <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">Once per week, complete a deeper analysis:</p>
+            <ul class="checklist weekly">
+              <li><span class="check-icon">☐</span> Export 7-day Sales Summary and analyze trends</li>
+              <li><span class="check-icon">☐</span> Review Menu Product Mix — identify slow movers and menu adjustment opportunities</li>
+              <li><span class="check-icon">☐</span> Calculate week's prime cost percentage</li>
+              <li><span class="check-icon">☐</span> Review labor scheduling vs actual sales by hour — optimize next week's schedule</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Monthly -->
+        <div class="period-card">
+          <div class="period-card-head gold">
+            <span>📓</span> Monthly Review
+          </div>
+          <div class="period-card-body">
+            <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">Monthly business performance review:</p>
+            <ul class="checklist monthly">
+              <li><span class="check-icon">☐</span> Generate 30-day Sales Summary and compare to budget</li>
+              <li><span class="check-icon">☐</span> Analyze sales by Revenue Center — consider reallocation of resources</li>
+              <li><span class="check-icon">☐</span> Review dining option mix trends (dine-in vs takeout vs delivery)</li>
+              <li><span class="check-icon">☐</span> Identify top 20% of menu items generating 80% of revenue (Pareto principle)</li>
+              <li><span class="check-icon">☐</span> Compare monthly labor cost % to previous 3-month average</li>
+            </ul>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 11. TRANSITION CHALLENGES -->
+    <div class="guide-section" id="transition-challenges">
+      <div class="section-header">
+        <div class="section-icon gold">🔧</div>
+        <h2 class="section-title">
+          Common Transition Challenges
+          <small>Frequently asked questions from the Aloha → Toast switch</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <div class="challenge-card">
+        <div class="challenge-q">
+          <span>❓</span>
+          Challenge: Gross Sales totals look different (lower) than in Aloha
+        </div>
+        <div class="challenge-a">
+          <strong style="color:var(--green);">✅ Solution:</strong> Toast excludes taxes from Gross Sales (GAAP standard). If your Aloha reports included taxes in Gross Sales, your Toast numbers will appear lower by exactly the tax amount. This is correct and expected — not an error. <strong>Focus on Net Sales</strong> as your primary metric and use it for all year-over-year comparisons.
+        </div>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-q">
+          <span>❓</span>
+          Challenge: Can't find a specific Aloha report in Toast
+        </div>
+        <div class="challenge-a">
+          <strong style="color:var(--green);">✅ Solution:</strong> Toast uses different report names and organizes data differently. Use the <strong>Finding Your Reports</strong> table in this guide as a cheat sheet. Most Aloha reports have Toast equivalents — they're just in a different menu location and may have different column names.
+        </div>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-q">
+          <span>❓</span>
+          Challenge: Labor cost percentage is showing as 0% in reports
+        </div>
+        <div class="challenge-a">
+          <strong style="color:var(--green);">✅ Solution:</strong> Wage rates must be configured in Toast for each employee job code before labor cost % will calculate. Contact your Toast representative or IT support to set up wage rates. This is a one-time configuration step.
+        </div>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-q">
+          <span>❓</span>
+          Challenge: Online order revenue looks different or is missing from Net Sales
+        </div>
+        <div class="challenge-a">
+          <strong style="color:var(--green);">✅ Solution:</strong> Some online/OLO items may be set as <strong>Deferred Revenue</strong> — they appear in the Deferred Sales section of the Sales Summary rather than in Net Sales. Use the <strong>Order Details Report filtered by OLO Only Items</strong> to find the breakdown. See the Sales Summary Breakdown section of this guide for screenshots.
+        </div>
+      </div>
+    </div>
+
+    <!-- 12. SUPPORT & RESOURCES -->
+    <div class="guide-section" id="support">
+      <div class="section-header">
+        <div class="section-icon red">🆘</div>
+        <h2 class="section-title">
+          Support &amp; Training Resources
+          <small>How to get help when you need it</small>
+        </h2>
+      </div>
+      <hr class="section-divider" />
+
+      <div class="contact-grid">
+        <div class="contact-card" style="border-top:3px solid var(--navy);">
+          <div class="contact-card-title">🎓 Toast Central (Knowledge Base)</div>
+          <p><strong>Access:</strong> <a href="https://central.toasttab.com" target="_blank">central.toasttab.com</a></p>
+          <p>Articles, video tutorials, and step-by-step guides for every feature. Use the search function to find specific topics like "Sales Summary" or "Labor Reports."</p>
+          <p><span class="tag navy">Training Videos Available</span></p>
+        </div>
+
+        <div class="contact-card" style="border-top:3px solid var(--red);">
+          <div class="contact-card-title">📞 Toast Customer Support</div>
+          <p><strong>Phone:</strong> <a href="tel:6172494710">617-249-4710</a> <em>(24/7 for urgent issues)</em></p>
+          <p><strong>Chat:</strong> Mon–Fri 8 AM – 2 AM ET via <a href="https://central.toasttab.com" target="_blank">central.toasttab.com</a></p>
+          <p><strong>System Status:</strong> <a href="https://status.toasttab.com" target="_blank">status.toasttab.com</a> — check here first if Toast isn't behaving as expected</p>
+        </div>
+
+        <div class="contact-card" style="border-top:3px solid var(--gold);">
+          <div class="contact-card-title">📊 Newk's Internal Resources</div>
+          <p>Contact your <strong>Operations or IT team</strong> for:</p>
+          <p>• Wage rate configuration issues</p>
+          <p>• Multi-location reporting setup</p>
+          <p>• Custom report access questions</p>
+          <p>• Historical Aloha data comparison</p>
+        </div>
+
+        <div class="contact-card" style="border-top:3px solid var(--green);">
+          <div class="contact-card-title">🔢 Quick Reference Numbers</div>
+          <p><strong>Toast Support:</strong> <a href="tel:6172494710">617-249-4710</a></p>
+          <p><strong>Web Reports:</strong> <a href="https://central.toasttab.com" target="_blank">central.toasttab.com</a></p>
+          <p><strong>System Status:</strong> <a href="https://status.toasttab.com" target="_blank">status.toasttab.com</a></p>
+          <p><strong>Toast Now App:</strong> Available on iOS &amp; Android</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top:32px; padding-top:16px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; color:var(--muted); font-size:12px;">
+      <span>Newk's Eatery Operations — Toast POS Reporting Guide</span>
+      <span>For internal use. Contact IT for updates.</span>
+    </div>
+
+  </main>
+
+  <script>
+    /* ── Sidebar search / highlight ────────────────────────────────────── */
+    const searchInput = document.getElementById('searchInput');
+    const allSections = Array.from(document.querySelectorAll('.guide-section'));
+
+    searchInput.addEventListener('input', () => {
+      const term = searchInput.value.trim().toLowerCase();
+      allSections.forEach(sec => {
+        const match = !term || sec.innerText.toLowerCase().includes(term);
+        sec.style.display = match ? '' : 'none';
+      });
+    });
+
+    /* ── Active nav link on scroll ─────────────────────────────────────── */
+    const navLinks = Array.from(document.querySelectorAll('.nav-group a'));
+
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const id = entry.target.id;
+          navLinks.forEach(a => {
+            const href = a.getAttribute('href');
+            a.classList.toggle('active', href === '#' + id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+
+    allSections.forEach(sec => observer.observe(sec));
+  </script>
+
+</body>
+</html>
+

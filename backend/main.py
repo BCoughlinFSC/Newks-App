@@ -147,20 +147,6 @@ def _normalize_tag_name(value: str) -> str:
     return text
 
 
-def _parse_ee_weight(tag_name: str) -> Optional[float]:
-    """Parse item-equivalent weight from an EE tag name.
-
-    Examples: 'EE 1' -> 1.0, 'EE .5' -> 0.5, 'EE 0.5' -> 0.5, 'EE 12' -> 12.0
-    Returns None if the tag name does not match the EE weight pattern.
-    """
-    m = re.match(r'^EE\s+(\d*\.?\d+)\s*$', str(tag_name or "").strip(), re.IGNORECASE)
-    if m:
-        try:
-            return float(m.group(1))
-        except ValueError:
-            return None
-    return None
-
 
 def _is_olo_item(item_name: str) -> bool:
     """Returns True when the Toast item name contains 'OLO' (case-insensitive),
@@ -837,8 +823,10 @@ _menu_data_cache_v2: Dict[str, dict] = {}  # {restaurant_guid: {data: ..., expir
 MENU_V2_CACHE_TTL_SECONDS = 60 * 60 * 12
 _price_group_cache: Dict[str, dict] = {}  # {restaurant_guid: {data: ..., expires_at: ...}}
 PRICE_GROUP_CACHE_TTL_SECONDS = 300
+_locations_cache: Dict[str, Any] = {"data": None, "expires_at": 0}  # single-tenant: cache all locations
+LOCATIONS_CACHE_TTL_SECONDS = 60 * 60 * 24  # 24 hours
 _sc_config_cache: Dict[str, Dict[str, Dict]] = {}  # {restaurant_guid: {sc_guid: {destination, gratuity, name}}}
-_sc_daily_cache: Dict[str, float] = {}  # {f"{restaurant_guid}|{business_date_yyyymmdd}": non_restaurant_sc_total}
+_sc_daily_cache: Dict[str, float] = {}  # {f"{restaurant_guid}|{business_date_yyyymmdd}": restaurant_sc_total}
 _DEFAULT_TIER_MAPPING_CANDIDATES = [
     os.path.join(ROOT_DIR, "Toast Price Tiers Mapping .xlsx"),
     os.path.join(os.path.dirname(__file__), "price_tier_mapping.csv"),
@@ -1187,9 +1175,16 @@ def chunk_list(items: List[str], size: int) -> List[List[str]]:
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 async def get_all_active_locations(client: httpx.AsyncClient) -> List[Location]:
-    """Get all active locations from Toast API with error handling"""
+    """Get all active locations from Toast API with error handling and in-memory caching."""
+    # In-process cache to avoid hammering Toast for every report / request.
+    now = time.time()
+    cached = _locations_cache.get("data")
+    expires_at = _locations_cache.get("expires_at", 0)
+    if cached is not None and expires_at > now:
+        return cached  # type: ignore[return-value]
+
     url = f"{TOAST_API_BASE_URL}/restaurants-information"
-    
+
     try:
         headers = await get_auth_headers()
     except HTTPException:
@@ -1198,7 +1193,7 @@ async def get_all_active_locations(client: httpx.AsyncClient) -> List[Location]:
         detail = getattr(e, "detail", str(e)) or repr(e)
         logger.error(f"Failed to get auth headers for locations: {type(e).__name__}: {detail}")
         raise HTTPException(status_code=500, detail=f"Authentication failed: {detail}")
-    
+
     try:
         resp = await client.get(url, headers=headers, timeout=30.0)
     except httpx.TimeoutException:
@@ -1207,33 +1202,35 @@ async def get_all_active_locations(client: httpx.AsyncClient) -> List[Location]:
     except Exception as e:
         logger.error(f"Network error fetching locations: {e}")
         raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
-    
+
     if resp.status_code != 200:
         error_msg = resp.text[:200] if resp.text else "Unknown error"
         logger.error(f"Toast API returned {resp.status_code} for locations: {error_msg}")
         raise HTTPException(status_code=resp.status_code, detail=f"Error fetching locations: {error_msg}")
-    
+
     try:
         data = resp.json()
     except Exception as e:
         logger.error(f"Failed to parse locations response: {e}")
         raise HTTPException(status_code=500, detail="Invalid response from Toast API")
-    
+
     if not isinstance(data, list):
         logger.error(f"Unexpected locations response format: {type(data)}")
         raise HTTPException(status_code=500, detail="Invalid response format from Toast API")
-    
+
     active = [
         Location(
             restaurantGuid=item["restaurantGuid"],
             restaurantName=item["restaurantName"],
-            externalId=item.get("externalId") or item.get("restaurantExternalId") or item.get("restaurantId")
+            externalId=item.get("externalId") or item.get("restaurantExternalId") or item.get("restaurantId"),
         )
         for item in data
         if item.get("active") and not item.get("archived") and not item.get("testMode")
     ]
-    
+
     logger.info(f"Loaded {len(active)} active locations from Toast API")
+    _locations_cache["data"] = active
+    _locations_cache["expires_at"] = now + LOCATIONS_CACHE_TTL_SECONDS
     return active
 
 async def request_toast_report(
@@ -1272,8 +1269,8 @@ async def request_toast_report(
         body["groupBy"] = group_by
     
     # Choose endpoint
-    endpoint_base = "metrics" if report_type == "metrics" else "menu"
-    
+    endpoint_base = "metrics" if report_type in ("metrics", "sales_summary") else "menu"
+
     if time_range and time_range in ["day", "week", "month", "year"]:
         url = f"{TOAST_API_BASE_URL}/{endpoint_base}/{time_range}"
     else:
@@ -1327,7 +1324,7 @@ async def fetch_toast_report(
     max_attempts: int = 60,
     delay_seconds: float = 1.0,
 ) -> list:
-    endpoint_base = "metrics" if report_type == "metrics" else "menu"
+    endpoint_base = "metrics" if report_type in ("metrics", "sales_summary") else "menu"
     url = f"{TOAST_API_BASE_URL}/{endpoint_base}/{report_guid}"
     params = {"fetchRestaurantNames": "true"}
     
@@ -1505,26 +1502,39 @@ async def _compute_restaurant_service_charges(
     """
     Compute total restaurant-destination service charges for one restaurant on one business day.
 
-    The Toast ERA netSalesAmount EXCLUDES service charges entirely.  Newk's Net Sales is
-    therefore higher than Toast Net Sales by the sum of service charges that go to the
-    restaurant (destination == 'RESTAURANT', gratuity == false) — e.g. delivery fees,
-    catering delivery fees ("CAT 3rd Party"), etc.
+    Toast's netSalesAmount INCLUDES service charges that go to the restaurant (e.g. delivery
+    fees, catering fees).  Newk's must pay those fees out to delivery providers, so they are
+    NOT Newk's revenue.  We subtract them:
 
-    Formula: Newk's Net Sales = Toast netSalesAmount + result of this function.
+        Newk's Net Sales = Toast netSalesAmount − result of this function
+
+    Charges included: ALL where destination == 'RESTAURANT', regardless of the gratuity flag.
+    Toast includes every restaurant-destination charge in netSalesAmount, so every one must
+    be removed to arrive at Newk's true revenue.
+    Charges going to SERVER, TOAST, or THIRD_PARTY are never in Toast netSalesAmount
+    and are therefore not included here.
 
     NOTE: destination is a top-level field on AppliedServiceCharge.  The nested
-    serviceCharge object is a stub reference (guid + entityType only) with no fields.
+    serviceCharge object is a stub reference (guid + entityType only) with no other fields.
     """
     global _sc_daily_cache
     cache_key = f"{restaurant_guid}|{business_date_yyyymmdd}"
     if cache_key in _sc_daily_cache:
-        return _sc_daily_cache[cache_key]
+        cached_val = _sc_daily_cache[cache_key]
+        logger.debug(
+            "SC cache HIT for %s|%s: returning cached %.2f",
+            restaurant_guid[:8] + "...",
+            business_date_yyyymmdd,
+            cached_val,
+        )
+        return cached_val
 
     # Fetch all orders for this business day
     orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
 
     # Walk orders → checks → appliedServiceCharges and sum restaurant-destination SC amounts.
     total_restaurant_sc: float = 0.0
+    dest_counts: Dict[str, int] = {}   # destination → charge count (for logging)
     for order in orders:
         if order.get("voided"):
             continue
@@ -1538,21 +1548,96 @@ async def _compute_restaurant_service_charges(
 
                 # destination is a top-level field on AppliedServiceCharge (not on the stub
                 # nested serviceCharge reference).  Default to RESTAURANT when absent.
+                # Any charge going to the restaurant is included in Toast's netSalesAmount,
+                # so we deduct ALL of them regardless of the gratuity flag.
                 destination = applied_sc.get("destination") or "RESTAURANT"
-                gratuity = bool(applied_sc.get("gratuity", False))
+                dest_counts[destination] = dest_counts.get(destination, 0) + 1
 
-                if destination == "RESTAURANT" and not gratuity:
+                if destination == "RESTAURANT":
                     total_restaurant_sc += charge_amount
 
     _sc_daily_cache[cache_key] = total_restaurant_sc
     logger.info(
-        "SC computed for %s|%s: restaurant_sc=%.2f (from %d orders)",
+        "SC computed for %s|%s: restaurant_sc=%.2f (from %d orders, dest breakdown=%s)",
         restaurant_guid[:8] + "...",
         business_date_yyyymmdd,
         total_restaurant_sc,
         len(orders),
+        dest_counts,
     )
     return total_restaurant_sc
+
+
+async def _compute_sales_metrics_for_day(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    business_date_yyyymmdd: str,
+) -> Dict:
+    """
+    Fetch all orders for one restaurant and one business day and compute aggregate metrics.
+
+    Returns a dict with:
+        order_count      – count of non-voided orders
+        restaurant_sc    – total RESTAURANT-destination service charges
+                           (also populates _sc_daily_cache as a side effect)
+        discount_amount  – sum of appliedDiscounts[].discountAmount on non-voided checks
+        void_count       – count of voided checks
+        cash_amount      – sum of CASH-type payments on non-voided checks
+        card_amount      – sum of non-CASH payments on non-voided checks
+    """
+    global _sc_daily_cache
+    orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
+
+    order_count: int = 0
+    restaurant_sc: float = 0.0
+    discount_amount: float = 0.0
+    void_count: int = 0
+    cash_amount: float = 0.0
+    card_amount: float = 0.0
+
+    for order in orders:
+        if order.get("voided"):
+            void_count += len(order.get("checks", []))
+            continue
+
+        order_count += 1
+        for check in order.get("checks", []):
+            if check.get("voided"):
+                void_count += 1
+                continue
+
+            # Restaurant-destination service charges
+            for sc in check.get("appliedServiceCharges", []):
+                charge = float(sc.get("chargeAmount") or 0)
+                if charge > 0 and (sc.get("destination") or "RESTAURANT") == "RESTAURANT":
+                    restaurant_sc += charge
+
+            # Discounts
+            for disc in check.get("appliedDiscounts", []):
+                discount_amount += float(disc.get("discountAmount") or 0)
+
+            # Payments: CASH vs everything else (credit, gift card, etc.)
+            for pmt in check.get("payments", []):
+                pmt_amount = float(pmt.get("amount") or 0)
+                if pmt_amount <= 0:
+                    continue
+                if (pmt.get("type") or "").upper() == "CASH":
+                    cash_amount += pmt_amount
+                else:
+                    card_amount += pmt_amount
+
+    # Populate SC cache as side effect so the standard net-sales report benefits too
+    cache_key = f"{restaurant_guid}|{business_date_yyyymmdd}"
+    _sc_daily_cache[cache_key] = restaurant_sc
+
+    return {
+        "order_count": order_count,
+        "restaurant_sc": restaurant_sc,
+        "discount_amount": discount_amount,
+        "void_count": void_count,
+        "cash_amount": cash_amount,
+        "card_amount": card_amount,
+    }
 
 
 def _get_modifier_guid_to_name(restaurant_guid: str) -> Dict[str, str]:
@@ -2872,6 +2957,96 @@ def pivot_metrics_by_location_and_date(
         "totals": totals_rows
     }
 
+def compute_sales_summary_by_location(
+    raw_rows: list,
+    metrics_by_key: Dict[str, Dict],
+) -> Dict:
+    """
+    Aggregate ERA netSalesAmount + Orders API metrics into a per-location summary table.
+
+    raw_rows:        ERA analytics rows: restaurantName, restaurantGuid, businessDate, netSalesAmount
+    metrics_by_key:  {f"{restaurantGuid}|{businessDate}": metrics_dict}
+                     Each metrics_dict is from _compute_sales_metrics_for_day().
+
+    Returns:
+    {
+        "summaryTable": [
+            { "restaurantName", "orders", "toastNetSales", "serviceFees",
+              "netSales", "avgTicket", "discounts", "voids", "cash", "card" },
+            ...
+        ],
+        "summaryTotals": { same keys, totals/averages across all locations }
+    }
+    """
+    loc: Dict[str, Dict] = {}
+
+    for row in raw_rows:
+        r_name   = row.get("restaurantName", "Unknown")
+        r_guid   = row.get("restaurantGuid", "")
+        b_date   = row.get("businessDate", "")
+        toast_ns = float(row.get("netSalesAmount") or 0)
+        key      = f"{r_guid}|{b_date}"
+        m        = metrics_by_key.get(key, {})
+
+        if r_name not in loc:
+            loc[r_name] = {
+                "orders": 0, "toast_net": 0.0, "svc_fees": 0.0,
+                "discounts": 0.0, "voids": 0, "cash": 0.0, "card": 0.0,
+            }
+
+        loc[r_name]["orders"]   += m.get("order_count", 0)
+        loc[r_name]["toast_net"] += toast_ns
+        loc[r_name]["svc_fees"]  += m.get("restaurant_sc", 0.0)
+        loc[r_name]["discounts"] += m.get("discount_amount", 0.0)
+        loc[r_name]["voids"]    += m.get("void_count", 0)
+        loc[r_name]["cash"]     += m.get("cash_amount", 0.0)
+        loc[r_name]["card"]     += m.get("card_amount", 0.0)
+
+    summary_rows = []
+    tot: Dict[str, Any] = {
+        "orders": 0, "toastNetSales": 0.0, "serviceFees": 0.0,
+        "netSales": 0.0, "discounts": 0.0, "voids": 0, "cash": 0.0, "card": 0.0,
+    }
+
+    for r_name in sorted(loc.keys()):
+        d         = loc[r_name]
+        toast_ns  = round(d["toast_net"], 2)
+        svc_fees  = round(d["svc_fees"], 2)
+        net_sales = round(toast_ns - svc_fees, 2)
+        orders    = d["orders"]
+        avg_tick  = round(net_sales / orders, 2) if orders > 0 else 0.0
+        discounts = round(d["discounts"], 2)
+        voids     = d["voids"]
+        cash      = round(d["cash"], 2)
+        card      = round(d["card"], 2)
+
+        summary_rows.append({
+            "restaurantName": r_name,
+            "orders":         orders,
+            "toastNetSales":  toast_ns,
+            "serviceFees":    svc_fees,
+            "netSales":       net_sales,
+            "avgTicket":      avg_tick,
+            "discounts":      discounts,
+            "voids":          voids,
+            "cash":           cash,
+            "card":           card,
+        })
+
+        tot["orders"]       += orders
+        tot["toastNetSales"] = round(tot["toastNetSales"] + toast_ns, 2)
+        tot["serviceFees"]   = round(tot["serviceFees"] + svc_fees, 2)
+        tot["netSales"]      = round(tot["netSales"] + net_sales, 2)
+        tot["discounts"]     = round(tot["discounts"] + discounts, 2)
+        tot["voids"]        += voids
+        tot["cash"]          = round(tot["cash"] + cash, 2)
+        tot["card"]          = round(tot["card"] + card, 2)
+
+    tot["avgTicket"] = round(tot["netSales"] / tot["orders"], 2) if tot["orders"] > 0 else 0.0
+
+    return {"summaryTable": summary_rows, "summaryTotals": tot}
+
+
 def pivot_menu_items_by_tag(
     analytics_rows: List[dict],
     tags_mapping: Dict[str, List[Dict]],
@@ -3225,83 +3400,6 @@ def pivot_menu_items_by_tag(
     olo_breakdown = [r for r in item_breakdown_rows if _is_olo_item(r.get("menuItemName", ""))]
     instore_breakdown = [r for r in item_breakdown_rows if not _is_olo_item(r.get("menuItemName", ""))]
 
-    # ── Per-store / per-day EE-weighted counts ──────────────────────────────────
-    # For each analytics row that passes the tag filter, look up its EE weight tag
-    # (any tag whose name matches "EE <number>") and accumulate weighted quantities
-    # per (restaurant, date, tag).  Items with no EE tag are collected for the warning.
-
-    per_store_day: Dict[Tuple, float] = {}   # (r_name, bdate, tag_canonical) -> weighted qty
-    missing_ee_items: set = set()
-
-    selected_tags_norm_ee = [_normalize_tag_name(t) for t in (selected_tags or [])]
-
-    for row in analytics_rows:
-        r_name = row.get("restaurantName", "Unknown")
-        m_guid = row.get("menuItemGuid", "")
-        m_name = (row.get("menuItemName") or
-                  item_names_mapping.get(m_guid, f"Item {m_guid[:8]}") if m_guid else "")
-        qty = row.get("quantitySold", 0) or 0
-        bdate = row.get("businessDate")
-
-        if not m_guid or not bdate:
-            continue
-
-        all_item_tags = tags_mapping.get(m_guid, [])
-
-        # Respect the same tag filter as the main loop
-        if selected_tags and m_guid not in tags_mapping:
-            continue
-
-        if selected_tags:
-            active_canonical = [
-                _canonical_tag(t["tagName"])
-                for t in all_item_tags
-                if _normalize_tag_name(t["tagName"]) in selected_tags_norm_ee
-            ]
-            if not active_canonical:
-                continue
-        else:
-            active_canonical = ["All Items"]
-
-        # Find EE weight (use the FULL tag list, not just selected tags)
-        ee_weight: Optional[float] = None
-        for t in all_item_tags:
-            w = _parse_ee_weight(t["tagName"])
-            if w is not None:
-                ee_weight = w
-                break
-
-        if ee_weight is None:
-            missing_ee_items.add(m_name or f"Item {m_guid[:8]}")
-            continue
-
-        for tag_canonical in active_canonical:
-            key = (r_name, bdate, tag_canonical)
-            per_store_day[key] = per_store_day.get(key, 0.0) + qty * ee_weight
-
-    # Build structured per-store/day weighted rows
-    store_tag_data: Dict[str, Dict[str, Dict]] = {}
-    for (r_name, bdate, tag_name), wqty in per_store_day.items():
-        if r_name not in store_tag_data:
-            store_tag_data[r_name] = {}
-        if tag_name not in store_tag_data[r_name]:
-            store_tag_data[r_name][tag_name] = {"totalWeightedQty": 0.0, "daily": {}}
-        store_tag_data[r_name][tag_name]["totalWeightedQty"] += wqty
-        store_tag_data[r_name][tag_name]["daily"][bdate] = (
-            store_tag_data[r_name][tag_name]["daily"].get(bdate, 0.0) + wqty
-        )
-
-    weighted_rows = []
-    for r_name in sorted(store_tag_data.keys()):
-        for tag_name in sorted(store_tag_data[r_name].keys()):
-            d = store_tag_data[r_name][tag_name]
-            weighted_rows.append({
-                "restaurantName": r_name,
-                "itemTagName": tag_name,
-                "totalWeightedQty": round(d["totalWeightedQty"], 2),
-                "daily": {k: round(v, 2) for k, v in sorted(d["daily"].items())},
-            })
-
     return {
         "pivotTable": pivot_rows,
         "totals": totals_rows,
@@ -3322,12 +3420,967 @@ def pivot_menu_items_by_tag(
                 "totals": _mode_totals_from_breakdown(olo_breakdown),
             },
         },
-        "perStoreDayWeighted": {
-            "rows": weighted_rows,
-            "dateColumns": sorted(date_columns),
-            "missingEETags": sorted(missing_ee_items),
+    }
+
+# ------------------
+# MSI / Monkey Discrepancy Report Parser
+# ------------------
+
+_MSI_UUID_RE = re.compile(
+    r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+    re.IGNORECASE,
+)
+_MSI_DATETIME_RE = re.compile(
+    r'(\d{2}/\d{2}/\d{4})\s+(\d{1,2}:\d{2}\s+(?:AM|PM))',
+    re.IGNORECASE,
+)
+# Location header: 4-digit code (City State) — region may have nested parens like "(Brookhaven)"
+_MSI_LOC_HDR_RE = re.compile(
+    r'\b(\d{3,4})\s+\(([^)]*(?:\([^)]*\)[^)]*)*)\)([\w][^\d]+?)\s+Order\s+ID\s+POS\s+ID',
+    re.IGNORECASE | re.DOTALL,
+)
+
+_MSI_CLASSIFICATION_LABELS: Dict[str, str] = {
+    "minor_rounding":      "Minor Rounding",
+    "tax_rounding":        "Tax Rounding",
+    "total_only":          "Total-Only (No Tax Diff)",
+    "item_price_mismatch": "Item Price Mismatch",
+    "large_discrepancy":   "Large Discrepancy",
+    "tax_rate_issue":      "Tax Rate Issue",
+    "mixed":               "Mixed Difference",
+}
+_MSI_CLASSIFICATION_SEVERITY: Dict[str, str] = {
+    "minor_rounding":      "low",
+    "tax_rounding":        "low",
+    "total_only":          "medium",
+    "item_price_mismatch": "high",
+    "large_discrepancy":   "high",
+    "tax_rate_issue":      "high",
+    "mixed":               "medium",
+}
+
+
+def _msi_classify(tax_diff: Optional[float], total_diff: Optional[float]) -> str:
+    """Return a classification code for one MSI discrepancy record."""
+    td  = total_diff or 0.0
+    txd = tax_diff   or 0.0
+    abs_td  = abs(td)
+    abs_txd = abs(txd)
+
+    if abs_td < 0.02:
+        return "minor_rounding"        # < 2¢ — essentially harmless
+
+    if abs_txd < 0.01:
+        return "total_only"            # total differs, no tax diff → fee or non-taxable item
+
+    # Both differ — decide on nature
+    if abs(abs_td - abs_txd) <= 0.05 and abs_td < 1.00:
+        return "tax_rounding"          # total diff ≈ tax diff → standard rounding
+
+    if abs_td >= 5.00:
+        if abs_txd >= 1.00:
+            return "tax_rate_issue"    # large tax discrepancy drives large total
+        return "large_discrepancy"     # $5+ total diff with minimal tax cause
+
+    if abs_td >= 1.00 and abs_td > abs_txd * 2.5:
+        return "item_price_mismatch"   # total far exceeds tax diff → price issue
+
+    if abs_txd >= 1.00:
+        return "tax_rate_issue"        # large tax-specific diff
+
+    return "mixed"                     # both differ, doesn't fit neat categories
+
+
+def parse_msi_discrepancy_report(text: str) -> Dict:
+    """
+    Parse a Monkey / MSI discrepancy report (pasted raw text) into structured records.
+
+    The report is typically copy-pasted as one flat space-delimited string from the Monkey
+    portal.  Each location block has a header like:
+        1182 (Athens GA)Atlanta - Barkin Eateries Order ID POS ID Log Date TAX TOTAL ...
+    followed by order rows, each anchored by a Toast order GUID (UUID format).
+
+    Returns:
+    {
+        "records":        [...],
+        "count":          int,
+        "parse_warnings": [...],
+        "summary": {
+            "by_classification":      {code: count},
+            "by_severity":            {low/medium/high: count},
+            "total_tax_exposure":     float,   # sum of |tax_diff|
+            "total_dollar_exposure":  float,   # sum of |total_diff|
+            "location_count":         int,
+        }
+    }
+    """
+    if not text or not text.strip():
+        return {"records": [], "count": 0, "parse_warnings": ["Empty input."], "summary": {}}
+
+    uuid_matches = list(_MSI_UUID_RE.finditer(text))
+    if not uuid_matches:
+        return {
+            "records": [], "count": 0,
+            "parse_warnings": ["No Toast order GUIDs found — is this a Monkey discrepancy report?"],
+            "summary": {},
+        }
+
+    records: List[Dict] = []
+    warnings: List[str] = []
+    current_location: Dict = {}
+
+    for i, uuid_m in enumerate(uuid_matches):
+        uuid_str  = uuid_m.group(0)
+        uuid_start = uuid_m.start()
+        uuid_end   = uuid_m.end()
+
+        # ── Text between end of previous UUID block and start of this UUID ──
+        prev_end   = uuid_matches[i - 1].end() if i > 0 else 0
+        inter_text = text[prev_end:uuid_start]
+
+        # ── Location header detection ──
+        loc_m = _MSI_LOC_HDR_RE.search(inter_text)
+        if loc_m:
+            loc_code   = loc_m.group(1).strip()
+            loc_city   = loc_m.group(2).strip()
+            loc_region = loc_m.group(3).strip()
+            # Strip any trailing whitespace/column headers that sneak in
+            loc_region = re.sub(
+                r'\s*(Order\s+ID|Monkey|POS\s+Monkey|TAX|TOTAL|Message).*',
+                '', loc_region, flags=re.IGNORECASE,
+            ).strip()
+            current_location = {
+                "code":   loc_code,
+                "name":   f"{loc_code} ({loc_city})",
+                "region": loc_region,
+            }
+
+        # ── Order ID: last 5-7 digit integer in inter_text (before the UUID) ──
+        # Use the tail of inter_text (order ID is the token right before UUID)
+        tail = inter_text[-80:].strip() if len(inter_text) > 80 else inter_text.strip()
+        oid_m = re.search(r'(\d{5,7})\s*$', tail)
+        order_id = oid_m.group(1) if oid_m else None
+
+        # ── Post-UUID block: everything until next UUID ──
+        next_start = uuid_matches[i + 1].start() if i + 1 < len(uuid_matches) else len(text)
+        post_block = text[uuid_end:next_start]
+
+        # Strip leading "Toast" keyword
+        post_block = re.sub(r'^\s*Toast\b\s*', '', post_block, flags=re.IGNORECASE).strip()
+
+        # Extract date + time
+        dt_m      = _MSI_DATETIME_RE.search(post_block)
+        log_date  = dt_m.group(1)        if dt_m else None
+        log_time  = dt_m.group(2).strip() if dt_m else None
+        after_dt  = post_block[dt_m.end():].strip() if dt_m else post_block
+
+        # Split into: values section | message section
+        # Message starts at first "POS Tax is off", "POS Total is off", or "Monkey and POS"
+        msg_anchor = re.search(
+            r'\b(POS\s+Tax\s+is\s+off|POS\s+Total\s+is\s+off|Monkey\s+and\s+POS)\b',
+            after_dt, re.IGNORECASE,
+        )
+        values_raw  = after_dt[:msg_anchor.start()].strip() if msg_anchor else ''
+        message_raw = after_dt[msg_anchor.start():].strip()  if msg_anchor else after_dt.strip()
+
+        # ── Parse numeric values section ──
+        # Pattern: "{num} Up/Down {num}" (total only) or "{num} Up/Down {num} {num} Up/Down {num}"
+        monkey_tax = toast_tax = monkey_total = toast_total = None
+        val_tokens = values_raw.split()
+        nums = [float(t) for t in val_tokens if re.match(r'^\d+\.\d+$', t)]
+        dirs = [t for t in val_tokens if t in ('Up', 'Down')]
+
+        if len(nums) == 4 and len(dirs) >= 2:
+            monkey_tax, toast_tax, monkey_total, toast_total = nums[:4]
+        elif len(nums) == 2 and len(dirs) >= 1:
+            # 2-number block is always the totals (tax blank when no tax diff)
+            monkey_total, toast_total = nums[:2]
+        elif len(nums) > 0:
+            warnings.append(
+                f"Unexpected value count for order {order_id} (GUID …{uuid_str[-8:]}): "
+                f"got {len(nums)} nums, {len(dirs)} dir tokens — raw: '{values_raw[:80]}'"
+            )
+
+        # ── Compute differences ──
+        tax_diff   = round(toast_tax   - monkey_tax,   4) if (monkey_tax   is not None and toast_tax   is not None) else None
+        total_diff = round(toast_total - monkey_total, 4) if (monkey_total is not None and toast_total is not None) else None
+
+        # Override with explicit "Tax Difference:" / "Total Difference:" if present in message
+        m = re.search(r'Tax\s+Difference:\s*\((\d+\.?\d*)\)', message_raw, re.I)
+        if m:
+            tax_diff = -round(float(m.group(1)), 4)
+        else:
+            m = re.search(r'Tax\s+Difference:\s*(-?\d+\.?\d*)', message_raw, re.I)
+            if m:
+                tax_diff = round(float(m.group(1)), 4)
+
+        m = re.search(r'Total\s+Difference:\s*\((\d+\.?\d*)\)', message_raw, re.I)
+        if m:
+            total_diff = -round(float(m.group(1)), 4)
+        else:
+            m = re.search(r'Total\s+Difference:\s*(-?\d+\.?\d*)', message_raw, re.I)
+            if m:
+                total_diff = round(float(m.group(1)), 4)
+
+        classification = _msi_classify(tax_diff, total_diff)
+        records.append({
+            "location_code":   current_location.get("code"),
+            "location_name":   current_location.get("name"),
+            "region":          current_location.get("region"),
+            "monkey_order_id": order_id,
+            "toast_order_guid": uuid_str,
+            "log_date":  log_date,
+            "log_time":  log_time,
+            "monkey_tax":   monkey_tax,
+            "toast_tax":    toast_tax,
+            "monkey_total": monkey_total,
+            "toast_total":  toast_total,
+            "tax_difference":   tax_diff,
+            "total_difference": total_diff,
+            "message": message_raw,
+            "classification":       classification,
+            "classification_label": _MSI_CLASSIFICATION_LABELS.get(classification, classification),
+            "severity":             _MSI_CLASSIFICATION_SEVERITY.get(classification, "medium"),
+        })
+
+    # ── Build summary ──
+    by_class:    Dict[str, int] = {}
+    by_severity: Dict[str, int] = {}
+    total_tax_exposure   = 0.0
+    total_dollar_exposure = 0.0
+    location_codes: set = set()
+
+    for r in records:
+        cls = r["classification"]
+        sev = r["severity"]
+        by_class[cls]    = by_class.get(cls, 0) + 1
+        by_severity[sev] = by_severity.get(sev, 0) + 1
+        if r["tax_difference"]   is not None: total_tax_exposure    += abs(r["tax_difference"])
+        if r["total_difference"] is not None: total_dollar_exposure += abs(r["total_difference"])
+        if r["location_code"]: location_codes.add(r["location_code"])
+
+    return {
+        "records": records,
+        "count":   len(records),
+        "parse_warnings": warnings,
+        "summary": {
+            "by_classification":     by_class,
+            "by_severity":           by_severity,
+            "total_tax_exposure":    round(total_tax_exposure, 2),
+            "total_dollar_exposure": round(total_dollar_exposure, 2),
+            "location_count":        len(location_codes),
         },
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MSI Order-Detail Comparison Utilities
+# Parse an MSI order paste, fetch the matching Toast order, compare item prices.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _msi_extract_amount(pattern: str, text: str) -> Optional[float]:
+    """Extract a dollar amount from text using a regex pattern (returns None if not found)."""
+    m = re.search(pattern, text, re.IGNORECASE)
+    return float(m.group(1)) if m else None
+
+
+def parse_msi_order_detail(text: str) -> Dict:
+    """
+    Parse an MSI / Monkey order-detail paste into structured items + totals.
+
+    The paste is the copy-pasted order detail view from the Monkey portal, typically
+    formatted as a flat text blob like:
+        PriceAmount
+        Box Lunches - Boxed Sandwiches
+        5Chicken Bacon Club on Wheatberry12.5062.50
+        Side Choice*5 Baked Lays
+        ...
+        *Total for all items ordered
+        Subtotal545.00Delivery Fee:65.00Service Fee:0.00Tax (9%):54.90Total:664.90
+
+    Returns:
+        items: list of {name, qty, unit_price, extended_price}
+        subtotal, delivery_fee, service_fee, tax_rate, tax_amount, gratuity, total
+        parse_warnings: list of any unexpected patterns noticed
+    """
+    warnings_out: List[str] = []
+
+    # ── Split at totals section ───────────────────────────────────────────────
+    totals_split_re = re.compile(r'\*?\s*Total for all items ordered', re.IGNORECASE)
+    parts = totals_split_re.split(text, maxsplit=1)
+    items_section  = parts[0]
+    totals_section = parts[1] if len(parts) > 1 else text
+
+    # ── Parse item lines ──────────────────────────────────────────────────────
+    # Pattern: {qty: 1-3 digits}{name: starts with capital, no digits/asterisks/plus}
+    #          {unit_price: N.NN}{extended_price: N,NNN.NN}
+    # We validate: qty * unit_price ≈ extended_price as a false-positive guard.
+    #
+    # Excluding '+' from the name charset is critical: MSI modifier upcharge lines
+    # look like  "50 Newk's Club on Croissant+0.50+25.00" where +0.50 is the per-unit
+    # upcharge and +25.00 is the total upcharge.  By stopping the name group at '+',
+    # the price group (\d...) immediately sees '+' next and the whole match fails —
+    # so modifier upcharge lines are never mistaken for real menu items.
+    #
+    # Extended prices may use comma-separated thousands (e.g. 1,950.00) so we allow
+    # [\d,]+ in that group and strip commas before float().
+    item_re = re.compile(
+        r'\b(\d{1,3})\s*([A-Z][^0-9\r\n*+]+?)(\d{1,4}\.\d{2})\s*([\d,]{1,11}\.\d{2})',
+        re.DOTALL,
+    )
+
+    items: List[Dict] = []
+    used_end_positions: List[int] = []
+    match_spans: List[Tuple[int, int]] = []  # (start, end) of each accepted regex match
+
+    for m in item_re.finditer(items_section):
+        qty        = int(m.group(1))
+        name       = m.group(2).strip()
+        unit_price = float(m.group(3))
+        extended   = float(m.group(4).replace(',', ''))
+
+        # Validate: extended ≈ qty × unit_price (within 2¢ per unit)
+        expected = round(qty * unit_price, 2)
+        if abs(expected - extended) > max(0.02 * qty, 0.05):
+            continue
+
+        # Skip overlapping matches
+        if any(abs(m.end() - p) < 4 for p in used_end_positions):
+            continue
+        used_end_positions.append(m.end())
+
+        # Clean up name: strip leading/trailing whitespace and any trailing punctuation
+        name = re.sub(r'\s+', ' ', name).strip().rstrip('- ')
+        if not name:
+            continue
+
+        items.append({
+            "name":               name,
+            "qty":                qty,
+            "unit_price":         unit_price,
+            "extended_price":     extended,
+            "modifiers":          [],
+            "effective_extended": extended,   # updated below if modifiers carry upcharges
+        })
+        match_spans.append((m.start(), m.end()))
+
+    # ── Second pass: extract modifier lines from interstitial text ────────────
+    # The text between item A's last price character and item B's first digit
+    # may contain modifier choice blocks such as:
+    #   "Side Choice*\t5\tBaked Lays"
+    #   "Dessert Choice*\t5\tBig Crispy\t+0.59\t+14.75"
+    #   "Sandwich Pick*\n50 Newk's Club on Croissant+0.50+25.00\n..."
+    # We parse those and attach them to the preceding item as structured modifiers.
+    for i, item in enumerate(items):
+        inter_start  = match_spans[i][1]
+        inter_end    = match_spans[i + 1][0] if i + 1 < len(match_spans) else len(items_section)
+        interstitial = items_section[inter_start:inter_end]
+        if interstitial.strip():
+            item["modifiers"] = _parse_modifiers_from_interstitial(interstitial)
+            total_mod_up = round(
+                sum(cat.get("total_upcharge", 0.0) for cat in item["modifiers"]), 2
+            )
+            item["effective_extended"] = round(item["extended_price"] + total_mod_up, 2)
+
+    if not items:
+        warnings_out.append("No item lines found — check that the paste includes item rows before '*Total for all items ordered'")
+
+    # ── Parse totals ──────────────────────────────────────────────────────────
+    subtotal     = _msi_extract_amount(r'Subtotal[:\s]*(\d+\.\d{2})', totals_section)
+    delivery_fee = _msi_extract_amount(r'Delivery\s+Fee[:\s]*(\d+\.\d{2})', totals_section) or 0.0
+    service_fee  = _msi_extract_amount(r'Service\s+Fee[:\s]*(\d+\.\d{2})', totals_section) or 0.0
+    gratuity     = _msi_extract_amount(r'Gratuity[:\s]*(\d+\.\d{2})', totals_section) or 0.0
+
+    # Tax: "Tax (9%):54.90" or "Tax:54.90"
+    tax_match  = re.search(r'Tax\s*\((\d+(?:\.\d+)?)%\)[:\s]*(\d+\.\d{2})', totals_section, re.IGNORECASE)
+    tax_rate   = float(tax_match.group(1)) if tax_match else None
+    tax_amount = float(tax_match.group(2)) if tax_match else _msi_extract_amount(r'\bTax[:\s]*(\d+\.\d{2})', totals_section)
+
+    # Grand total: match "Total:664.90" but NOT "Subtotal"
+    grand_total = _msi_extract_amount(r'(?<![a-zA-Z])Total[:\s]*(\d+\.\d{2})', totals_section)
+
+    return {
+        "items":        items,
+        "item_count":   len(items),
+        "subtotal":     subtotal,
+        "delivery_fee": delivery_fee,
+        "service_fee":  service_fee,
+        "tax_rate":     tax_rate,
+        "tax_amount":   tax_amount,
+        "gratuity":     gratuity,
+        "total":        grand_total,
+        "parse_warnings": warnings_out,
+    }
+
+
+def _parse_modifiers_from_interstitial(text: str) -> List[Dict]:
+    """
+    Parse modifier choice lines from the interstitial text that appears between
+    two consecutive top-level MSI item lines in an order-detail paste.
+
+    Handles three MSI formats:
+      Format A — inline tab-separated (category + choice on the same line):
+        "Side Choice*\\t5\\tBaked Lays"
+        "Dessert Choice*\\t5\\tBig Crispy\\t+0.59\\t+14.75"
+
+      Format B — category header line followed by individual choice lines:
+        "Sandwich Pick*"
+        "50 Newk's Club on Croissant+0.50+25.00"
+        "50 Chicken Salad on Croissant"
+
+      Format C — concatenated (no newlines), common when copying from browser:
+        "Dressing Choice*25 CaesarWould you like to add a protein?*25 All-Natural Chicken (4 oz.)+4.00+100.00Dessert Choice*..."
+
+    Returns:
+        List of {category, choices: [{name, qty, upcharge_per_unit, total_upcharge}],
+                 total_upcharge}
+    """
+    # ── Normalize line structure ─────────────────────────────────────────────
+    # MSI copy-paste may arrive as a single long concatenated string (Format C)
+    # or as properly newline-separated text (Formats A/B).  Insert newlines at
+    # natural boundaries so the existing line-by-line patterns work for all formats.
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    # (a) Insert \n before category headers not already at line start.
+    #     A header is alpha text (no digits in body) ending with *.
+    #     Use a lookbehind so we only insert when the header is not already
+    #     at the start of a line (i.e. preceded by a non-whitespace/non-* char).
+    text = re.sub(
+        r'(?<=[^*\n\s])([A-Za-z][A-Za-z\s?,:()+.-]*\*)',
+        r'\n\1', text,
+    )
+    # (b) Insert \n after * not already followed by \n (put header on its own line).
+    text = re.sub(r'\*(?!\n)', r'*\n', text)
+
+    # (c) Insert \n before choice lines (qty + space + Capital) not at line start:
+    #     Case 1 — preceded by a letter or symbol (e.g. "CookieIncluded" seam).
+    text = re.sub(r'(?<!\n)(?<![0-9])(\d{1,3}[\t ]+[A-Z])', r'\n\1', text)
+    #     Case 2 — immediately follows the end of a price value (X.XX + qty),
+    #     e.g. "+5.905 Brownie" → "+5.90\n5 Brownie"
+    text = re.sub(r'(?<=\.\d\d)(\d{1,3}[\t ]+[A-Z])', r'\n\1', text)
+
+    categories: Dict[str, Dict] = {}
+    current_category: Optional[str] = None
+
+    # Format A: "Category Name*\tqty\tChoice[\t+upcharge\t+total]"
+    inline_re  = re.compile(
+        r'^([A-Za-z][^\t\n\r*]+?)\*\s*\t(\d+)\t([^\t\n\r+]+?)(?:\s*\t\+([0-9.]+)\s*\t\+([0-9.]+))?\s*$'
+    )
+    # Category-only header: "Side Choice*"  (no tabs / prices on the same line)
+    header_re  = re.compile(r'^([A-Za-z][^\n\r*]+?)\*\s*$')
+    # Choice with upcharge  (concat or tab-sep format):
+    #   "50 Newk's Club on Croissant+0.50+25.00"
+    #   "25 All-Natural Chicken+4.00+100.00"
+    #   "25\tAll-Natural Chicken\t+4.00\t+100.00"
+    choice_up_re = re.compile(r'^(\d+)\s+([A-Z][^+\n\r\t]+?)\s*\+([0-9.]+)[\t ]*\+([0-9.]+)\s*$')
+    # Choice without upcharge: "50\tChicken Salad on Croissant"  or  "50 Baked Lays"
+    choice_no_re = re.compile(r'^(\d+)[\t ]+([A-Z][^\n\r\t+0-9]+?)\s*$')
+
+    def _add(cat_name: str, name: str, qty: int, upcharge: float, total: float) -> None:
+        if cat_name not in categories:
+            categories[cat_name] = {"category": cat_name, "choices": [], "total_upcharge": 0.0}
+        categories[cat_name]["choices"].append({
+            "name": name, "qty": qty,
+            "upcharge_per_unit": upcharge, "total_upcharge": total,
+        })
+        categories[cat_name]["total_upcharge"] = round(
+            categories[cat_name]["total_upcharge"] + total, 2
+        )
+
+    for line in text.split('\n'):
+        line = line.rstrip('\r')
+        if not line.strip():
+            continue
+
+        # Try Format A (inline tab-separated)
+        m = inline_re.match(line)
+        if m:
+            _add(m.group(1).strip(), m.group(3).strip(), int(m.group(2)),
+                 float(m.group(4)) if m.group(4) else 0.0,
+                 float(m.group(5)) if m.group(5) else 0.0)
+            current_category = None   # inline line resets state-machine mode
+            continue
+
+        # Try category-only header: "Sandwich Pick*"
+        m = header_re.match(line)
+        if m and not line.lstrip()[:1].isdigit():
+            current_category = m.group(1).strip()
+            if current_category not in categories:
+                categories[current_category] = {
+                    "category": current_category, "choices": [], "total_upcharge": 0.0
+                }
+            continue
+
+        if current_category:
+            # Choice with upcharge: "50 Newk's Club on Croissant+0.50+25.00"
+            m = choice_up_re.match(line)
+            if m:
+                _add(current_category, m.group(2).strip(), int(m.group(1)),
+                     float(m.group(3)), float(m.group(4)))
+                continue
+            # Choice without upcharge: "50 Chicken Salad on Croissant"
+            m = choice_no_re.match(line)
+            if m:
+                _add(current_category, m.group(2).strip(), int(m.group(1)), 0.0, 0.0)
+                continue
+            # Non-matching non-empty line → exit the modifier block
+            if line.strip() and not line.strip().startswith('*'):
+                current_category = None
+
+    return list(categories.values())
+
+
+def _normalize_msi_items(
+    items: List[Dict],
+) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Expand MSI grouped items into unit-level derived items using parsed modifier data.
+
+    For each MSI item:
+      • No modifiers            → passed through unchanged.
+      • Has a "primary" modifier (choices whose quantities sum to the parent qty)
+                                → exploded: one derived item per choice with
+                                  final_unit_price = base_price + choice_upcharge
+      • Secondary modifiers with upcharges (e.g. dessert pools) → returned as
+        modifier_pools for separate dollar accounting.
+      • Has modifiers but none is primary → single blended item with average upcharge.
+
+    Returns:
+        derived_items  — [{name, parent_name, choice_name, qty, base_price,
+                           modifier_upcharge, final_unit_price, extended_price, source}]
+        modifier_pools — [{description, total_amount, parent_item}]
+    """
+    derived: List[Dict] = []
+    pools:   List[Dict] = []
+
+    for item in items:
+        mods       = item.get("modifiers", [])
+        parent_qty = item["qty"]
+
+        if not mods:
+            derived.append({
+                "name":               item["name"],
+                "parent_name":        item["name"],
+                "choice_name":        None,
+                "qty":                parent_qty,
+                "base_price":         item["unit_price"],
+                "modifier_upcharge":  0.0,
+                "final_unit_price":   item["unit_price"],
+                "extended_price":     item["extended_price"],
+                "source":             "direct",
+            })
+            continue
+
+        # Find primary modifier: the category whose choice-qty sum equals parent qty
+        primary_cat: Optional[Dict] = None
+        for cat in mods:
+            if cat["choices"] and abs(sum(c["qty"] for c in cat["choices"]) - parent_qty) <= 1:
+                primary_cat = cat
+                break
+
+        if primary_cat is None:
+            # Blend all upcharges into a single average per-unit amount
+            total_up = round(sum(cat.get("total_upcharge", 0.0) for cat in mods), 2)
+            avg_up   = round(total_up / parent_qty, 4) if parent_qty else 0.0
+            derived.append({
+                "name":               item["name"],
+                "parent_name":        item["name"],
+                "choice_name":        None,
+                "qty":                parent_qty,
+                "base_price":         item["unit_price"],
+                "modifier_upcharge":  avg_up,
+                "final_unit_price":   round(item["unit_price"] + avg_up, 2),
+                "extended_price":     round(item.get("effective_extended", item["extended_price"]), 2),
+                "source":             "blended",
+            })
+            continue
+
+        secondary_cats = [c for c in mods if c is not primary_cat]
+
+        # One derived item per primary modifier choice
+        for choice in primary_cat["choices"]:
+            derived.append({
+                "name":               f"{item['name']} / {choice['name']}",
+                "parent_name":        item["name"],
+                "choice_name":        choice["name"],
+                "qty":                choice["qty"],
+                "base_price":         item["unit_price"],
+                "modifier_upcharge":  choice["upcharge_per_unit"],
+                "final_unit_price":   round(item["unit_price"] + choice["upcharge_per_unit"], 2),
+                "extended_price":     round(
+                    choice["qty"] * (item["unit_price"] + choice["upcharge_per_unit"]), 2
+                ),
+                "source":             "exploded",
+            })
+
+        # Secondary modifier upcharges become modifier pools (e.g. dessert upcharges)
+        for cat in secondary_cats:
+            if cat.get("total_upcharge", 0.0) > 0.001:
+                up_choices = [
+                    f"{c['name']} ×{c['qty']}"
+                    for c in cat["choices"]
+                    if c["upcharge_per_unit"] > 0
+                ]
+                pools.append({
+                    "description": (
+                        f"{item['name']} — {cat['category']} upcharges"
+                        + (f" ({', '.join(up_choices)})" if up_choices else "")
+                    ),
+                    "total_amount": cat["total_upcharge"],
+                    "parent_item":  item["name"],
+                })
+
+    return derived, pools
+
+
+async def _fetch_single_toast_order(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    order_guid: str,
+) -> Dict:
+    """Fetch a single Toast order by its GUID using the Orders API."""
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {
+        **standard_headers,
+        "Toast-Restaurant-External-ID": restaurant_guid,
+    }
+    url  = f"{TOAST_ORDERS_API_BASE_URL}/orders/v2/orders/{order_guid}"
+    resp = await client.get(url, headers=headers, timeout=30.0)
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=f"Toast Orders API error fetching order {order_guid}: {resp.text[:400]}",
+        )
+    return resp.json()
+
+
+def _extract_toast_selections(order: Dict) -> List[Dict]:
+    """
+    Extract top-level (non-voided) item selections from a Toast order object,
+    grouped by (name, unit_price).
+
+    Toast catering orders often return one selection per item (qty=1 each) rather
+    than a single selection with qty=N, so we group them here before comparison.
+
+    Each returned dict: {name, qty, unit_price, extended_price, guid, modifiers, applied_discounts}
+    """
+    raw: List[Dict] = []
+    for check in order.get("checks", []):
+        if check.get("voided"):
+            continue
+        for sel in check.get("selections", []):
+            if sel.get("voided"):
+                continue
+            name = (
+                sel.get("displayName")
+                or (sel.get("item") or {}).get("name")
+                or ""
+            ).strip()
+            if not name:
+                continue
+            qty        = float(sel.get("quantity") or 1)
+            unit_price = float(sel.get("price") or 0)
+            raw.append({
+                "name":           name,
+                "qty":            qty,
+                "unit_price":     unit_price,
+                "extended_price": round(qty * unit_price, 2),
+                "guid":           sel.get("guid", ""),
+                "modifiers": [
+                    (m.get("displayName") or (m.get("item") or {}).get("name") or "")
+                    for m in sel.get("modifiers", [])
+                    if (m.get("displayName") or (m.get("item") or {}).get("name"))
+                ],
+                "applied_discounts": [
+                    (d.get("discount") or {}).get("name", "")
+                    for d in sel.get("appliedDiscounts", [])
+                ],
+            })
+
+    # Group by (name, unit_price) so catering orders with qty=1 per line are consolidated
+    grouped: Dict[tuple, Dict] = {}
+    for item in raw:
+        key = (item["name"].lower(), item["unit_price"])
+        if key in grouped:
+            grouped[key]["qty"]            += item["qty"]
+            grouped[key]["extended_price"]  = round(grouped[key]["qty"] * grouped[key]["unit_price"], 2)
+            grouped[key]["modifiers"]       = list(set(grouped[key]["modifiers"] + item["modifiers"]))
+        else:
+            grouped[key] = dict(item)
+
+    return list(grouped.values())
+
+
+def _normalize_item_name(name: str) -> str:
+    """
+    Lowercase, strip punctuation, collapse whitespace — used for fuzzy name matching.
+    Also strips Toast venue/service-mode suffixes like '(Catering)', '(Dine In)', etc.
+    that appear in Toast item names but not in MSI names.
+    Also strips MSI-specific markers like '(Bulk)' and leading 'Custom ' prefix so
+    that e.g. 'Custom Classic Box (Bulk)' aligns with 'Box Classic Sandwich'.
+    """
+    n = name.lower()
+    # Remove Toast service-mode suffixes in parentheses
+    n = re.sub(
+        r'\s*\((catering|dine[- ]?in|to[- ]?go|drive[- ]?thru|take[- ]?out|delivery|carry[- ]?out)\)',
+        '', n, flags=re.IGNORECASE,
+    )
+    # Remove MSI bulk/modifier indicator suffixes
+    n = re.sub(r'\s*\(bulk\)', '', n, flags=re.IGNORECASE)
+    # Strip MSI "Custom" prefix (e.g. "Custom Classic Box" → "Classic Box")
+    n = re.sub(r'^custom\s+', '', n)
+    n = re.sub(r"[^a-z0-9 ]", " ", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    return n
+
+
+def _name_similarity(a: str, b: str) -> float:
+    """
+    Similarity score [0.0–1.0] between two normalised item names.
+
+    Scoring tiers:
+      1.0  — exact match
+      0.85 — one is a substring of the other
+      0.80 — all words of the shorter name appear in the longer name
+              (handles "Works Sweet" ↔ "Gallon of Sweet Tea with The Works",
+               "Club Wrap" ↔ "Box Club Classic Wrap", etc.)
+      else — Jaccard word-overlap ratio
+    """
+    if a == b:
+        return 1.0
+    if a in b or b in a:
+        return 0.85
+    words_a = set(a.split())
+    words_b = set(b.split())
+    if not words_a or not words_b:
+        return 0.0
+    # All words of the shorter name contained in the longer → strong partial match
+    shorter, longer = (words_a, words_b) if len(words_a) <= len(words_b) else (words_b, words_a)
+    if shorter.issubset(longer):
+        return 0.80
+    return len(words_a & words_b) / len(words_a | words_b)
+
+
+def _compare_order_items(
+    derived_items: List[Dict],
+    toast_items: List[Dict],
+    modifier_pools: List[Dict],
+    msi_total_diff: float,
+    msi_tax_diff: float,
+    msi_raw_items: Optional[List[Dict]] = None,
+) -> Dict:
+    """
+    Match MSI item GROUPS to Toast item name groups and compare effective totals.
+
+    Phase 1 — Group MSI derived items by parent_name; group Toast items by normalized name.
+    Phase 2 — Match each MSI parent group to the best-scoring Toast name group (one-to-one
+               at the group level, so all Toast price-tiers for 'Box Caesar' are captured
+               together rather than split across multiple one-to-one item pairings).
+    Phase 3 — Compare group-level totals:
+               MSI effective total = sum(final_unit_price × qty for each derived item)
+                                   + sum of secondary modifier pool amounts for this parent
+               Toast total         = sum(unit_price × qty) for all Toast items in the group
+               group_diff          = toast_total − msi_effective_total
+    Phase 4 — Within each matched group, do best-effort per-unit detail matching for display.
+
+    This approach correctly handles multi-level modifier catering orders where a single MSI
+    parent item (e.g. 'Custom Classic Box (Bulk)' or 'Caesar') explodes into multiple
+    price tiers via protein × dessert combinations that Toast expresses as individual
+    line items — whereas the old one-to-one approach would leave most of them unmatched.
+
+    explained_diff = sum of group_diff values for flagged groups (no separate pool addition,
+    since pool amounts are already included in each group's msi_effective_total).
+    """
+    # Build indexed Toast pool with normalized names
+    toast_pool = [
+        {
+            "idx":        i,
+            "name":       t["name"],
+            "norm":       _normalize_item_name(t["name"]),
+            "qty":        t["qty"],
+            "unit_price": t["unit_price"],
+        }
+        for i, t in enumerate(toast_items)
+    ]
+
+    # Group Toast items by normalized name (captures all price tiers under one key)
+    toast_by_norm: Dict[str, List[Dict]] = {}
+    for t in toast_pool:
+        toast_by_norm.setdefault(t["norm"], []).append(t)
+
+    # Group MSI derived items by parent_name
+    msi_by_parent: Dict[str, List[Dict]] = {}
+    for msi in derived_items:
+        msi_by_parent.setdefault(msi["parent_name"], []).append(msi)
+
+    # Sum modifier pool amounts per parent item
+    pool_by_parent: Dict[str, float] = {}
+    for p in modifier_pools:
+        k = p["parent_item"]
+        pool_by_parent[k] = round(pool_by_parent.get(k, 0.0) + p["total_amount"], 2)
+
+    # Build a lookup of authoritative effective totals from the original parsed MSI items.
+    # These are pre-computed by parse_msi_order_detail as extended_price + all modifier
+    # total_upcharges — so they are correct even when the modifier regex parsing fails.
+    # IMPORTANT: SUM across all raw items with the same name (MSI may list the same item
+    # twice if it appears in multiple sections, e.g. 25×Caesar and 10×Caesar separately).
+    msi_eff_by_name: Dict[str, float] = {}
+    if msi_raw_items:
+        for raw in msi_raw_items:
+            name = raw.get("name", "")
+            eff  = raw.get("effective_extended")
+            if name and eff is not None:
+                msi_eff_by_name[name] = round(
+                    msi_eff_by_name.get(name, 0.0) + float(eff), 2
+                )
+
+    matches:             List[Dict] = []
+    unmatched_msi:       List[Dict] = []
+    used_toast_norms:    set        = set()
+    all_used_toast_idxs: set        = set()
+
+    for parent_name, msi_group in msi_by_parent.items():
+        parent_norm = _normalize_item_name(parent_name)
+
+        # Find best-matching Toast name group
+        best_norm, best_score = None, 0.0
+        for tnorm in toast_by_norm:
+            if tnorm in used_toast_norms:
+                continue
+            score = _name_similarity(parent_norm, tnorm)
+            if score > best_score:
+                best_score, best_norm = score, tnorm
+
+        # MSI effective total for this parent group.
+        # Prefer the authoritative value from the original parsed item (effective_extended),
+        # which is pre-computed as extended_price + all modifier upcharges.  Fall back to
+        # recomputing from derived item unit prices + secondary modifier pools.
+        msi_total_qty = sum(m["qty"] for m in msi_group)
+        if parent_name in msi_eff_by_name:
+            msi_eff_total = msi_eff_by_name[parent_name]
+        else:
+            msi_eff_total = round(
+                sum(m["final_unit_price"] * m["qty"] for m in msi_group)
+                + pool_by_parent.get(parent_name, 0.0),
+                2,
+            )
+
+        if best_norm and best_score >= 0.45:
+            used_toast_norms.add(best_norm)
+            tgroup      = toast_by_norm[best_norm]
+            toast_total = round(sum(t["unit_price"] * t["qty"] for t in tgroup), 2)
+            toast_qty   = int(sum(t["qty"] for t in tgroup))
+            group_diff  = round(toast_total - msi_eff_total, 2)
+
+            for t in tgroup:
+                all_used_toast_idxs.add(t["idx"])
+
+            # Phase 4: best-effort per-unit detail matching within the group (for display)
+            used_in_group: set        = set()
+            detail_rows:   List[Dict] = []
+            for msi in msi_group:
+                best_tidx, best_pdist = None, float("inf")
+                for t in tgroup:
+                    if t["idx"] in used_in_group:
+                        continue
+                    pdist = abs(t["unit_price"] - msi["final_unit_price"])
+                    if pdist < best_pdist:
+                        best_pdist, best_tidx = pdist, t["idx"]
+
+                if best_tidx is not None:
+                    used_in_group.add(best_tidx)
+                    tt         = next(t for t in tgroup if t["idx"] == best_tidx)
+                    price_diff = round(tt["unit_price"] - msi["final_unit_price"], 4)
+                    detail_rows.append({
+                        "msi_name":              msi["name"],
+                        "msi_parent_name":       msi["parent_name"],
+                        "msi_choice_name":       msi["choice_name"],
+                        "toast_name":            tt["name"],
+                        "msi_qty":               msi["qty"],
+                        "toast_qty":             int(tt["qty"]),
+                        "msi_base_price":        msi["base_price"],
+                        "msi_modifier_upcharge": msi["modifier_upcharge"],
+                        "msi_unit_price":        msi["final_unit_price"],
+                        "toast_unit_price":      tt["unit_price"],
+                        "price_diff":            price_diff,
+                        "qty_diff":              int(tt["qty"]) - msi["qty"],
+                        "source":                msi.get("source", "direct"),
+                    })
+
+            group_flagged = abs(group_diff) > 0.005
+            matches.append({
+                "msi_name":              parent_name,
+                "msi_parent_name":       parent_name,
+                "msi_choice_name":       None,
+                "toast_name":            tgroup[0]["name"],
+                "match_score":           round(min(best_score, 1.0), 2),
+                "msi_qty":               msi_total_qty,
+                "toast_qty":             toast_qty,
+                "msi_base_price":        None,
+                "msi_modifier_upcharge": pool_by_parent.get(parent_name, 0.0),
+                "msi_unit_price":        None,
+                "toast_unit_price":      None,
+                "msi_eff_total":         msi_eff_total,
+                "toast_total":           toast_total,
+                "price_diff":            round(group_diff / msi_total_qty, 4) if msi_total_qty else 0.0,
+                "qty_diff":              toast_qty - msi_total_qty,
+                "impact":                group_diff,
+                "flagged":               group_flagged,
+                "cause":                 "price_mismatch" if group_flagged else "match",
+                "source":                "group",
+                "detail_rows":           detail_rows,
+                "pool_amount":           pool_by_parent.get(parent_name, 0.0),
+            })
+        else:
+            for msi in msi_group:
+                unmatched_msi.append({
+                    "name":               msi["name"],
+                    "parent_name":        msi["parent_name"],
+                    "choice_name":        msi["choice_name"],
+                    "qty":                msi["qty"],
+                    "unit_price":         msi["final_unit_price"],
+                    "base_price":         msi["base_price"],
+                    "modifier_upcharge":  msi["modifier_upcharge"],
+                    "source":             msi.get("source", "direct"),
+                })
+
+    unmatched_toast = [
+        {
+            "name":       toast_items[t["idx"]]["name"],
+            "qty":        t["qty"],
+            "unit_price": t["unit_price"],
+        }
+        for t in toast_pool
+        if t["idx"] not in all_used_toast_idxs and t["unit_price"] > 0
+    ]
+
+    flagged = sorted(
+        [m for m in matches if m["flagged"]],
+        key=lambda x: abs(x["impact"]),
+        reverse=True,
+    )
+
+    pool_total      = round(sum(p["total_amount"] for p in modifier_pools), 2)
+    # explained_diff is the sum of group-level diffs for flagged groups.
+    # Pool amounts are already included in each group's msi_eff_total, so they are NOT
+    # added separately here (doing so would double-count them).
+    explained_diff  = round(sum(f["impact"] for f in flagged), 2)
+    unexplained     = round(msi_total_diff - explained_diff, 2)
+    fully_explained = abs(unexplained) < 0.03
+
+    return {
+        "matches":          matches,
+        "flagged":          flagged,
+        "unmatched_msi":    unmatched_msi,
+        "unmatched_toast":  unmatched_toast,
+        "modifier_pools":   modifier_pools,
+        "pool_total":       pool_total,
+        "explained_diff":   explained_diff,
+        "unexplained_diff": unexplained,
+        "fully_explained":  fully_explained,
+        "primary_cause":    flagged[0] if flagged else None,
+    }
+
 
 # ------------------
 # FastAPI App
@@ -3347,6 +4400,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ------------------
+# Media uploads for kiosk/menu board
+# ------------------
+
+UPLOAD_ROOT = os.path.join(os.path.dirname(__file__), "uploads", "menu-board")
+os.makedirs(UPLOAD_ROOT, exist_ok=True)
+
+
+@app.post("/api/uploads/menu-board")
+async def upload_menu_board_file(file: UploadFile = File(...)) -> Dict[str, str]:
+  """Upload an image or video for the kiosk menu board and return a URL."""
+  original_name = file.filename or "upload"
+  name, ext = os.path.splitext(original_name)
+  safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)[:80] or "upload"
+  unique = uuid.uuid4().hex[:8]
+  filename = f"{safe_name}_{unique}{ext}"
+  dest_path = os.path.join(UPLOAD_ROOT, filename)
+
+  try:
+      with open(dest_path, "wb") as out:
+          while True:
+              chunk = await file.read(1024 * 1024)
+              if not chunk:
+                  break
+              out.write(chunk)
+  except Exception as exc:
+      logger.error(f"Failed to save uploaded file {original_name}: {exc}")
+      raise HTTPException(status_code=500, detail="Failed to save uploaded file")
+
+  url = f"/media/menu-board/{filename}"
+  return {"url": url}
 
 # ------------------
 # V2 API Router
@@ -5343,6 +6428,16 @@ async def build_menu_mix_report_fallback(
     if not all_rows:
         return {"pivotTable": [], "totals": [], "itemBreakdown": [], "itemBreakdownDaily": [], "dateColumns": []}
     
+    # Prefer display names from menu cache over names from Toast analytics (which may be kitchen names, e.g. "cup pepjac&craw")
+    guid_to_display_name: Dict[str, str] = {}
+    for rid in restaurant_ids:
+        if rid in _menu_tags_cache and "guid_to_name" in _menu_tags_cache[rid]:
+            guid_to_display_name.update(_menu_tags_cache[rid]["guid_to_name"])
+    for row in all_rows:
+        guid = row.get("menuItemGuid")
+        if guid and guid in guid_to_display_name:
+            row["menuItemName"] = guid_to_display_name[guid]
+    
     # Build item names mapping
     item_names_mapping: Dict[str, str] = {}
     for row in all_rows:
@@ -6435,7 +7530,39 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 )
                 pivot_data = pivot_metrics_by_location_and_date(raw_rows, service_charges)
                 return pivot_data
-            
+
+            if report_config.reportType == "sales_summary" and not report_config.groupBy:
+                # Fetch full order metrics (SC, discounts, voids, payments) per location/date in parallel
+                unique_combos_ss: set = {
+                    (row.get("restaurantGuid", ""), row.get("businessDate", ""))
+                    for row in raw_rows
+                    if row.get("restaurantGuid") and row.get("businessDate")
+                }
+                sem_ss = asyncio.Semaphore(10)
+
+                async def _fetch_metrics_combo(guid: str, bd: str) -> Tuple[str, Dict]:
+                    async with sem_ss:
+                        try:
+                            m = await _compute_sales_metrics_for_day(client, guid, bd)
+                            return f"{guid}|{bd}", m
+                        except Exception as exc:
+                            logger.warning(
+                                "Sales metrics fetch failed for %s|%s: %s — defaulting to zeros",
+                                guid, bd, exc, exc_info=True,
+                            )
+                            return f"{guid}|{bd}", {}
+
+                met_results = await asyncio.gather(
+                    *[_fetch_metrics_combo(g, b) for g, b in unique_combos_ss]
+                )
+                metrics_by_key: Dict[str, Dict] = dict(met_results)
+                logger.info(
+                    "Sales summary metrics fetch complete: %d combos, total_orders=%d",
+                    len(metrics_by_key),
+                    sum(m.get("order_count", 0) for m in metrics_by_key.values()),
+                )
+                return compute_sales_summary_by_location(raw_rows, metrics_by_key)
+
             if report_config.reportType == "menu":
                 return await build_menu_mix_report_fallback(
                     client,
@@ -6550,6 +7677,164 @@ async def debug_service_charges(
         "total_applied_service_charges": total_applied_scs,
         "sc_summary": sc_totals_serial,
         "sc_samples": sc_samples,
+    }
+
+
+@app.post("/api/admin/clear-sc-cache")
+async def clear_sc_cache():
+    """
+    Clear the in-memory service-charge daily cache (_sc_daily_cache).
+
+    The SC cache persists for the life of the server process.  If a stale 0.0 entry was
+    cached from an earlier run with incorrect filter logic, it will suppress all SC
+    deductions for that restaurant/date even after the code is fixed.  Call this endpoint
+    (or restart the server) to force a fresh Orders API fetch on the next report run.
+    """
+    global _sc_daily_cache
+    count = len(_sc_daily_cache)
+    _sc_daily_cache = {}
+    logger.info("SC daily cache cleared manually: %d entries removed", count)
+    return {"cleared": True, "entries_removed": count}
+
+
+class MsiDiscrepancyParseRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/admin/msi-discrepancy/parse")
+async def parse_msi_discrepancy(
+    body: MsiDiscrepancyParseRequest,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Parse a raw Monkey / MSI discrepancy report paste into structured records.
+
+    Accepts the flat space-delimited text you copy from the Monkey portal (the report that
+    shows MSI→Toast discrepancies by location with order GUIDs, tax/total diffs, and messages).
+
+    Returns structured records with parsed fields, computed differences, and a classification
+    for each discrepancy (tax rounding, item price mismatch, large discrepancy, etc.) plus
+    a summary by severity and classification.
+    """
+    logger.info("MSI discrepancy parse requested by %s (%d chars)", admin_user.email, len(body.text))
+    result = parse_msi_discrepancy_report(body.text)
+    logger.info(
+        "MSI discrepancy parse complete: %d records, %d warnings, %d locations, "
+        "tax_exposure=$%.2f, total_exposure=$%.2f",
+        result["count"],
+        len(result["parse_warnings"]),
+        result["summary"].get("location_count", 0),
+        result["summary"].get("total_tax_exposure", 0),
+        result["summary"].get("total_dollar_exposure", 0),
+    )
+    return result
+
+
+class MsiOrderCompareRequest(BaseModel):
+    toast_order_guid: str
+    location_code: str
+    msi_order_text: str
+    msi_total_diff: Optional[float] = None
+    msi_tax_diff: Optional[float] = None
+
+
+@app.post("/api/admin/msi-discrepancy/compare-order")
+async def msi_compare_order(
+    body: MsiOrderCompareRequest,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Given a Toast order GUID + MSI location code + pasted MSI order-detail text:
+      1. Resolve the location code → Toast restaurantGuid
+      2. Fetch the full Toast order from the Orders API
+      3. Parse the MSI order detail text into items + totals
+      4. Match items between MSI and Toast, compare unit prices
+      5. Return a structured comparison identifying which items (if any) explain the discrepancy
+    """
+    logger.info(
+        "MSI order compare requested by %s — guid=%s loc=%s msi_chars=%d",
+        admin_user.email, body.toast_order_guid, body.location_code, len(body.msi_order_text),
+    )
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # ── Step 1: Resolve location code → restaurant GUID ──────────────────
+        locations = await get_all_active_locations(client)
+        restaurant_guid: Optional[str] = None
+        restaurant_name: Optional[str] = None
+
+        loc_code_str = str(body.location_code).strip()
+        for loc in locations:
+            if str(loc.externalId or "").strip() == loc_code_str:
+                restaurant_guid = loc.restaurantGuid
+                restaurant_name = loc.restaurantName
+                break
+
+        if not restaurant_guid:
+            # Fallback: look for location code embedded in the restaurant name
+            for loc in locations:
+                if loc_code_str in (loc.restaurantName or ""):
+                    restaurant_guid = loc.restaurantGuid
+                    restaurant_name = loc.restaurantName
+                    break
+
+        if not restaurant_guid:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Location code '{body.location_code}' not found in Toast. "
+                    f"Available external IDs: {[str(l.externalId) for l in locations if l.externalId][:10]}"
+                ),
+            )
+
+        # ── Step 2: Fetch Toast order ─────────────────────────────────────────
+        toast_order = await _fetch_single_toast_order(client, restaurant_guid, body.toast_order_guid)
+
+        # ── Step 3: Extract Toast items ───────────────────────────────────────
+        toast_items = _extract_toast_selections(toast_order)
+
+        # ── Step 4: Parse MSI order detail ───────────────────────────────────
+        msi_data = parse_msi_order_detail(body.msi_order_text)
+
+        # ── Step 4b: Normalize — explode grouped items by primary modifier ────
+        # e.g. "Custom Classic Box (Bulk) ×150" with Sandwich Pick modifier choices
+        # becomes three derived items: ×50 Newk's Club @ $13.50, ×50 Chicken Salad
+        # @ $13.00, ×50 BLT @ $13.00.  Secondary modifier upcharge pools (desserts,
+        # etc.) are returned separately for dollar accounting.
+        derived_items, modifier_pools = _normalize_msi_items(msi_data["items"])
+
+        # ── Step 5: Compare ───────────────────────────────────────────────────
+        comparison = _compare_order_items(
+            derived_items,
+            toast_items,
+            modifier_pools,
+            body.msi_total_diff or 0.0,
+            body.msi_tax_diff   or 0.0,
+            msi_raw_items=msi_data["items"],
+        )
+
+    logger.info(
+        "MSI order compare complete — loc=%s guid=%s msi_items=%d derived=%d "
+        "toast_items=%d pools=%d flagged=%d explained=$%.2f unexplained=$%.2f",
+        body.location_code, body.toast_order_guid[:8],
+        len(msi_data["items"]), len(derived_items), len(toast_items),
+        len(modifier_pools), len(comparison["flagged"]),
+        comparison["explained_diff"], comparison["unexplained_diff"],
+    )
+
+    return {
+        "toast_order": {
+            "guid":            body.toast_order_guid,
+            "restaurant_guid": restaurant_guid,
+            "restaurant_name": restaurant_name,
+            "items_count":     len(toast_items),
+            "items":           toast_items,
+        },
+        "msi_order":   msi_data,
+        "msi_derived": {
+            "items":          derived_items,
+            "modifier_pools": modifier_pools,
+        },
+        "comparison":  comparison,
     }
 
 
@@ -7964,9 +9249,15 @@ async def get_report_types():
     return {
         "reportTypes": [
             {
+                "id": "sales_summary",
+                "name": "Sales Summary",
+                "description": "Orders, net sales, avg ticket, discounts, voids, cash & card by location",
+                "groupByOptions": []
+            },
+            {
                 "id": "metrics",
-                "name": "Metrics Report",
-                "description": "Sales metrics by date and location",
+                "name": "Net Sales Report",
+                "description": "Toast vs Newk's net sales by date and location",
                 "groupByOptions": [
                     {"id": "", "name": "No grouping", "description": "Total by date and location only"},
                     {"id": "REVENUE_CENTER", "name": "Revenue Center", "description": "Group by revenue center"},
@@ -8653,8 +9944,12 @@ initialize_super_admin()
 
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
 kiosk_path = os.path.join(os.path.dirname(__file__), "kiosk")
+media_path = UPLOAD_ROOT
 
 if os.path.isdir(kiosk_path):
     app.mount("/kiosk", StaticFiles(directory=kiosk_path, html=True), name="kiosk")
+
+if os.path.isdir(media_path):
+    app.mount("/media/menu-board", StaticFiles(directory=media_path, html=False), name="menu_board_media")
 
 app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
