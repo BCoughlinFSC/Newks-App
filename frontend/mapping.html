@@ -250,6 +250,15 @@
       background: #f0f9ff;
       border-color: #e0e7ef;
     }
+    .mapping-table .cell-display.readonly-cell {
+      background: #f5f5f5;
+      color: #666;
+      cursor: default;
+    }
+    .mapping-table .cell-display.readonly-cell:hover {
+      background: #f5f5f5;
+      border-color: transparent;
+    }
     .mapping-table .cell-edit {
       width: 100%;
       min-width: 80px;
@@ -415,6 +424,7 @@
           </div>
           <button type="button" class="btn btn-secondary" id="btnRefresh" title="Reload from file">↻ Refresh</button>
           <button type="button" class="btn btn-secondary" id="btnAddRow" title="Add a new row to the mapping table" disabled>➕ Add row</button>
+          <button type="button" class="btn btn-secondary" id="btnExport" title="Export mapping table as CSV" disabled>📥 Export CSV</button>
           <button type="button" class="btn btn-primary" id="btnSave" title="Save changes to file" disabled>💾 Save changes</button>
           <span class="save-status hidden" id="saveStatus"></span>
           <span class="mapping-meta">
@@ -439,19 +449,35 @@
       <div id="panelAudit" class="hidden">
         <div class="audit-card">
 
-          <!-- Toast Menu Audit -->
+          <!-- Sync from Toast -->
           <div class="audit-section">
             <div class="audit-section-head">
-              <h3>🍞 Toast Menu Audit</h3>
-              <button type="button" class="btn btn-primary" id="btnToastAudit">Poll Toast Menu</button>
+              <h3>🔄 Sync from Toast</h3>
+              <button type="button" class="btn btn-primary" id="btnSyncToast">Sync from Toast</button>
+              <button type="button" class="btn btn-secondary" id="btnExportSync" style="display:none;">⬇ Export CSV</button>
+              <span id="syncToastStatus" style="font-size:0.85rem;color:#666;"></span>
+            </div>
+            <div class="audit-section-body" id="syncToastBody">
+              <p style="color:#6B7280;font-size:0.88rem;margin:0;">
+                Click <strong>Sync from Toast</strong> to poll all Toast locations and automatically
+                update the mapping table with current Toast data (names, GUIDs, MLIs, PLUs, tags).
+                New items can be selected and added. Truly stale rows are flagged for removal.
+              </p>
+            </div>
+          </div>
+
+          <!-- Legacy Toast Menu Audit (kept for reference) -->
+          <div class="audit-section">
+            <div class="audit-section-head">
+              <h3>🍞 Toast Menu Audit (Legacy)</h3>
+              <button type="button" class="btn btn-secondary" id="btnToastAudit" style="font-size:0.82rem;">Poll Toast Menu</button>
               <button type="button" class="btn btn-secondary" id="btnExportToastAudit" style="display:none;">⬇ Export CSV</button>
               <span id="toastAuditStatus" style="font-size:0.85rem;color:#666;"></span>
             </div>
             <div class="audit-section-body" id="toastAuditBody">
               <p style="color:#6B7280;font-size:0.88rem;margin:0;">
-                Click <strong>Poll Toast Menu</strong> to fetch every item currently on your live
-                Toast menu and check it against <code>Toast_Item_Name</code> in the mapping table.
-                Unmapped items can be bulk-added to the table in one click.
+                Compare-only view (no writes). Click <strong>Poll Toast Menu</strong> to check mapping
+                against live Toast data.
               </p>
             </div>
           </div>
@@ -577,6 +603,7 @@
       const searchInput = document.getElementById('searchInput');
       const btnRefresh = document.getElementById('btnRefresh');
       const btnAddRow = document.getElementById('btnAddRow');
+      const btnExport = document.getElementById('btnExport');
       const btnSave = document.getElementById('btnSave');
       const saveStatus = document.getElementById('saveStatus');
       const sourcePath = document.getElementById('sourcePath');
@@ -671,13 +698,19 @@
         return div.innerHTML;
       }
 
+      // Columns synced from Toast — read-only (not user-editable)
+      var READONLY_COLS = new Set(['Tags', 'ConsolidatedCat', 'GuestCountTag', 'EntreEquivTag', 'item_guid', 'Toast_Item_Name', 'MultiLocationId', 'ToastPLU']);
+
       function cellDisplay(rowIndex, colKey, value) {
         const val = value == null ? '' : String(value);
+        const ro = READONLY_COLS.has(colKey) ? ' readonly-cell' : '';
         return '<td data-row="' + rowIndex + '" data-col="' + escapeHtml(colKey) + '">' +
-          '<div class="cell-display" data-value="' + escapeHtml(val) + '">' + escapeHtml(val || '\u00A0') + '</div></td>';
+          '<div class="cell-display' + ro + '" data-value="' + escapeHtml(val) + '">' + escapeHtml(val || '\u00A0') + '</div></td>';
       }
 
       function cellEdit(rowIndex, colKey, value, el) {
+        // Don't allow editing of Toast-synced columns
+        if (READONLY_COLS.has(colKey)) return;
         const val = value == null ? '' : String(value);
         const input = document.createElement('input');
         input.type = 'text';
@@ -773,6 +806,7 @@
             btnSave.disabled = true;
             sourcePath.textContent = (data.source || '').split(/[/\\]/).pop() || '—';
             btnAddRow.disabled = false;
+            btnExport.disabled = false;
             renderTableHead();
             applyFilter();
             showTable();
@@ -815,6 +849,29 @@
         loadTable();
       });
       btnAddRow.addEventListener('click', addNewRow);
+      btnExport.addEventListener('click', function() {
+        if (!columns.length || !rows.length) return;
+        // Build CSV
+        var csvRows = [];
+        // Header
+        csvRows.push(columns.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','));
+        // Data rows
+        rows.forEach(function(row) {
+          csvRows.push(columns.map(function(c) {
+            var v = row[c] == null ? '' : String(row[c]);
+            return '"' + v.replace(/"/g, '""') + '"';
+          }).join(','));
+        });
+        var blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'Mapping_Table_Export_' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
       btnSave.addEventListener('click', saveTable);
 
       loadTable();
@@ -1122,10 +1179,32 @@
           alert('Mapping table not loaded. Please load it first (Mapping Table tab).');
           return;
         }
+        // Ensure new columns exist
+        ['item_guid', 'Tags', 'ConsolidatedCat', 'GuestCountTag', 'EntreEquivTag'].forEach(function(col) {
+          if (columns.indexOf(col) === -1) {
+            columns.push(col);
+            rows.forEach(function(r) { r[col] = ''; });
+          }
+        });
         toastItems.forEach(function(item) {
           var newRow = {};
           columns.forEach(function(c) { newRow[c] = ''; });
-          if (columns.indexOf('Toast_Item_Name') !== -1) newRow['Toast_Item_Name'] = item.name;
+          if (columns.indexOf('Toast_Item_Name') !== -1)   newRow['Toast_Item_Name'] = item.name || '';
+          if (columns.indexOf('item_guid') !== -1)          newRow['item_guid'] = item.guid || '';
+          if (columns.indexOf('MultiLocationId') !== -1)    newRow['MultiLocationId'] = item.mli || '';
+          if (columns.indexOf('ToastPLU') !== -1)           newRow['ToastPLU'] = item.plu || '';
+          var tagsArr = item.tags || [];
+          if (columns.indexOf('Tags') !== -1)               newRow['Tags'] = tagsArr.join(', ');
+          // Auto-derive tag columns from Toast item tags
+          var consolidated = '', guestCount = '', ee = '';
+          for (var t = 0; t < tagsArr.length; t++) {
+            if (!consolidated && tagsArr[t].indexOf('* Consolidated') === 0) consolidated = tagsArr[t];
+            else if (!guestCount && tagsArr[t].indexOf('Guest Count') === 0) guestCount = tagsArr[t];
+            else if (!ee && tagsArr[t].indexOf('EE ') === 0) ee = tagsArr[t];
+          }
+          if (columns.indexOf('ConsolidatedCat') !== -1)  newRow['ConsolidatedCat'] = consolidated;
+          if (columns.indexOf('GuestCountTag') !== -1)     newRow['GuestCountTag'] = guestCount;
+          if (columns.indexOf('EntreEquivTag') !== -1)     newRow['EntreEquivTag'] = ee;
           rows.push(newRow);
         });
         dirty = true;
@@ -1139,6 +1218,202 @@
         setSaveStatus('saving', toastItems.length + ' item(s) added — review and save when ready.');
         setTimeout(function() { saveStatus.classList.add('hidden'); }, 8000);
       }
+
+      // ── Sync from Toast ─────────────────────────────────────────────────
+      var lastSyncData = null;
+
+      function renderSyncSummary(s) {
+        var html = '<div class="summary-badges">'
+          + '<span class="sbadge sbadge-total">📍 ' + (s.locationCount || '?') + ' locations polled</span>'
+          + '<span class="sbadge sbadge-total">🍞 ' + s.toastItemCount + ' Toast items</span>'
+          + '<span class="sbadge sbadge-total">🗂 ' + s.mappingRowCount + ' mapping rows</span>'
+          + '<span class="sbadge sbadge-ok">✅ ' + s.updatedCount + ' updated</span>'
+          + '<span class="sbadge sbadge-danger">❌ ' + s.unmappedCount + ' unmapped</span>'
+          + '<span class="sbadge sbadge-warn">⚠️ ' + s.staleCount + ' stale</span>'
+          + '</div>';
+        if (s.columnsAdded && s.columnsAdded.length) {
+          html += '<div style="margin:0.4rem 0;font-size:0.82rem;color:#1E40AF;background:#DBEAFE;padding:0.3rem 0.6rem;border-radius:4px;display:inline-block;">'
+               + '📋 New columns added to mapping: <strong>' + auditEsc(s.columnsAdded.join(', ')) + '</strong></div>';
+        }
+        if (s.errors && s.errors.length) {
+          html += '<div class="error-state" style="margin:0.5rem 0;font-size:0.82rem;">'
+               + '⚠️ Some locations failed: ' + auditEsc(s.errors.join(' | ')) + '</div>';
+        }
+        return html;
+      }
+
+      function renderSyncResults(data) {
+        lastSyncData = data;
+        var exportBtn = document.getElementById('btnExportSync');
+        exportBtn.style.display = '';
+        exportBtn.onclick = function() {
+          var allRows = []
+            .concat(data.updated.map(function(r) {
+              var changeDesc = Object.keys(r.changes || {}).map(function(k) {
+                return k + ': ' + (r.changes[k].old || '(empty)') + ' → ' + r.changes[k].new;
+              }).join('; ');
+              return Object.assign({}, r, {_bucket: 'Updated', _changes: changeDesc});
+            }))
+            .concat(data.unmapped.map(function(r) { return Object.assign({}, r, {_bucket: 'Unmapped'}); }))
+            .concat(data.stale.map(function(r) { return Object.assign({}, r, {_bucket: 'Stale'}); }));
+          var colDefs = [
+            {label: 'Status', val: function(r) { return r._bucket; }},
+            {label: 'Item Name', val: function(r) { return r.Toast_Item_Name || r.name || ''; }},
+            {label: 'GUID', val: function(r) { return r.guid || ''; }},
+            {label: 'MLI', val: function(r) { return r.mli || r.MultiLocationId || ''; }},
+            {label: 'PLU', val: function(r) { return r.plu || r.ToastPLU || ''; }},
+            {label: 'Tags', val: function(r) { return (r.tags || []).join(', '); }},
+            {label: 'AlohaItemName', val: function(r) { return r.AlohaItemName || ''; }},
+            {label: 'ConsolidatedCat', val: function(r) { return r.ConsolidatedCat || ''; }},
+            {label: 'Changes', val: function(r) { return r._changes || ''; }},
+          ];
+          downloadAuditCsv('Toast_Sync_Results.csv', allRows, colDefs);
+        };
+
+        var html = renderSyncSummary(data.summary);
+
+        // Updated rows bucket (collapsed by default)
+        if (data.updated.length > 0) {
+          var updatedTableHtml = '<div class="audit-tbl-wrap"><table class="audit-tbl"><thead><tr>'
+            + '<th>Item Name</th><th>Match Via</th><th>Changes</th><th>Aloha Item</th><th>Category</th>'
+            + '</tr></thead><tbody>';
+          data.updated.forEach(function(r) {
+            var changeList = Object.keys(r.changes || {}).map(function(k) {
+              return '<span style="font-size:0.75rem;"><strong>' + auditEsc(k) + '</strong>: '
+                + '<span style="color:#991B1B;text-decoration:line-through;">' + auditEsc(r.changes[k].old || '(empty)') + '</span>'
+                + ' → <span style="color:#166534;">' + auditEsc(r.changes[k].new) + '</span></span>';
+            }).join('<br>');
+            updatedTableHtml += '<tr>'
+              + '<td>' + auditEsc(r.Toast_Item_Name) + '</td>'
+              + '<td><span style="font-size:0.78rem;background:#DBEAFE;color:#1E40AF;padding:0.1rem 0.4rem;border-radius:4px;">'
+              + auditEsc(r.matchMethod) + '</span></td>'
+              + '<td style="font-size:0.82rem;">' + changeList + '</td>'
+              + '<td style="font-size:0.82rem;">' + auditEsc(r.AlohaItemName) + '</td>'
+              + '<td style="font-size:0.82rem;">' + auditEsc(r.ConsolidatedCat) + '</td>'
+              + '</tr>';
+          });
+          updatedTableHtml += '</tbody></table></div>';
+          html += collapsibleBucket('✅ Updated — Toast data synced', 'ok', data.updated.length, updatedTableHtml, true);
+        }
+
+        // Unmapped bucket (has checkboxes + Add button)
+        html += '<div class="bucket"><div class="bucket-head">';
+        html += '<span class="bucket-label danger">❌ Unmapped Toast Items (' + data.unmapped.length + ')</span>';
+        if (data.unmapped.length > 0) {
+          html += '<button type="button" class="btn btn-primary" id="btnSyncAddSelected" disabled '
+               + 'style="font-size:0.82rem;padding:0.35rem 0.85rem;">➕ Add Selected to Mapping</button>';
+        }
+        html += '</div>';
+        html += renderAuditTable(data.unmapped, [
+          {label: 'Item Name',   key: 'name'},
+          {label: 'Item GUID',   key: 'guid'},
+          {label: 'MLI',         key: 'mli'},
+          {label: 'PLU',         key: 'plu'},
+          {label: 'Tags',        val: function(r) { return (r.tags || []).join(', '); }},
+          {label: '# Locations', key: 'locationCount'},
+        ], true);
+        html += '</div>';
+
+        // Stale bucket
+        var staleBktId = 'bkt_sync_stale_' + Math.random().toString(36).slice(2);
+        var staleTable = renderAuditTable(data.stale, [
+          {label: 'Toast_Item_Name', key: 'Toast_Item_Name'},
+          {label: 'ToastPLU',        key: 'ToastPLU'},
+          {label: 'MLI',             key: 'MultiLocationId'},
+          {label: 'AlohaItemName',   key: 'AlohaItemName'},
+          {label: 'ConsolidatedCat', key: 'ConsolidatedCat'},
+        ], false);
+        var staleHead = '<div class="bucket"><div class="bucket-head">'
+          + '<span class="bucket-label warn">⚠️ Stale — not found on any Toast menu (' + data.stale.length + ')</span>';
+        if (data.stale.length > 0) {
+          staleHead += '<button type="button" class="btn btn-danger" id="btnSyncRemoveStale" '
+            + 'style="font-size:0.82rem;padding:0.35rem 0.85rem;background:#DC2626;border-color:#DC2626;">'
+            + '🗑 Remove Stale from Mapping</button>';
+          staleHead += '<button type="button" class="btn btn-secondary" '
+            + 'onclick="var p=document.getElementById(\'' + staleBktId + '\');p.style.display=p.style.display===\'none\'?\'block\':\'none\'" '
+            + 'style="font-size:0.78rem;padding:0.3rem 0.7rem;">Toggle ▾</button>';
+        }
+        staleHead += '</div><div id="' + staleBktId + '">' + staleTable + '</div></div>';
+        html += staleHead;
+
+        document.getElementById('syncToastBody').innerHTML = html;
+
+        // Wire Remove Stale button
+        var btnSyncRemoveStale = document.getElementById('btnSyncRemoveStale');
+        if (btnSyncRemoveStale) {
+          btnSyncRemoveStale.addEventListener('click', function() {
+            var n = removeStaleToastRows(data.stale);
+            if (n > 0) {
+              this.textContent = '✅ Removed ' + n + ' rows';
+              this.disabled = true;
+            }
+          });
+        }
+
+        // Wire select-all + Add Selected button for sync unmapped
+        if (data.unmapped.length > 0) {
+          var chkAll  = document.getElementById('chkAll');
+          var btnAdd  = document.getElementById('btnSyncAddSelected');
+
+          function refreshSyncAddBtn() {
+            var n = document.querySelectorAll('.item-chk:checked').length;
+            btnAdd.disabled   = n === 0;
+            btnAdd.textContent = n > 0 ? '➕ Add ' + n + ' to Mapping' : '➕ Add Selected to Mapping';
+          }
+
+          if (chkAll) {
+            chkAll.addEventListener('change', function() {
+              document.querySelectorAll('.item-chk').forEach(function(c) { c.checked = chkAll.checked; });
+              refreshSyncAddBtn();
+            });
+          }
+          document.querySelectorAll('.item-chk').forEach(function(c) {
+            c.addEventListener('change', refreshSyncAddBtn);
+          });
+          btnAdd.addEventListener('click', function() {
+            var selected = [];
+            document.querySelectorAll('.item-chk:checked').forEach(function(c) {
+              var i = parseInt(c.dataset.idx, 10);
+              if (!isNaN(i) && lastSyncData.unmapped[i]) selected.push(lastSyncData.unmapped[i]);
+            });
+            if (selected.length) addUnmappedToMapping(selected);
+          });
+        }
+
+        // Reload the mapping table to pick up sync changes
+        fetch(API_BASE + '/api/mapping-table')
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            columns = data.columns;
+            rows = data.rows;
+            dirty = false;
+            btnSave.disabled = true;
+            renderTableHead();
+            applyFilter();
+          });
+      }
+
+      document.getElementById('btnSyncToast').addEventListener('click', function() {
+        var statusEl = document.getElementById('syncToastStatus');
+        var bodyEl   = document.getElementById('syncToastBody');
+        this.disabled = true;
+        statusEl.textContent = 'Syncing from Toast… (polling all locations)';
+        bodyEl.innerHTML = '';
+        fetch(API_BASE + '/api/audit/sync-from-toast', { method: 'POST' })
+          .then(function(res) {
+            if (!res.ok) return res.json().then(function(j) { throw new Error(j.detail || 'Sync failed'); });
+            return res.json();
+          })
+          .then(function(data) {
+            statusEl.textContent = 'Last synced: ' + new Date().toLocaleTimeString();
+            renderSyncResults(data);
+          })
+          .catch(function(err) {
+            statusEl.textContent = '';
+            bodyEl.innerHTML = '<div class="error-state" style="margin:0;">' + auditEsc(err.message || 'Sync failed') + '</div>';
+          })
+          .finally(function() { document.getElementById('btnSyncToast').disabled = false; });
+      });
 
       document.getElementById('btnToastAudit').addEventListener('click', function() {
         var statusEl = document.getElementById('toastAuditStatus');

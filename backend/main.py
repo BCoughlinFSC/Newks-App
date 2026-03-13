@@ -124,20 +124,24 @@ def _mapping_lookup_keys(normalized_name: str) -> List[str]:
 
 def _get_tag_from_mapping(
     normalized_name: str,
-    report_tag_map: Dict[str, str],
+    report_tag_map: Dict[str, List[str]],
     consolidated_cat_map: Dict[str, str],
     consolidated_override: Dict[str, str],
     guid: str,
-) -> Optional[str]:
-    """First try override by GUID, then try each lookup key in report_tag_map and consolidated_cat_map."""
+) -> List[str]:
+    """Return all tags for an item. Tries override by GUID, then report_tag_map (list),
+    then consolidated_cat_map (single value wrapped in list)."""
     tag = consolidated_override.get(guid)
     if tag:
-        return tag
+        return [tag]
     for key in _mapping_lookup_keys(normalized_name):
-        tag = report_tag_map.get(key) or consolidated_cat_map.get(key)
-        if tag:
-            return tag
-    return None
+        tags = report_tag_map.get(key)
+        if tags:
+            return tags
+        cat = consolidated_cat_map.get(key)
+        if cat:
+            return [cat]
+    return []
 
 
 def _normalize_tag_name(value: str) -> str:
@@ -168,11 +172,11 @@ def get_consolidated_category_map() -> Dict[str, str]:
     return _consolidated_cat_cache.get("data", {}).get("map", {})
 
 
-def get_report_tag_map() -> Dict[str, str]:
+def get_report_tag_map() -> Dict[str, List[str]]:
     """
-    Toast_Item_Name (normalized) -> tag used for report filtering.
-    Uses column 'Tag' or 'ReportTag' if present, else ConsolidatedCat.
-    Used so mapping table can assign report tags (e.g. PepperoniMushroom) to items/modifiers.
+    Toast_Item_Name (normalized) -> list of tags for report filtering.
+    Parsed from the comma-separated 'Tags' column (synced from Toast item tags).
+    Falls back to ConsolidatedCat if no Tags value.
     """
     _ensure_consolidated_maps()
     return _consolidated_cat_cache.get("data", {}).get("report_tag_map", {})
@@ -189,7 +193,12 @@ def get_consolidated_guid_map() -> Dict[str, str]:
 
 
 def _ensure_consolidated_maps() -> None:
-    """Load mapping file once and populate consolidated map + report_tag_map in cache."""
+    """Load mapping file once and populate consolidated map + report_tag_map in cache.
+
+    The Tags column (comma-separated, synced from Toast item tags) is parsed into
+    individual tags for report_tag_map.  ConsolidatedCat (also synced from Toast)
+    feeds the consolidated_cat_map.
+    """
     mapping_files = [MAPPING_FILE, FALLBACK_MAPPING_FILE]
     missing = [path for path in mapping_files if not os.path.exists(path)]
     if len(missing) == len(mapping_files):
@@ -203,8 +212,9 @@ def _ensure_consolidated_maps() -> None:
 
     name_col = "Toast_Item_Name"
     cat_col = "ConsolidatedCat"
+    tags_col = "Tags"
     mapping: Dict[str, str] = {}
-    report_tag_map: Dict[str, str] = {}
+    report_tag_map: Dict[str, List[str]] = {}
 
     for path in mapping_files:
         if not os.path.exists(path):
@@ -216,26 +226,38 @@ def _ensure_consolidated_maps() -> None:
             logger.warning(f"Failed to read mapping file for consolidated categories: {path} ({exc})")
             continue
 
-        if name_col not in df.columns or cat_col not in df.columns:
-            logger.warning(f"Mapping file missing required columns for consolidated categories: {path} ({name_col}, {cat_col})")
+        if name_col not in df.columns:
+            logger.warning(f"Mapping file missing required column: {path} ({name_col})")
             continue
 
-        tag_col = None
-        for c in ["Tag", "ReportTag", "GuestCountTag"]:
-            if c in df.columns:
-                tag_col = c
-                break
+        has_cat = cat_col in df.columns
+        has_tags = tags_col in df.columns
+
+        # Backwards compat: if Tags column doesn't exist yet, try legacy columns
+        legacy_tag_col = None
+        if not has_tags:
+            for c in ["Tag", "ReportTag", "GuestCountTag"]:
+                if c in df.columns:
+                    legacy_tag_col = c
+                    break
 
         for _, row in df.iterrows():
             name = _normalize_item_name(row.get(name_col))
             if not name:
                 continue
-            cat = str(row.get(cat_col)).strip() if pd.notna(row.get(cat_col)) else ""
-            tag_val = ""
-            if tag_col and pd.notna(row.get(tag_col)):
-                tag_val = str(row.get(tag_col)).strip()
-            if not tag_val:
-                tag_val = cat
+            cat = str(row.get(cat_col)).strip() if has_cat and pd.notna(row.get(cat_col)) else ""
+
+            # Parse individual tags from comma-separated Tags column
+            tag_list: List[str] = []
+            if has_tags and pd.notna(row.get(tags_col)):
+                tag_list = [t.strip() for t in str(row.get(tags_col)).split(",") if t.strip()]
+            elif legacy_tag_col and pd.notna(row.get(legacy_tag_col)):
+                # Fallback to legacy single-tag column if Tags not available yet
+                tag_list = [str(row.get(legacy_tag_col)).strip()]
+
+            if not tag_list and cat:
+                tag_list = [cat]
+
             # Only store base key (e.g. "pepperoni and portabella pizza") when the row has NO parenthetical,
             # so we don't apply "(Entree)" mapping to "(OLO Pairing Choice)" or other variants.
             name_has_paren = "(" in name
@@ -245,8 +267,8 @@ def _ensure_consolidated_maps() -> None:
                     continue
                 if key not in mapping and cat:
                     mapping[key] = cat
-                if tag_val and key not in report_tag_map:
-                    report_tag_map[key] = tag_val
+                if tag_list and key not in report_tag_map:
+                    report_tag_map[key] = tag_list
 
     _consolidated_cat_cache["data"] = {"mtimes": mtimes, "map": mapping, "report_tag_map": report_tag_map}
 
@@ -5956,6 +5978,70 @@ async def update_mapping_table(body: MappingTableUpdate):
 # Mapping Audit API
 # ------------------
 
+
+def _collect_items_from_groups(groups, menu_name, loc_name, out: Dict[str, dict]):
+    """Recursively walk menuGroups (Toast can nest sub-groups)."""
+    for group in groups:
+        group_name = group.get("name", "")
+        for item in group.get("menuItems", []):
+            name = (item.get("name") or "").strip()
+            if not name:
+                continue
+            norm = _normalize_item_name(name)
+            if norm not in out:
+                out[norm] = {
+                    "name":          name,
+                    "guid":          item.get("guid", ""),
+                    "plu":           str(item.get("plu") or ""),
+                    "mli":           str(item.get("multiLocationId") or ""),
+                    "menu":          menu_name,
+                    "group":         group_name,
+                    "tags":          [t.get("name") for t in item.get("itemTags", []) if t.get("name")],
+                    "locationCount": 0,
+                }
+            out[norm]["locationCount"] += 1
+        # Recurse into nested sub-groups
+        _collect_items_from_groups(group.get("menuGroups", []), menu_name, loc_name, out)
+
+
+async def _poll_all_toast_items() -> Tuple[Dict[str, dict], int, List[str]]:
+    """
+    Poll all active Toast locations and collect every menu item.
+    Returns (toast_items_by_norm, location_count, errors).
+    """
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        locations = await get_all_active_locations(client)
+        if not locations:
+            raise HTTPException(status_code=404, detail="No active locations found")
+        standard_headers = await get_standard_api_auth_headers()
+
+        toast_items: Dict[str, dict] = {}
+        errors: List[str] = []
+
+        for loc in locations:
+            loc_name = (getattr(loc, "restaurantName", None) or "").strip() or loc.restaurantGuid
+            try:
+                resp = await client.get(
+                    f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus",
+                    headers={**standard_headers, "Toast-Restaurant-External-ID": loc.restaurantGuid},
+                )
+                if resp.status_code != 200:
+                    errors.append(f"{loc_name}: HTTP {resp.status_code}")
+                    continue
+                menu_data = resp.json()
+                for menu in menu_data.get("menus", []):
+                    _collect_items_from_groups(
+                        menu.get("menuGroups", []),
+                        menu.get("name", ""),
+                        loc_name,
+                        toast_items,
+                    )
+            except Exception as exc:
+                errors.append(f"{loc_name}: {exc}")
+
+    return toast_items, len(locations), errors
+
+
 @app.get("/api/audit/toast-vs-mapping")
 async def audit_toast_vs_mapping():
     """
@@ -5975,65 +6061,12 @@ async def audit_toast_vs_mapping():
         if name:
             mapping_by_norm[_normalize_item_name(name)] = row
 
-    def _collect_items_from_groups(groups, menu_name, loc_name, out: Dict[str, dict]):
-        """Recursively walk menuGroups (Toast can nest sub-groups)."""
-        for group in groups:
-            group_name = group.get("name", "")
-            for item in group.get("menuItems", []):
-                name = (item.get("name") or "").strip()
-                if not name:
-                    continue
-                norm = _normalize_item_name(name)
-                if norm not in out:
-                    out[norm] = {
-                        "name":          name,
-                        "guid":          item.get("guid", ""),
-                        "plu":           str(item.get("plu") or ""),
-                        "mli":           str(item.get("multiLocationId") or ""),
-                        "menu":          menu_name,
-                        "group":         group_name,
-                        "tags":          [t.get("name") for t in item.get("itemTags", []) if t.get("name")],
-                        "locationCount": 0,
-                    }
-                out[norm]["locationCount"] += 1
-            # Recurse into nested sub-groups
-            _collect_items_from_groups(group.get("menuGroups", []), menu_name, loc_name, out)
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            locations = await get_all_active_locations(client)
-            if not locations:
-                raise HTTPException(status_code=404, detail="No active locations found")
-            standard_headers = await get_standard_api_auth_headers()
-
-            toast_items: Dict[str, dict] = {}
-            errors: List[str] = []
-
-            for loc in locations:
-                loc_name = (getattr(loc, "restaurantName", None) or "").strip() or loc.restaurantGuid
-                try:
-                    resp = await client.get(
-                        f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus",
-                        headers={**standard_headers, "Toast-Restaurant-External-ID": loc.restaurantGuid},
-                    )
-                    if resp.status_code != 200:
-                        errors.append(f"{loc_name}: HTTP {resp.status_code}")
-                        continue
-                    menu_data = resp.json()
-                    for menu in menu_data.get("menus", []):
-                        _collect_items_from_groups(
-                            menu.get("menuGroups", []),
-                            menu.get("name", ""),
-                            loc_name,
-                            toast_items,
-                        )
-                except Exception as exc:
-                    errors.append(f"{loc_name}: {exc}")
-
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Error fetching Toast menu: {exc}")
+    try:
+        toast_items, location_count, errors = await _poll_all_toast_items()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error fetching Toast menu: {exc}")
 
     # Build secondary index: MLI → toast item (for items with a non-empty MLI)
     toast_by_mli: Dict[str, dict] = {}
@@ -6101,7 +6134,7 @@ async def audit_toast_vs_mapping():
     return {
         "summary": {
             "toastItemCount":       len(toast_items),
-            "locationCount":        len(locations),
+            "locationCount":        location_count,
             "mappingToastRowCount": len(mapping_by_norm),
             "unmappedCount":        len(unmapped),
             "nameDriftedCount":     len(name_drifted),
@@ -6113,6 +6146,204 @@ async def audit_toast_vs_mapping():
         "nameDrifted": sorted(name_drifted, key=lambda x: x["mappingName"].lower()),
         "stale":       sorted(stale,        key=lambda x: x["Toast_Item_Name"].lower()),
         "ok":          sorted(ok,           key=lambda x: x["name"].lower()),
+    }
+
+
+@app.post("/api/audit/sync-from-toast")
+async def sync_from_toast():
+    """
+    Poll all Toast locations, then sync Toast-side fields into the mapping table.
+    - Matches existing rows by item_guid > MultiLocationId > ToastPLU > normalized name
+    - Updates Toast_Item_Name, item_guid, MultiLocationId, ToastPLU, Tags, ConsolidatedCat
+    - Removes legacy manual tag columns (Recipe, GuestCountTag, etc.)
+    - Returns updated rows, unmapped Toast items (for user to add), and stale rows
+    - Saves updated mapping table to Excel automatically
+    """
+    path, columns, mapping_rows = _load_mapping_table_excel()
+
+    try:
+        toast_items, location_count, errors = await _poll_all_toast_items()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error fetching Toast menu: {exc}")
+
+    # Ensure Toast-derived columns exist
+    new_columns = list(columns)
+    for col in ("item_guid", "Tags", "ConsolidatedCat", "GuestCountTag", "EntreEquivTag"):
+        if col not in new_columns:
+            new_columns.append(col)
+            for row in mapping_rows:
+                row[col] = ""
+
+    # Remove legacy manual tag columns (now sourced from Toast Tags)
+    _REMOVED_COLS = {"Recipe", "LTOTag", "Tag", "ReportTag"}
+    new_columns = [c for c in new_columns if c not in _REMOVED_COLS]
+
+    # Build Toast lookup indexes
+    toast_by_guid: Dict[str, Tuple[str, dict]] = {}  # guid → (norm, item)
+    toast_by_mli: Dict[str, Tuple[str, dict]] = {}   # mli → (norm, item)
+    toast_by_plu: Dict[str, Tuple[str, dict]] = {}   # plu → (norm, item)
+    toast_by_norm: Dict[str, dict] = {}                # norm → item
+
+    for norm, item in toast_items.items():
+        toast_by_norm[norm] = item
+        guid = (item.get("guid") or "").strip()
+        if guid:
+            toast_by_guid[guid] = (norm, item)
+        mli = (item.get("mli") or "").strip()
+        if mli:
+            toast_by_mli[mli] = (norm, item)
+        plu = (item.get("plu") or "").strip()
+        if plu:
+            toast_by_plu[plu] = (norm, item)
+
+    # Track which Toast items get matched (so we know what's unmapped)
+    matched_toast_norms: set = set()
+
+    updated = []
+    stale = []
+
+    for row in mapping_rows:
+        toast_name = (row.get("Toast_Item_Name") or "").strip()
+        if not toast_name:
+            continue  # skip rows with no Toast item name
+
+        # Try to find matching Toast item: guid > mli > plu > name
+        matched_item = None
+        match_method = ""
+
+        row_guid = str(row.get("item_guid") or "").strip()
+        row_mli = str(row.get("MultiLocationId") or "").strip()
+        row_plu = str(row.get("ToastPLU") or "").strip()
+        row_norm = _normalize_item_name(toast_name)
+
+        if row_guid and row_guid in toast_by_guid:
+            norm, matched_item = toast_by_guid[row_guid]
+            match_method = "GUID"
+            matched_toast_norms.add(norm)
+        elif row_mli and row_mli in toast_by_mli:
+            norm, matched_item = toast_by_mli[row_mli]
+            match_method = "MLI"
+            matched_toast_norms.add(norm)
+        elif row_plu and row_plu in toast_by_plu:
+            norm, matched_item = toast_by_plu[row_plu]
+            match_method = "PLU"
+            matched_toast_norms.add(norm)
+        elif row_norm in toast_by_norm:
+            matched_item = toast_by_norm[row_norm]
+            match_method = "Name"
+            matched_toast_norms.add(row_norm)
+        else:
+            # Try secondary name variants
+            for key in _mapping_lookup_keys(row_norm):
+                if key in toast_by_norm:
+                    matched_item = toast_by_norm[key]
+                    match_method = "Name"
+                    matched_toast_norms.add(key)
+                    break
+
+        if matched_item:
+            # Build change record for the response
+            changes = {}
+            new_name = matched_item["name"]
+            new_guid = matched_item.get("guid", "")
+            new_mli = matched_item.get("mli", "")
+            new_plu = matched_item.get("plu", "")
+            new_tags = ", ".join(matched_item.get("tags", []))
+
+            # Auto-derive specific tag columns from Toast item tags
+            new_consolidated = ""
+            new_guest_count = ""
+            new_ee = ""
+            for t in matched_item.get("tags", []):
+                if not new_consolidated and t.startswith("* Consolidated"):
+                    new_consolidated = t
+                elif not new_guest_count and t.startswith("Guest Count"):
+                    new_guest_count = t
+                elif not new_ee and t.startswith("EE "):
+                    new_ee = t
+
+            if row.get("Toast_Item_Name", "") != new_name:
+                changes["Toast_Item_Name"] = {"old": row.get("Toast_Item_Name", ""), "new": new_name}
+            if str(row.get("item_guid", "")) != new_guid:
+                changes["item_guid"] = {"old": str(row.get("item_guid", "")), "new": new_guid}
+            if str(row.get("MultiLocationId", "")) != new_mli:
+                changes["MultiLocationId"] = {"old": str(row.get("MultiLocationId", "")), "new": new_mli}
+            if str(row.get("ToastPLU", "")) != new_plu:
+                changes["ToastPLU"] = {"old": str(row.get("ToastPLU", "")), "new": new_plu}
+            if str(row.get("Tags", "")) != new_tags:
+                changes["Tags"] = {"old": str(row.get("Tags", "")), "new": new_tags}
+            # Only overwrite derived columns if Toast has a value
+            if new_consolidated and str(row.get("ConsolidatedCat", "")) != new_consolidated:
+                changes["ConsolidatedCat"] = {"old": str(row.get("ConsolidatedCat", "")), "new": new_consolidated}
+            if new_guest_count and str(row.get("GuestCountTag", "")) != new_guest_count:
+                changes["GuestCountTag"] = {"old": str(row.get("GuestCountTag", "")), "new": new_guest_count}
+            if new_ee and str(row.get("EntreEquivTag", "")) != new_ee:
+                changes["EntreEquivTag"] = {"old": str(row.get("EntreEquivTag", "")), "new": new_ee}
+
+            # Apply updates to the row
+            row["Toast_Item_Name"] = new_name
+            row["item_guid"] = new_guid
+            row["MultiLocationId"] = new_mli
+            row["ToastPLU"] = new_plu
+            row["Tags"] = new_tags
+            if new_consolidated:
+                row["ConsolidatedCat"] = new_consolidated
+            if new_guest_count:
+                row["GuestCountTag"] = new_guest_count
+            if new_ee:
+                row["EntreEquivTag"] = new_ee
+
+            if changes:
+                updated.append({
+                    "Toast_Item_Name": new_name,
+                    "matchMethod":     match_method,
+                    "changes":         changes,
+                    "AlohaItemName":   row.get("AlohaItemName", ""),
+                    "ConsolidatedCat": row.get("ConsolidatedCat", ""),
+                })
+        else:
+            stale.append({
+                "Toast_Item_Name":  toast_name,
+                "AlohaItemName":    row.get("AlohaItemName", ""),
+                "ConsolidatedCat":  row.get("ConsolidatedCat", ""),
+                "ToastPLU":         str(row.get("ToastPLU") or ""),
+                "MultiLocationId":  str(row.get("MultiLocationId") or ""),
+            })
+
+    # Unmapped: Toast items that didn't match any mapping row
+    unmapped = []
+    for norm, item in toast_items.items():
+        if norm not in matched_toast_norms:
+            unmapped.append(item)
+
+    # Save updated mapping table to Excel
+    df = pd.DataFrame(mapping_rows, columns=new_columns)
+    for col in new_columns:
+        if col not in df.columns:
+            df[col] = ""
+    out_path = _safe_write_excel(df, path)
+
+    # Invalidate consolidated category cache
+    global _consolidated_cat_cache
+    _consolidated_cat_cache = {}
+
+    return {
+        "summary": {
+            "toastItemCount":   len(toast_items),
+            "locationCount":    location_count,
+            "mappingRowCount":  len([r for r in mapping_rows if (r.get("Toast_Item_Name") or "").strip()]),
+            "updatedCount":     len(updated),
+            "unmappedCount":    len(unmapped),
+            "staleCount":       len(stale),
+            "errors":           errors,
+            "savedTo":          out_path,
+            "columnsAdded":     [c for c in ("item_guid", "Tags") if c not in columns],
+        },
+        "updated":   sorted(updated,   key=lambda x: x["Toast_Item_Name"].lower()),
+        "unmapped":  sorted(unmapped,   key=lambda x: x["name"].lower()),
+        "stale":     sorted(stale,      key=lambda x: x["Toast_Item_Name"].lower()),
     }
 
 
@@ -6513,9 +6744,10 @@ async def build_menu_mix_report_fallback(
                 filtered_rows.append(row)
                 continue
             name_key = _normalize_item_name(row.get("menuItemName", ""))
-            report_tag = _get_tag_from_mapping(name_key, report_tag_map, consolidated_cat_map, consolidated_override, guid)
-            if report_tag and _normalize_tag_name(report_tag) in selected_tags_norm:
-                filtered_mapping[guid] = [{"tagName": report_tag}]
+            report_tags = _get_tag_from_mapping(name_key, report_tag_map, consolidated_cat_map, consolidated_override, guid)
+            matching_report_tags = [t for t in report_tags if _normalize_tag_name(t) in selected_tags_norm]
+            if matching_report_tags:
+                filtered_mapping[guid] = [{"tagName": t} for t in matching_report_tags]
                 filtered_rows.append(row)
                 consolidated_fallback_hits += 1
                 if debug_mapping_fallback_names is not None:
@@ -6550,17 +6782,32 @@ async def build_menu_mix_report_fallback(
     # appear in the breakdown and Toast Items popup with count 0.
     if report_config.itemTags and selected_tags_norm:
         names_in_filtered = {_normalize_item_name(r.get("menuItemName", "")) for r in filtered_rows if r.get("menuItemName")}
-        for norm_name, tag in list(report_tag_map.items()) + list(consolidated_cat_map.items()):
-            if not norm_name or not tag:
+        # report_tag_map values are List[str]; consolidated_cat_map values are str
+        for norm_name, tags in report_tag_map.items():
+            if not norm_name or not tags:
                 continue
-            if _normalize_tag_name(tag) not in selected_tags_norm:
+            matching = [t for t in tags if _normalize_tag_name(t) in selected_tags_norm]
+            if not matching:
                 continue
             if norm_name in names_in_filtered:
                 continue
             synthetic_guid = "mapping:" + norm_name
             if synthetic_guid in filtered_mapping:
                 continue
-            filtered_mapping[synthetic_guid] = [{"tagName": tag}]
+            filtered_mapping[synthetic_guid] = [{"tagName": t} for t in matching]
+            item_names_mapping[synthetic_guid] = _humanize_item_name(norm_name)
+            names_in_filtered.add(norm_name)
+        for norm_name, cat in consolidated_cat_map.items():
+            if not norm_name or not cat:
+                continue
+            if _normalize_tag_name(cat) not in selected_tags_norm:
+                continue
+            if norm_name in names_in_filtered:
+                continue
+            synthetic_guid = "mapping:" + norm_name
+            if synthetic_guid in filtered_mapping:
+                continue
+            filtered_mapping[synthetic_guid] = [{"tagName": cat}]
             item_names_mapping[synthetic_guid] = _humanize_item_name(norm_name)
             names_in_filtered.add(norm_name)
 
@@ -6584,14 +6831,14 @@ async def build_menu_mix_report_fallback(
         target_details = []
         for tn in target_names:
             nkey = _nk(tn)
-            tag_from_map = _get_tag_from_mapping(nkey, report_tag_map, consolidated_cat_map, consolidated_override, "")
+            tags_from_map = _get_tag_from_mapping(nkey, report_tag_map, consolidated_cat_map, consolidated_override, "")
             in_analytics = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in all_rows)
             in_filtered = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in filtered_rows)
             target_details.append({
                 "name": tn,
                 "normalizedKey": nkey,
-                "tagFromMappingTable": tag_from_map,
-                "tagNormalized": _tk(tag_from_map) if tag_from_map else None,
+                "tagsFromMappingTable": tags_from_map,
+                "tagsNormalized": [_tk(t) for t in tags_from_map],
                 "selectedTagsNormalized": selected_tags_norm[:5],
                 "inAnalyticsRows": in_analytics,
                 "inFilteredRows": in_filtered,
@@ -7159,9 +7406,10 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                             modifier_count_in_filtered += 1
                     # 2) Mapping table first: assign tag from mapping so items without the tag in Toast still count
                     elif report_config.itemTags:
-                        report_tag = _get_tag_from_mapping(name_key, report_tag_map, consolidated_cat_map, consolidated_override, menu_item_guid)
-                        if report_tag and _normalize_tag_name(report_tag) in selected_tags_norm:
-                            filtered_mapping[menu_item_guid] = [{"tagName": report_tag}]
+                        report_tags = _get_tag_from_mapping(name_key, report_tag_map, consolidated_cat_map, consolidated_override, menu_item_guid)
+                        matching_report_tags = [t for t in report_tags if _normalize_tag_name(t) in selected_tags_norm]
+                        if matching_report_tags:
+                            filtered_mapping[menu_item_guid] = [{"tagName": t} for t in matching_report_tags]
                             filtered_rows.append(row)
                             if is_modifier:
                                 modifier_count_in_filtered += 1
@@ -7298,14 +7546,14 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     target_details = []
                     for tn in target_names:
                         nkey = _nk(tn)
-                        tag_from_map = _get_tag_from_mapping(nkey, report_tag_map, consolidated_cat_map, consolidated_override, "")
+                        tags_from_map = _get_tag_from_mapping(nkey, report_tag_map, consolidated_cat_map, consolidated_override, "")
                         in_analytics = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in all_analytics_rows)
                         in_filtered = any(_nk(r.get("menuItemName", "")) == nkey or tn in (r.get("menuItemName") or "") for r in filtered_rows)
                         target_details.append({
                             "name": tn,
                             "normalizedKey": nkey,
-                            "tagFromMappingTable": tag_from_map,
-                            "tagNormalized": _tk(tag_from_map) if tag_from_map else None,
+                            "tagsFromMappingTable": tags_from_map,
+                            "tagsNormalized": [_tk(t) for t in tags_from_map],
                             "selectedTagsNormalized": selected_tags_norm[:5],
                             "inAnalyticsRows": in_analytics,
                             "inFilteredRows": in_filtered,
@@ -7430,17 +7678,32 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # so they appear in the breakdown and Toast Items popup with count 0.
                 if report_config.itemTags and selected_tags_norm:
                     names_in_filtered = {_normalize_item_name(r.get("menuItemName", "")) for r in filtered_rows if r.get("menuItemName")}
-                    for norm_name, tag in list(report_tag_map.items()) + list(consolidated_cat_map.items()):
-                        if not norm_name or not tag:
+                    # report_tag_map values are List[str]; consolidated_cat_map values are str
+                    for norm_name, tags in report_tag_map.items():
+                        if not norm_name or not tags:
                             continue
-                        if _normalize_tag_name(tag) not in selected_tags_norm:
+                        matching = [t for t in tags if _normalize_tag_name(t) in selected_tags_norm]
+                        if not matching:
                             continue
                         if norm_name in names_in_filtered:
                             continue
                         synthetic_guid = "mapping:" + norm_name
                         if synthetic_guid in filtered_mapping:
                             continue
-                        filtered_mapping[synthetic_guid] = [{"tagName": tag}]
+                        filtered_mapping[synthetic_guid] = [{"tagName": t} for t in matching]
+                        item_names_mapping[synthetic_guid] = _humanize_item_name(norm_name)
+                        names_in_filtered.add(norm_name)
+                    for norm_name, cat in consolidated_cat_map.items():
+                        if not norm_name or not cat:
+                            continue
+                        if _normalize_tag_name(cat) not in selected_tags_norm:
+                            continue
+                        if norm_name in names_in_filtered:
+                            continue
+                        synthetic_guid = "mapping:" + norm_name
+                        if synthetic_guid in filtered_mapping:
+                            continue
+                        filtered_mapping[synthetic_guid] = [{"tagName": cat}]
                         item_names_mapping[synthetic_guid] = _humanize_item_name(norm_name)
                         names_in_filtered.add(norm_name)
                 
