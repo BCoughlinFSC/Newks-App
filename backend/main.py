@@ -8,6 +8,7 @@ import hashlib
 import csv
 import io
 import re
+import copy
 
 import asyncio
 import os
@@ -694,21 +695,17 @@ async def apply_yoy_aloha_quantities(
                     if src:
                         row["alohaMatchSource"] = src
 
-            # ── Save combined Aloha quantities before split enrichment ────────
-            # The split rows share the same dict objects as the combined
-            # itemBreakdown / itemTotals rows.  _enrich_split mutates them
-            # in-place, so we snapshot the combined values here (keyed by
-            # object id) and restore them afterwards so the top-level combined
-            # view continues to show the all-channel Aloha total.
-            _combined_rows = result.get("itemBreakdown", []) + result.get("itemTotals", [])
-            _saved_combined: dict = {}
-            for _row in _combined_rows:
-                _saved_combined[id(_row)] = {
-                    "alohaQty":        _row.get("alohaQty", 0),
-                    "alohaItemName":   _row.get("alohaItemName"),
-                    "alohaDetails":    _row.get("alohaDetails"),
-                    "alohaMatchSource": _row.get("alohaMatchSource"),
-                }
+            # ── Deep-copy split rows so they are independent of combined ────
+            # The rows in orderModeSplit originally share the same dict objects
+            # as itemBreakdown / itemTotals.  If we enrich splits in-place, the
+            # combined rows get overwritten (and vice-versa on restore).
+            # Deep-copying the split lists makes them fully independent, so each
+            # channel gets its own alohaQty without affecting the combined view.
+            for _ch_key in ("olo", "inStore"):
+                _ch = _order_mode_split.get(_ch_key, {})
+                for _list_key in ("itemBreakdownDaily", "itemBreakdown", "itemTotals"):
+                    if _list_key in _ch:
+                        _ch[_list_key] = copy.deepcopy(_ch[_list_key])
 
             # ── OLO ──────────────────────────────────────────────────────────
             if _olo_modes:
@@ -737,21 +734,6 @@ async def apply_yoy_aloha_quantities(
                     _split_debug["instoreSkipped"] = "df_instore is empty after filtering"
             else:
                 _split_debug["instoreSkipped"] = "no Aloha order modes mapped to In-Store channels"
-
-            # ── Restore combined Aloha quantities on main (non-split) rows ────
-            # Re-stamp itemBreakdown / itemTotals with the combined values we
-            # saved above, undoing any in-place overwrites from _enrich_split.
-            for _row in _combined_rows:
-                _saved = _saved_combined.get(id(_row))
-                if _saved is None:
-                    continue
-                _row["alohaQty"] = _saved["alohaQty"]
-                if _saved.get("alohaItemName") is not None:
-                    _row["alohaItemName"]   = _saved["alohaItemName"]
-                if _saved.get("alohaDetails") is not None:
-                    _row["alohaDetails"]    = _saved["alohaDetails"]
-                if _saved.get("alohaMatchSource") is not None:
-                    _row["alohaMatchSource"] = _saved["alohaMatchSource"]
 
             # ── Post-enrichment sample ────────────────────────────────────────
             _olo_rows     = _order_mode_split.get("olo",     {}).get("itemBreakdown", [])

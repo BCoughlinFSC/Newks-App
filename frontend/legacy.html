@@ -519,16 +519,16 @@
 
     /* Floating help button */
     .help-fab {
-      position: fixed; bottom: 2rem; right: 2rem;
+      position: fixed; bottom: 1rem; left: 1rem;
       background: #C41E3A; color: #fff;
       border: none; border-radius: 50px;
-      padding: 0.85rem 1.4rem;
-      font-weight: 600; font-size: 0.9rem;
-      cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.2);
-      z-index: 1000; display: flex; align-items: center; gap: 0.5rem;
-      transition: all 0.2s;
+      padding: 0.55rem 1rem;
+      font-weight: 600; font-size: 0.8rem;
+      cursor: pointer; box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+      z-index: 1000; display: flex; align-items: center; gap: 0.4rem;
+      transition: all 0.2s; opacity: 0.85;
     }
-    .help-fab:hover { background: #A01A2E; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.25); }
+    .help-fab:hover { background: #A01A2E; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.25); opacity: 1; }
 
     /* YoY section */
     .yoy-inner {
@@ -2053,6 +2053,20 @@
       document.getElementById('exportBtn').classList.remove('hidden');
       document.getElementById('resultsSummary').textContent =
         `${rows.length} locations • ${(tot.orders||0).toLocaleString()} orders • ${formatCell('Sales', tot.netSales||0)} Newk's Net Sales`;
+
+      // Attach expand/collapse handlers for location rows
+      setTimeout(() => {
+        body.querySelectorAll('.expandable-header').forEach(header => {
+          header.addEventListener('click', function() {
+            const id = this.getAttribute('data-expand-id');
+            const rows = body.querySelectorAll(`.location-row[data-expand-id="${id}"]`);
+            const icon = this.querySelector('.expand-icon');
+            const isExpanded = rows[0] && rows[0].style.display !== 'none';
+            rows.forEach(r => r.style.display = isExpanded ? 'none' : 'table-row');
+            icon.textContent = isExpanded ? '▶' : '▼';
+          });
+        });
+      }, 100);
     }
 
     function renderPivotResults(results, config) {
