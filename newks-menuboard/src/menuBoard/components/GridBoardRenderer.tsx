@@ -68,6 +68,47 @@ export function GridBoardRenderer({
     [blocks, gridColumns, gridRows],
   );
 
+  // Compute a uniform font size for all category blocks so they match visually.
+  // Uses the maximum item count across all visible category blocks as the baseline.
+  const [uniformFontSize, setUniformFontSize] = useState<number | null>(null);
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const gridH = el.clientHeight;
+      if (!gridH) return;
+      // Find max item count across all category blocks
+      let maxItems = 0;
+      for (const block of blocks) {
+        if (block.type !== "category" || !block.categoryId) continue;
+        const cat = catMap.get(block.categoryId);
+        if (!cat) continue;
+        const splitPoints = categoryConfigs[cat.id]?.splitPoints;
+        let itemCount: number;
+        if (splitPoints && splitPoints.length > 0) {
+          const part = block.categoryPart ?? 0;
+          const start = part === 0 ? 0 : splitPoints[part - 1];
+          const end = part < splitPoints.length ? splitPoints[part] : cat.items.length;
+          itemCount = end - start;
+        } else {
+          itemCount = cat.items.length;
+        }
+        // Scale by rowSpan — a card spanning 2 rows has double the height
+        const effectiveItems = Math.ceil(itemCount / (block.placement.rowSpan || 1));
+        if (effectiveItems > maxItems) maxItems = effectiveItems;
+      }
+      if (maxItems === 0) return;
+      // Each grid row gets an equal share of height
+      const cellH = gridH / gridRows;
+      // Use 80% of a single row's height for item space, divided by max items
+      const availableH = cellH * 0.8;
+      const idealSize = Math.floor(availableH / (maxItems * 1.8));
+      setUniformFontSize(Math.max(10, Math.min(32, idealSize)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [blocks, catMap, categoryConfigs, gridRows]);
+
   // ── Drag-and-drop (move) ──
   const handleDragStart = useCallback((e: React.DragEvent, blockId: string) => {
     e.dataTransfer.effectAllowed = "move";
@@ -227,9 +268,9 @@ export function GridBoardRenderer({
         const end = part < splitPoints.length ? splitPoints[part] : cat.items.length;
         const slicedItems = cat.items.slice(start, end);
         const title = part > 0 ? `${cat.name} (cont.)` : cat.name;
-        return <CategoryPanel category={cat} freshTheme={freshTheme} itemsOverride={slicedItems} titleOverride={title} />;
+        return <CategoryPanel category={cat} freshTheme={freshTheme} itemsOverride={slicedItems} titleOverride={title} uniformFontSize={uniformFontSize} />;
       }
-      return <CategoryPanel category={cat} freshTheme={freshTheme} />;
+      return <CategoryPanel category={cat} freshTheme={freshTheme} uniformFontSize={uniformFontSize} />;
     }
     if (block.type === "image" && block.imageUrl) {
       return (

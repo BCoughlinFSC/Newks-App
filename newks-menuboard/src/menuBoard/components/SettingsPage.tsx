@@ -12,7 +12,7 @@ import type {
   ScreenDefinition,
 } from "../types";
 import { mergeMenuWithConfig } from "../utils/mergeMenuWithConfig";
-import { autoLayoutGrid, buildOccupancy } from "../utils/autoLayoutGrid";
+import { autoLayoutGrid, buildOccupancy, placementFits } from "../utils/autoLayoutGrid";
 import { setAdminToken } from "../utils/storage";
 import { BoardHeader } from "./BoardHeader";
 import { GridBoardRenderer } from "./GridBoardRenderer";
@@ -23,12 +23,13 @@ type Props = {
   onChange: (next: BoardConfig) => void;
   onClose: () => void;
   onOpenPreview: () => void;
+  locationId?: string | null;
 };
 
 type SettingsTab = "appearance" | "content" | "menu" | "screens";
 type UploadStatus = { loading: boolean; error: string | null; success: boolean };
 
-export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Props) {
+export function SettingsPage({ boardConfig, viewModel, onChange, onClose, locationId }: Props) {
   const [draft, setDraft] = useState<BoardConfig>(boardConfig);
   const [activeTab, setActiveTab] = useState<SettingsTab>("appearance");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -45,6 +46,7 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
   const uploadCallbackRef = useRef<((url: string) => void) | null>(null);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const [previewWidth, setPreviewWidth] = useState(800);
+  const [previewHeight, setPreviewHeight] = useState(600);
 
   // Escape to close
   useEffect(() => {
@@ -55,12 +57,15 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // Observe preview container width for responsive scaling
+  // Observe preview container size for responsive scaling
   useEffect(() => {
     const el = previewContainerRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) setPreviewWidth(entry.contentRect.width);
+      for (const entry of entries) {
+        setPreviewWidth(entry.contentRect.width);
+        setPreviewHeight(entry.contentRect.height);
+      }
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -260,15 +265,13 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
     const cols = screen.gridColumns ?? 6;
     const rows = screen.gridRows ?? 4;
     const hasPromo = draft.featureSlots.length > 0;
-    const { blocks, rows: newRows } = autoLayoutGrid(screenCats, cols, rows, [], hasPromo);
+    const { blocks, rows: newRows } = autoLayoutGrid(screenCats, cols, rows, [], hasPromo, draft.categoryConfigs);
     updateScreen(screenIndex, { gridBlocks: blocks, gridRows: newRows });
   }
 
   function addPromoBlock(screenIndex: number) {
     const screen = screens[screenIndex];
     if (!screen) return;
-    // Don't add if one already exists
-    if (screen.gridBlocks?.some((b) => b.type === "promo")) return;
     const cols = screen.gridColumns ?? 6;
     const rows = screen.gridRows ?? 4;
     const existing = screen.gridBlocks ?? [];
@@ -385,19 +388,16 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
       const rows = screen.gridRows ?? 4;
       const existing = screen.gridBlocks ?? [];
       const occ = buildOccupancy(existing, cols, rows);
+      // Place as 1x1 by default (user can resize with drag handles)
       let placed = false;
       for (let r = 0; r < rows && !placed; r++) {
         for (let c = 0; c < cols && !placed; c++) {
-          if (!occ[r]?.[c]) {
+          const p = { col: c + 1, row: r + 1, colSpan: 1, rowSpan: 1 };
+          if (placementFits(occ, p, cols, rows)) {
             updateScreen(screenIndex, {
               gridBlocks: [
                 ...existing,
-                {
-                  id: `vid-${Date.now()}`,
-                  type: "video" as const,
-                  videoUrl: url,
-                  placement: { col: c + 1, row: r + 1, colSpan: 2, rowSpan: 2 },
-                },
+                { id: `vid-${Date.now()}`, type: "video" as const, videoUrl: url, placement: p },
               ],
             });
             placed = true;
@@ -413,7 +413,7 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
               id: `vid-${Date.now()}`,
               type: "video" as const,
               videoUrl: url,
-              placement: { col: 1, row: rows + 1, colSpan: 2, rowSpan: 2 },
+              placement: { col: 1, row: rows + 1, colSpan: 1, rowSpan: 1 },
             },
           ],
         });
@@ -423,7 +423,11 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
 
   // ── Live preview data ──
   const previewScreen = screens[previewScreenIdx] ?? screens[0];
-  const previewScale = previewScreen ? Math.min(previewWidth / previewScreen.width, 1) : 0.5;
+  // Scale to fit both width and height of the preview container (account for header ~40px)
+  const previewFrameH = Math.max(previewHeight - 40, 200);
+  const previewScale = previewScreen
+    ? Math.min(previewWidth / previewScreen.width, previewFrameH / previewScreen.height, 1)
+    : 0.5;
   const previewVm = useMemo(
     () => (viewModel?.menu ? mergeMenuWithConfig(viewModel.menu, draft) : null),
     [viewModel?.menu, draft],
@@ -448,9 +452,69 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
     const cols = previewScreen.gridColumns ?? 6;
     const rows = previewScreen.gridRows ?? 4;
     const hasPromo = draft.featureSlots.length > 0;
-    const { blocks, rows: newRows } = autoLayoutGrid(screenCats, cols, rows, [], hasPromo);
+    const { blocks, rows: newRows } = autoLayoutGrid(screenCats, cols, rows, [], hasPromo, draft.categoryConfigs);
     updateScreen(previewScreenIdx, { gridBlocks: blocks, gridRows: newRows });
   }, [previewScreen?.id]);
+
+  // Reconcile grid blocks when category selection or split points change
+  useEffect(() => {
+    if (!previewScreen) return;
+    const existing = previewScreen.gridBlocks ?? [];
+    if (!existing.length) return; // let auto-populate handle empty grids
+
+    const screenCats = previewScreen.useAllCategories !== false
+      ? categories
+      : categories.filter((c) => previewScreen.categoryIds.includes(c.id));
+    const enabledIds = new Set(screenCats.map((c) => c.id));
+
+    // Remove blocks for categories no longer on this screen
+    let blocks = existing.filter(
+      (b) => b.type !== "category" || (b.categoryId && enabledIds.has(b.categoryId))
+    );
+
+    // Find categories that need blocks added
+    const placedCatIds = new Set(
+      blocks.filter((b) => b.type === "category" && b.categoryId).map((b) => b.categoryId!)
+    );
+    const unplaced = screenCats.filter((c) => !placedCatIds.has(c.id));
+
+    if (unplaced.length > 0) {
+      const cols = previewScreen.gridColumns ?? 6;
+      const rows = previewScreen.gridRows ?? 4;
+      const hasPromo = draft.featureSlots.length > 0;
+      const result = autoLayoutGrid(unplaced, cols, rows, blocks, hasPromo, draft.categoryConfigs);
+      blocks = result.blocks;
+      if (result.rows !== rows) {
+        updateScreen(previewScreenIdx, { gridBlocks: blocks, gridRows: result.rows });
+        return;
+      }
+    }
+
+    // Reconcile split parts for existing categories
+    for (const cat of screenCats) {
+      const splitPoints = draft.categoryConfigs[cat.id]?.splitPoints;
+      const expectedParts = splitPoints && splitPoints.length > 0 ? splitPoints.length + 1 : 1;
+      const existingParts = blocks.filter((b) => b.type === "category" && b.categoryId === cat.id);
+      if (existingParts.length !== expectedParts) {
+        // Remove old parts and re-add via auto-layout
+        blocks = blocks.filter((b) => !(b.type === "category" && b.categoryId === cat.id));
+        const cols = previewScreen.gridColumns ?? 6;
+        const rows = previewScreen.gridRows ?? 4;
+        const result = autoLayoutGrid([cat], cols, rows, blocks, false, draft.categoryConfigs);
+        blocks = result.blocks;
+      }
+    }
+
+    // Only update if blocks actually changed
+    if (JSON.stringify(blocks) !== JSON.stringify(existing)) {
+      updateScreen(previewScreenIdx, { gridBlocks: blocks });
+    }
+  }, [
+    previewScreen?.categoryIds?.join(","),
+    previewScreen?.useAllCategories,
+    JSON.stringify(draft.categoryConfigs),
+    previewScreenIdx,
+  ]);
 
   // ── Upload status toast ──
   const statusBar = uploadStatus.loading ? (
@@ -808,7 +872,7 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
                           onClick={(e) => { e.stopPropagation(); addGridImageBlock(index); }}>+ Image</button>
                         <button type="button" disabled={uploadStatus.loading}
                           onClick={(e) => { e.stopPropagation(); addGridVideoBlock(index); }}>+ Video</button>
-                        <button type="button" disabled={!draft.featureSlots.length || !!screen.gridBlocks?.some((b) => b.type === "promo")}
+                        <button type="button" disabled={!draft.featureSlots.length}
                           onClick={(e) => { e.stopPropagation(); addPromoBlock(index); }}>+ Promo</button>
                         <button type="button"
                           onClick={(e) => { e.stopPropagation(); resetGridLayout(index); }}>Reset Layout</button>
@@ -829,6 +893,18 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose }: Prop
                         <Thumb src={screen.backgroundVideoUrl} label="BG Video" />
                         {screen.backgroundVideoUrl && <button type="button" className="sp-text-btn" onClick={() => updateScreen(index, { backgroundVideoUrl: undefined })}>x</button>}
                       </div>
+                      {locationId && (
+                        <div className="sp-display-url" style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0", fontSize: "0.8rem" }}>
+                          <span style={{ color: "#666", whiteSpace: "nowrap" }}>Display URL:</span>
+                          <code style={{ flex: 1, padding: "3px 6px", background: "#f1f5f9", borderRadius: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.75rem" }}>
+                            {`${window.location.origin}/menuboard/menu-board?screen=${index + 1}&location=${locationId}`}
+                          </code>
+                          <button type="button" className="sp-text-btn" style={{ fontSize: "0.75rem" }} onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(`${window.location.origin}/menuboard/menu-board?screen=${index + 1}&location=${locationId}`);
+                          }}>Copy</button>
+                        </div>
+                      )}
                       <div className="sp-cat-toolbar">
                         <input type="text" className="sp-input sp-cat-search" placeholder="Search categories..."
                           value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} />

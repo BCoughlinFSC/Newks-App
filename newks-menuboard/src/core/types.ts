@@ -23,6 +23,7 @@ export type MenuItem = {
   basePriceCents: Money;
   modifierGroups?: ModifierGroup[];
   categoryId: string;
+  outOfStock?: boolean;
 };
 
 export type MenuCategory = {

@@ -65,6 +65,7 @@ export function mergeMenuWithConfig(menu: Menu, config: BoardConfig): BoardViewM
       effectiveDescription,
       effectivePriceCents,
       effectiveImageUrl,
+      outOfStock: item.outOfStock || undefined,
     };
 
     const category = categoryById.get(item.categoryId);

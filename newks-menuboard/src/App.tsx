@@ -23,9 +23,25 @@ type LocationsCache = {
   locations: LocationOption[];
 };
 
+function getLocationFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const p = new URLSearchParams(window.location.search);
+  return p.get("location") ?? null;
+}
+
+function getScreenIndexFromUrl(): number | null {
+  if (typeof window === "undefined") return null;
+  const p = new URLSearchParams(window.location.search);
+  const s = p.get("screen");
+  if (s == null) return null;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
 export default function App() {
+  const urlLocationId = getLocationFromUrl();
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [locationId, setLocationId] = useState<string | null>(null);
+  const [locationId, setLocationId] = useState<string | null>(urlLocationId);
   const [savedLocationId, setSavedLocationId] = useState<string | null>(null);
   const [locationReady, setLocationReady] = useState(false);
   const [gateSelection, setGateSelection] = useState<string>("");
@@ -33,7 +49,9 @@ export default function App() {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [attractMode, setAttractMode] = useState(true);
+  // Skip attract screen when loaded via direct display URL with location param
+  const hasDirectUrl = !!(urlLocationId || getScreenIndexFromUrl());
+  const [attractMode, setAttractMode] = useState(!hasDirectUrl);
   const [locationReloadKey, setLocationReloadKey] = useState(0);
   const [menuReloadKey, setMenuReloadKey] = useState(0);
   const [lastToastError, setLastToastError] = useState<string | null>(null);
@@ -213,6 +231,13 @@ export default function App() {
       cancelled = true;
     };
   }, [demoMode, locationReloadKey]);
+
+  // If location came from URL, mark as ready immediately
+  useEffect(() => {
+    if (urlLocationId && !locationReady) {
+      setLocationReady(true);
+    }
+  }, [urlLocationId, locationReady]);
 
   // Automatically reuse a previously saved location on reload if it is still valid
   useEffect(() => {

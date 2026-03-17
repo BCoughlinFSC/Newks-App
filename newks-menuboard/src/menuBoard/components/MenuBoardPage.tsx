@@ -133,6 +133,7 @@ export function MenuBoardPage({
           onChange={onBoardConfigChange}
           onClose={() => setSettingsPageOpen(false)}
           onOpenPreview={() => {}}
+          locationId={locationId}
         />
       ) : (
         <div

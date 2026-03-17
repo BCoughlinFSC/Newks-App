@@ -108,6 +108,9 @@ type ToastMenuItem = {
   modifierGroupGuids?: string[];
   modifierGroups?: string[];
   modifierGroupReferences?: { guid?: string; id?: string }[];
+  outOfStock86?: boolean;
+  outOfStock?: boolean;
+  visibility?: string;
 };
 
 type ToastModifierGroup = {
@@ -288,6 +291,9 @@ function mapToastMenuToMenu(response: ToastMenuResponse): Menu {
 
     const imageUrl = resolveImageUrl(item);
 
+    // Toast Menus V2 uses "outOfStock86", Config API uses "visibility" === "HIDDEN"
+    const outOfStock = !!(item.outOfStock86 ?? item.outOfStock ?? item.visibility === "HIDDEN");
+
     return {
       id: itemId,
       name: item.name ?? `Item ${index + 1}`,
@@ -296,6 +302,7 @@ function mapToastMenuToMenu(response: ToastMenuResponse): Menu {
       basePriceCents: normalizeMoneyToCents(item.price ?? item.basePrice ?? item.unitPrice ?? 0),
       modifierGroups: modifierGroups.length > 0 ? modifierGroups : undefined,
       categoryId,
+      outOfStock: outOfStock || undefined,
     };
   });
 

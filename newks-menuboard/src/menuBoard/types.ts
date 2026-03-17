@@ -129,6 +129,7 @@ export type BoardItem = {
   effectiveDescription?: string;
   effectivePriceCents: number;
   effectiveImageUrl?: string;
+  outOfStock?: boolean;
 };
 
 export type BoardCategory = {

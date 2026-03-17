@@ -68,11 +68,9 @@ export function PromoPanel({ featureSlots, freshTheme = false, fillContainer = f
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              background: "linear-gradient(135deg, #4a7c4e 0%, #3a6340 100%)",
+              ...(fillContainer ? { flex: 1, minHeight: 0 } : { minHeight: 180 }),
               padding: 24,
               gap: 10,
-              borderRadius: 14,
-              minHeight: 180,
             }}
           >
             {slot.title && (
@@ -107,19 +105,19 @@ export function PromoPanel({ featureSlots, freshTheme = false, fillContainer = f
   // ── default dark/light theme promo ──
   return (
     <aside className="board-promo">
-      {primary.imageUrl && (
+      {slot.imageUrl && (
         <div className="board-promo-image-wrap">
           <img
-            src={primary.imageUrl}
-            alt={primary.title ?? "Promotion"}
+            src={slot.imageUrl}
+            alt={slot.title ?? "Promotion"}
             className="board-promo-image"
           />
         </div>
       )}
-      {primary.videoUrl && !primary.imageUrl && (
+      {slot.videoUrl && !slot.imageUrl && (
         <div className="board-promo-image-wrap">
           <video
-            src={primary.videoUrl}
+            src={slot.videoUrl}
             autoPlay
             muted
             loop
@@ -129,9 +127,20 @@ export function PromoPanel({ featureSlots, freshTheme = false, fillContainer = f
         </div>
       )}
       <div className="board-promo-text">
-        {primary.title && <div className="board-promo-title">{primary.title}</div>}
-        {primary.subtitle && <div className="board-promo-subtitle">{primary.subtitle}</div>}
+        {slot.title && <div className="board-promo-title">{slot.title}</div>}
+        {slot.subtitle && <div className="board-promo-subtitle">{slot.subtitle}</div>}
       </div>
+      {featureSlots.length > 1 && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 6, padding: "8px 0 4px" }}>
+          {featureSlots.map((_, i) => (
+            <div key={i} style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: i === activeIdx ? "#f97316" : "#555",
+              transition: "background 0.3s",
+            }} />
+          ))}
+        </div>
+      )}
     </aside>
   );
 }
