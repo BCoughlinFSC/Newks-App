@@ -1178,12 +1178,13 @@ def chunk_list(items: List[str], size: int) -> List[List[str]]:
         return [items]
     return [items[i:i + size] for i in range(0, len(items), size)]
 
-async def get_all_active_locations(client: httpx.AsyncClient) -> List[Location]:
+async def get_all_active_locations(client: httpx.AsyncClient, include_test: bool = False) -> List[Location]:
     """Get all active locations from Toast API with error handling and in-memory caching."""
     # In-process cache to avoid hammering Toast for every report / request.
+    cache_key = "data_with_test" if include_test else "data"
     now = time.time()
-    cached = _locations_cache.get("data")
-    expires_at = _locations_cache.get("expires_at", 0)
+    cached = _locations_cache.get(cache_key)
+    expires_at = _locations_cache.get(f"{cache_key}_expires_at", 0)
     if cached is not None and expires_at > now:
         return cached  # type: ignore[return-value]
 
@@ -1229,12 +1230,12 @@ async def get_all_active_locations(client: httpx.AsyncClient) -> List[Location]:
             externalId=item.get("externalId") or item.get("restaurantExternalId") or item.get("restaurantId"),
         )
         for item in data
-        if item.get("active") and not item.get("archived") and not item.get("testMode")
+        if item.get("active") and not item.get("archived") and (include_test or not item.get("testMode"))
     ]
 
-    logger.info(f"Loaded {len(active)} active locations from Toast API")
-    _locations_cache["data"] = active
-    _locations_cache["expires_at"] = now + LOCATIONS_CACHE_TTL_SECONDS
+    logger.info(f"Loaded {len(active)} active locations from Toast API (include_test={include_test})")
+    _locations_cache[cache_key] = active
+    _locations_cache[f"{cache_key}_expires_at"] = now + LOCATIONS_CACHE_TTL_SECONDS
     return active
 
 async def request_toast_report(
@@ -5799,9 +5800,9 @@ async def admin_set_user_restaurants(
     return User(**{k: v for k, v in users[user_id].items() if k != "password"})
 
 @app.get("/locations", response_model=List[Location])
-async def list_locations(optional_user: Optional[User] = Depends(get_optional_user)):
+async def list_locations(optional_user: Optional[User] = Depends(get_optional_user), includeTest: bool = False):
     async with httpx.AsyncClient(timeout=30.0) as client:
-        all_locs = await get_all_active_locations(client)
+        all_locs = await get_all_active_locations(client, include_test=includeTest)
     # Filter to assigned restaurants for authenticated non-admin users who have an assignment.
     # Admins and unauthenticated callers always receive the full list.
     if optional_user and optional_user.role != "admin" and optional_user.assignedRestaurants:
