@@ -10184,12 +10184,77 @@ async def get_labor_summary(
 initialize_super_admin()
 
 # ------------------
+# Menuboard API Proxy → Express server on port 8787
+# ------------------
+
+MENUBOARD_API_URL = os.getenv("MENUBOARD_API_URL", "http://localhost:8787")
+
+async def _proxy_to_menuboard(request, path: str):
+    """Forward a request to the menuboard Express server."""
+    url = f"{MENUBOARD_API_URL}/{path.lstrip('/')}"
+    headers = {k: v for k, v in request.headers.items()
+               if k.lower() not in ("host", "content-length", "transfer-encoding")}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                content=await request.body(),
+                params=request.query_params,
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            headers={k: v for k, v in resp.headers.items()
+                     if k.lower() not in ("transfer-encoding", "content-encoding", "content-length")},
+            media_type=resp.headers.get("content-type"),
+        )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Menuboard API server unavailable")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Menuboard API server timeout")
+
+@app.api_route("/api/board-config/{rest:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_board_config(request, rest: str):
+    return await _proxy_to_menuboard(request, f"api/board-config/{rest}")
+
+@app.api_route("/api/toast/{rest:path}", methods=["GET", "POST"])
+async def proxy_toast_api(request, rest: str):
+    return await _proxy_to_menuboard(request, f"api/toast/{rest}")
+
+@app.get("/api/menu")
+async def proxy_menu_api(request):
+    return await _proxy_to_menuboard(request, "api/menu")
+
+@app.get("/api/debug/menu")
+async def proxy_debug_menu(request):
+    return await _proxy_to_menuboard(request, "api/debug/menu")
+
+# ------------------
 # Static Frontend
 # ------------------
 
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
+menuboard_path = os.path.join(os.path.dirname(__file__), "menuboard")
 kiosk_path = os.path.join(os.path.dirname(__file__), "kiosk")
 media_path = UPLOAD_ROOT
+
+if os.path.isdir(menuboard_path):
+    # SPA fallback: serve index.html for any /menuboard/* route that doesn't match a file
+    @app.get("/menuboard/{rest:path}")
+    async def menuboard_spa_fallback(rest: str):
+        file_path = os.path.join(menuboard_path, rest)
+        if os.path.isfile(file_path):
+            from starlette.responses import FileResponse
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(menuboard_path, "index.html"))
+
+    @app.get("/menuboard")
+    @app.get("/menuboard/")
+    async def menuboard_root():
+        from starlette.responses import FileResponse
+        return FileResponse(os.path.join(menuboard_path, "index.html"))
 
 if os.path.isdir(kiosk_path):
     app.mount("/kiosk", StaticFiles(directory=kiosk_path, html=True), name="kiosk")
