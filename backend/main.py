@@ -15,7 +15,7 @@ import os
 
 import httpx
 from httpx import HTTPStatusError
-from fastapi import FastAPI, HTTPException, Query, Body, Depends, status, APIRouter, Response, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Body, Depends, status, APIRouter, Response, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -10189,7 +10189,7 @@ initialize_super_admin()
 
 MENUBOARD_API_URL = os.getenv("MENUBOARD_API_URL", "http://localhost:8787")
 
-async def _proxy_to_menuboard(request, path: str):
+async def _proxy_to_menuboard(request: Request, path: str):
     """Forward a request to the menuboard Express server."""
     url = f"{MENUBOARD_API_URL}/{path.lstrip('/')}"
     headers = {k: v for k, v in request.headers.items()
@@ -10216,19 +10216,19 @@ async def _proxy_to_menuboard(request, path: str):
         raise HTTPException(status_code=504, detail="Menuboard API server timeout")
 
 @app.api_route("/api/board-config/{rest:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def proxy_board_config(request, rest: str):
+async def proxy_board_config(request: Request, rest: str):
     return await _proxy_to_menuboard(request, f"api/board-config/{rest}")
 
 @app.api_route("/api/toast/{rest:path}", methods=["GET", "POST"])
-async def proxy_toast_api(request, rest: str):
+async def proxy_toast_api(request: Request, rest: str):
     return await _proxy_to_menuboard(request, f"api/toast/{rest}")
 
 @app.get("/api/menu")
-async def proxy_menu_api(request):
+async def proxy_menu_api(request: Request):
     return await _proxy_to_menuboard(request, "api/menu")
 
 @app.get("/api/debug/menu")
-async def proxy_debug_menu(request):
+async def proxy_debug_menu(request: Request):
     return await _proxy_to_menuboard(request, "api/debug/menu")
 
 # ------------------
