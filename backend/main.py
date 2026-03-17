@@ -10241,20 +10241,20 @@ kiosk_path = os.path.join(os.path.dirname(__file__), "kiosk")
 media_path = UPLOAD_ROOT
 
 if os.path.isdir(menuboard_path):
-    # SPA fallback: serve index.html for any /menuboard/* route that doesn't match a file
-    @app.get("/menuboard/{rest:path}")
-    async def menuboard_spa_fallback(rest: str):
-        file_path = os.path.join(menuboard_path, rest)
-        if os.path.isfile(file_path):
-            from starlette.responses import FileResponse
-            return FileResponse(file_path)
-        return FileResponse(os.path.join(menuboard_path, "index.html"))
+    from starlette.responses import FileResponse as _FileResponse
 
     @app.get("/menuboard")
-    @app.get("/menuboard/")
-    async def menuboard_root():
-        from starlette.responses import FileResponse
-        return FileResponse(os.path.join(menuboard_path, "index.html"))
+    async def menuboard_redirect():
+        from starlette.responses import RedirectResponse
+        return RedirectResponse("/menuboard/")
+
+    @app.get("/menuboard/{rest:path}")
+    async def menuboard_spa_fallback(rest: str):
+        if rest:
+            file_path = os.path.join(menuboard_path, rest)
+            if os.path.isfile(file_path):
+                return _FileResponse(file_path)
+        return _FileResponse(os.path.join(menuboard_path, "index.html"))
 
 if os.path.isdir(kiosk_path):
     app.mount("/kiosk", StaticFiles(directory=kiosk_path, html=True), name="kiosk")
