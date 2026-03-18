@@ -10753,7 +10753,11 @@ async def create_help_ticket(ticket: HelpTicketRequest = Body(...)):
 # ------------------
 
 # Only include these job titles in the tip pool
-_TIP_POOL_JOBS = {"server"}
+_TIP_POOL_JOBS = {
+    "dish", "shift lead", "prep", "server", "salad", "pizza",
+    "sandwich", "catering team leader", "training boh", "dra",
+    "training foh", "expo", "certified trainer", "utility",
+}
 
 
 async def _fetch_tips_for_restaurant(
