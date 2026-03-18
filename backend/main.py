@@ -10846,6 +10846,18 @@ async def _fetch_employee_hours(
     start_dt = datetime(start_date.year, start_date.month, start_date.day)
     end_dt = datetime(end_date.year, end_date.month, end_date.day)
 
+    # Debug counters
+    total_entries = 0
+    skipped_clocked_in = 0
+    skipped_ghost = 0
+    ghost_jobs_seen: Dict[str, int] = {}
+
+    logger.info(
+        f"Tip pool labor: restaurant={restaurant_guid[:8]}, "
+        f"emp_map_size={len(emp_map)}, job_map_size={len(job_map)}, "
+        f"job_map_sample={dict(list(job_map.items())[:5])}"
+    )
+
     chunk_start = start_dt
     while chunk_start <= end_dt:
         chunk_end = min(chunk_start + timedelta(days=29), end_dt)
@@ -10856,13 +10868,15 @@ async def _fetch_employee_hours(
         try:
             resp = await client.get(labor_url, headers=headers, params=params, timeout=60.0)
             if resp.status_code != 200:
-                logger.warning(f"Tip pool labor API {resp.status_code} for {restaurant_guid[:8]}")
+                logger.warning(f"Tip pool labor API {resp.status_code} for {restaurant_guid[:8]}: {resp.text[:200]}")
             else:
                 entries = resp.json()
                 if not isinstance(entries, list):
                     entries = entries.get("timeEntries", []) if isinstance(entries, dict) else []
+                total_entries += len(entries)
                 for entry in entries:
                     if entry.get("outDate") is None:
+                        skipped_clocked_in += 1
                         continue
                     emp_ref = entry.get("employeeReference") or {}
                     job_ref = entry.get("jobReference") or {}
@@ -10871,6 +10885,8 @@ async def _fetch_employee_hours(
                     job_title = job_map.get(job_guid, job_ref.get("externalId", "Unknown"))
                     # Filter out ghost jobs
                     if job_title.lower().strip() in _GHOST_JOBS:
+                        skipped_ghost += 1
+                        ghost_jobs_seen[job_title] = ghost_jobs_seen.get(job_title, 0) + 1
                         continue
                     emp_name = emp_map.get(emp_guid, emp_ref.get("externalId", emp_guid[:8]))
                     reg_h = float(entry.get("regularHours") or 0)
@@ -10885,8 +10901,15 @@ async def _fetch_employee_hours(
                     by_employee[emp_guid]["regularHours"] += reg_h
                     by_employee[emp_guid]["overtimeHours"] += ot_h
         except Exception as exc:
-            logger.warning(f"Tip pool labor exception for {restaurant_guid[:8]}: {exc}")
+            logger.warning(f"Tip pool labor exception for {restaurant_guid[:8]}: {exc}", exc_info=True)
         chunk_start = chunk_end + timedelta(days=1)
+
+    logger.info(
+        f"Tip pool labor results: restaurant={restaurant_guid[:8]}, "
+        f"total_entries={total_entries}, skipped_clocked_in={skipped_clocked_in}, "
+        f"skipped_ghost={skipped_ghost}, ghost_jobs={ghost_jobs_seen}, "
+        f"unique_employees={len(by_employee)}"
+    )
 
     results = []
     for emp_guid, data in by_employee.items():
