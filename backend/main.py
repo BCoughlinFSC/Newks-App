@@ -1600,6 +1600,23 @@ async def _compute_sales_metrics_for_day(
     cash_amount: float = 0.0
     card_amount: float = 0.0
 
+    # Catering / non-catering splits (based on check-level selection names)
+    cat_order_count: int = 0
+    cat_sc: float = 0.0
+    cat_discount: float = 0.0
+    cat_void: int = 0
+    cat_cash: float = 0.0
+    cat_card: float = 0.0
+
+    def _check_is_catering(check: Dict) -> bool:
+        for sel in check.get("selections", []):
+            if sel.get("voided"):
+                continue
+            name = (sel.get("displayName") or (sel.get("item") or {}).get("name") or "").lower()
+            if "(catering)" in name:
+                return True
+        return False
+
     for order in orders:
         if order.get("voided"):
             void_count += len(order.get("checks", []))
@@ -1611,15 +1628,24 @@ async def _compute_sales_metrics_for_day(
                 void_count += 1
                 continue
 
+            is_catering = _check_is_catering(check)
+            if is_catering:
+                cat_order_count += 1
+
             # Restaurant-destination service charges
             for sc in check.get("appliedServiceCharges", []):
                 charge = float(sc.get("chargeAmount") or 0)
                 if charge > 0 and (sc.get("destination") or "RESTAURANT") == "RESTAURANT":
                     restaurant_sc += charge
+                    if is_catering:
+                        cat_sc += charge
 
             # Discounts
             for disc in check.get("appliedDiscounts", []):
-                discount_amount += float(disc.get("discountAmount") or 0)
+                amt = float(disc.get("discountAmount") or 0)
+                discount_amount += amt
+                if is_catering:
+                    cat_discount += amt
 
             # Payments: CASH vs everything else (credit, gift card, etc.)
             for pmt in check.get("payments", []):
@@ -1628,20 +1654,31 @@ async def _compute_sales_metrics_for_day(
                     continue
                 if (pmt.get("type") or "").upper() == "CASH":
                     cash_amount += pmt_amount
+                    if is_catering:
+                        cat_cash += pmt_amount
                 else:
                     card_amount += pmt_amount
+                    if is_catering:
+                        cat_card += pmt_amount
 
     # Populate SC cache as side effect so the standard net-sales report benefits too
     cache_key = f"{restaurant_guid}|{business_date_yyyymmdd}"
     _sc_daily_cache[cache_key] = restaurant_sc
 
     return {
-        "order_count": order_count,
-        "restaurant_sc": restaurant_sc,
-        "discount_amount": discount_amount,
-        "void_count": void_count,
-        "cash_amount": cash_amount,
-        "card_amount": card_amount,
+        "order_count":      order_count,
+        "restaurant_sc":    restaurant_sc,
+        "discount_amount":  discount_amount,
+        "void_count":       void_count,
+        "cash_amount":      cash_amount,
+        "card_amount":      card_amount,
+        # catering split
+        "cat_order_count":  cat_order_count,
+        "cat_sc":           cat_sc,
+        "cat_discount":     cat_discount,
+        "cat_void":         cat_void,
+        "cat_cash":         cat_cash,
+        "cat_card":         cat_card,
     }
 
 
@@ -2962,9 +2999,88 @@ def pivot_metrics_by_location_and_date(
         "totals": totals_rows
     }
 
+async def _fetch_catering_item_data(
+    client: httpx.AsyncClient,
+    start_date: date,
+    end_date: date,
+    restaurant_ids: List[str],
+) -> Dict[str, Dict]:
+    """
+    Fetch item-level analytics and return per '{restaurantGuid}|{businessDate}' key:
+      catering_ns    – net sales from items whose name contains '(catering)'
+      catering_gc    – tag-based guest count for catering items (qty × GC tag value)
+      non_catering_gc – tag-based guest count for non-catering items
+    """
+    # Build guest-count tag lookup (same approach as build_guest_count_report)
+    gc_by_guid: Dict[str, float] = {}
+    try:
+        tags_mapping = await get_menu_tags_mapping(client, restaurant_ids[0])
+        for guid, tags in tags_mapping.items():
+            for tag in tags:
+                val = parse_guest_count_value(tag.get("tagName", ""))
+                if val is not None:
+                    gc_by_guid[guid] = val
+                    break
+    except Exception as exc:
+        logger.warning("_fetch_catering_item_data: failed to load GC tag mapping: %s", exc)
+
+    days_diff = (end_date - start_date).days + 1
+    all_rows: list = []
+
+    if days_diff > 7:
+        current_start = start_date
+        while current_start <= end_date:
+            chunk_end = min(current_start + timedelta(days=6), end_date)
+            try:
+                rg = await request_toast_report(
+                    client, current_start, chunk_end, restaurant_ids, "menu", ["MENU_ITEM"]
+                )
+                rows = await fetch_toast_report(client, rg, "menu")
+                if rows:
+                    all_rows.extend(rows)
+            except Exception as exc:
+                logger.warning("Catering analytics fetch failed for %s–%s: %s", current_start, chunk_end, exc)
+            current_start = chunk_end + timedelta(days=1)
+    else:
+        try:
+            rg = await request_toast_report(
+                client, start_date, end_date, restaurant_ids, "menu", ["MENU_ITEM"]
+            )
+            all_rows = await fetch_toast_report(client, rg, "menu")
+        except Exception as exc:
+            logger.warning("Catering analytics fetch failed: %s", exc)
+
+    result: Dict[str, Dict] = {}
+    for row in (all_rows or []):
+        r_guid  = row.get("restaurantGuid", "")
+        b_date  = row.get("businessDate", "")
+        key     = f"{r_guid}|{b_date}"
+        name    = (row.get("menuItemName") or "").lower()
+        ns      = float(row.get("netSalesAmount") or 0)
+        qty     = float(row.get("quantitySold") or 0)
+        item_gc = gc_by_guid.get(row.get("menuItemGuid", ""), 0.0)
+        gc_contrib = qty * item_gc
+
+        if key not in result:
+            result[key] = {"catering_ns": 0.0, "catering_gc": 0.0, "non_catering_gc": 0.0}
+
+        if "(catering)" in name:
+            result[key]["catering_ns"] += ns
+            result[key]["catering_gc"] += gc_contrib
+        else:
+            result[key]["non_catering_gc"] += gc_contrib
+
+    logger.info(
+        "Catering item data fetch: %d item rows → %d location/date keys",
+        len(all_rows or []), len(result),
+    )
+    return result
+
+
 def compute_sales_summary_by_location(
     raw_rows: list,
     metrics_by_key: Dict[str, Dict],
+    catering_item_data: Optional[Dict[str, Dict]] = None,
 ) -> Dict:
     """
     Aggregate ERA netSalesAmount + Orders API metrics into a per-location summary table.
@@ -2993,63 +3109,172 @@ def compute_sales_summary_by_location(
         key      = f"{r_guid}|{b_date}"
         m        = metrics_by_key.get(key, {})
 
+        guest_count   = int(row.get("guestCount") or 0)
+        _item_key     = (catering_item_data or {}).get(key, {})
+        catering_ns   = float(_item_key.get("catering_ns", 0.0))
+        catering_gc   = float(_item_key.get("catering_gc", 0.0))
+        non_cat_gc    = float(_item_key.get("non_catering_gc", 0.0))
+
         if r_name not in loc:
             loc[r_name] = {
                 "orders": 0, "toast_net": 0.0, "svc_fees": 0.0,
                 "discounts": 0.0, "voids": 0, "cash": 0.0, "card": 0.0,
+                "guest_count": 0, "catering_toast": 0.0,
+                "cat_orders": 0, "cat_sc": 0.0, "cat_discount": 0.0,
+                "cat_void": 0, "cat_cash": 0.0, "cat_card": 0.0,
+                "cat_gc": 0.0, "non_cat_gc": 0.0,
             }
 
-        loc[r_name]["orders"]   += m.get("order_count", 0)
-        loc[r_name]["toast_net"] += toast_ns
-        loc[r_name]["svc_fees"]  += m.get("restaurant_sc", 0.0)
-        loc[r_name]["discounts"] += m.get("discount_amount", 0.0)
-        loc[r_name]["voids"]    += m.get("void_count", 0)
-        loc[r_name]["cash"]     += m.get("cash_amount", 0.0)
-        loc[r_name]["card"]     += m.get("card_amount", 0.0)
+        loc[r_name]["orders"]       += m.get("order_count", 0)
+        loc[r_name]["toast_net"]    += toast_ns
+        loc[r_name]["svc_fees"]     += m.get("restaurant_sc", 0.0)
+        loc[r_name]["discounts"]    += m.get("discount_amount", 0.0)
+        loc[r_name]["voids"]        += m.get("void_count", 0)
+        loc[r_name]["cash"]         += m.get("cash_amount", 0.0)
+        loc[r_name]["card"]         += m.get("card_amount", 0.0)
+        loc[r_name]["guest_count"]  += guest_count
+        loc[r_name]["catering_toast"] += catering_ns
+        loc[r_name]["cat_gc"]       += catering_gc
+        loc[r_name]["non_cat_gc"]   += non_cat_gc
+        loc[r_name]["cat_orders"]   += m.get("cat_order_count", 0)
+        loc[r_name]["cat_sc"]       += m.get("cat_sc", 0.0)
+        loc[r_name]["cat_discount"] += m.get("cat_discount", 0.0)
+        loc[r_name]["cat_void"]     += m.get("cat_void", 0)
+        loc[r_name]["cat_cash"]     += m.get("cat_cash", 0.0)
+        loc[r_name]["cat_card"]     += m.get("cat_card", 0.0)
 
-    summary_rows = []
+    summary_rows  = []
+    catering_rows = []
+    non_cat_rows  = []
     tot: Dict[str, Any] = {
         "orders": 0, "toastNetSales": 0.0, "serviceFees": 0.0,
         "netSales": 0.0, "discounts": 0.0, "voids": 0, "cash": 0.0, "card": 0.0,
+        "guestCount": 0,
+    }
+    cat_tot: Dict[str, Any] = {
+        "orders": 0, "guestCount": 0.0, "netSales": 0.0, "discounts": 0.0, "voids": 0, "cash": 0.0, "card": 0.0,
+    }
+    non_cat_tot: Dict[str, Any] = {
+        "orders": 0, "guestCount": 0.0, "netSales": 0.0, "discounts": 0.0, "voids": 0, "cash": 0.0, "card": 0.0,
     }
 
     for r_name in sorted(loc.keys()):
-        d         = loc[r_name]
-        toast_ns  = round(d["toast_net"], 2)
-        svc_fees  = round(d["svc_fees"], 2)
-        net_sales = round(toast_ns - svc_fees, 2)
-        orders    = d["orders"]
-        avg_tick  = round(net_sales / orders, 2) if orders > 0 else 0.0
-        discounts = round(d["discounts"], 2)
-        voids     = d["voids"]
-        cash      = round(d["cash"], 2)
-        card      = round(d["card"], 2)
+        d              = loc[r_name]
+        toast_ns       = round(d["toast_net"], 2)
+        svc_fees       = round(d["svc_fees"], 2)
+        net_sales      = round(toast_ns - svc_fees, 2)
+        orders         = d["orders"]
+        avg_tick       = round(net_sales / orders, 2) if orders > 0 else 0.0
+        discounts      = round(d["discounts"], 2)
+        voids          = d["voids"]
+        cash           = round(d["cash"], 2)
+        card           = round(d["card"], 2)
+        guest_count    = d["guest_count"]
+        ppa            = round(net_sales / guest_count, 2) if guest_count > 0 else 0.0
+        catering_toast = round(d["catering_toast"], 2)
+
+        # Catering split — net sales from item analytics, other metrics from orders
+        cat_svc          = round(d["cat_sc"], 2)
+        catering_net     = round(catering_toast - cat_svc, 2)
+        cat_orders       = d["cat_orders"]
+        cat_discounts    = round(d["cat_discount"], 2)
+        cat_voids        = d["cat_void"]
+        cat_cash         = round(d["cat_cash"], 2)
+        cat_card         = round(d["cat_card"], 2)
+        cat_guest_count  = round(d["cat_gc"], 2)
+        cat_avg          = round(catering_net / cat_orders, 2) if cat_orders > 0 else 0.0
+        cat_ppa          = round(catering_net / cat_guest_count, 2) if cat_guest_count > 0 else 0.0
+
+        non_cat_net      = round(net_sales - catering_net, 2)
+        non_cat_orders   = orders - cat_orders
+        non_cat_disc     = round(discounts - cat_discounts, 2)
+        non_cat_voids    = voids - cat_voids
+        non_cat_cash     = round(cash - cat_cash, 2)
+        non_cat_card     = round(card - cat_card, 2)
+        non_cat_gc       = round(d["non_cat_gc"], 2)
+        non_cat_avg      = round(non_cat_net / non_cat_orders, 2) if non_cat_orders > 0 else 0.0
+        non_cat_ppa      = round(non_cat_net / non_cat_gc, 2) if non_cat_gc > 0 else 0.0
 
         summary_rows.append({
             "restaurantName": r_name,
             "orders":         orders,
+            "guestCount":     guest_count,
             "toastNetSales":  toast_ns,
             "serviceFees":    svc_fees,
             "netSales":       net_sales,
             "avgTicket":      avg_tick,
+            "ppa":            ppa,
             "discounts":      discounts,
             "voids":          voids,
             "cash":           cash,
             "card":           card,
         })
+        catering_rows.append({
+            "restaurantName": r_name,
+            "orders":         cat_orders,
+            "guestCount":     cat_guest_count,
+            "netSales":       catering_net,
+            "avgTicket":      cat_avg,
+            "ppa":            cat_ppa,
+            "discounts":      cat_discounts,
+            "voids":          cat_voids,
+            "cash":           cat_cash,
+            "card":           cat_card,
+        })
+        non_cat_rows.append({
+            "restaurantName": r_name,
+            "orders":         non_cat_orders,
+            "guestCount":     non_cat_gc,
+            "netSales":       non_cat_net,
+            "avgTicket":      non_cat_avg,
+            "ppa":            non_cat_ppa,
+            "discounts":      non_cat_disc,
+            "voids":          non_cat_voids,
+            "cash":           non_cat_cash,
+            "card":           non_cat_card,
+        })
 
-        tot["orders"]       += orders
-        tot["toastNetSales"] = round(tot["toastNetSales"] + toast_ns, 2)
-        tot["serviceFees"]   = round(tot["serviceFees"] + svc_fees, 2)
-        tot["netSales"]      = round(tot["netSales"] + net_sales, 2)
-        tot["discounts"]     = round(tot["discounts"] + discounts, 2)
-        tot["voids"]        += voids
-        tot["cash"]          = round(tot["cash"] + cash, 2)
-        tot["card"]          = round(tot["card"] + card, 2)
+        tot["orders"]        += orders
+        tot["toastNetSales"]  = round(tot["toastNetSales"] + toast_ns, 2)
+        tot["serviceFees"]    = round(tot["serviceFees"] + svc_fees, 2)
+        tot["netSales"]       = round(tot["netSales"] + net_sales, 2)
+        tot["discounts"]      = round(tot["discounts"] + discounts, 2)
+        tot["voids"]         += voids
+        tot["cash"]           = round(tot["cash"] + cash, 2)
+        tot["card"]           = round(tot["card"] + card, 2)
+        tot["guestCount"]    += guest_count
 
-    tot["avgTicket"] = round(tot["netSales"] / tot["orders"], 2) if tot["orders"] > 0 else 0.0
+        cat_tot["orders"]      += cat_orders
+        cat_tot["guestCount"]   = round(cat_tot["guestCount"] + cat_guest_count, 2)
+        cat_tot["netSales"]     = round(cat_tot["netSales"] + catering_net, 2)
+        cat_tot["discounts"]    = round(cat_tot["discounts"] + cat_discounts, 2)
+        cat_tot["voids"]       += cat_voids
+        cat_tot["cash"]         = round(cat_tot["cash"] + cat_cash, 2)
+        cat_tot["card"]         = round(cat_tot["card"] + cat_card, 2)
 
-    return {"summaryTable": summary_rows, "summaryTotals": tot}
+        non_cat_tot["orders"]     += non_cat_orders
+        non_cat_tot["guestCount"]  = round(non_cat_tot["guestCount"] + non_cat_gc, 2)
+        non_cat_tot["netSales"]    = round(non_cat_tot["netSales"] + non_cat_net, 2)
+        non_cat_tot["discounts"]   = round(non_cat_tot["discounts"] + non_cat_disc, 2)
+        non_cat_tot["voids"]      += non_cat_voids
+        non_cat_tot["cash"]        = round(non_cat_tot["cash"] + non_cat_cash, 2)
+        non_cat_tot["card"]        = round(non_cat_tot["card"] + non_cat_card, 2)
+
+    tot["avgTicket"]          = round(tot["netSales"] / tot["orders"], 2) if tot["orders"] > 0 else 0.0
+    tot["ppa"]                = round(tot["netSales"] / tot["guestCount"], 2) if tot["guestCount"] > 0 else 0.0
+    cat_tot["avgTicket"]      = round(cat_tot["netSales"] / cat_tot["orders"], 2) if cat_tot["orders"] > 0 else 0.0
+    cat_tot["ppa"]            = round(cat_tot["netSales"] / cat_tot["guestCount"], 2) if cat_tot["guestCount"] > 0 else 0.0
+    non_cat_tot["avgTicket"]  = round(non_cat_tot["netSales"] / non_cat_tot["orders"], 2) if non_cat_tot["orders"] > 0 else 0.0
+    non_cat_tot["ppa"]        = round(non_cat_tot["netSales"] / non_cat_tot["guestCount"], 2) if non_cat_tot["guestCount"] > 0 else 0.0
+
+    return {
+        "summaryTable":      summary_rows,
+        "summaryTotals":     tot,
+        "cateringTable":     catering_rows,
+        "cateringTotals":    cat_tot,
+        "nonCateringTable":  non_cat_rows,
+        "nonCateringTotals": non_cat_tot,
+    }
 
 
 def pivot_menu_items_by_tag(
@@ -6510,6 +6735,212 @@ async def delete_saved_report(report_id: str):
 # Report Execution API
 # ------------------
 
+def compute_royalty_by_location(raw_rows: list) -> Dict:
+    """
+    Aggregate ERA netSalesAmount per location and compute royalty (5%) and MKT fund (1.75%).
+
+    Returns:
+    {
+        "royaltyTable": [
+            { "restaurantName", "netSales", "royalty5", "mktFund175" },
+            ...
+        ],
+        "royaltyTotals": { "netSales", "royalty5", "mktFund175", "locationCount" }
+    }
+    """
+    ROYALTY_RATE = 0.05
+    MKT_FUND_RATE = 0.0175
+
+    loc: Dict[str, float] = {}
+    for row in raw_rows:
+        r_name = row.get("restaurantName", "Unknown")
+        ns = float(row.get("netSalesAmount") or 0)
+        loc[r_name] = loc.get(r_name, 0.0) + ns
+
+    table = []
+    tot_ns = 0.0
+    for r_name in sorted(loc.keys()):
+        ns = round(loc[r_name], 2)
+        r5 = round(ns * ROYALTY_RATE, 2)
+        mkt = round(ns * MKT_FUND_RATE, 2)
+        table.append({
+            "restaurantName": r_name,
+            "netSales": ns,
+            "royalty5": r5,
+            "mktFund175": mkt,
+        })
+        tot_ns += ns
+
+    tot_ns = round(tot_ns, 2)
+    return {
+        "royaltyTable": table,
+        "royaltyTotals": {
+            "netSales": tot_ns,
+            "royalty5": round(tot_ns * ROYALTY_RATE, 2),
+            "mktFund175": round(tot_ns * MKT_FUND_RATE, 2),
+            "locationCount": len(table),
+        },
+    }
+
+
+_GUEST_COUNT_RE = re.compile(r"^Guest\s*Count\s+([\d.]+)$", re.IGNORECASE)
+
+def parse_guest_count_value(tag_name: str) -> Optional[float]:
+    """Parse a Guest Count tag name like 'Guest Count 0.5' → 0.5. Returns None if not a GC tag."""
+    m = _GUEST_COUNT_RE.match(tag_name.strip())
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+async def build_guest_count_report(
+    client: httpx.AsyncClient,
+    report_config: ReportConfig,
+    restaurant_ids: List[str],
+    start_date: date,
+    end_date: date,
+    locations: Optional[List] = None,
+) -> dict:
+    """Build guest count report: qty sold × Guest Count tag value per item."""
+
+    # ── 1. Fetch tag mapping ──
+    if locations:
+        restaurant_ids = prioritize_menu_tag_restaurants(restaurant_ids, locations)
+    tags_mapping = await get_menu_tags_mapping(client, restaurant_ids[0])
+    logger.info(f"Guest count report: tag mapping has {len(tags_mapping)} items")
+
+    # ── 2. Build GUID → guest count value lookup ──
+    gc_by_guid: Dict[str, Tuple[float, str]] = {}  # guid → (value, tagName)
+    for guid, tags in tags_mapping.items():
+        for tag in tags:
+            val = parse_guest_count_value(tag.get("tagName", ""))
+            if val is not None:
+                gc_by_guid[guid] = (val, tag["tagName"])
+                break
+    logger.info(f"Guest count report: {len(gc_by_guid)} items have Guest Count tags")
+
+    if not gc_by_guid:
+        return {
+            "guestCountTable": [],
+            "guestCountTotals": {"totalGuestCount": 0, "totalQtySold": 0, "locationCount": 0, "itemCount": 0},
+            "guestCountItemBreakdown": [],
+        }
+
+    # ── 3. Fetch menu mix data (MENU_ITEM analytics, weekly chunks) ──
+    days_diff = (end_date - start_date).days + 1
+    all_rows: List[Dict] = []
+    if days_diff > 7:
+        current_start = start_date
+        while current_start <= end_date:
+            chunk_end = min(current_start + timedelta(days=6), end_date)
+            report_guid = await request_toast_report(
+                client, current_start, chunk_end, restaurant_ids, "menu", ["MENU_ITEM"]
+            )
+            chunk_rows = await fetch_toast_report(client, report_guid, "menu")
+            if chunk_rows:
+                all_rows.extend(chunk_rows)
+            current_start = chunk_end + timedelta(days=1)
+    else:
+        report_guid = await request_toast_report(
+            client, start_date, end_date, restaurant_ids, "menu", ["MENU_ITEM"]
+        )
+        all_rows = await fetch_toast_report(client, report_guid, "menu") or []
+
+    logger.info(f"Guest count report: {len(all_rows)} analytics rows fetched")
+
+    # ── 4. Also fetch MODIFIER analytics ──
+    modifier_rows: List[Dict] = []
+    if days_diff > 7:
+        current_start = start_date
+        while current_start <= end_date:
+            chunk_end = min(current_start + timedelta(days=6), end_date)
+            mod_guid = await request_toast_report(
+                client, current_start, chunk_end, restaurant_ids, "menu", ["MODIFIER"]
+            )
+            chunk = await fetch_toast_report(client, mod_guid, "menu")
+            if chunk:
+                modifier_rows.extend(chunk)
+            current_start = chunk_end + timedelta(days=1)
+    else:
+        mod_guid = await request_toast_report(
+            client, start_date, end_date, restaurant_ids, "menu", ["MODIFIER"]
+        )
+        modifier_rows = await fetch_toast_report(client, mod_guid, "menu") or []
+
+    all_rows.extend(modifier_rows)
+
+    # Get display name mapping
+    cache_entry = _menu_tags_cache.get(restaurant_ids[0], {})
+    guid_to_name = cache_entry.get("guid_to_name", {})
+
+    # ── 5. Process rows: multiply qty × guest count value ──
+    # Accumulate by location and by item
+    loc_totals: Dict[str, Dict] = {}  # restaurantGuid → {name, totalQty, totalGC, items set}
+    item_rows: List[Dict] = []
+
+    for row in all_rows:
+        item_guid = row.get("menuItemGuid") or row.get("modifierGuid") or ""
+        if item_guid not in gc_by_guid:
+            continue
+
+        gc_value, gc_tag = gc_by_guid[item_guid]
+        qty = float(row.get("quantitySold", 0) or 0)
+        if qty == 0:
+            continue
+
+        contribution = round(qty * gc_value, 2)
+        rest_guid = row.get("restaurantGuid", "")
+        rest_name = row.get("restaurantName", "Unknown")
+        item_name = guid_to_name.get(item_guid) or row.get("menuItemName") or row.get("modifierName") or "Unknown Item"
+
+        item_rows.append({
+            "restaurantGuid": rest_guid,
+            "restaurantName": rest_name,
+            "menuItemName": item_name,
+            "quantitySold": qty,
+            "guestCountValue": gc_value,
+            "guestContribution": contribution,
+        })
+
+        if rest_guid not in loc_totals:
+            loc_totals[rest_guid] = {"restaurantName": rest_name, "totalQtySold": 0, "totalGuestCount": 0, "items": set()}
+        loc_totals[rest_guid]["totalQtySold"] += qty
+        loc_totals[rest_guid]["totalGuestCount"] += contribution
+        loc_totals[rest_guid]["items"].add(item_guid)
+
+    # ── 6. Build response ──
+    guest_count_table = sorted([
+        {
+            "restaurantGuid": guid,
+            "restaurantName": info["restaurantName"],
+            "totalQtySold": round(info["totalQtySold"], 2),
+            "totalGuestCount": round(info["totalGuestCount"], 2),
+            "itemCount": len(info["items"]),
+        }
+        for guid, info in loc_totals.items()
+    ], key=lambda x: x["restaurantName"])
+
+    grand_qty = sum(r["totalQtySold"] for r in guest_count_table)
+    grand_gc = sum(r["totalGuestCount"] for r in guest_count_table)
+
+    # Sort item breakdown by location then item name
+    item_rows.sort(key=lambda x: (x["restaurantName"], x["menuItemName"]))
+
+    return {
+        "guestCountTable": guest_count_table,
+        "guestCountTotals": {
+            "totalGuestCount": round(grand_gc, 2),
+            "totalQtySold": round(grand_qty, 2),
+            "locationCount": len(guest_count_table),
+            "itemCount": len(gc_by_guid),
+        },
+        "guestCountItemBreakdown": item_rows,
+    }
+
+
 async def build_menu_mix_report_fallback(
     client: httpx.AsyncClient,
     report_config: ReportConfig,
@@ -6908,7 +7339,13 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
             
             if not restaurant_ids or len(restaurant_ids) == 0:
                 raise HTTPException(status_code=400, detail="No restaurants available")
-            
+
+            # Guest Count report
+            if report_config.reportType == "guest_count":
+                return await build_guest_count_report(
+                    client, report_config, restaurant_ids, start_date, end_date, locations
+                )
+
             # Special handling for menu reports
             # Use Analytics API with groupBy: MENU_ITEM + join to tags
             if report_config.reportType == "menu":
@@ -7798,8 +8235,9 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                             )
                             return f"{guid}|{bd}", {}
 
-                met_results = await asyncio.gather(
-                    *[_fetch_metrics_combo(g, b) for g, b in unique_combos_ss]
+                met_results, catering_item_data = await asyncio.gather(
+                    asyncio.gather(*[_fetch_metrics_combo(g, b) for g, b in unique_combos_ss]),
+                    _fetch_catering_item_data(client, start_date, end_date, restaurant_ids),
                 )
                 metrics_by_key: Dict[str, Dict] = dict(met_results)
                 logger.info(
@@ -7807,7 +8245,11 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     len(metrics_by_key),
                     sum(m.get("order_count", 0) for m in metrics_by_key.values()),
                 )
-                return compute_sales_summary_by_location(raw_rows, metrics_by_key)
+                return compute_sales_summary_by_location(raw_rows, metrics_by_key, catering_item_data)
+
+            # Royalty report — just needs ERA net sales, no Orders API calls
+            if report_config.reportType == "royalty":
+                return compute_royalty_by_location(raw_rows)
 
             if report_config.reportType == "menu":
                 return await build_menu_mix_report_fallback(
@@ -9520,6 +9962,18 @@ async def get_report_types():
                     {"id": "MENU_ITEM", "name": "Menu Item", "description": "Group by menu item"}
                 ],
                 "supportsItemTagFilters": True
+            },
+            {
+                "id": "guest_count",
+                "name": "Guest Count",
+                "description": "Calculate guest count from item quantities x Guest Count tag values",
+                "groupByOptions": []
+            },
+            {
+                "id": "royalty",
+                "name": "Royalty Report",
+                "description": "Newk's net sales with Royalty 5% and MKT Fund 1.75% by location",
+                "groupByOptions": []
             }
         ],
         "dateRangeTypes": [

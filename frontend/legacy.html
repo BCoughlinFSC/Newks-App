@@ -585,6 +585,8 @@
         <a href="/toast-reporting-guide.html" class="nav-link-item">📘 Toast Reporting Guide</a>
         <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink">📱 Digital Orders by Platform (OLO)</a>
         <a href="/pick3.html" class="nav-link-item">📊 Pick 3 Report</a>
+        <a href="#" class="nav-link-item" id="guestCountNavLink" onclick="document.getElementById('reportType').value='guest_count';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">👥 Guest Count Report</a>
+        <a href="#" class="nav-link-item" id="royaltyNavLink" onclick="document.getElementById('reportType').value='royalty';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">💰 Royalty Report</a>
         <div class="nav-section-label hidden" id="dataNavSection" style="margin-top: 0.5rem;">Data</div>
         <a href="/mapping.html" class="nav-link-item hidden" id="mappingNavLink">🗂 Mapping Table</a>
         <a href="/msi-discrepancy.html" class="nav-link-item hidden" id="msiDiscrepancyNavLink">🐒 MSI Discrepancy</a>
@@ -643,9 +645,11 @@
           <div class="form-group">
             <label>Report Type</label>
             <select id="reportType">
-              <option value="sales_summary">Sales Summary (Orders, Revenue, Discounts, Voids, Cash/Card)</option>
+              <option value="sales_summary">Sales Summary (Tickets, Guests, PPA, Revenue, Discounts, Voids, Cash/Card)</option>
               <option value="metrics">Net Sales Report (Toast vs Newk's by Date)</option>
               <option value="menu">Menu Performance (Item-level Sales)</option>
+              <option value="guest_count">Guest Count (Items x Guest Count Tags)</option>
+              <option value="royalty">Royalty Report (Net Sales, 5% Royalty, 1.75% MKT Fund)</option>
             </select>
           </div>
           <div class="form-group">
@@ -1431,6 +1435,12 @@
       const itemTagsSection = document.getElementById('itemTagsSection');
       const yoySection = document.getElementById('yoySection');
 
+      // Hide filter-by for guest_count (auto-uses Guest Count tags)
+      const filterByRow = document.getElementById('filterByType')?.closest('.form-row');
+      if (filterByRow) {
+        filterByRow.style.display = (reportType === 'guest_count' || reportType === 'royalty') ? 'none' : '';
+      }
+
       if (reportType === 'menu' && filterByType === 'itemTags' && reportTypeConfig?.supportsItemTagFilters) {
         itemTagsSection.classList.remove('hidden');
         if (!menuItems) loadMenuItems();
@@ -1964,6 +1974,16 @@
       toggleBtn = document.getElementById('toggleDailyColumnsBtn');
       if (toggleBtn) toggleBtn.classList.add('hidden');
       if (results && typeof results==='object' && !Array.isArray(results) &&
+          results.hasOwnProperty('royaltyTable')) {
+        renderRoyaltyReport(results, config);
+        return;
+      }
+      if (results && typeof results==='object' && !Array.isArray(results) &&
+          results.hasOwnProperty('guestCountTable')) {
+        renderGuestCountResults(results, config);
+        return;
+      }
+      if (results && typeof results==='object' && !Array.isArray(results) &&
           results.hasOwnProperty('summaryTable')) {
         renderSalesSummary(results, config);
         return;
@@ -1983,6 +2003,204 @@
       body.innerHTML = results.map(row=>`<tr>${keys.map(k=>`<td>${formatCell(k,row[k])}</td>`).join('')}</tr>`).join('');
       document.getElementById('exportBtn').classList.remove('hidden');
       document.getElementById('resultsSummary').textContent = `${results.length} rows`;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // renderRoyaltyReport
+    // ──────────────────────────────────────────────────────────
+    function renderRoyaltyReport(results, config) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      const rows = results.royaltyTable || [];
+      const tot  = results.royaltyTotals || {};
+
+      if (rows.length === 0) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td colspan="100" class="empty-state">No data found</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        document.getElementById('resultsSummary').textContent = '0 rows';
+        return;
+      }
+
+      const fmt$ = v => '$' + (v||0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+
+      // Style constants
+      const thNavy  = 'background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
+      const thNavyL = 'background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
+      const tdTot   = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
+      const tdTotL  = 'text-align:left;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
+      const tdRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;';
+      const tdRowL  = 'padding:0.5rem 0.75rem;text-align:left;border:1px solid #E5E7EB;';
+
+      let html = '';
+
+      // Header
+      html += `<tr>
+        <th style="${thNavyL}">Location</th>
+        <th style="${thNavy}">Newk's Net Sales</th>
+        <th style="${thNavy}">Royalty 5%</th>
+        <th style="${thNavy}">MKT Fund 1.75%</th>
+      </tr>`;
+
+      // Totals row (expandable)
+      const expandId = 'royalty-expand-' + Date.now();
+      html += `<tr class="expandable-header" data-expand-id="${expandId}" style="cursor:pointer;background:#EFF6FF;border:1px solid #BFDBFE;">
+        <td style="${tdTotL}"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations (${tot.locationCount||rows.length})</td>
+        <td style="${tdTot}">${fmt$(tot.netSales)}</td>
+        <td style="${tdTot}">${fmt$(tot.royalty5)}</td>
+        <td style="${tdTot}">${fmt$(tot.mktFund175)}</td>
+      </tr>`;
+
+      // Location rows (hidden by default)
+      rows.forEach(loc => {
+        html += `<tr class="location-row" data-expand-id="${expandId}" style="display:none;">
+          <td style="${tdRowL} padding-left:2.5rem;">${loc.restaurantName||''}</td>
+          <td style="${tdRow}">${fmt$(loc.netSales)}</td>
+          <td style="${tdRow}">${fmt$(loc.royalty5)}</td>
+          <td style="${tdRow}">${fmt$(loc.mktFund175)}</td>
+        </tr>`;
+      });
+
+      head.innerHTML = '';
+      body.innerHTML = html;
+
+      // Expandable click handler
+      body.querySelectorAll('.expandable-header').forEach(hdr => {
+        hdr.addEventListener('click', () => {
+          const eid = hdr.dataset.expandId;
+          const icon = hdr.querySelector('.expand-icon');
+          const locRows = body.querySelectorAll(`tr[data-expand-id="${eid}"]:not(.expandable-header)`);
+          const showing = locRows[0]?.style.display !== 'none';
+          locRows.forEach(r => r.style.display = showing ? 'none' : '');
+          if (icon) icon.textContent = showing ? '▶' : '▼';
+        });
+      });
+
+      document.getElementById('exportBtn').classList.remove('hidden');
+      document.getElementById('resultsSummary').textContent =
+        `${rows.length} locations • ${fmt$(tot.netSales)} net sales • ${fmt$(tot.royalty5)} royalty • ${fmt$(tot.mktFund175)} MKT fund`;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // renderGuestCountResults
+    // ──────────────────────────────────────────────────────────
+    function renderGuestCountResults(results, config) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      const rows = results.guestCountTable || [];
+      const tot  = results.guestCountTotals || {};
+      const items = results.guestCountItemBreakdown || [];
+
+      if (rows.length === 0) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td colspan="100" class="empty-state">No data found — no items with Guest Count tags</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        document.getElementById('resultsSummary').textContent = '0 rows';
+        return;
+      }
+
+      // Style constants (match sales summary)
+      const thNavy  = 'background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
+      const thNavyL = 'background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
+      const thGreen = 'background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;';
+      const tdTot   = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
+      const tdTotL  = 'text-align:left;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
+      const tdGrnT  = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #A7F3D0;background:#ECFDF5;';
+      const tdRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;';
+      const tdRowL  = 'padding:0.5rem 0.75rem;text-align:left;border:1px solid #E5E7EB;';
+
+      // Group item breakdown by restaurantGuid for expandable detail
+      const itemsByLoc = {};
+      items.forEach(it => {
+        if (!itemsByLoc[it.restaurantGuid]) itemsByLoc[it.restaurantGuid] = [];
+        itemsByLoc[it.restaurantGuid].push(it);
+      });
+
+      let html = '';
+
+      // Header
+      html += `<tr>
+        <th style="${thNavyL}">Location</th>
+        <th style="${thNavy}">Items w/ GC Tag</th>
+        <th style="${thNavy}">Qty Sold</th>
+        <th style="${thGreen}">Guest Count</th>
+      </tr>`;
+
+      // Totals row (expandable — shows all locations)
+      const gcExpandId = 'gc-expand-' + Date.now();
+      html += `<tr class="expandable-header" data-expand-id="${gcExpandId}" style="cursor:pointer;background:#EFF6FF;border:1px solid #BFDBFE;">
+        <td style="${tdTotL}"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations (${rows.length})</td>
+        <td style="${tdTot}">${(tot.itemCount||0).toLocaleString()}</td>
+        <td style="${tdTot}">${(tot.totalQtySold||0).toLocaleString()}</td>
+        <td style="${tdGrnT}">${(tot.totalGuestCount||0).toLocaleString(undefined, {minimumFractionDigits:1, maximumFractionDigits:1})}</td>
+      </tr>`;
+
+      // Location rows (hidden, each expandable to show items)
+      rows.forEach(loc => {
+        const locItemExpandId = 'gc-items-' + loc.restaurantGuid;
+        // Location summary row
+        html += `<tr class="location-row expandable-header" data-expand-id="${gcExpandId}" data-item-expand-id="${locItemExpandId}" style="display:none;cursor:pointer;">
+          <td style="${tdRowL} padding-left:2.5rem;"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span>${loc.restaurantName||''}</td>
+          <td style="${tdRow}">${(loc.itemCount||0).toLocaleString()}</td>
+          <td style="${tdRow}">${(loc.totalQtySold||0).toLocaleString()}</td>
+          <td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;font-weight:600;">${(loc.totalGuestCount||0).toLocaleString(undefined, {minimumFractionDigits:1, maximumFractionDigits:1})}</td>
+        </tr>`;
+
+        // Item detail rows for this location (hidden)
+        const locItems = (itemsByLoc[loc.restaurantGuid] || []).sort((a,b) => (b.guestContribution||0) - (a.guestContribution||0));
+        // Item detail header
+        html += `<tr class="gc-item-row" data-item-expand-id="${locItemExpandId}" style="display:none;">
+          <td style="padding-left:4rem;font-weight:600;font-size:0.8rem;color:#6B7280;border:1px solid #E5E7EB;" colspan="1">Item Name</td>
+          <td style="font-weight:600;font-size:0.8rem;color:#6B7280;text-align:right;border:1px solid #E5E7EB;">GC Value</td>
+          <td style="font-weight:600;font-size:0.8rem;color:#6B7280;text-align:right;border:1px solid #E5E7EB;">Qty Sold</td>
+          <td style="font-weight:600;font-size:0.8rem;color:#6B7280;text-align:right;border:1px solid #E5E7EB;">Guest Contribution</td>
+        </tr>`;
+        locItems.forEach(it => {
+          html += `<tr class="gc-item-row" data-item-expand-id="${locItemExpandId}" style="display:none;">
+            <td style="padding:0.35rem 0.75rem 0.35rem 4rem;border:1px solid #F3F4F6;font-size:0.85rem;">${it.menuItemName||''}</td>
+            <td style="padding:0.35rem 0.75rem;text-align:right;border:1px solid #F3F4F6;font-size:0.85rem;">${(it.guestCountValue||0)}</td>
+            <td style="padding:0.35rem 0.75rem;text-align:right;border:1px solid #F3F4F6;font-size:0.85rem;">${(it.quantitySold||0).toLocaleString()}</td>
+            <td style="padding:0.35rem 0.75rem;text-align:right;border:1px solid #F3F4F6;font-size:0.85rem;background:#F0FDF4;">${(it.guestContribution||0).toLocaleString(undefined, {minimumFractionDigits:1, maximumFractionDigits:1})}</td>
+          </tr>`;
+        });
+      });
+
+      head.innerHTML = '';
+      body.innerHTML = html;
+      document.getElementById('exportBtn').classList.remove('hidden');
+      document.getElementById('resultsSummary').textContent =
+        `${rows.length} locations • ${(tot.totalQtySold||0).toLocaleString()} items sold • ${(tot.totalGuestCount||0).toLocaleString(undefined, {minimumFractionDigits:1, maximumFractionDigits:1})} total guest count`;
+
+      // Attach expand/collapse handlers
+      setTimeout(() => {
+        // Level 1: totals row → show/hide location rows
+        body.querySelectorAll(`.expandable-header[data-expand-id="${gcExpandId}"]:not(.location-row)`).forEach(header => {
+          header.addEventListener('click', function() {
+            const locRows = body.querySelectorAll(`.location-row[data-expand-id="${gcExpandId}"]`);
+            const icon = this.querySelector('.expand-icon');
+            const isExpanded = locRows[0] && locRows[0].style.display !== 'none';
+            locRows.forEach(r => r.style.display = isExpanded ? 'none' : 'table-row');
+            // Collapse all item details when collapsing locations
+            if (isExpanded) {
+              body.querySelectorAll('.gc-item-row').forEach(r => r.style.display = 'none');
+              body.querySelectorAll('.location-row .expand-icon').forEach(ic => ic.textContent = '▶');
+            }
+            icon.textContent = isExpanded ? '▶' : '▼';
+          });
+        });
+
+        // Level 2: location row → show/hide item rows
+        body.querySelectorAll('.location-row[data-item-expand-id]').forEach(locRow => {
+          locRow.addEventListener('click', function() {
+            const itemId = this.getAttribute('data-item-expand-id');
+            const itemRows = body.querySelectorAll(`.gc-item-row[data-item-expand-id="${itemId}"]`);
+            const icon = this.querySelector('.expand-icon');
+            const isExpanded = itemRows[0] && itemRows[0].style.display !== 'none';
+            itemRows.forEach(r => r.style.display = isExpanded ? 'none' : 'table-row');
+            icon.textContent = isExpanded ? '▶' : '▼';
+          });
+        });
+      }, 100);
     }
 
     function renderSalesSummary(results, config) {
@@ -2014,9 +2232,11 @@
       // Header row
       html += `<tr>
         <th style="${thNavyL}">Location</th>
-        <th style="${thNavy}">Orders</th>
+        <th style="${thNavy}">Total Tickets</th>
+        <th style="${thNavy}">Guest Count</th>
         <th style="${thGreen}">Newk's Net Sales</th>
         <th style="${thNavy}">Avg Ticket</th>
+        <th style="${thNavy}">PPA</th>
         <th style="${thNavy}">Discounts</th>
         <th style="${thNavy}">Voids</th>
         <th style="${thNavy}">Cash</th>
@@ -2027,8 +2247,10 @@
       html += `<tr class="expandable-header" data-expand-id="${expandId}" style="cursor:pointer;background:#EFF6FF;border:1px solid #BFDBFE;">
         <td style="${tdTotL}"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations Totals:</td>
         <td style="${tdTot}">${(tot.orders||0).toLocaleString()}</td>
+        <td style="${tdTot}">${(tot.guestCount||0).toLocaleString()}</td>
         <td style="${tdGrnT}">${formatCell('Sales', tot.netSales||0)}</td>
         <td style="${tdTot}">${formatCell('Sales', tot.avgTicket||0)}</td>
+        <td style="${tdTot}">${formatCell('Sales', tot.ppa||0)}</td>
         <td style="${tdTot}">${formatCell('Sales', tot.discounts||0)}</td>
         <td style="${tdTot}">${(tot.voids||0).toLocaleString()}</td>
         <td style="${tdTot}">${formatCell('Sales', tot.cash||0)}</td>
@@ -2040,8 +2262,10 @@
         html += `<tr class="location-row" data-expand-id="${expandId}" style="display:none;">
           <td style="${tdRowL} padding-left:2.5rem;">${row.restaurantName||''}</td>
           <td style="${tdRow}">${(row.orders||0).toLocaleString()}</td>
+          <td style="${tdRow}">${(row.guestCount||0).toLocaleString()}</td>
           <td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;">${formatCell('Sales', row.netSales||0)}</td>
           <td style="${tdRow}">${formatCell('Sales', row.avgTicket||0)}</td>
+          <td style="${tdRow}">${formatCell('Sales', row.ppa||0)}</td>
           <td style="${tdRow}">${formatCell('Sales', row.discounts||0)}</td>
           <td style="${tdRow}">${(row.voids||0).toLocaleString()}</td>
           <td style="${tdRow}">${formatCell('Sales', row.cash||0)}</td>
@@ -2049,10 +2273,80 @@
         </tr>`;
       });
 
+      // ── Catering / Non-Catering split tables ─────────────────────────────
+      const catRows    = results.cateringTable    || [];
+      const nonCatRows = results.nonCateringTable || [];
+      const catTot     = results.cateringTotals   || {};
+      const nonCatTot  = results.nonCateringTotals|| {};
+
+      const buildSplitTable = (label, splitRows, splitTot, headerBg, headerBorder, totBg, totBorder) => {
+        const thS  = `background:${headerBg};color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid ${headerBorder};`;
+        const thSL = `background:${headerBg};color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid ${headerBorder};`;
+        const thSG = 'background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;';
+        const tdS  = `text-align:right;font-weight:700;padding:0.75rem;border:1px solid ${totBorder};background:${totBg};`;
+        const tdSL = `text-align:left;font-weight:700;padding:0.75rem;border:1px solid ${totBorder};background:${totBg};`;
+        const tdSG = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #A7F3D0;background:#ECFDF5;';
+        const tdR  = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;';
+        const tdRL = 'padding:0.5rem 0.75rem;text-align:left;border:1px solid #E5E7EB;';
+        const tdRG = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;';
+        const eid  = 'ss-split-' + label.replace(/\s+/g,'') + '-' + Date.now();
+        let h = `<tr><td colspan="10" style="padding:1rem 0 0.25rem;font-weight:700;font-size:1rem;color:#374151;border:none;">${label}</td></tr>`;
+        h += `<tr>
+          <th style="${thSL}">Location</th>
+          <th style="${thS}">Total Tickets</th>
+          <th style="${thS}">Guest Count</th>
+          <th style="${thSG}">Newk's Net Sales</th>
+          <th style="${thS}">Avg Ticket</th>
+          <th style="${thS}">PPA</th>
+          <th style="${thS}">Discounts</th>
+          <th style="${thS}">Voids</th>
+          <th style="${thS}">Cash</th>
+          <th style="${thS}">Card</th>
+        </tr>`;
+        h += `<tr class="expandable-header" data-expand-id="${eid}" style="cursor:pointer;background:${totBg};border:1px solid ${totBorder};">
+          <td style="${tdSL}"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations:</td>
+          <td style="${tdS}">${(splitTot.orders||0).toLocaleString()}</td>
+          <td style="${tdS}">${(splitTot.guestCount||0).toLocaleString()}</td>
+          <td style="${tdSG}">${formatCell('Sales', splitTot.netSales||0)}</td>
+          <td style="${tdS}">${formatCell('Sales', splitTot.avgTicket||0)}</td>
+          <td style="${tdS}">${formatCell('Sales', splitTot.ppa||0)}</td>
+          <td style="${tdS}">${formatCell('Sales', splitTot.discounts||0)}</td>
+          <td style="${tdS}">${(splitTot.voids||0).toLocaleString()}</td>
+          <td style="${tdS}">${formatCell('Sales', splitTot.cash||0)}</td>
+          <td style="${tdS}">${formatCell('Sales', splitTot.card||0)}</td>
+        </tr>`;
+        splitRows.forEach(r => {
+          h += `<tr class="location-row" data-expand-id="${eid}" style="display:none;">
+            <td style="${tdRL} padding-left:2.5rem;">${r.restaurantName||''}</td>
+            <td style="${tdR}">${(r.orders||0).toLocaleString()}</td>
+            <td style="${tdR}">${(r.guestCount||0).toLocaleString()}</td>
+            <td style="${tdRG}">${formatCell('Sales', r.netSales||0)}</td>
+            <td style="${tdR}">${formatCell('Sales', r.avgTicket||0)}</td>
+            <td style="${tdR}">${formatCell('Sales', r.ppa||0)}</td>
+            <td style="${tdR}">${formatCell('Sales', r.discounts||0)}</td>
+            <td style="${tdR}">${(r.voids||0).toLocaleString()}</td>
+            <td style="${tdR}">${formatCell('Sales', r.cash||0)}</td>
+            <td style="${tdR}">${formatCell('Sales', r.card||0)}</td>
+          </tr>`;
+        });
+        return h;
+      };
+
+      if (catRows.length > 0 || nonCatRows.length > 0) {
+        html += buildSplitTable(
+          'Non-Catering Sales', nonCatRows, nonCatTot,
+          '#1E40AF', '#1E3A8A', '#EFF6FF', '#BFDBFE'
+        );
+        html += buildSplitTable(
+          'Catering Sales', catRows, catTot,
+          '#7C3AED', '#6D28D9', '#F5F3FF', '#DDD6FE'
+        );
+      }
+
       head.innerHTML=''; body.innerHTML=html;
       document.getElementById('exportBtn').classList.remove('hidden');
       document.getElementById('resultsSummary').textContent =
-        `${rows.length} locations • ${(tot.orders||0).toLocaleString()} orders • ${formatCell('Sales', tot.netSales||0)} Newk's Net Sales`;
+        `${rows.length} locations • ${(tot.orders||0).toLocaleString()} tickets • ${(tot.guestCount||0).toLocaleString()} guests • ${formatCell('Sales', tot.netSales||0)} Newk's Net Sales • PPA ${formatCell('Sales', tot.ppa||0)}`;
 
       // Attach expand/collapse handlers for location rows
       setTimeout(() => {
@@ -2521,8 +2815,30 @@
       }
 
       const WB = XLSX.utils.book_new();
-      const reportName = document.getElementById('reportName').value.trim() || 'Report';
-      const dateStr = new Date().toISOString().split('T')[0];
+
+      // Build report name from dropdown label
+      const reportTypeEl = document.getElementById('reportType');
+      const reportTypeLabel = reportTypeEl
+        ? (reportTypeEl.options[reportTypeEl.selectedIndex]?.text || 'Report').split('(')[0].trim()
+        : (document.getElementById('reportName')?.value.trim() || 'Report');
+      const reportName = reportTypeLabel;
+
+      // Build date range string from form values
+      const fmtD = s => { if (!s) return ''; const [y,m,d] = s.split('-'); return `${parseInt(m)}_${parseInt(d)}_${y.slice(2)}`; };
+      const drType = document.getElementById('dateRangeType')?.value;
+      let dateStr;
+      if (drType === 'custom') {
+        const s = document.getElementById('customStartDate')?.value;
+        const e = document.getElementById('customEndDate')?.value;
+        dateStr = s && e ? `${fmtD(s)}_${fmtD(e)}` : new Date().toISOString().split('T')[0];
+      } else {
+        const today = new Date();
+        const daysMap = { last_7_days: 6, last_30_days: 29, last_90_days: 89 };
+        const offset = daysMap[drType] ?? 6;
+        const start = new Date(today); start.setDate(start.getDate() - offset);
+        const toISO = d => d.toISOString().split('T')[0];
+        dateStr = `${fmtD(toISO(start))}_${fmtD(toISO(today))}`;
+      }
 
       // ── Style palette ──────────────────────────────────────────────────────
       const navy   = '1E3A5F', navyBdr  = '162d4a';
@@ -2647,25 +2963,53 @@
         const rows = currentResults.summaryTable || [];
         const tot  = currentResults.summaryTotals || {};
         const hdr = [
-          c('Location', S.navyL), c('Orders', S.navyR), c("Newk's Net Sales", S.navyR),
-          c('Avg Ticket', S.navyR), c('Discounts', S.navyR), c('Voids', S.navyR),
-          c('Cash', S.navyR), c('Card', S.navyR),
+          c('Location', S.navyL), c('Total Tickets', S.navyR), c('Guest Count', S.navyR),
+          c("Newk's Net Sales", S.navyR), c('Avg Ticket', S.navyR), c('PPA', S.navyR),
+          c('Discounts', S.navyR), c('Voids', S.navyR), c('Cash', S.navyR), c('Card', S.navyR),
         ];
         const totRow = [
-          c('TOTAL', S.navyL), n(tot.orders||0, S.navyR), n(tot.netSales||0, S.navyR),
-          n(tot.avgTicket||0, S.navyR), n(tot.discounts||0, S.navyR), n(tot.voids||0, S.navyR),
+          c('TOTAL', S.navyL), n(tot.orders||0, S.navyR), n(tot.guestCount||0, S.navyR),
+          n(tot.netSales||0, S.navyR), n(tot.avgTicket||0, S.navyR), n(tot.ppa||0, S.navyR),
+          n(tot.discounts||0, S.navyR), n(tot.voids||0, S.navyR),
           n(tot.cash||0, S.navyR), n(tot.card||0, S.navyR),
         ];
         const dataRows = rows.map((row, idx) => {
           const alt = idx % 2 === 1;
           const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
           return [
-            c(row.restaurantName||'', dL), n(row.orders||0, dR), n(row.netSales||0, dR),
-            n(row.avgTicket||0, dR), n(row.discounts||0, dR), n(row.voids||0, dR),
+            c(row.restaurantName||'', dL), n(row.orders||0, dR), n(row.guestCount||0, dR),
+            n(row.netSales||0, dR), n(row.avgTicket||0, dR), n(row.ppa||0, dR),
+            n(row.discounts||0, dR), n(row.voids||0, dR),
             n(row.cash||0, dR), n(row.card||0, dR),
           ];
         });
         addWS(WB, [hdr, totRow, ...dataRows], 'Sales Summary');
+
+        // Non-Catering sheet
+        const splitHdr = [
+          c('Location', S.navyL), c('Total Tickets', S.navyR), c('Guest Count', S.navyR),
+          c("Newk's Net Sales", S.navyR), c('Avg Ticket', S.navyR), c('PPA', S.navyR),
+          c('Discounts', S.navyR), c('Voids', S.navyR), c('Cash', S.navyR), c('Card', S.navyR),
+        ];
+        const mkSplitRow = (r, dL, dR) => [
+          c(r.restaurantName||'', dL), n(r.orders||0, dR), n(r.guestCount||0, dR),
+          n(r.netSales||0, dR), n(r.avgTicket||0, dR), n(r.ppa||0, dR),
+          n(r.discounts||0, dR), n(r.voids||0, dR), n(r.cash||0, dR), n(r.card||0, dR),
+        ];
+        const mkSplitTotRow = t => [
+          c('TOTAL', S.navyL), n(t.orders||0, S.navyR), n(t.guestCount||0, S.navyR),
+          n(t.netSales||0, S.navyR), n(t.avgTicket||0, S.navyR), n(t.ppa||0, S.navyR),
+          n(t.discounts||0, S.navyR), n(t.voids||0, S.navyR), n(t.cash||0, S.navyR), n(t.card||0, S.navyR),
+        ];
+
+        const ncRows = currentResults.nonCateringTable || [];
+        const ncTot  = currentResults.nonCateringTotals || {};
+        addWS(WB, [splitHdr, mkSplitTotRow(ncTot), ...ncRows.map((r,i) => mkSplitRow(r, i%2?S.dLalt:S.dL, i%2?S.dRalt:S.dR))], 'Non-Catering');
+
+        // Catering sheet
+        const catRows2 = currentResults.cateringTable || [];
+        const catTot2  = currentResults.cateringTotals || {};
+        addWS(WB, [splitHdr, mkSplitTotRow(catTot2), ...catRows2.map((r,i) => mkSplitRow(r, i%2?S.dLalt:S.dL, i%2?S.dRalt:S.dR))], 'Catering');
       } else if (currentResults.pivotTable !== undefined) {
         const pivotTable        = currentResults.pivotTable || [];
         const totals            = currentResults.totals || [];
@@ -2809,6 +3153,45 @@
             }
             addWS(WB, sumRows, 'Summary');
           }
+        }
+
+      // ── Royalty report ─────────────────────────────────────────────────────
+      } else if (currentResults && currentResults.royaltyTable) {
+        const rRows = currentResults.royaltyTable || [];
+        const rTot  = currentResults.royaltyTotals || {};
+        const fmt$  = v => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v || 0);
+        const hdr = [c('Location', S.navyL), c("Newk's Net Sales", S.navyR), c('Royalty 5%', S.navyR), c('MKT Fund 1.75%', S.navyR)];
+        const totRow = [c('TOTAL', S.navyL), n(rTot.netSales||0, S.navyR), n(rTot.royalty5||0, S.navyR), n(rTot.mktFund175||0, S.navyR)];
+        const dataRows = rRows.map((loc, idx) => {
+          const alt = idx % 2 === 1;
+          const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+          return [c(loc.restaurantName||'', dL), n(loc.netSales||0, dR), n(loc.royalty5||0, dR), n(loc.mktFund175||0, dR)];
+        });
+        addWS(WB, [hdr, totRow, ...dataRows], 'Royalty');
+
+      // ── Guest Count report ────────────────────────────────────────────────
+      } else if (currentResults && currentResults.guestCountTable) {
+        const gcRows  = currentResults.guestCountTable || [];
+        const gcTot   = currentResults.guestCountTotals || {};
+        const gcItems = currentResults.guestCountItemBreakdown || [];
+        // Summary sheet
+        const hdr = [c('Location', S.navyL), c('Items w/ GC Tag', S.navyR), c('Total Qty Sold', S.navyR), c('Total Guest Count', S.navyR)];
+        const totRow = [c('TOTAL', S.navyL), n(gcTot.itemCount||0, S.navyR), n(gcTot.totalQtySold||0, S.navyR), n(gcTot.totalGuestCount||0, S.navyR)];
+        const dataRows = gcRows.map((loc, idx) => {
+          const alt = idx % 2 === 1;
+          const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+          return [c(loc.restaurantName||'', dL), n(loc.itemCount||0, dR), n(loc.totalQtySold||0, dR), n(loc.totalGuestCount||0, dR)];
+        });
+        addWS(WB, [hdr, totRow, ...dataRows], 'Guest Count');
+        // Item breakdown sheet
+        if (gcItems.length > 0) {
+          const iHdr = [c('Location', S.navyL), c('Item Name', S.navyL), c('Qty Sold', S.navyR), c('GC Value', S.navyR), c('Guest Contribution', S.navyR)];
+          const iRows = gcItems.map((it, idx) => {
+            const alt = idx % 2 === 1;
+            const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+            return [c(it.restaurantName||'', dL), c(it.menuItemName||'', dL), n(it.quantitySold||0, dR), n(it.guestCountValue||0, dR), n(it.guestContribution||0, dR)];
+          });
+          addWS(WB, [iHdr, ...iRows], 'Item Breakdown');
         }
 
       // ── Flat array results ────────────────────────────────────────────────
