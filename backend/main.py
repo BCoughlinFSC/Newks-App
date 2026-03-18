@@ -38,6 +38,7 @@ from sales_consolidator import SalesConsolidator
 from hierarchical_reports import HierarchicalReportGenerator
 from aloha_sql_importer import import_aloha_sql_range, import_aloha_sql_last_days
 import aloha_db
+import toast_orders_db
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -1393,7 +1394,7 @@ async def fetch_toast_report(
     raise HTTPException(status_code=504, detail=f"Timed out waiting for report {report_guid}. Try narrowing the date range.")
 
 
-async def _fetch_orders_for_restaurant_day(
+async def _fetch_orders_from_toast_api(
     client: httpx.AsyncClient,
     restaurant_guid: str,
     business_date_yyyymmdd: str,
@@ -1425,6 +1426,41 @@ async def _fetch_orders_for_restaurant_day(
         page += 1
         await asyncio.sleep(0.25)
     return all_orders
+
+
+async def _fetch_orders_for_restaurant_day(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    business_date_yyyymmdd: str,
+) -> List[Dict]:
+    """Fetch orders: from cache if available and not today, otherwise from Toast API."""
+    today_yyyymmdd = date.today().strftime("%Y%m%d")
+
+    # Today's data always live
+    if business_date_yyyymmdd == today_yyyymmdd:
+        return await _fetch_orders_from_toast_api(client, restaurant_guid, business_date_yyyymmdd)
+
+    # Check cache
+    if toast_orders_db.is_date_cached(restaurant_guid, business_date_yyyymmdd):
+        cached = toast_orders_db.get_cached_orders(restaurant_guid, business_date_yyyymmdd)
+        if cached:
+            logger.debug("Orders cache HIT: %s|%s (%d orders)",
+                         restaurant_guid[:8], business_date_yyyymmdd, len(cached))
+            return cached
+
+    # Cache miss — fetch from API
+    logger.debug("Orders cache MISS: %s|%s — fetching from Toast API",
+                 restaurant_guid[:8], business_date_yyyymmdd)
+    orders = await _fetch_orders_from_toast_api(client, restaurant_guid, business_date_yyyymmdd)
+
+    # Opportunistically cache the result (historical date)
+    try:
+        toast_orders_db.store_orders(restaurant_guid, business_date_yyyymmdd, orders)
+    except Exception as exc:
+        logger.warning("Failed to cache orders for %s|%s: %s",
+                       restaurant_guid[:8], business_date_yyyymmdd, exc)
+
+    return orders
 
 
 async def _fetch_orders_for_restaurant_date_range(
@@ -4650,6 +4686,79 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ------------------
+# APScheduler — nightly orders cache job
+# ------------------
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+_scheduler = AsyncIOScheduler()
+_nightly_job_last_result: Dict[str, Any] = {}  # Track last run result for admin visibility
+
+
+async def nightly_orders_cache_job():
+    """Fetch yesterday's orders for all active restaurants and cache them."""
+    yesterday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+    logger.info("Nightly orders cache job started for business_date=%s", yesterday)
+
+    success_count = 0
+    fail_count = 0
+    skipped_count = 0
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            locations = await get_all_active_locations(client)
+            total = len(locations)
+
+            for i, loc in enumerate(locations, 1):
+                rguid = loc.restaurantGuid
+                if toast_orders_db.is_date_cached(rguid, yesterday):
+                    skipped_count += 1
+                    continue
+                try:
+                    toast_orders_db.mark_import_started(rguid, yesterday)
+                    orders = await _fetch_orders_from_toast_api(client, rguid, yesterday)
+                    toast_orders_db.store_orders(rguid, yesterday, orders)
+                    success_count += 1
+                    logger.info("Nightly cache: %s (%d/%d) — %d orders",
+                                rguid[:8], i, total, len(orders))
+                    await asyncio.sleep(0.5)  # Rate limit courtesy
+                except Exception as exc:
+                    fail_count += 1
+                    toast_orders_db.mark_import_failed(rguid, yesterday, str(exc))
+                    logger.error("Nightly cache failed for %s: %s", rguid[:8], exc)
+    except Exception as exc:
+        logger.error("Nightly orders cache job failed: %s", exc)
+
+    _nightly_job_last_result.update({
+        "business_date": yesterday,
+        "success": success_count,
+        "failed": fail_count,
+        "skipped": skipped_count,
+        "completed_at": datetime.now().isoformat(),
+    })
+    logger.info("Nightly orders cache completed: %d success, %d failed, %d skipped",
+                success_count, fail_count, skipped_count)
+
+
+# Schedule: run at 3:00 AM daily (after Toast closeout typically settles)
+_scheduler.add_job(nightly_orders_cache_job, CronTrigger(hour=3, minute=0),
+                   id="nightly_orders_cache", replace_existing=True)
+
+
+@app.on_event("startup")
+async def _on_startup():
+    toast_orders_db.initialize_db()
+    _scheduler.start()
+    logger.info("APScheduler started — nightly orders cache job scheduled at 3:00 AM")
+
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    _scheduler.shutdown(wait=False)
+
 
 # ------------------
 # Media uploads for kiosk/menu board
@@ -8576,6 +8685,114 @@ async def clear_sc_cache():
     _sc_daily_cache = {}
     logger.info("SC daily cache cleared manually: %d entries removed", count)
     return {"cleared": True, "entries_removed": count}
+
+
+# ------------------
+# Orders Cache Admin Endpoints
+# ------------------
+
+@app.get("/api/admin/orders-cache/stats")
+async def admin_orders_cache_stats(admin_user: User = Depends(get_current_admin_user)):
+    """Overall cache statistics."""
+    stats = toast_orders_db.get_stats()
+    stats["scheduler"] = {
+        "last_run": _nightly_job_last_result or None,
+        "jobs": [
+            {"id": j.id, "next_run": str(j.next_run_time), "trigger": str(j.trigger)}
+            for j in _scheduler.get_jobs()
+        ],
+    }
+    return stats
+
+
+@app.get("/api/admin/orders-cache/failed")
+async def admin_orders_cache_failed(admin_user: User = Depends(get_current_admin_user)):
+    """List failed imports."""
+    return toast_orders_db.get_failed_imports()
+
+
+@app.post("/api/admin/orders-cache/backfill")
+async def admin_orders_cache_backfill(
+    start_date: str = Query(..., description="YYYY-MM-DD"),
+    end_date: str = Query(..., description="YYYY-MM-DD"),
+    restaurant_guid: Optional[str] = Query(None, description="Single restaurant, or all if omitted"),
+    overwrite: bool = Query(False),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Trigger backfill for a date range. Runs in background."""
+    async def _run_backfill():
+        from datetime import datetime as dt
+        start = dt.strptime(start_date, "%Y-%m-%d").date()
+        end = dt.strptime(end_date, "%Y-%m-%d").date()
+        logger.info("Admin backfill started: %s to %s (restaurant=%s, overwrite=%s)",
+                     start_date, end_date, restaurant_guid or "ALL", overwrite)
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                if restaurant_guid:
+                    guids = [restaurant_guid]
+                else:
+                    locations = await get_all_active_locations(client)
+                    guids = [loc.restaurantGuid for loc in locations]
+
+                d = start
+                while d <= end:
+                    bdate = d.strftime("%Y%m%d")
+                    for rguid in guids:
+                        if not overwrite and toast_orders_db.is_date_cached(rguid, bdate):
+                            continue
+                        try:
+                            toast_orders_db.mark_import_started(rguid, bdate)
+                            orders = await _fetch_orders_from_toast_api(client, rguid, bdate)
+                            toast_orders_db.store_orders(rguid, bdate, orders)
+                            await asyncio.sleep(0.5)
+                        except Exception as exc:
+                            toast_orders_db.mark_import_failed(rguid, bdate, str(exc))
+                            logger.error("Backfill failed %s|%s: %s", rguid[:8], bdate, exc)
+                    d += timedelta(days=1)
+        except Exception as exc:
+            logger.error("Admin backfill job failed: %s", exc)
+        logger.info("Admin backfill completed: %s to %s", start_date, end_date)
+
+    asyncio.create_task(_run_backfill())
+    return {"status": "started", "start_date": start_date, "end_date": end_date,
+            "restaurant_guid": restaurant_guid, "overwrite": overwrite}
+
+
+@app.post("/api/admin/orders-cache/retry-failed")
+async def admin_orders_cache_retry_failed(admin_user: User = Depends(get_current_admin_user)):
+    """Retry all failed imports in background."""
+    failed = toast_orders_db.get_failed_imports()
+    if not failed:
+        return {"status": "nothing_to_retry", "count": 0}
+
+    async def _run_retry():
+        logger.info("Retrying %d failed imports", len(failed))
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                for item in failed:
+                    rguid = item["restaurant_guid"]
+                    bdate = item["business_date"]
+                    try:
+                        toast_orders_db.mark_import_started(rguid, bdate)
+                        orders = await _fetch_orders_from_toast_api(client, rguid, bdate)
+                        toast_orders_db.store_orders(rguid, bdate, orders)
+                        await asyncio.sleep(0.5)
+                    except Exception as exc:
+                        toast_orders_db.mark_import_failed(rguid, bdate, str(exc))
+                        logger.error("Retry failed %s|%s: %s", rguid[:8], bdate, exc)
+        except Exception as exc:
+            logger.error("Retry job failed: %s", exc)
+        logger.info("Retry completed")
+
+    asyncio.create_task(_run_retry())
+    return {"status": "started", "count": len(failed)}
+
+
+@app.post("/api/admin/orders-cache/run-nightly")
+async def admin_run_nightly_job(admin_user: User = Depends(get_current_admin_user)):
+    """Manually trigger the nightly orders cache job."""
+    asyncio.create_task(nightly_orders_cache_job())
+    return {"status": "started"}
 
 
 class MsiDiscrepancyParseRequest(BaseModel):

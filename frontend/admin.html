@@ -285,6 +285,50 @@
         </div>
       </div>
     </div>
+
+    <!-- ─── Orders Cache Section ──────────────────────── -->
+    <div style="margin-top:2.5rem;">
+      <div class="section-header">
+        <div>
+          <h2>Orders Cache</h2>
+          <div class="user-count" id="cacheSubtitle">Local SQLite cache of Toast Orders API data</div>
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <button class="btn-primary" id="runNightlyBtn" style="background:#1E3A5F;">Run Nightly Job</button>
+          <button class="btn-primary" id="retryFailedBtn" style="background:#B45309;">Retry Failed</button>
+        </div>
+      </div>
+
+      <!-- Stats cards -->
+      <div id="cacheStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem;">
+        <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading cache stats&hellip;</div>
+      </div>
+
+      <!-- Backfill form -->
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+        <h3 style="margin:0 0 0.75rem;color:#1E3A5F;font-size:1rem;">Backfill Orders</h3>
+        <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+            <input type="date" id="backfillStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+            <input type="date" id="backfillEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.85rem;color:#374151;padding-bottom:0.1rem;">
+            <input type="checkbox" id="backfillOverwrite" /> Overwrite
+          </label>
+          <button class="btn-primary" id="backfillBtn">Start Backfill</button>
+        </div>
+      </div>
+
+      <!-- Failed imports table -->
+      <div id="failedImports"></div>
+
+      <!-- Scheduler info -->
+      <div id="schedulerInfo" style="margin-top:1rem;font-size:0.82rem;color:#6B7280;"></div>
+    </div>
   </main>
 
   <!-- ─── Auth Modal ───────────────────────────────────── -->
@@ -959,6 +1003,121 @@
     }
 
     // ──────────────────────────────────────────────────────
+    // Orders Cache
+    // ──────────────────────────────────────────────────────
+    const fmt$ = v => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(v||0);
+
+    async function loadCacheStats() {
+      try {
+        const resp = await fetch('/api/admin/orders-cache/stats', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        const el = document.getElementById('cacheStats');
+        const card = (label, value, color) =>
+          `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1rem;text-align:center;">
+            <div style="font-size:0.78rem;color:#6B7280;margin-bottom:0.3rem;">${label}</div>
+            <div style="font-size:1.3rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
+          </div>`;
+        el.innerHTML =
+          card('Total Orders', (s.total_orders||0).toLocaleString(), '#1E3A5F') +
+          card('Restaurants', s.total_restaurants||0, '#1E3A5F') +
+          card('Date Range', s.min_date && s.max_date ? `${s.min_date} — ${s.max_date}` : 'None', '#374151') +
+          card('Dates Cached', (s.dates_cached||0).toLocaleString(), '#059669') +
+          card('DB Size', `${(s.db_size_mb||0).toFixed(1)} MB`, '#6B7280') +
+          card('Failed', s.failed_count||0, s.failed_count > 0 ? '#DC2626' : '#059669');
+
+        // Scheduler info
+        const infoEl = document.getElementById('schedulerInfo');
+        let info = '';
+        if (s.scheduler?.last_run) {
+          const lr = s.scheduler.last_run;
+          info += `Last nightly run: ${lr.business_date} — ${lr.success} ok, ${lr.failed} failed, ${lr.skipped} skipped (${lr.completed_at || '?'})`;
+        }
+        if (s.scheduler?.jobs?.length) {
+          const j = s.scheduler.jobs[0];
+          info += (info ? ' | ' : '') + `Next run: ${j.next_run || 'N/A'}`;
+        }
+        if (s.last_import_at) {
+          info += (info ? ' | ' : '') + `Last import: ${s.last_import_at}`;
+        }
+        infoEl.textContent = info || 'No scheduler data yet';
+      } catch (err) {
+        document.getElementById('cacheStats').innerHTML =
+          `<div style="color:#991B1B;font-size:0.85rem;grid-column:1/-1;">Error loading cache stats: ${escHtml(err.message)}</div>`;
+      }
+    }
+
+    async function loadFailedImports() {
+      try {
+        const resp = await fetch('/api/admin/orders-cache/failed', { headers: getAuthHeaders() });
+        if (!resp.ok) return;
+        const failed = await resp.json();
+        const el = document.getElementById('failedImports');
+        if (!failed.length) { el.innerHTML = ''; return; }
+        el.innerHTML = `
+          <div style="background:#FEF2F2;border:1px solid #FCA5A5;border-radius:10px;padding:1rem;">
+            <h3 style="margin:0 0 0.75rem;color:#991B1B;font-size:0.95rem;">${failed.length} Failed Import(s)</h3>
+            <div style="max-height:200px;overflow-y:auto;font-size:0.82rem;">
+              ${failed.slice(0, 50).map(f =>
+                `<div style="padding:0.25rem 0;border-bottom:1px solid #FEE2E2;">
+                  <strong>${escHtml(f.restaurant_guid?.slice(0,8))}</strong> | ${escHtml(f.business_date)}
+                  — <span style="color:#991B1B;">${escHtml(f.error_message?.slice(0,100))}</span>
+                </div>`
+              ).join('')}
+            </div>
+          </div>`;
+      } catch (err) { /* ignore */ }
+    }
+
+    async function runNightlyJob() {
+      if (!confirm('Run the nightly orders cache job now?')) return;
+      try {
+        const resp = await fetch('/api/admin/orders-cache/run-nightly', {
+          method: 'POST', headers: getAuthHeaders()
+        });
+        if (resp.ok) {
+          showStatus('Nightly job started. Check back in a few minutes.', 'success');
+        } else {
+          showStatus('Failed to start nightly job', 'error');
+        }
+      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+    }
+
+    async function retryFailed() {
+      if (!confirm('Retry all failed imports?')) return;
+      try {
+        const resp = await fetch('/api/admin/orders-cache/retry-failed', {
+          method: 'POST', headers: getAuthHeaders()
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          showStatus(`Retrying ${data.count} failed imports in background.`, 'success');
+        } else {
+          showStatus('Failed to start retry', 'error');
+        }
+      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+    }
+
+    async function startBackfill() {
+      const startDate = document.getElementById('backfillStart').value;
+      const endDate = document.getElementById('backfillEnd').value;
+      const overwrite = document.getElementById('backfillOverwrite').checked;
+      if (!startDate || !endDate) { showStatus('Please select start and end dates', 'error'); return; }
+      if (!confirm(`Backfill orders from ${startDate} to ${endDate}${overwrite ? ' (OVERWRITE)' : ''}?`)) return;
+      try {
+        const params = new URLSearchParams({ start_date: startDate, end_date: endDate, overwrite });
+        const resp = await fetch('/api/admin/orders-cache/backfill?' + params, {
+          method: 'POST', headers: getAuthHeaders()
+        });
+        if (resp.ok) {
+          showStatus(`Backfill started: ${startDate} to ${endDate}. This runs in the background.`, 'success');
+        } else {
+          showStatus('Failed to start backfill', 'error');
+        }
+      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+    }
+
+    // ──────────────────────────────────────────────────────
     // Init
     // ──────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', async () => {
@@ -989,11 +1148,18 @@
       document.getElementById('saveAssignRestaurantsBtn').addEventListener('click', saveAssignedRestaurants);
       document.getElementById('selectAllAssignRestaurants').addEventListener('change', toggleAllAssignRestaurants);
 
+      // Orders cache buttons
+      document.getElementById('runNightlyBtn').addEventListener('click', runNightlyJob);
+      document.getElementById('retryFailedBtn').addEventListener('click', retryFailed);
+      document.getElementById('backfillBtn').addEventListener('click', startBackfill);
+
       // Auth gate
       const isAuth = await checkAuth();
       if (isAuth) {
         await loadAvailablePages();
         await loadAdminUsers();
+        loadCacheStats();
+        loadFailedImports();
       }
     });
   </script>

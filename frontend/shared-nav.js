@@ -37,7 +37,10 @@
     const path = window.location.pathname.replace(/\/$/, '');
     const params = new URLSearchParams(window.location.search);
 
-    if (path.endsWith('/legacy.html') || path === '' || path === '/') {
+    if (path === '' || path === '/' || path.endsWith('/index.html')) {
+      return 'home';
+    }
+    if (path.endsWith('/legacy.html')) {
       return params.get('report') || 'sales_summary';
     }
     if (path.endsWith('/pick3.html'))                return 'pick3';
@@ -48,7 +51,6 @@
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';
     if (path.endsWith('/admin.html'))                 return 'admin';
-    if (path.endsWith('/index.html'))                 return 'home';
     return '';
   }
 

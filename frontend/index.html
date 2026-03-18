@@ -748,7 +748,9 @@
         ? currentUser.assignedRestaurants : [];
 
       // Fetch sales and labor in parallel
-      const [salesResult, laborResult] = await Promise.allSettled([
+      let salesResult, laborResult;
+      try {
+      [salesResult, laborResult] = await Promise.allSettled([
         fetch('/api/reports/run', {
           method: 'POST',
           headers: getAuthHeaders(),
@@ -823,6 +825,13 @@
       }
 
       if (tsEl) tsEl.textContent = `Updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+      } catch (err) {
+        console.error('loadTodaysSales error:', err);
+        if (totalEl) totalEl.textContent = '—';
+        if (listEl)  listEl.innerHTML = '<div style="color:#991B1B;font-size:0.85rem;padding:0.5rem 0;">Could not load sales data.</div>';
+        laborEls.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '—'; });
+        if (tsEl) tsEl.textContent = 'Error loading data';
+      }
     }
 
     // Load dashboard metrics (sales chart only)
@@ -1076,34 +1085,24 @@
     }
 
     function setupEventListeners() {
+      const on = (id, evt, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); };
+
       // Auth form
-      document.getElementById('authForm').addEventListener('submit', handleAuth);
-      document.getElementById('closeAuthModal').addEventListener('click', () => {
-        document.getElementById('authModal').classList.add('hidden');
-      });
-      document.getElementById('cancelAuthBtn').addEventListener('click', () => {
-        document.getElementById('authModal').classList.add('hidden');
-      });
-      
+      on('authForm', 'submit', handleAuth);
+      on('closeAuthModal', 'click', () => document.getElementById('authModal')?.classList.add('hidden'));
+      on('cancelAuthBtn', 'click', () => document.getElementById('authModal')?.classList.add('hidden'));
+
       // Logout (from sidebar)
-      document.getElementById('userLogoutBtn').addEventListener('click', logout);
-      
+      on('userLogoutBtn', 'click', logout);
+
       // Admin panel (from sidebar) — navigates to standalone admin page
-      document.getElementById('userAdminBtn').addEventListener('click', () => {
-        window.location.href = '/admin.html';
-      });
+      on('userAdminBtn', 'click', () => { window.location.href = '/admin.html'; });
 
       // Help button (floating bubble)
-      document.getElementById('helpBtn').addEventListener('click', () => {
-        document.getElementById('helpModal').classList.remove('hidden');
-      });
-      document.getElementById('closeHelpModal').addEventListener('click', () => {
-        document.getElementById('helpModal').classList.add('hidden');
-      });
-      document.getElementById('cancelHelpBtn').addEventListener('click', () => {
-        document.getElementById('helpModal').classList.add('hidden');
-      });
-      document.getElementById('helpForm').addEventListener('submit', submitHelpTicket);
+      on('helpBtn', 'click', () => document.getElementById('helpModal')?.classList.remove('hidden'));
+      on('closeHelpModal', 'click', () => document.getElementById('helpModal')?.classList.add('hidden'));
+      on('cancelHelpBtn', 'click', () => document.getElementById('helpModal')?.classList.add('hidden'));
+      on('helpForm', 'submit', submitHelpTicket);
     }
 
     // Initialize on page load
