@@ -3232,26 +3232,25 @@
       } catch (err) {
         console.error('Error loading saved reports:', err);
       }
+
+      // Handle ?report= param from shared nav links (after all data is loaded)
+      const urlParams = new URLSearchParams(window.location.search);
+      const reportParam = urlParams.get('report');
+      if (reportParam) {
+        const reportSelect = document.getElementById('reportType');
+        if (reportSelect) {
+          reportSelect.value = reportParam;
+          reportSelect.dispatchEvent(new Event('change'));
+        }
+      }
+      // Handle ?loadReport= param from saved report links on other pages
+      const loadReportParam = urlParams.get('loadReport');
+      if (loadReportParam && typeof window.loadReport === 'function') {
+        window.loadReport(loadReportParam);
+      }
     }
 
     init();
-
-    // Handle ?report= param from shared nav links
-    const urlParams = new URLSearchParams(window.location.search);
-    const reportParam = urlParams.get('report');
-    if (reportParam) {
-      const reportSelect = document.getElementById('reportType');
-      if (reportSelect) {
-        reportSelect.value = reportParam;
-        reportSelect.dispatchEvent(new Event('change'));
-      }
-    }
-    // Handle ?loadReport= param from saved report links on other pages
-    const loadReportParam = urlParams.get('loadReport');
-    if (loadReportParam && typeof window.loadReport === 'function') {
-      // Wait for saved reports to load, then load the specific report
-      setTimeout(() => { window.loadReport(loadReportParam); }, 500);
-    }
   </script>
   <script src="/shared-nav.js"></script>
 </body>
