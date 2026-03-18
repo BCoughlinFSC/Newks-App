@@ -10874,6 +10874,14 @@ async def _fetch_employee_hours(
                 if not isinstance(entries, list):
                     entries = entries.get("timeEntries", []) if isinstance(entries, dict) else []
                 total_entries += len(entries)
+                # Log first entry for debugging field structure
+                if entries and total_entries == len(entries):
+                    sample = entries[0]
+                    logger.info(
+                        f"Tip pool sample time entry keys: {list(sample.keys())}, "
+                        f"employeeReference={sample.get('employeeReference')}, "
+                        f"jobReference={sample.get('jobReference')}"
+                    )
                 for entry in entries:
                     if entry.get("outDate") is None:
                         skipped_clocked_in += 1
@@ -10882,13 +10890,13 @@ async def _fetch_employee_hours(
                     job_ref = entry.get("jobReference") or {}
                     emp_guid = emp_ref.get("guid", "unknown")
                     job_guid = job_ref.get("guid", "")
-                    job_title = job_map.get(job_guid, job_ref.get("externalId", "Unknown"))
+                    job_title = job_map.get(job_guid) or job_ref.get("externalId") or "Unknown"
                     # Filter out ghost jobs
                     if job_title.lower().strip() in _GHOST_JOBS:
                         skipped_ghost += 1
                         ghost_jobs_seen[job_title] = ghost_jobs_seen.get(job_title, 0) + 1
                         continue
-                    emp_name = emp_map.get(emp_guid, emp_ref.get("externalId", emp_guid[:8]))
+                    emp_name = emp_map.get(emp_guid) or emp_ref.get("externalId") or emp_guid[:8]
                     reg_h = float(entry.get("regularHours") or 0)
                     ot_h = float(entry.get("overtimeHours") or 0)
                     if emp_guid not in by_employee:
