@@ -10784,23 +10784,40 @@ async def _fetch_employee_configs(
     client: httpx.AsyncClient,
     restaurant_guid: str,
 ) -> Dict[str, str]:
-    """Fetch employee guid -> 'FirstName LastName' mapping from Toast config API."""
+    """Fetch employee guid -> 'FirstName LastName' mapping from Toast config API.
+    Tries multiple endpoint paths since different API scopes expose different paths."""
     standard_headers = await get_standard_api_auth_headers()
     headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
-    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/employees"
     emp_map: Dict[str, str] = {}
-    try:
-        resp = await client.get(url, headers=headers, timeout=60.0)
-        if resp.status_code == 200:
-            for emp in resp.json():
-                guid = emp.get("guid", "")
-                first = (emp.get("firstName") or "").strip()
-                last = (emp.get("lastName") or "").strip()
-                emp_map[guid] = f"{first} {last}".strip() or guid[:8]
-        else:
-            logger.warning(f"Employees config API {resp.status_code} for {restaurant_guid[:8]}")
-    except Exception as exc:
-        logger.warning(f"Employees config API error for {restaurant_guid[:8]}: {exc}")
+
+    # Try multiple endpoint paths — different Toast API versions/scopes
+    endpoints = [
+        f"{TOAST_STANDARD_API_BASE_URL}/config/v2/employees",
+        f"{TOAST_STANDARD_API_BASE_URL}/config/v1/employees",
+        f"{TOAST_STANDARD_API_BASE_URL}/labor/v1/employees",
+    ]
+    for url in endpoints:
+        try:
+            resp = await client.get(url, headers=headers, timeout=60.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    logger.info(f"Employees resolved via {url} ({len(data)} found), sample keys: {list(data[0].keys())[:10]}")
+                    for emp in data:
+                        guid = emp.get("guid", "")
+                        first = (emp.get("firstName") or "").strip()
+                        last = (emp.get("lastName") or "").strip()
+                        name = f"{first} {last}".strip()
+                        if not name:
+                            name = (emp.get("name") or emp.get("displayName") or "").strip()
+                        emp_map[guid] = name or guid[:8]
+                    return emp_map
+            else:
+                logger.debug(f"Employees endpoint {url} returned {resp.status_code}")
+        except Exception as exc:
+            logger.debug(f"Employees endpoint {url} error: {exc}")
+
+    logger.warning(f"Could not resolve employee names for {restaurant_guid[:8]} (all endpoints failed)")
     return emp_map
 
 
@@ -10808,22 +10825,36 @@ async def _fetch_job_configs(
     client: httpx.AsyncClient,
     restaurant_guid: str,
 ) -> Dict[str, str]:
-    """Fetch job guid -> job title mapping from Toast config API."""
+    """Fetch job guid -> job title mapping from Toast config API.
+    Tries multiple endpoint paths since different API scopes expose different paths."""
     standard_headers = await get_standard_api_auth_headers()
     headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
-    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/jobs"
     job_map: Dict[str, str] = {}
-    try:
-        resp = await client.get(url, headers=headers, timeout=60.0)
-        if resp.status_code == 200:
-            for job in resp.json():
-                guid = job.get("guid", "")
-                title = (job.get("title") or "").strip() or guid[:8]
-                job_map[guid] = title
-        else:
-            logger.warning(f"Jobs config API {resp.status_code} for {restaurant_guid[:8]}")
-    except Exception as exc:
-        logger.warning(f"Jobs config API error for {restaurant_guid[:8]}: {exc}")
+
+    # Try multiple endpoint paths
+    endpoints = [
+        f"{TOAST_STANDARD_API_BASE_URL}/config/v2/jobs",
+        f"{TOAST_STANDARD_API_BASE_URL}/config/v1/jobs",
+        f"{TOAST_STANDARD_API_BASE_URL}/labor/v1/jobs",
+    ]
+    for url in endpoints:
+        try:
+            resp = await client.get(url, headers=headers, timeout=60.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    logger.info(f"Jobs resolved via {url} ({len(data)} found), sample keys: {list(data[0].keys())[:10]}")
+                    for job in data:
+                        guid = job.get("guid", "")
+                        title = (job.get("title") or job.get("name") or job.get("displayName") or "").strip()
+                        job_map[guid] = title or guid[:8]
+                    return job_map
+            else:
+                logger.debug(f"Jobs endpoint {url} returned {resp.status_code}")
+        except Exception as exc:
+            logger.debug(f"Jobs endpoint {url} error: {exc}")
+
+    logger.warning(f"Could not resolve job titles for {restaurant_guid[:8]} (all endpoints failed)")
     return job_map
 
 
