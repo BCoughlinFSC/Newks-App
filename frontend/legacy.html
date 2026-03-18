@@ -1365,7 +1365,7 @@
       // Hide filter-by for guest_count (auto-uses Guest Count tags)
       const filterByRow = document.getElementById('filterByType')?.closest('.form-row');
       if (filterByRow) {
-        filterByRow.style.display = (reportType === 'guest_count' || reportType === 'royalty') ? 'none' : '';
+        filterByRow.style.display = (reportType === 'guest_count' || reportType === 'royalty' || reportType === 'tip_pool') ? 'none' : '';
       }
 
       if (reportType === 'menu' && filterByType === 'itemTags' && reportTypeConfig?.supportsItemTagFilters) {
@@ -1901,6 +1901,11 @@
       toggleBtn = document.getElementById('toggleDailyColumnsBtn');
       if (toggleBtn) toggleBtn.classList.add('hidden');
       if (results && typeof results==='object' && !Array.isArray(results) &&
+          results.hasOwnProperty('tipPoolTable')) {
+        renderTipPoolReport(results, config);
+        return;
+      }
+      if (results && typeof results==='object' && !Array.isArray(results) &&
           results.hasOwnProperty('royaltyTable')) {
         renderRoyaltyReport(results, config);
         return;
@@ -1930,6 +1935,107 @@
       body.innerHTML = results.map(row=>`<tr>${keys.map(k=>`<td>${formatCell(k,row[k])}</td>`).join('')}</tr>`).join('');
       document.getElementById('exportBtn').classList.remove('hidden');
       document.getElementById('resultsSummary').textContent = `${results.length} rows`;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // renderTipPoolReport
+    // ──────────────────────────────────────────────────────────
+    function renderTipPoolReport(results, config) {
+      const head = document.getElementById('resultsHead');
+      const body = document.getElementById('resultsBody');
+      const summary = results.tipPoolSummary || {};
+      const rows = results.tipPoolTable || [];
+      const totals = results.tipPoolTotals || {};
+      const byLocation = results.tipPoolByLocation || [];
+
+      if (rows.length === 0) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td colspan="100" class="empty-state">No tip pool data found. Make sure the selected locations have orders with tips and clocked-in employees for this date range.</td></tr>';
+        document.getElementById('exportBtn').classList.add('hidden');
+        document.getElementById('resultsSummary').textContent = '0 employees';
+        return;
+      }
+
+      const fmt$ = v => '$' + (v||0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+      const fmtH = v => (v||0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+
+      // Colors
+      const hdrBg = '#1E40AF';
+      const hdrColor = '#fff';
+      const summaryBg = '#EFF6FF';
+      const altBg = '#F9FAFB';
+      const totBg = '#1E3A5F';
+
+      let html = '';
+
+      // ── Summary cards (the math) ──
+      html += `<tr><td colspan="4" style="padding:0;border:none;">
+        <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
+            <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Tips</div>
+            <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmt$(summary.totalTips)}</div>
+          </div>
+          <div style="display:flex;align-items:center;font-size:24px;font-weight:700;color:#9CA3AF;">&divide;</div>
+          <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
+            <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Hours</div>
+            <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmtH(summary.totalHours)} hrs</div>
+          </div>
+          <div style="display:flex;align-items:center;font-size:24px;font-weight:700;color:#9CA3AF;">=</div>
+          <div style="flex:1;min-width:180px;background:#ECFDF5;border:2px solid #10B981;border-radius:10px;padding:16px;text-align:center;">
+            <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Hourly Tip Rate</div>
+            <div style="font-size:28px;font-weight:700;color:#065F46;margin-top:4px;">${fmt$(summary.hourlyRate)}/hr</div>
+          </div>
+        </div>
+      </td></tr>`;
+
+      // ── Per-location summary (if multiple locations) ──
+      if (byLocation.length > 1) {
+        html += `<tr><td colspan="4" style="padding:0 0 12px 0;border:none;">
+          <div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:12px;">
+            <div style="font-size:12px;font-weight:600;color:#92400E;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Tips by Location</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">`;
+        for (const loc of byLocation) {
+          html += `<span style="background:#fff;border:1px solid #D1D5DB;border-radius:6px;padding:4px 10px;font-size:13px;">
+            <strong>${loc.restaurantName}</strong>: ${fmt$(loc.totalTips)} tips, ${fmtH(loc.totalHours)} hrs
+          </span>`;
+        }
+        html += `</div></div></td></tr>`;
+      }
+
+      // ── Employee breakdown table header ──
+      html += `<tr style="background:${hdrBg};">
+        <th style="color:${hdrColor};padding:10px 14px;text-align:left;font-size:13px;border:none;">Employee Name</th>
+        <th style="color:${hdrColor};padding:10px 14px;text-align:left;font-size:13px;border:none;">Job Title</th>
+        <th style="color:${hdrColor};padding:10px 14px;text-align:right;font-size:13px;border:none;">Hours Worked</th>
+        <th style="color:${hdrColor};padding:10px 14px;text-align:right;font-size:13px;border:none;">Tip Share</th>
+      </tr>`;
+
+      // ── Employee rows ──
+      rows.forEach((row, idx) => {
+        const bg = idx % 2 ? altBg : '#fff';
+        const locLabel = byLocation.length > 1 ? ` <span style="font-size:11px;color:#9CA3AF;">(${row.restaurantName})</span>` : '';
+        html += `<tr style="background:${bg};">
+          <td style="padding:8px 14px;border-bottom:1px solid #E5E7EB;">${row.employeeName}${locLabel}</td>
+          <td style="padding:8px 14px;border-bottom:1px solid #E5E7EB;">${row.jobTitle}</td>
+          <td style="padding:8px 14px;text-align:right;border-bottom:1px solid #E5E7EB;">${fmtH(row.hoursWorked)}</td>
+          <td style="padding:8px 14px;text-align:right;border-bottom:1px solid #E5E7EB;font-weight:600;">${fmt$(row.tipShare)}</td>
+        </tr>`;
+      });
+
+      // ── Totals row ──
+      html += `<tr style="background:${totBg};">
+        <td style="padding:10px 14px;color:#fff;font-weight:700;border:none;" colspan="2">Totals (${rows.length} employees)</td>
+        <td style="padding:10px 14px;color:#fff;font-weight:700;text-align:right;border:none;">${fmtH(totals.hoursWorked)}</td>
+        <td style="padding:10px 14px;color:#fff;font-weight:700;text-align:right;border:none;">${fmt$(totals.tipShare)}</td>
+      </tr>`;
+
+      head.innerHTML = '';
+      body.innerHTML = html;
+      document.getElementById('exportBtn').classList.remove('hidden');
+      document.getElementById('resultsSummary').textContent = `${rows.length} employees`;
+
+      // Store for Excel export
+      currentResults = results;
     }
 
     // ──────────────────────────────────────────────────────────
@@ -3081,6 +3187,40 @@
             addWS(WB, sumRows, 'Summary');
           }
         }
+
+      // ── Tip Pool report ────────────────────────────────────────────────────
+      } else if (currentResults && currentResults.tipPoolTable) {
+        const tpSummary = currentResults.tipPoolSummary || {};
+        const tpRows = currentResults.tipPoolTable || [];
+        const tpTotals = currentResults.tipPoolTotals || {};
+        const tpByLoc = currentResults.tipPoolByLocation || [];
+        // Summary sheet
+        const sumRows = [
+          [c('Tip Pool Calculation', mkS(navy, '#fff', true, false))],
+          [],
+          [c('Total Tips', S.navyL), n(tpSummary.totalTips || 0, S.navyR)],
+          [c('Total Hours', S.navyL), n(tpSummary.totalHours || 0, S.navyR)],
+          [c('Hourly Tip Rate', S.navyL), n(tpSummary.hourlyRate || 0, S.navyR)],
+        ];
+        if (tpByLoc.length > 1) {
+          sumRows.push([]);
+          sumRows.push([c('Location', S.navyL), c('Tips', S.navyR), c('Hours', S.navyR)]);
+          tpByLoc.forEach((loc, idx) => {
+            const alt = idx % 2 === 1;
+            const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+            sumRows.push([c(loc.restaurantName || '', dL), n(loc.totalTips || 0, dR), n(loc.totalHours || 0, dR)]);
+          });
+        }
+        addWS(WB, sumRows, 'Summary');
+        // Employee breakdown sheet
+        const empHdr = [c('Employee', S.navyL), c('Job Title', S.navyL), c('Hours Worked', S.navyR), c('Tip Share', S.navyR)];
+        const empTotRow = [c('TOTAL', S.navyL), c('', S.navyL), n(tpTotals.hoursWorked || 0, S.navyR), n(tpTotals.tipShare || 0, S.navyR)];
+        const empDataRows = tpRows.map((emp, idx) => {
+          const alt = idx % 2 === 1;
+          const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+          return [c(emp.employeeName || '', dL), c(emp.jobTitle || '', dL), n(emp.hoursWorked || 0, dR), n(emp.tipShare || 0, dR)];
+        });
+        addWS(WB, [empHdr, empTotRow, ...empDataRows], 'Tip Pool');
 
       // ── Royalty report ─────────────────────────────────────────────────────
       } else if (currentResults && currentResults.royaltyTable) {

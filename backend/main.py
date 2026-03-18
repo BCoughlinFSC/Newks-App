@@ -1073,6 +1073,7 @@ AVAILABLE_PAGES = {
     "guest_count": "Guest Count",
     "royalty": "Royalty Report",
     "pick3": "Pick 3",
+    "tip_pool": "Tip Pool",
 }
 
 class UserCreate(BaseModel):
@@ -7526,6 +7527,12 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
             if not restaurant_ids or len(restaurant_ids) == 0:
                 raise HTTPException(status_code=400, detail="No restaurants available")
 
+            # Tip Pool report
+            if report_config.reportType == "tip_pool":
+                return await build_tip_pool_report(
+                    client, report_config, restaurant_ids, start_date, end_date, locations
+                )
+
             # Guest Count report
             if report_config.reportType == "guest_count":
                 return await build_guest_count_report(
@@ -10160,6 +10167,12 @@ async def get_report_types():
                 "name": "Royalty Report",
                 "description": "Newk's net sales with Royalty 5% and MKT Fund 1.75% by location",
                 "groupByOptions": []
+            },
+            {
+                "id": "tip_pool",
+                "name": "Tip Pool Report",
+                "description": "Weekly tip pool: total tips \u00f7 total hours = per-employee share",
+                "groupByOptions": []
             }
         ],
         "dateRangeTypes": [
@@ -10734,6 +10747,246 @@ async def create_help_ticket(ticket: HelpTicketRequest = Body(...)):
     except Exception as e:
         logger.error(f"Error sending Slack message: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error submitting request: {str(e)}")
+
+# ------------------
+# Tip Pool Report Helpers
+# ------------------
+
+# Ghost job titles to exclude from tip pool
+_GHOST_JOBS = {"ghost cashier", "ghost kds"}
+
+
+async def _fetch_tips_for_restaurant(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    start_date: date,
+    end_date: date,
+) -> float:
+    """Sum credit-card tipAmount across all orders for one restaurant over a date range."""
+    orders = await _fetch_orders_for_restaurant_date_range(
+        client, restaurant_guid, start_date, end_date
+    )
+    total_tips = 0.0
+    for order in orders:
+        if order.get("voided"):
+            continue
+        for check in order.get("checks") or []:
+            if check.get("voided"):
+                continue
+            for pmt in check.get("payments") or []:
+                tip = float(pmt.get("tipAmount") or 0)
+                if tip > 0:
+                    total_tips += tip
+    return total_tips
+
+
+async def _fetch_employee_configs(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+) -> Dict[str, str]:
+    """Fetch employee guid -> 'FirstName LastName' mapping from Toast config API."""
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
+    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/employees"
+    emp_map: Dict[str, str] = {}
+    try:
+        resp = await client.get(url, headers=headers, timeout=60.0)
+        if resp.status_code == 200:
+            for emp in resp.json():
+                guid = emp.get("guid", "")
+                first = (emp.get("firstName") or "").strip()
+                last = (emp.get("lastName") or "").strip()
+                emp_map[guid] = f"{first} {last}".strip() or guid[:8]
+        else:
+            logger.warning(f"Employees config API {resp.status_code} for {restaurant_guid[:8]}")
+    except Exception as exc:
+        logger.warning(f"Employees config API error for {restaurant_guid[:8]}: {exc}")
+    return emp_map
+
+
+async def _fetch_job_configs(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+) -> Dict[str, str]:
+    """Fetch job guid -> job title mapping from Toast config API."""
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
+    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/jobs"
+    job_map: Dict[str, str] = {}
+    try:
+        resp = await client.get(url, headers=headers, timeout=60.0)
+        if resp.status_code == 200:
+            for job in resp.json():
+                guid = job.get("guid", "")
+                title = (job.get("title") or "").strip() or guid[:8]
+                job_map[guid] = title
+        else:
+            logger.warning(f"Jobs config API {resp.status_code} for {restaurant_guid[:8]}")
+    except Exception as exc:
+        logger.warning(f"Jobs config API error for {restaurant_guid[:8]}: {exc}")
+    return job_map
+
+
+async def _fetch_employee_hours(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    start_date: date,
+    end_date: date,
+    emp_map: Dict[str, str],
+    job_map: Dict[str, str],
+) -> List[Dict]:
+    """Fetch per-employee hours from labor API, excluding ghost jobs. Returns list of dicts."""
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
+    labor_url = f"{TOAST_STANDARD_API_BASE_URL}/labor/v1/timeEntries"
+
+    # Keyed by employee guid -> {name, job, reg_hours, ot_hours}
+    by_employee: Dict[str, Dict] = {}
+
+    start_dt = datetime(start_date.year, start_date.month, start_date.day)
+    end_dt = datetime(end_date.year, end_date.month, end_date.day)
+
+    chunk_start = start_dt
+    while chunk_start <= end_dt:
+        chunk_end = min(chunk_start + timedelta(days=29), end_dt)
+        params = {
+            "startDate": chunk_start.strftime("%Y-%m-%dT00:00:00.000+0000"),
+            "endDate": chunk_end.strftime("%Y-%m-%dT23:59:59.999+0000"),
+        }
+        try:
+            resp = await client.get(labor_url, headers=headers, params=params, timeout=60.0)
+            if resp.status_code != 200:
+                logger.warning(f"Tip pool labor API {resp.status_code} for {restaurant_guid[:8]}")
+            else:
+                entries = resp.json()
+                if not isinstance(entries, list):
+                    entries = entries.get("timeEntries", []) if isinstance(entries, dict) else []
+                for entry in entries:
+                    if entry.get("outDate") is None:
+                        continue
+                    emp_ref = entry.get("employeeReference") or {}
+                    job_ref = entry.get("jobReference") or {}
+                    emp_guid = emp_ref.get("guid", "unknown")
+                    job_guid = job_ref.get("guid", "")
+                    job_title = job_map.get(job_guid, job_ref.get("externalId", "Unknown"))
+                    # Filter out ghost jobs
+                    if job_title.lower().strip() in _GHOST_JOBS:
+                        continue
+                    emp_name = emp_map.get(emp_guid, emp_ref.get("externalId", emp_guid[:8]))
+                    reg_h = float(entry.get("regularHours") or 0)
+                    ot_h = float(entry.get("overtimeHours") or 0)
+                    if emp_guid not in by_employee:
+                        by_employee[emp_guid] = {
+                            "employeeName": emp_name,
+                            "jobTitle": job_title,
+                            "regularHours": 0.0,
+                            "overtimeHours": 0.0,
+                        }
+                    by_employee[emp_guid]["regularHours"] += reg_h
+                    by_employee[emp_guid]["overtimeHours"] += ot_h
+        except Exception as exc:
+            logger.warning(f"Tip pool labor exception for {restaurant_guid[:8]}: {exc}")
+        chunk_start = chunk_end + timedelta(days=1)
+
+    results = []
+    for emp_guid, data in by_employee.items():
+        total_h = round(data["regularHours"] + data["overtimeHours"], 2)
+        if total_h > 0:
+            results.append({
+                "employeeName": data["employeeName"],
+                "jobTitle": data["jobTitle"],
+                "hoursWorked": total_h,
+            })
+    return results
+
+
+async def build_tip_pool_report(
+    client: httpx.AsyncClient,
+    report_config: "ReportConfig",
+    restaurant_ids: List[str],
+    start_date: date,
+    end_date: date,
+    locations=None,
+) -> Dict:
+    """Build the weekly tip pool report across selected restaurants."""
+    # Resolve location names for display
+    loc_name_map: Dict[str, str] = {}
+    if locations:
+        for loc in locations:
+            loc_name_map[loc.restaurantGuid] = loc.name
+    else:
+        try:
+            all_locs = await get_all_active_locations(client)
+            for loc in all_locs:
+                loc_name_map[loc.restaurantGuid] = loc.name
+        except Exception:
+            pass
+
+    grand_total_tips = 0.0
+    all_employees: List[Dict] = []
+    per_location: List[Dict] = []
+    errors: List[str] = []
+
+    for restaurant_guid in restaurant_ids:
+        loc_name = loc_name_map.get(restaurant_guid, restaurant_guid[:8])
+        try:
+            # Fetch employee and job configs for name resolution
+            emp_map, job_map = await asyncio.gather(
+                _fetch_employee_configs(client, restaurant_guid),
+                _fetch_job_configs(client, restaurant_guid),
+            )
+            # Fetch tips and employee hours in parallel
+            tips, employees = await asyncio.gather(
+                _fetch_tips_for_restaurant(client, restaurant_guid, start_date, end_date),
+                _fetch_employee_hours(client, restaurant_guid, start_date, end_date, emp_map, job_map),
+            )
+            grand_total_tips += tips
+            # Tag each employee with their location
+            for emp in employees:
+                emp["restaurantName"] = loc_name
+            all_employees.extend(employees)
+            total_loc_hours = sum(e["hoursWorked"] for e in employees)
+            per_location.append({
+                "restaurantName": loc_name,
+                "totalTips": round(tips, 2),
+                "totalHours": round(total_loc_hours, 2),
+            })
+        except Exception as exc:
+            errors.append(f"{loc_name}: {str(exc)}")
+            logger.warning(f"Tip pool error for {loc_name}: {exc}", exc_info=True)
+
+    # Calculate totals
+    grand_total_hours = sum(e["hoursWorked"] for e in all_employees)
+    hourly_rate = round(grand_total_tips / grand_total_hours, 4) if grand_total_hours > 0 else 0.0
+
+    # Calculate each employee's tip share
+    for emp in all_employees:
+        emp["tipShare"] = round(emp["hoursWorked"] * hourly_rate, 2)
+
+    # Sort by hours descending
+    all_employees.sort(key=lambda e: e["hoursWorked"], reverse=True)
+
+    logger.info(
+        f"Tip pool report: {len(restaurant_ids)} locations, {start_date}–{end_date}, "
+        f"tips=${grand_total_tips:.2f}, hours={grand_total_hours:.2f}, rate=${hourly_rate:.4f}/hr, "
+        f"employees={len(all_employees)}, errors={errors}"
+    )
+
+    return {
+        "tipPoolSummary": {
+            "totalTips": round(grand_total_tips, 2),
+            "totalHours": round(grand_total_hours, 2),
+            "hourlyRate": round(hourly_rate, 4),
+        },
+        "tipPoolTable": all_employees,
+        "tipPoolTotals": {
+            "hoursWorked": round(grand_total_hours, 2),
+            "tipShare": round(grand_total_tips, 2),
+        },
+        "tipPoolByLocation": per_location,
+        "errors": errors,
+    }
+
 
 # ------------------
 # Labor Summary Endpoint
