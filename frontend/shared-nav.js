@@ -20,6 +20,8 @@
     { key: 'guest_count',   label: 'Guest Count',       href: '/legacy.html?report=guest_count' },
     { key: 'royalty',       label: 'Royalty Report',     href: '/legacy.html?report=royalty' },
     { key: 'pick3',         label: 'Pick 3',             href: '/pick3.html' },
+    { key: 'pick2',         label: 'Pick 2',             href: '/pick2.html' },
+    { key: 'full-pairings', label: 'Full Pairings',      href: '/full-pairings.html' },
   ];
 
   const ADMIN_LINKS = [
@@ -38,6 +40,8 @@
       return params.get('report') || 'sales_summary';
     }
     if (path.endsWith('/pick3.html'))                return 'pick3';
+    if (path.endsWith('/pick2.html'))                return 'pick2';
+    if (path.endsWith('/full-pairings.html'))        return 'full-pairings';
     if (path.endsWith('/olo.html'))                   return 'olo';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
