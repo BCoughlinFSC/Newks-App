@@ -10771,16 +10771,42 @@ async def _fetch_tips_for_restaurant(
         client, restaurant_guid, start_date, end_date
     )
     total_tips = 0.0
+    skipped_tips = 0.0
+    skipped_reasons: list = []
     for order in orders:
-        if order.get("voided"):
+        if order.get("voided") or order.get("deleted"):
             continue
         for check in order.get("checks") or []:
-            if check.get("voided"):
+            if check.get("voided") or check.get("deleted"):
                 continue
             for pmt in check.get("payments") or []:
                 tip = float(pmt.get("tipAmount") or 0)
+                if tip == 0:
+                    continue
+                # Skip voided, refunded, or denied payments
+                pmt_voided = pmt.get("voided", False)
+                pmt_status = (pmt.get("paymentStatus") or "").upper()
+                refund_status = (pmt.get("refundStatus") or "").upper()
+                original_pmt = pmt.get("originalMapPayment")  # refund reference
+                if pmt_voided or pmt_status in ("VOIDED", "DENIED") or refund_status in ("SUCCESSFUL",) or original_pmt:
+                    skipped_tips += tip
+                    skipped_reasons.append({
+                        "tip": tip,
+                        "voided": pmt_voided,
+                        "status": pmt_status,
+                        "refundStatus": refund_status,
+                        "hasOriginalPmt": bool(original_pmt),
+                        "type": pmt.get("type"),
+                    })
+                    continue
                 if tip > 0:
                     total_tips += tip
+    if skipped_tips > 0:
+        logger.info(
+            f"Tip pool tips: restaurant={restaurant_guid[:8]}, "
+            f"total=${total_tips:.2f}, skipped=${skipped_tips:.2f}, "
+            f"skipped_details={skipped_reasons}"
+        )
     return total_tips
 
 
