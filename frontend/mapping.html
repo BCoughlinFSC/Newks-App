@@ -57,7 +57,7 @@
     }
     .main-layout {
       display: grid;
-      grid-template-columns: 220px 1fr;
+      grid-template-columns: 280px 1fr;
       grid-template-rows: 1fr;
       gap: 1.5rem;
       max-width: 1800px;
@@ -399,12 +399,7 @@
   </div>
 
   <div class="main-layout">
-    <nav class="left-nav">
-      <h3>Navigation</h3>
-      <a href="/" class="nav-link-item">🏠 Home</a>
-      <a href="/mapping.html" class="nav-link-item active">🗂 Mapping Table</a>
-      <a href="/legacy.html" class="nav-link-item">📋 Reports V1</a>
-    </nav>
+    <div id="shared-sidebar"></div>
 
     <main class="content-area">
 
@@ -2040,5 +2035,6 @@
 
     })();
   </script>
+  <script src="/shared-nav.js"></script>
 </body>
 </html>

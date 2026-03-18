@@ -14,7 +14,7 @@
     .header p  { margin: 0.4rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
     .home-btn  { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem; }
     .home-btn:hover { background: rgba(255,255,255,0.25); }
-    .main-layout { display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem; max-width: 1600px; margin: 0 auto; padding: 2rem; }
+    .main-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; max-width: 1600px; margin: 0 auto; padding: 2rem; }
     .left-nav { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e8e0d5; height: fit-content; }
     .left-nav h3 { margin: 0 0 1rem; color: #C41E3A; font-size: 1rem; font-weight: 700; }
     .nav-link { display: block; padding: 0.5rem 0.75rem; color: #2c2c2c; text-decoration: none; border-radius: 6px; margin-bottom: 0.25rem; font-size: 0.9rem; }
@@ -94,14 +94,7 @@
 </div>
 
 <div class="main-layout">
-  <nav class="left-nav">
-    <h3>Reports</h3>
-    <a href="/legacy.html"        class="nav-link">Reports V1</a>
-    <a href="/olo.html"           class="nav-link hidden" id="oloNavLink">Digital Orders by Platform (OLO)</a>
-    <a href="/pick3.html"         class="nav-link">Pick 3 Report</a>
-    <a href="/pick2.html"         class="nav-link">Pick 2 Report</a>
-    <a href="/full-pairings.html" class="nav-link active">Full Pairings Report</a>
-  </nav>
+  <div id="shared-sidebar"></div>
 
   <main>
 
@@ -482,5 +475,6 @@ $('btnExportAll').addEventListener('click',()=>{
   dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),'full_pairings_all_stores.csv');
 });
 </script>
+<script src="/shared-nav.js"></script>
 </body>
 </html>

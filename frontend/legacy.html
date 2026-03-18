@@ -574,55 +574,8 @@
   <!-- ─── Main layout ─────────────────────────────────────── -->
   <div class="container">
 
-    <!-- Sidebar -->
-    <div class="sidebar">
-
-      <!-- Navigation -->
-      <div class="sidebar-card" style="flex: none;">
-        <h3 style="margin: 0 0 0.75rem 0; color: #C41E3A; font-size: 0.95rem; font-weight: 700;">Navigation</h3>
-        <div class="nav-section-label">Reports</div>
-        <a href="/legacy.html" class="nav-link-item active" data-page-key="legacy">📋 Reports V1</a>
-        <a href="/toast-reporting-guide.html" class="nav-link-item">📘 Toast Reporting Guide</a>
-        <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink" data-page-key="olo">📱 Digital Orders by Platform (OLO)</a>
-        <a href="/pick3.html" class="nav-link-item" data-page-key="pick3">📊 Pick 3 Report</a>
-        <a href="#" class="nav-link-item" id="guestCountNavLink" data-page-key="legacy" onclick="document.getElementById('reportType').value='guest_count';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">👥 Guest Count Report</a>
-        <a href="#" class="nav-link-item" id="royaltyNavLink" data-page-key="legacy" onclick="document.getElementById('reportType').value='royalty';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">💰 Royalty Report</a>
-        <div class="nav-section-label hidden" id="dataNavSection" style="margin-top: 0.5rem;">Data</div>
-        <a href="/mapping.html" class="nav-link-item hidden" id="mappingNavLink" data-page-key="mapping">🗂 Mapping Table</a>
-        <a href="/msi-discrepancy.html" class="nav-link-item hidden" id="msiDiscrepancyNavLink" data-page-key="msi-discrepancy">🐒 MSI Discrepancy</a>
-      </div>
-
-      <div class="sidebar-card">
-        <h2>Saved Reports</h2>
-        <button class="btn-primary btn-full" id="newReportBtn">+ New Report</button>
-
-        <div style="margin-top: 0.75rem;">
-          <div class="saved-reports-list" id="savedReportsList">
-            <div class="empty-state">Loading...</div>
-          </div>
-        </div>
-
-        <button class="btn-secondary btn-full hidden" style="margin-top: 0.75rem;" id="toastPricingExportBtn">
-          📊 Toast Pricing Export
-        </button>
-
-        <!-- User Profile -->
-        <div class="sidebar-footer hidden" id="userProfileSection">
-          <div class="user-profile-info">
-            <div class="user-avatar" id="userAvatar">U</div>
-            <div>
-              <div class="user-name" id="userProfileName">User</div>
-              <div class="user-role" id="userProfileRole">user</div>
-            </div>
-          </div>
-          <div class="user-profile-actions">
-            <button class="btn-blue btn-full hidden" id="userAdminBtn">⚙ Admin Panel</button>
-            <button class="btn-secondary btn-full hidden" id="myRestaurantsBtn">🏪 My Restaurants</button>
-            <button class="btn-secondary btn-full" id="userLogoutBtn">Logout</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Shared Sidebar (injected by shared-nav.js) -->
+    <div id="shared-sidebar"></div>
 
     <!-- Main content -->
     <div class="main-content">
@@ -1004,53 +957,12 @@
       return false;
     }
 
-    function userCanAccessPage(pageKey) {
-      if (!currentUser) return false;
-      if (currentUser.role === 'admin') return true;
-      const allowed = currentUser.allowedPages || [];
-      if (allowed.length === 0) return true; // empty = all pages
-      return allowed.includes(pageKey);
-    }
-
     function updateUIForAuth() {
       if (currentUser) {
-        const isAdmin = currentUser.role === 'admin';
-        const section = document.getElementById('userProfileSection');
-        const adminBtn = document.getElementById('userAdminBtn');
-        const myRestBtn = document.getElementById('myRestaurantsBtn');
-        if (section) section.classList.remove('hidden');
-        if (document.getElementById('userProfileName')) document.getElementById('userProfileName').textContent = currentUser.name;
-        if (document.getElementById('userProfileRole')) document.getElementById('userProfileRole').textContent = currentUser.role || 'user';
-        if (document.getElementById('userAvatar')) {
-          document.getElementById('userAvatar').textContent = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-        }
-        if (adminBtn) adminBtn.classList.toggle('hidden', !isAdmin);
-        if (myRestBtn) myRestBtn.classList.toggle('hidden', isAdmin);
-
-        // Show/hide nav links based on page permissions
-        document.querySelectorAll('.nav-link-item[data-page-key]').forEach(link => {
-          const pageKey = link.dataset.pageKey;
-          link.classList.toggle('hidden', !userCanAccessPage(pageKey));
-        });
-
-        // Show "Data" section header if any data-section link is visible
-        const hasDataLinks = userCanAccessPage('mapping') || userCanAccessPage('msi-discrepancy');
-        document.getElementById('dataNavSection')?.classList.toggle('hidden', !hasDataLinks);
-
-        // Admin-only buttons
-        document.getElementById('toastPricingExportBtn')?.classList.toggle('hidden', !isAdmin);
         document.getElementById('authModal').classList.add('hidden');
-      } else {
-        const section = document.getElementById('userProfileSection');
-        if (section) section.classList.add('hidden');
-        document.getElementById('userAdminBtn')?.classList.add('hidden');
-        document.getElementById('myRestaurantsBtn')?.classList.add('hidden');
-        // Keep nav links hidden until role is known
-        document.querySelectorAll('.nav-link-item[data-page-key]').forEach(link => {
-          link.classList.add('hidden');
-        });
-        document.getElementById('dataNavSection')?.classList.add('hidden');
       }
+      // Rebuild the shared sidebar with current auth state
+      if (typeof window.rebuildSharedNav === 'function') window.rebuildSharedNav();
     }
 
     async function handleAuth(e) {
@@ -3235,9 +3147,6 @@
       document.getElementById('closeAuthModal').addEventListener('click', () => document.getElementById('authModal').classList.add('hidden'));
       document.getElementById('cancelAuthBtn').addEventListener('click', () => document.getElementById('authModal').classList.add('hidden'));
       document.getElementById('authForm').addEventListener('submit', handleAuth);
-      document.getElementById('userLogoutBtn').addEventListener('click', logout);
-      document.getElementById('userAdminBtn').addEventListener('click', () => { window.location.href = '/admin.html'; });
-      document.getElementById('myRestaurantsBtn').addEventListener('click', openMyRestaurantsModal);
       document.getElementById('closeMyRestaurantsModal').addEventListener('click', closeMyRestaurantsModal);
       document.getElementById('cancelMyRestaurantsBtn').addEventListener('click', closeMyRestaurantsModal);
       document.getElementById('saveMyRestaurantsBtn').addEventListener('click', saveMyRestaurants);
@@ -3246,13 +3155,12 @@
       document.getElementById('closeHelpModal').addEventListener('click', () => document.getElementById('helpModal').classList.add('hidden'));
       document.getElementById('cancelHelpBtn').addEventListener('click', () => document.getElementById('helpModal').classList.add('hidden'));
       document.getElementById('helpForm').addEventListener('submit', submitHelpTicket);
-      document.getElementById('newReportBtn').addEventListener('click', newReport);
       document.getElementById('runReportBtn').addEventListener('click', runReport);
       document.getElementById('saveReportBtn').addEventListener('click', saveReport);
       document.getElementById('updateReportBtn').addEventListener('click', updateReport);
       document.getElementById('deleteReportBtn').addEventListener('click', deleteReport);
       document.getElementById('exportBtn').addEventListener('click', exportExcel);
-      document.getElementById('toastPricingExportBtn').addEventListener('click', exportToastPricing);
+      // Toast Pricing Export is now handled by shared-nav.js via window.exportToastPricing
       document.getElementById('toggleToastColumnsBtn').addEventListener('click', toggleToastColumns);
       document.getElementById('toggleDailyColumnsBtn').addEventListener('click', toggleDailyColumns);
       document.getElementById('reportType').addEventListener('change', updateFilterByOptions);
@@ -3327,6 +3235,24 @@
     }
 
     init();
+
+    // Handle ?report= param from shared nav links
+    const urlParams = new URLSearchParams(window.location.search);
+    const reportParam = urlParams.get('report');
+    if (reportParam) {
+      const reportSelect = document.getElementById('reportType');
+      if (reportSelect) {
+        reportSelect.value = reportParam;
+        reportSelect.dispatchEvent(new Event('change'));
+      }
+    }
+    // Handle ?loadReport= param from saved report links on other pages
+    const loadReportParam = urlParams.get('loadReport');
+    if (loadReportParam && typeof window.loadReport === 'function') {
+      // Wait for saved reports to load, then load the specific report
+      setTimeout(() => { window.loadReport(loadReportParam); }, 500);
+    }
   </script>
+  <script src="/shared-nav.js"></script>
 </body>
 </html>

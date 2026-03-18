@@ -1065,17 +1065,14 @@ class User(BaseModel):
     status: Optional[str] = "active"  # "invited" or "active"
 
 # Available report pages for page-level permissions
+# Report keys match the nav link keys in shared-nav.js
 AVAILABLE_PAGES = {
-    "legacy": "Reports V1",
-    "menu-performance": "Menu Performance",
-    "olo": "Digital Orders",
-    "pick3": "Pick3 Report",
-    "full-pairings": "Item Pairings",
-    "report-builder": "Report Builder",
-    "mapping": "Mapping Table",
-    "configuration": "Configuration",
-    "report-categories": "Report Categories",
-    "msi-discrepancy": "MSI Discrepancy",
+    "sales_summary": "Sales Summary",
+    "metrics": "Net Sales",
+    "menu": "Menu Performance",
+    "guest_count": "Guest Count",
+    "royalty": "Royalty Report",
+    "pick3": "Pick 3",
 }
 
 class UserCreate(BaseModel):

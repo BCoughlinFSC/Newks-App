@@ -37,12 +37,7 @@
     }
     .home-btn:hover { background: rgba(255,255,255,0.25); }
     /* ── Layout ── */
-    .page-body { display: flex; gap: 0; min-height: calc(100vh - 64px); }
-    .sidebar {
-      width: 220px; min-width: 220px;
-      background: #1E293B; padding: 1rem 0.75rem;
-      display: flex; flex-direction: column; gap: 0.25rem;
-    }
+    .page-body { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; min-height: calc(100vh - 64px); padding: 1.5rem 2rem; max-width: 1800px; margin: 0 auto; }
     .sidebar-label {
       font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em;
       color: #64748B; text-transform: uppercase;
@@ -372,15 +367,8 @@
 
 <!-- Page Layout -->
 <div class="page-body">
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="sidebar-label">Admin Tools</div>
-    <a href="/admin.html" class="nav-link">⚙️ Admin Panel</a>
-    <a href="/msi-discrepancy.html" class="nav-link active">🐒 MSI Discrepancy</a>
-    <div class="sidebar-label" style="margin-top:1rem;">Reports</div>
-    <a href="/legacy.html" class="nav-link">📋 Reports V1</a>
-    <a href="/olo.html" class="nav-link">📱 OLO Orders</a>
-  </div>
+  <!-- Shared Sidebar -->
+  <div id="shared-sidebar"></div>
 
   <!-- Main Content -->
   <div class="main-content">
@@ -1283,5 +1271,6 @@ function escHtml(s) {
   if (!ok) return;
 })();
 </script>
+<script src="/shared-nav.js"></script>
 </body>
 </html>

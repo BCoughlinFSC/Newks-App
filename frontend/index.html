@@ -174,7 +174,7 @@
     }
     .main-layout {
       display: grid;
-      grid-template-columns: 250px 1fr;
+      grid-template-columns: 280px 1fr;
       gap: 1.5rem;
       max-width: 1600px;
       margin: 0 auto;
@@ -543,49 +543,8 @@
     </div>
 
   <div class="main-layout">
-    <!-- Left Navigation -->
-    <div class="left-nav">
-      <h3>Navigation</h3>
-      
-      <div class="nav-category">
-        <div class="nav-category-header collapsed" data-category="reports">
-          <span>REPORTS</span>
-          <span class="toggle-icon">▶</span>
-          </div>
-        <div class="nav-category-items" style="max-height: 0; overflow: hidden; opacity: 0; margin-top: 0;">
-          <a href="/legacy.html" class="nav-link-item">📋 Reports V1</a>
-          <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink">📱 Digital Orders by Platform (OLO)</a>
-          <a href="/pick3.html" class="nav-link-item">📊 Pick 3 Report</a>
-          </div>
-        </div>
-
-      <div class="nav-category hidden" id="dataNavSection">
-        <div class="nav-category-header collapsed" data-category="data">
-          <span>DATA</span>
-          <span class="toggle-icon">▶</span>
-        </div>
-        <div class="nav-category-items" style="max-height: 0; overflow: hidden; opacity: 0; margin-top: 0;">
-          <a href="/mapping.html" class="nav-link-item" id="mappingNavLink">🗂 Mapping Table</a>
-        </div>
-      </div>
-
-      <!-- User Profile Section at Bottom -->
-      <div class="left-nav-footer hidden" id="userProfileSection">
-        <div class="user-profile">
-          <div class="user-profile-info">
-            <div class="user-profile-avatar" id="userAvatar">U</div>
-            <div class="user-profile-details">
-              <div class="user-profile-name" id="userProfileName">User</div>
-              <div class="user-profile-role" id="userProfileRole">user</div>
-            </div>
-          </div>
-          <div class="user-profile-actions">
-            <button class="user-profile-btn admin hidden" id="userAdminBtn">Admin Panel</button>
-            <button class="user-profile-btn" id="userLogoutBtn">Logout</button>
-          </div>
-        </div>
-          </div>
-        </div>
+    <!-- Shared Sidebar -->
+    <div id="shared-sidebar"></div>
 
     <!-- Main Content -->
     <div class="container">
@@ -1150,5 +1109,6 @@
     // Initialize on page load
     init();
   </script>
+  <script src="/shared-nav.js"></script>
 </body>
 </html>
