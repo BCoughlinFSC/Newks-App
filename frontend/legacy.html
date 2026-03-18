@@ -581,15 +581,15 @@
       <div class="sidebar-card" style="flex: none;">
         <h3 style="margin: 0 0 0.75rem 0; color: #C41E3A; font-size: 0.95rem; font-weight: 700;">Navigation</h3>
         <div class="nav-section-label">Reports</div>
-        <a href="/legacy.html" class="nav-link-item active">📋 Reports V1</a>
+        <a href="/legacy.html" class="nav-link-item active" data-page-key="legacy">📋 Reports V1</a>
         <a href="/toast-reporting-guide.html" class="nav-link-item">📘 Toast Reporting Guide</a>
-        <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink">📱 Digital Orders by Platform (OLO)</a>
-        <a href="/pick3.html" class="nav-link-item">📊 Pick 3 Report</a>
-        <a href="#" class="nav-link-item" id="guestCountNavLink" onclick="document.getElementById('reportType').value='guest_count';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">👥 Guest Count Report</a>
-        <a href="#" class="nav-link-item" id="royaltyNavLink" onclick="document.getElementById('reportType').value='royalty';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">💰 Royalty Report</a>
+        <a href="/olo.html" class="nav-link-item hidden" id="oloNavLink" data-page-key="olo">📱 Digital Orders by Platform (OLO)</a>
+        <a href="/pick3.html" class="nav-link-item" data-page-key="pick3">📊 Pick 3 Report</a>
+        <a href="#" class="nav-link-item" id="guestCountNavLink" data-page-key="legacy" onclick="document.getElementById('reportType').value='guest_count';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">👥 Guest Count Report</a>
+        <a href="#" class="nav-link-item" id="royaltyNavLink" data-page-key="legacy" onclick="document.getElementById('reportType').value='royalty';document.getElementById('reportType').dispatchEvent(new Event('change'));return false;">💰 Royalty Report</a>
         <div class="nav-section-label hidden" id="dataNavSection" style="margin-top: 0.5rem;">Data</div>
-        <a href="/mapping.html" class="nav-link-item hidden" id="mappingNavLink">🗂 Mapping Table</a>
-        <a href="/msi-discrepancy.html" class="nav-link-item hidden" id="msiDiscrepancyNavLink">🐒 MSI Discrepancy</a>
+        <a href="/mapping.html" class="nav-link-item hidden" id="mappingNavLink" data-page-key="mapping">🗂 Mapping Table</a>
+        <a href="/msi-discrepancy.html" class="nav-link-item hidden" id="msiDiscrepancyNavLink" data-page-key="msi-discrepancy">🐒 MSI Discrepancy</a>
       </div>
 
       <div class="sidebar-card">
@@ -1004,6 +1004,14 @@
       return false;
     }
 
+    function userCanAccessPage(pageKey) {
+      if (!currentUser) return false;
+      if (currentUser.role === 'admin') return true;
+      const allowed = currentUser.allowedPages || [];
+      if (allowed.length === 0) return true; // empty = all pages
+      return allowed.includes(pageKey);
+    }
+
     function updateUIForAuth() {
       if (currentUser) {
         const isAdmin = currentUser.role === 'admin';
@@ -1018,11 +1026,18 @@
         }
         if (adminBtn) adminBtn.classList.toggle('hidden', !isAdmin);
         if (myRestBtn) myRestBtn.classList.toggle('hidden', isAdmin);
-        // Admin-only nav links and buttons
-        document.getElementById('oloNavLink')?.classList.toggle('hidden', !isAdmin);
-        document.getElementById('dataNavSection')?.classList.toggle('hidden', !isAdmin);
-        document.getElementById('mappingNavLink')?.classList.toggle('hidden', !isAdmin);
-        document.getElementById('msiDiscrepancyNavLink')?.classList.toggle('hidden', !isAdmin);
+
+        // Show/hide nav links based on page permissions
+        document.querySelectorAll('.nav-link-item[data-page-key]').forEach(link => {
+          const pageKey = link.dataset.pageKey;
+          link.classList.toggle('hidden', !userCanAccessPage(pageKey));
+        });
+
+        // Show "Data" section header if any data-section link is visible
+        const hasDataLinks = userCanAccessPage('mapping') || userCanAccessPage('msi-discrepancy');
+        document.getElementById('dataNavSection')?.classList.toggle('hidden', !hasDataLinks);
+
+        // Admin-only buttons
         document.getElementById('toastPricingExportBtn')?.classList.toggle('hidden', !isAdmin);
         document.getElementById('authModal').classList.add('hidden');
       } else {
@@ -1031,10 +1046,10 @@
         document.getElementById('userAdminBtn')?.classList.add('hidden');
         document.getElementById('myRestaurantsBtn')?.classList.add('hidden');
         // Keep nav links hidden until role is known
-        document.getElementById('oloNavLink')?.classList.add('hidden');
+        document.querySelectorAll('.nav-link-item[data-page-key]').forEach(link => {
+          link.classList.add('hidden');
+        });
         document.getElementById('dataNavSection')?.classList.add('hidden');
-        document.getElementById('mappingNavLink')?.classList.add('hidden');
-        document.getElementById('msiDiscrepancyNavLink')?.classList.add('hidden');
       }
     }
 

@@ -45,6 +45,7 @@ from olo_client import (
     aggregate_digital_orders_by_platform,
     filter_batches_by_date_range,
 )
+from email_service import send_invite_email
 
 # ------------------
 # Config
@@ -792,6 +793,10 @@ async def apply_yoy_aloha_quantities(
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24 * 7  # 7 days
+INVITE_EXPIRY_HOURS = 72  # Invite link valid for 72 hours
+
+# Base URL for building invite links (e.g. https://reports.newks.com)
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 
 # Super Admin configuration (for initial setup)
 SUPER_ADMIN_EMAIL = os.getenv("SUPER_ADMIN_EMAIL", "").lower()
@@ -1056,12 +1061,29 @@ class User(BaseModel):
     preferences: Optional[Dict] = {}  # User preferences (default locations, etc.)
     role: Optional[str] = "user"  # User role: "user" or "admin"
     assignedRestaurants: Optional[List[str]] = []  # Allowed restaurant GUIDs; [] = show all
+    allowedPages: Optional[List[str]] = []  # Page keys user can access; [] = all pages
+    status: Optional[str] = "active"  # "invited" or "active"
+
+# Available report pages for page-level permissions
+AVAILABLE_PAGES = {
+    "legacy": "Reports V1",
+    "menu-performance": "Menu Performance",
+    "olo": "Digital Orders",
+    "pick3": "Pick3 Report",
+    "full-pairings": "Item Pairings",
+    "report-builder": "Report Builder",
+    "mapping": "Mapping Table",
+    "configuration": "Configuration",
+    "report-categories": "Report Categories",
+    "msi-discrepancy": "MSI Discrepancy",
+}
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
     name: str
+    password: Optional[str] = None  # Optional — omit when using invite flow
     role: Optional[str] = "user"
+    allowedPages: Optional[List[str]] = []
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -5871,7 +5893,14 @@ async def login(login_data: UserLogin = Body(...)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
-    
+
+    # Block login for invited (not yet activated) users
+    if user_data.get("status") == "invited":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Please check your email and set up your password first"
+        )
+
     # Verify password
     if not verify_password(login_data.password, user_data.get("password", "")):
         raise HTTPException(
@@ -5939,46 +5968,60 @@ async def create_user(
     user_data: UserCreate = Body(...),
     admin_user: User = Depends(get_current_admin_user)
 ):
-    """Create a new user (admin only)"""
-    # Truncate password
-    user_data.password = truncate_password_to_72_bytes(user_data.password)
-    
-    if len(user_data.password) < 6:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 6 characters long."
-        )
-    
+    """Create a new user via invite flow (admin only).
+
+    No password required — an invitation email is sent so the user
+    can set their own password.
+    """
     users = load_users()
-    
+
     # Check if user already exists
-    for user_id, user in users.items():
+    for uid, user in users.items():
         if user.get("email", "").lower() == user_data.email.lower():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
-    
-    # Create new user
+
+    # Validate allowedPages keys
+    allowed = user_data.allowedPages or []
+    invalid = [p for p in allowed if p not in AVAILABLE_PAGES]
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid page keys: {', '.join(invalid)}"
+        )
+
     user_id = str(uuid.uuid4())
-    hashed_password = hash_password(user_data.password)
-    
+    invite_token = str(uuid.uuid4())
+    invite_expiry = (datetime.now() + timedelta(hours=INVITE_EXPIRY_HOURS)).isoformat()
+
     new_user = {
         "id": user_id,
         "email": user_data.email.lower(),
         "name": user_data.name.strip(),
-        "password": hashed_password,
+        "password": "",  # No password until invite accepted
         "createdAt": datetime.now().isoformat(),
         "lastLogin": None,
         "preferences": {},
-        "role": user_data.role if user_data.role in ["user", "admin"] else "user"
+        "role": user_data.role if user_data.role in ["user", "admin"] else "user",
+        "allowedPages": allowed,
+        "status": "invited",
+        "inviteToken": invite_token,
+        "inviteTokenExpiry": invite_expiry,
     }
-    
+
     users[user_id] = new_user
     save_users(users)
-    
-    logger.info(f"Admin {admin_user.email} created user: {user_data.email}")
-    return User(**{k: v for k, v in new_user.items() if k != "password"})
+
+    # Send invitation email
+    invite_url = f"{APP_BASE_URL}/set-password.html?token={invite_token}"
+    email_sent = send_invite_email(user_data.email.lower(), user_data.name.strip(), invite_url)
+    if not email_sent:
+        logger.warning(f"User {user_data.email} created but invite email failed to send")
+
+    logger.info(f"Admin {admin_user.email} invited user: {user_data.email}")
+    return User(**{k: v for k, v in new_user.items() if k not in ("password", "inviteToken", "inviteTokenExpiry")})
 
 @app.put("/api/admin/users/{user_id}/role", response_model=User)
 async def update_user_role(
@@ -6062,6 +6105,113 @@ async def admin_set_user_restaurants(
     save_users(users)
     logger.info(f"Admin {admin_user.email} set assignedRestaurants for user {user_id}: {len(restaurant_ids)} location(s)")
     return User(**{k: v for k, v in users[user_id].items() if k != "password"})
+
+@app.put("/api/admin/users/{user_id}/pages", response_model=User)
+async def admin_set_user_pages(
+    user_id: str,
+    data: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user)
+):
+    """Admin sets which report pages a user can access. Pass pages=[] to allow all."""
+    pages = data.get("pages", [])
+    invalid = [p for p in pages if p not in AVAILABLE_PAGES]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Invalid page keys: {', '.join(invalid)}")
+    users = load_users()
+    if user_id not in users:
+        raise HTTPException(status_code=404, detail="User not found")
+    users[user_id]["allowedPages"] = pages
+    save_users(users)
+    logger.info(f"Admin {admin_user.email} set allowedPages for user {user_id}: {pages}")
+    return User(**{k: v for k, v in users[user_id].items() if k not in ("password", "inviteToken", "inviteTokenExpiry")})
+
+@app.post("/api/admin/users/{user_id}/resend-invite")
+async def resend_invite(
+    user_id: str,
+    admin_user: User = Depends(get_current_admin_user)
+):
+    """Regenerate invite token and resend invitation email."""
+    users = load_users()
+    user_data = users.get(user_id)
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user_data.get("status") != "invited":
+        raise HTTPException(status_code=400, detail="User has already accepted their invite")
+
+    invite_token = str(uuid.uuid4())
+    invite_expiry = (datetime.now() + timedelta(hours=INVITE_EXPIRY_HOURS)).isoformat()
+    user_data["inviteToken"] = invite_token
+    user_data["inviteTokenExpiry"] = invite_expiry
+    users[user_id] = user_data
+    save_users(users)
+
+    invite_url = f"{APP_BASE_URL}/set-password.html?token={invite_token}"
+    email_sent = send_invite_email(user_data["email"], user_data["name"], invite_url)
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="Failed to send invitation email")
+
+    logger.info(f"Admin {admin_user.email} resent invite for {user_data['email']}")
+    return {"message": f"Invitation resent to {user_data['email']}"}
+
+@app.get("/api/auth/invite-info")
+async def get_invite_info(token: str = Query(...)):
+    """Public endpoint — returns name and email for a valid invite token."""
+    users = load_users()
+    for uid, user_data in users.items():
+        if user_data.get("inviteToken") == token:
+            if user_data.get("status") != "invited":
+                raise HTTPException(status_code=400, detail="This invitation has already been used")
+            expiry = user_data.get("inviteTokenExpiry", "")
+            if expiry and datetime.fromisoformat(expiry) < datetime.now():
+                raise HTTPException(status_code=400, detail="This invitation has expired. Please ask your administrator to resend it.")
+            return {"name": user_data["name"], "email": user_data["email"]}
+    raise HTTPException(status_code=404, detail="Invalid invitation link")
+
+@app.post("/api/auth/accept-invite")
+async def accept_invite(data: dict = Body(...)):
+    """Accept an invitation by setting a password. Public endpoint."""
+    token = data.get("token", "")
+    password = data.get("password", "")
+    if not token or not password:
+        raise HTTPException(status_code=400, detail="Token and password are required")
+
+    password = truncate_password_to_72_bytes(password)
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+
+    users = load_users()
+    target_uid = None
+    for uid, user_data in users.items():
+        if user_data.get("inviteToken") == token:
+            target_uid = uid
+            break
+
+    if not target_uid:
+        raise HTTPException(status_code=404, detail="Invalid invitation link")
+
+    user_data = users[target_uid]
+    if user_data.get("status") != "invited":
+        raise HTTPException(status_code=400, detail="This invitation has already been used")
+
+    expiry = user_data.get("inviteTokenExpiry", "")
+    if expiry and datetime.fromisoformat(expiry) < datetime.now():
+        raise HTTPException(status_code=400, detail="This invitation has expired. Please ask your administrator to resend it.")
+
+    # Activate the account
+    user_data["password"] = hash_password(password)
+    user_data["status"] = "active"
+    user_data["inviteToken"] = None
+    user_data["inviteTokenExpiry"] = None
+    users[target_uid] = user_data
+    save_users(users)
+
+    logger.info(f"User {user_data['email']} accepted invite and set password")
+    return {"message": "Account activated! You can now log in."}
+
+@app.get("/api/available-pages")
+async def get_available_pages():
+    """Return the list of available report pages (for admin UI)."""
+    return AVAILABLE_PAGES
 
 @app.get("/locations", response_model=List[Location])
 async def list_locations(optional_user: Optional[User] = Depends(get_optional_user), includeTest: bool = False, includeInactive: bool = False):
