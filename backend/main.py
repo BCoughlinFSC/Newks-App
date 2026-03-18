@@ -10913,12 +10913,12 @@ async def build_tip_pool_report(
     loc_name_map: Dict[str, str] = {}
     if locations:
         for loc in locations:
-            loc_name_map[loc.restaurantGuid] = loc.name
+            loc_name_map[loc.restaurantGuid] = loc.restaurantName
     else:
         try:
             all_locs = await get_all_active_locations(client)
             for loc in all_locs:
-                loc_name_map[loc.restaurantGuid] = loc.name
+                loc_name_map[loc.restaurantGuid] = loc.restaurantName
         except Exception:
             pass
 
