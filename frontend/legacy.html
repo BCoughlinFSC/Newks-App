@@ -2005,6 +2005,7 @@
 
       // ── Employee breakdown table header ──
       html += `<tr style="background:${hdrBg};">
+        <th style="color:${hdrColor};padding:10px 14px;text-align:left;font-size:13px;border:none;">Employee ID</th>
         <th style="color:${hdrColor};padding:10px 14px;text-align:left;font-size:13px;border:none;">Employee Name</th>
         <th style="color:${hdrColor};padding:10px 14px;text-align:left;font-size:13px;border:none;">Job Title</th>
         <th style="color:${hdrColor};padding:10px 14px;text-align:right;font-size:13px;border:none;">Hours Worked</th>
@@ -2016,6 +2017,7 @@
         const bg = idx % 2 ? altBg : '#fff';
         const locLabel = byLocation.length > 1 ? ` <span style="font-size:11px;color:#9CA3AF;">(${row.restaurantName})</span>` : '';
         html += `<tr style="background:${bg};">
+          <td style="padding:8px 14px;border-bottom:1px solid #E5E7EB;">${row.employeeId || ''}</td>
           <td style="padding:8px 14px;border-bottom:1px solid #E5E7EB;">${row.employeeName}${locLabel}</td>
           <td style="padding:8px 14px;border-bottom:1px solid #E5E7EB;">${row.jobTitle}</td>
           <td style="padding:8px 14px;text-align:right;border-bottom:1px solid #E5E7EB;">${fmtH(row.hoursWorked)}</td>
@@ -2025,7 +2027,7 @@
 
       // ── Totals row ──
       html += `<tr style="background:${totBg};">
-        <td style="padding:10px 14px;color:#fff;font-weight:700;border:none;" colspan="2">Totals (${rows.length} employees)</td>
+        <td style="padding:10px 14px;color:#fff;font-weight:700;border:none;" colspan="3">Totals (${rows.length} employees)</td>
         <td style="padding:10px 14px;color:#fff;font-weight:700;text-align:right;border:none;">${fmtH(totals.hoursWorked)}</td>
         <td style="padding:10px 14px;color:#fff;font-weight:700;text-align:right;border:none;">${fmt$(totals.tipShare)}</td>
       </tr>`;
@@ -3214,12 +3216,12 @@
         }
         addWS(WB, sumRows, 'Summary');
         // Employee breakdown sheet
-        const empHdr = [c('Employee', S.navyL), c('Job Title', S.navyL), c('Hours Worked', S.navyR), c('Tip Share', S.navyR)];
-        const empTotRow = [c('TOTAL', S.navyL), c('', S.navyL), n(tpTotals.hoursWorked || 0, S.navyR), n(tpTotals.tipShare || 0, S.navyR)];
+        const empHdr = [c('Employee ID', S.navyL), c('Employee', S.navyL), c('Job Title', S.navyL), c('Hours Worked', S.navyR), c('Tip Share', S.navyR)];
+        const empTotRow = [c('', S.navyL), c('TOTAL', S.navyL), c('', S.navyL), n(tpTotals.hoursWorked || 0, S.navyR), n(tpTotals.tipShare || 0, S.navyR)];
         const empDataRows = tpRows.map((emp, idx) => {
           const alt = idx % 2 === 1;
           const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
-          return [c(emp.employeeName || '', dL), c(emp.jobTitle || '', dL), n(emp.hoursWorked || 0, dR), n(emp.tipShare || 0, dR)];
+          return [c(emp.employeeId || '', dL), c(emp.employeeName || '', dL), c(emp.jobTitle || '', dL), n(emp.hoursWorked || 0, dR), n(emp.tipShare || 0, dR)];
         });
         addWS(WB, [empHdr, empTotRow, ...empDataRows], 'Tip Pool');
 

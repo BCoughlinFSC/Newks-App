@@ -10814,7 +10814,8 @@ async def _fetch_employee_configs(
                         name = f"{first} {last}".strip()
                         if not name:
                             name = (emp.get("name") or emp.get("displayName") or "").strip()
-                        emp_map[guid] = name or guid[:8]
+                        ext_id = (emp.get("externalEmployeeId") or emp.get("externalId") or "").strip()
+                        emp_map[guid] = {"name": name or guid[:8], "externalId": ext_id}
                     return emp_map
             else:
                 logger.debug(f"Employees endpoint {url} returned {resp.status_code}")
@@ -10931,12 +10932,17 @@ async def _fetch_employee_hours(
                     if job_title.lower().strip() not in _TIP_POOL_JOBS:
                         skipped_non_server += 1
                         continue
-                    emp_name = emp_map.get(emp_guid) or emp_ref.get("externalId") or emp_guid[:8]
+                    emp_info = emp_map.get(emp_guid) or {}
+                    if isinstance(emp_info, str):
+                        emp_info = {"name": emp_info, "externalId": ""}
+                    emp_name = emp_info.get("name") or emp_ref.get("externalId") or emp_guid[:8]
+                    emp_ext_id = emp_info.get("externalId") or ""
                     reg_h = float(entry.get("regularHours") or 0)
                     ot_h = float(entry.get("overtimeHours") or 0)
                     if emp_guid not in by_employee:
                         by_employee[emp_guid] = {
                             "employeeName": emp_name,
+                            "employeeId": emp_ext_id,
                             "jobTitle": job_title,
                             "regularHours": 0.0,
                             "overtimeHours": 0.0,
@@ -10959,6 +10965,7 @@ async def _fetch_employee_hours(
         total_h = round(data["regularHours"] + data["overtimeHours"], 2)
         if total_h > 0:
             results.append({
+                "employeeId": data.get("employeeId", ""),
                 "employeeName": data["employeeName"],
                 "jobTitle": data["jobTitle"],
                 "hoursWorked": total_h,
