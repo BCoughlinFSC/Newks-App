@@ -4663,6 +4663,45 @@ async def upload_menu_board_file(file: UploadFile = File(...)) -> Dict[str, str]
   url = f"/media/menu-board/{filename}"
   return {"url": url}
 
+
+class Base64Upload(BaseModel):
+    """JSON-based upload: base64-encoded file data + original filename.
+    Works around Cloudways backend nginx blocking multipart/form-data."""
+    filename: str
+    data: str  # base64-encoded file content
+
+
+@app.post("/api/uploads/menu-board-b64")
+async def upload_menu_board_file_b64(body: Base64Upload) -> Dict[str, str]:
+    """Upload via JSON with base64-encoded data (bypasses multipart proxy issues)."""
+    import base64 as _b64
+
+    original_name = body.filename or "upload"
+    name, ext = os.path.splitext(original_name)
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)[:80] or "upload"
+    unique = uuid.uuid4().hex[:8]
+    filename = f"{safe_name}_{unique}{ext}"
+    dest_path = os.path.join(UPLOAD_ROOT, filename)
+
+    try:
+        raw = _b64.b64decode(body.data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 data")
+
+    if len(raw) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
+
+    try:
+        with open(dest_path, "wb") as out:
+            out.write(raw)
+    except Exception as exc:
+        logger.error(f"Failed to save uploaded file {original_name}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to save uploaded file")
+
+    url = f"/media/menu-board/{filename}"
+    return {"url": url}
+
+
 # ------------------
 # V2 API Router
 # ------------------

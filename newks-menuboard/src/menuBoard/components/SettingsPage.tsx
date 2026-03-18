@@ -87,6 +87,7 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose, locati
   const categories = viewModel.categories.filter((c) => !c.hidden);
 
   // ── Upload logic ──
+  // Uses base64 JSON endpoint to bypass Cloudways nginx blocking multipart uploads
   async function handleUploadChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -95,13 +96,19 @@ export function SettingsPage({ boardConfig, viewModel, onChange, onClose, locati
     uploadCallbackRef.current = null;
     if (!cb) return;
     setUploadStatus({ loading: true, error: null, success: false });
-    const formData = new FormData();
-    formData.append("file", file);
     try {
-      const headers: Record<string, string> = {};
+      const buf = await file.arrayBuffer();
+      const base64 = btoa(
+        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""),
+      );
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
       const token = window.sessionStorage.getItem("adminToken");
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      const resp = await fetch("/api/uploads/menu-board", { method: "POST", body: formData, headers });
+      const resp = await fetch("/api/uploads/menu-board-b64", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ filename: file.name, data: base64 }),
+      });
       if (resp.status === 401) {
         setUploadStatus({ loading: false, error: null, success: false });
         setShowAuthPrompt(true);
