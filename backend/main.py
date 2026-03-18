@@ -10752,8 +10752,8 @@ async def create_help_ticket(ticket: HelpTicketRequest = Body(...)):
 # Tip Pool Report Helpers
 # ------------------
 
-# Ghost job titles to exclude from tip pool
-_GHOST_JOBS = {"ghost cashier", "ghost kds"}
+# Only include these job titles in the tip pool
+_TIP_POOL_JOBS = {"server"}
 
 
 async def _fetch_tips_for_restaurant(
@@ -10866,7 +10866,7 @@ async def _fetch_employee_hours(
     emp_map: Dict[str, str],
     job_map: Dict[str, str],
 ) -> List[Dict]:
-    """Fetch per-employee hours from labor API, excluding ghost jobs. Returns list of dicts."""
+    """Fetch per-employee hours from labor API, filtered to tip pool jobs only. Returns list of dicts."""
     standard_headers = await get_standard_api_auth_headers()
     headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
     labor_url = f"{TOAST_STANDARD_API_BASE_URL}/labor/v1/timeEntries"
@@ -10880,8 +10880,8 @@ async def _fetch_employee_hours(
     # Debug counters
     total_entries = 0
     skipped_clocked_in = 0
-    skipped_ghost = 0
-    ghost_jobs_seen: Dict[str, int] = {}
+    skipped_non_server = 0
+    jobs_seen: Dict[str, int] = {}
 
     logger.info(
         f"Tip pool labor: restaurant={restaurant_guid[:8]}, "
@@ -10922,10 +10922,10 @@ async def _fetch_employee_hours(
                     emp_guid = emp_ref.get("guid", "unknown")
                     job_guid = job_ref.get("guid", "")
                     job_title = job_map.get(job_guid) or job_ref.get("externalId") or "Unknown"
-                    # Filter out ghost jobs
-                    if job_title.lower().strip() in _GHOST_JOBS:
-                        skipped_ghost += 1
-                        ghost_jobs_seen[job_title] = ghost_jobs_seen.get(job_title, 0) + 1
+                    # Only include tip pool eligible jobs (Server)
+                    jobs_seen[job_title] = jobs_seen.get(job_title, 0) + 1
+                    if job_title.lower().strip() not in _TIP_POOL_JOBS:
+                        skipped_non_server += 1
                         continue
                     emp_name = emp_map.get(emp_guid) or emp_ref.get("externalId") or emp_guid[:8]
                     reg_h = float(entry.get("regularHours") or 0)
@@ -10946,7 +10946,7 @@ async def _fetch_employee_hours(
     logger.info(
         f"Tip pool labor results: restaurant={restaurant_guid[:8]}, "
         f"total_entries={total_entries}, skipped_clocked_in={skipped_clocked_in}, "
-        f"skipped_ghost={skipped_ghost}, ghost_jobs={ghost_jobs_seen}, "
+        f"skipped_non_server={skipped_non_server}, all_jobs={jobs_seen}, "
         f"unique_employees={len(by_employee)}"
     )
 
