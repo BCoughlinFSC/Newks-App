@@ -1363,10 +1363,10 @@
       const itemTagsSection = document.getElementById('itemTagsSection');
       const yoySection = document.getElementById('yoySection');
 
-      // Hide filter-by for guest_count (auto-uses Guest Count tags)
+      // Only show filter-by for menu performance report
       const filterByRow = document.getElementById('filterByType')?.closest('.form-row');
       if (filterByRow) {
-        filterByRow.style.display = (reportType === 'guest_count' || reportType === 'royalty' || reportType === 'tip_pool') ? 'none' : '';
+        filterByRow.style.display = reportType === 'menu' ? '' : 'none';
       }
 
       if (reportType === 'menu' && filterByType === 'itemTags' && reportTypeConfig?.supportsItemTagFilters) {
