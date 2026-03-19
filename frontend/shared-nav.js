@@ -235,10 +235,75 @@
     document.querySelectorAll('[data-action="toastPricing"]').forEach(link => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
-        if (typeof window.exportToastPricing === 'function') {
-          window.exportToastPricing();
-        }
+        showPricingExportModal();
       });
+    });
+  }
+
+  // ─── Toast Pricing Export Modal ─────────────────
+  function showPricingExportModal() {
+    // Remove existing modal if any
+    const existing = document.getElementById('pricingExportModal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pricingExportModal';
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div style="background:white;border-radius:12px;padding:2rem;max-width:420px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:2px solid #E5E7EB;">
+          <h2 style="margin:0;color:#C41E3A;font-size:1.25rem;">Toast Pricing Export</h2>
+          <button id="pricingModalClose" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:#6B7280;padding:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:4px;">&times;</button>
+        </div>
+        <p style="color:#374151;margin:0 0 1.5rem;font-size:0.95rem;">Download the current Toast pricing file as a CSV?</p>
+        <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
+          <button id="pricingModalCancel" style="padding:0.6rem 1.25rem;border-radius:6px;border:1px solid #D1D5DB;background:white;color:#374151;cursor:pointer;font-size:0.9rem;font-family:inherit;">Cancel</button>
+          <button id="pricingModalDownload" style="padding:0.6rem 1.25rem;border-radius:6px;border:none;background:#C41E3A;color:white;cursor:pointer;font-size:0.9rem;font-family:inherit;font-weight:600;">Download</button>
+        </div>
+      </div>
+    `;
+
+    // Inject overlay styles if not already on page
+    if (!document.querySelector('.modal-overlay')) {
+      const s = document.createElement('style');
+      s.textContent = `.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;justify-content:center;align-items:center;z-index:10000;}`;
+      document.head.appendChild(s);
+    }
+
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.querySelector('#pricingModalClose').addEventListener('click', close);
+    overlay.querySelector('#pricingModalCancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    overlay.querySelector('#pricingModalDownload').addEventListener('click', async () => {
+      const btn = overlay.querySelector('#pricingModalDownload');
+      btn.disabled = true; btn.textContent = 'Downloading...';
+      try {
+        const url = new URL('/api/toast-pricing-export', window.location.origin);
+        url.searchParams.set('group_by_tier', 'true');
+        const headers = {};
+        const token = getAuthToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch(url.toString(), { headers });
+        if (!resp.ok) {
+          let errorText = await resp.text();
+          try { const j = JSON.parse(errorText); errorText = j.detail || j.message || errorText; } catch(e) {}
+          throw new Error(errorText || `HTTP ${resp.status}`);
+        }
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `toast_pricing_export_${new Date().toISOString().split('T')[0]}.csv`;
+        a.style.visibility = 'hidden';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 100);
+        close();
+      } catch (err) {
+        btn.disabled = false; btn.textContent = 'Download';
+        alert(`Toast pricing export failed: ${err.message}`);
+      }
     });
   }
 

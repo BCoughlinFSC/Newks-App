@@ -1620,9 +1620,8 @@
     // Toast pricing export
     // ──────────────────────────────────────────────────────────
     async function exportToastPricing() {
-      const btn = document.getElementById('toastPricingExportBtn');
-      const orig = btn.textContent;
-      btn.disabled = true; btn.textContent = 'Exporting…';
+      const btn = document.querySelector('[data-action="toastPricing"]');
+      if (btn) { btn.style.pointerEvents = 'none'; btn.style.opacity = '0.5'; }
       try {
         const url = new URL('/api/toast-pricing-export', window.location.origin);
         url.searchParams.set('group_by_tier', 'true');
@@ -1641,7 +1640,7 @@
         setTimeout(() => URL.revokeObjectURL(a.href), 100);
         showStatus('success', 'Toast pricing export downloaded.');
       } catch (err) { showStatus('error', `Toast pricing export failed: ${err.message}`); }
-      finally { btn.disabled = false; btn.textContent = orig; }
+      finally { if (btn) { btn.style.pointerEvents = ''; btn.style.opacity = ''; } }
     }
 
     // ──────────────────────────────────────────────────────────
