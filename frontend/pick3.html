@@ -47,6 +47,16 @@
     .date-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
     .date-row label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
     .date-row input[type="date"] { padding: 0.45rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+    .loc-picker { margin-bottom: 1rem; }
+    .loc-picker-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.35rem; }
+    .loc-picker-header label { font-size: 0.85rem; font-weight: 600; color: #374151; display: flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+    .loc-picker-header .loc-count { font-size: 0.8rem; color: #6B7280; font-weight: 400; }
+    .loc-list { max-height: 10rem; overflow-y: auto; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.4rem 0.6rem; background: #fafafa; font-size: 0.85rem; }
+    .loc-list label { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.2rem; cursor: pointer; }
+    .loc-list label:hover { background: #F0F9FF; border-radius: 4px; }
+    .store-header { padding: 0.6rem 0.75rem; font-weight: 600; color: #1E3A5F; border-bottom: 1px solid #e8e0d5; }
+    .store-header:hover { background: #F0F9FF; }
+    .store-row { border: 1px solid #e8e0d5; border-radius: 8px; margin-bottom: 0.5rem; overflow: hidden; }
     .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
     @media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
     .tbl-section h3 { margin: 0 0 0.5rem; font-size: 1rem; color: #1E3A5F; font-weight: 700; }
@@ -73,6 +83,11 @@
     .drill-tables { display: flex; gap: 1.5rem; flex-wrap: wrap; }
     .drill-col { flex: 1; min-width: 240px; }
     .drill-caption { font-weight: 700; color: #1E3A5F; font-size: 0.9rem; margin: 0 0 0.4rem; }
+    .top-combos { margin-top: 1rem; padding: 0.75rem 1rem; background: #eef4fb; border-radius: 8px; border-left: 4px solid #2E75B6; }
+    .top-combos h4 { margin: 0 0 0.5rem; font-size: 0.9rem; color: #1E3A5F; }
+    .top-combos ol { margin: 0; padding-left: 1.25rem; }
+    .top-combos li { margin-bottom: 0.35rem; font-size: 0.85rem; color: #333; }
+    .top-combos .combo-count { font-weight: 700; color: #2E75B6; margin-left: 0.25rem; }
     .prompt-box { color: #6B7280; font-style: italic; padding: 1rem; border: 1px dashed #d1d5db; border-radius: 8px; background: #fafafa; margin-top: 0.75rem; }
     .toolbar { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 0.75rem 0; }
     .help-text { font-size: 0.83rem; color: #6B7280; }
@@ -153,35 +168,32 @@
         <label>End date   <input type="date" id="endDate"   /></label>
       </div>
 
-      <div class="vtabs" id="apiVariantTabs">
-        <button class="vtab active" data-v="pos">Pick 3 (POS)</button>
-        <button class="vtab"        data-v="olo">Pick 3 (OLO)</button>
+      <div class="loc-picker">
+        <div class="loc-picker-header">
+          <label><input type="checkbox" id="selectAllLocs" checked /> Select All</label>
+          <span class="loc-count" id="locCount"></span>
+        </div>
+        <div class="loc-list" id="locList">Loading locations...</div>
       </div>
 
       <div class="toolbar">
         <button class="btn"       id="btnRun">&#9654; Run Report</button>
-        <button class="btn btn-gray" id="btnExportSummary" style="display:none;">Export Summary CSV</button>
-        <button class="btn btn-gray" id="btnLoadAll"       style="display:none;">Load All-Stores Drill-Down</button>
-        <button class="btn btn-gray" id="btnExportAll"     style="display:none;">Export All-Stores CSV</button>
+        <button class="btn btn-gray" id="btnExportAll"     style="display:none;">Export CSV</button>
       </div>
       <div id="apiStatus" class="status"></div>
     </div>
 
     <!-- ── API Results ─────────────────────────────────────────── -->
     <div class="card" id="apiResults" style="display:none;">
-      <h2>Per-Store Per-Day Counts <span id="apiVariantLabel" style="font-weight:400;font-size:1rem;"></span></h2>
-      <p class="help-text">Click any store row to load its pairing breakdown.</p>
-      <div class="pivot-wrap">
-        <table class="pivot-table">
-          <thead><tr id="pivotThead"><th>Store Name</th></tr></thead>
-          <tbody id="pivotBody"></tbody>
-        </table>
+      <h2>Pick 3 Drill-Down</h2>
+      <div id="topCombosContainer"></div>
+      <div id="allStoresContainer"></div>
+      <div id="perStoreSection" style="display:none;">
+        <hr class="section-div" />
+        <h2 style="color:#C41E3A;font-size:1.1rem;margin:0 0 0.25rem;">Per-Store Breakdown</h2>
+        <p class="help-text">Click a store below to expand its pairing breakdown.</p>
+        <div id="perStoreList"></div>
       </div>
-      <hr class="section-div" />
-      <h2 style="color:#C41E3A;font-size:1.1rem;margin:0 0 0.25rem;">Drill-Down</h2>
-      <p class="help-text">Click a store above, or use "Load All-Stores" above the report.</p>
-      <div id="drillContainer"><div class="prompt-box">Click a store row to load its pairing breakdown.</div></div>
-      <div id="allStoresContainer" style="margin-top:1rem;display:none;"></div>
     </div>
 
   </main>
@@ -198,7 +210,6 @@
 
 const API = window.location.origin;
 let csvVariant  = 'all';
-let apiVariant  = 'pos';
 let lastCsvData = null;
 let lastSlFile  = null;
 let pivotDates  = [], pivotRows = [], selectedGuid = null;
@@ -224,7 +235,45 @@ function initTabs(tabsId, onChange) {
   });
 }
 initTabs('csvVariantTabs', v => { csvVariant = v; });
-initTabs('apiVariantTabs', v => { apiVariant = v; });
+
+/* ── Location picker ── */
+(async function loadLocations(){
+  try{
+    const res = await fetch(`${API}/locations`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const locs = await res.json();
+    const list = document.getElementById('locList');
+    const selAll = document.getElementById('selectAllLocs');
+    const countEl = document.getElementById('locCount');
+    if(!locs.length){ list.textContent='No locations found.'; return; }
+    list.innerHTML='';
+    locs.sort((a,b)=>(a.restaurantName||'').localeCompare(b.restaurantName||''));
+    locs.forEach(loc=>{
+      const lbl=document.createElement('label');
+      const cb=document.createElement('input');
+      cb.type='checkbox'; cb.value=loc.restaurantGuid; cb.checked=true; cb.className='loc-cb';
+      lbl.appendChild(cb);
+      lbl.appendChild(document.createTextNode(' '+(loc.restaurantName||loc.restaurantGuid)));
+      list.appendChild(lbl);
+    });
+    function updateCount(){
+      const total=list.querySelectorAll('.loc-cb').length;
+      const checked=list.querySelectorAll('.loc-cb:checked').length;
+      countEl.textContent=`${checked} / ${total} selected`;
+      selAll.checked=checked===total;
+      selAll.indeterminate=checked>0&&checked<total;
+    }
+    list.addEventListener('change', updateCount);
+    selAll.addEventListener('change',()=>{
+      list.querySelectorAll('.loc-cb').forEach(cb=>cb.checked=selAll.checked);
+      updateCount();
+    });
+    updateCount();
+  }catch(e){ console.error(e); document.getElementById('locList').textContent='Error loading locations.'; }
+})();
+function getSelectedLocations(){
+  return Array.from(document.querySelectorAll('#locList .loc-cb:checked')).map(cb=>cb.value);
+}
 
 /* ── Helpers ── */
 const $ = id => document.getElementById(id);
@@ -235,6 +284,16 @@ function pct(q,t){return t?Math.round(q/t*100)+'%':'–';}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function fmtDate(d){const s=String(d||'');return s.length===8?s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6):s;}
 function dlBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
+function shortPairing(n){ return n.replace(/\s*\((?:POS|OLO) Pairing Cho(?:ice|cie)\)\s*/g,'').trim(); }
+function renderTopCombos(combos, total){
+  if(!combos||!combos.length) return '';
+  let h='<div class="top-combos"><h4>Top 3 Combos</h4><ol>';
+  combos.slice(0,3).forEach(c=>{
+    const names = (c.items||[]).map(shortPairing).join(' + ');
+    h+=`<li>${esc(names)} <span class="combo-count">(${fmt(c.count)} &mdash; ${pct(c.count,total)})</span></li>`;
+  });
+  return h+'</ol></div>';
+}
 
 /* ── Build a simple qty table ── */
 function mkTable(rows, totalPick3, cols){
@@ -357,111 +416,118 @@ $('btnRun').addEventListener('click', async()=>{
   const start=$('startDate').value, end=$('endDate').value;
   if(!start||!end){showStatus('apiStatus','Select both dates.','error');return;}
   if(start>end){showStatus('apiStatus','Start must be before end.','error');return;}
+  const selLocs=getSelectedLocations();
+  if(!selLocs.length){showStatus('apiStatus','Please select at least one location.','error');return;}
   const btn=$('btnRun'); btn.disabled=true;
-  showStatus('apiStatus',`Loading Pick 3 (${apiVariant.toUpperCase()})…`,'loading');
+  reportStart=start; reportEnd=end;
+  showStatus('apiStatus',`Loading Pick 3 drill-down for ${selLocs.length} location(s)… this may take 2–4 minutes.`,'loading');
   try{
-    const res  = await fetch(`${API}/api/reports/pick3`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:start,end_date:end,variant:apiVariant})});
+    const res  = await fetch(`${API}/api/reports/pick3/drill-down-all-stores`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:start,end_date:end,variant:'all',restaurant_ids:selLocs})});
     const data = await res.json().catch(()=>({}));
     if(!res.ok){showStatus('apiStatus',data.detail||res.statusText,'error');return;}
-    reportStart=start; reportEnd=end;
-    renderPivot(data.summary||[]);
+    lastAllStores=data;
+    const stores=(data.stores||[]).filter(s=>s.totalPick3Quantity>0);
+    const merged=mergeStores(stores);
+    // Top 3 Combos (from all data combined)
+    $('topCombosContainer').innerHTML=renderTopCombos(merged.all.topCombos||[], merged.all.totalPick3Quantity);
+    // In-Store and OLO sections (without combos inside)
+    const c=$('allStoresContainer');
+    let html='';
+    html+=renderDrillBlockHtml(`In-Store / POS (${stores.length} locations)`, merged.pos, 'Pick 3');
+    html+=renderDrillBlockHtml(`OLO / Online (${stores.length} locations)`, merged.olo, 'Pick 3');
+    c.innerHTML=html;
+    // Per-store breakdown (only if multiple stores)
+    if(stores.length>1){
+      renderPerStoreList(stores);
+      $('perStoreSection').style.display='block';
+    } else {
+      $('perStoreSection').style.display='none';
+    }
     $('apiResults').style.display='block';
-    $('apiVariantLabel').textContent = apiVariant==='olo'?'(OLO)':'(POS)';
-    $('btnExportSummary').style.display='inline-flex';
-    $('btnLoadAll').style.display='inline-flex';
-    $('drillContainer').innerHTML='<div class="prompt-box">Click a store row to load its pairing breakdown.</div>';
-    $('allStoresContainer').style.display='none';
-    showStatus('apiStatus',`Report loaded. ${new Set((data.summary||[]).map(r=>r.restaurantGuid)).size} stores, ${pivotDates.length} dates.`,'success');
+    $('btnExportAll').style.display='inline-flex';
+    showStatus('apiStatus',`Report loaded — ${stores.length} stores with Pick 3 data, ${fmt(merged.all.totalPick3Quantity)} total.`,'success');
   }catch(e){showStatus('apiStatus','Error: '+e.message,'error');}
   finally{btn.disabled=false;}
 });
 
-function renderPivot(rows){
-  const dates = [...new Set(rows.map(r=>r.businessDate))].sort();
-  pivotDates = dates;
-  const byStore={};
-  rows.forEach(r=>{
-    if(!byStore[r.restaurantGuid]) byStore[r.restaurantGuid]={name:r.restaurantName,guid:r.restaurantGuid,dq:{},total:0};
-    byStore[r.restaurantGuid].dq[r.businessDate]=r.pick3Total;
-    byStore[r.restaurantGuid].total+=r.pick3Total;
-  });
-  pivotRows = Object.values(byStore).sort((a,b)=>a.name.localeCompare(b.name));
-  $('pivotThead').innerHTML='<th>Store Name</th>'+dates.map(d=>`<th class="num">${esc(fmtDate(d))}</th>`).join('')+'<th class="num total-col">Total</th>';
-  $('pivotBody').innerHTML = pivotRows.map(s=>`
-    <tr class="drill-row${s.guid===selectedGuid?' selected':''}" data-guid="${esc(s.guid)}" data-name="${esc(s.name)}">
-      <td>${esc(s.name)}</td>${dates.map(d=>`<td class="num">${s.dq[d]!==undefined?fmt(s.dq[d]):''}</td>`).join('')}
-      <td class="num total-col">${fmt(s.total)}</td>
-    </tr>`).join('');
-  $('pivotBody').querySelectorAll('tr.drill-row').forEach(tr=>{
-    tr.addEventListener('click',function(){
-      const guid=this.dataset.guid,name=this.dataset.name;
-      if(!confirm(`Load pairing drill-down for ${name}?`)) return;
-      selectedGuid=guid;
-      document.querySelectorAll('#pivotBody tr').forEach(r=>r.classList.remove('selected'));
-      this.classList.add('selected');
-      loadDrillDown(guid);
-    });
-  });
+const _isPOS = n => n.includes('(POS Pairing Choice)') || n.includes('(Pick 3 Entree)');
+const _isOLO = n => /OLO Pairing Cho(?:ice|cie)/.test(n) || n.includes('Pick 3 (OLO)');
+
+function splitData(data){
+  const posP=data.parentItems.filter(p=>_isPOS(p.itemName));
+  const oloP=data.parentItems.filter(p=>_isOLO(p.itemName));
+  const posS=data.selections.filter(s=>_isPOS(s.itemName));
+  const oloS=data.selections.filter(s=>_isOLO(s.itemName));
+  const posC=(data.topCombos||[]).filter(c=>c.items.every(_isPOS));
+  const oloC=(data.topCombos||[]).filter(c=>c.items.every(_isOLO));
+  const posT=posP.reduce((s,p)=>s+p.quantity,0);
+  const oloT=oloP.reduce((s,p)=>s+p.quantity,0);
+  return {
+    all: data,
+    pos: {totalPick3Quantity:posT, parentItems:posP, selections:posS, topCombos:posC},
+    olo: {totalPick3Quantity:oloT, parentItems:oloP, selections:oloS, topCombos:oloC},
+  };
 }
 
-async function loadDrillDown(guid){
-  const c=$('drillContainer');
-  c.innerHTML='<div class="prompt-box">Loading pairing counts…</div>';
-  try{
-    const res  = await fetch(`${API}/api/reports/pick3/drill-down-orders`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:reportStart,end_date:reportEnd,restaurant_guid:guid,variant:apiVariant})});
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok){c.innerHTML=`<div class="prompt-box">Failed: ${esc(data.detail||res.statusText)}</div>`;return;}
-    renderDrillBlock(c, data.restaurantName||'Store', data);
-  }catch(e){c.innerHTML=`<div class="prompt-box">Error: ${esc(e.message)}</div>`;}
+function mergeStores(stores){
+  const pT={},sT={},cT={};let totAll=0;
+  stores.forEach(s=>{
+    totAll+=s.totalPick3Quantity||0;
+    (s.parentItems||[]).forEach(p=>{pT[p.itemName]=(pT[p.itemName]||0)+p.quantity;});
+    (s.selections||[]).forEach(sel=>{sT[sel.itemName]=(sT[sel.itemName]||0)+sel.quantity;});
+    (s.topCombos||[]).forEach(cb=>{const k=cb.items.slice().sort().join('||');cT[k]={items:cb.items,count:(cT[k]?.count||0)+cb.count};});
+  });
+  const allData={
+    totalPick3Quantity:totAll,
+    parentItems:Object.entries(pT).map(([n,q])=>({itemName:n,quantity:q})).sort((a,b)=>b.quantity-a.quantity),
+    selections: Object.entries(sT).map(([n,q])=>({itemName:n,quantity:q})).sort((a,b)=>b.quantity-a.quantity),
+    topCombos:  Object.values(cT).sort((a,b)=>b.count-a.count).slice(0,3),
+  };
+  return splitData(allData);
 }
 
-function renderDrillBlock(container, title, data){
-  const total  = data.totalPick3Quantity||1;
+function renderDrillBlockHtml(title, data, label){
+  const total  = data.totalPick3Quantity||0;
+  if(!total) return '';
   const parents= data.parentItems||[];
   const sels   = data.selections||[];
   const cols   = [{label:'Item',val:r=>r.itemName},{label:'Qty',num:true,val:r=>fmt(r.quantity)}];
-  let html=`<div class="drill-block"><div class="drill-title">${esc(title)}</div><p class="help-text">Total Pick 3: ${fmt(total)}</p><div class="drill-tables">`;
-  html+=`<div class="drill-col"><div class="drill-caption">Pick 3 Entree</div>${mkTable(parents,total,cols)}</div>`;
+  let html=`<div class="drill-block"><div class="drill-title">${esc(title)}</div><p class="help-text">Total ${esc(label)}: ${fmt(total)}</p>`;
+  html+='<div class="drill-tables">';
+  html+=`<div class="drill-col"><div class="drill-caption">${esc(label)} Entree</div>${mkTable(parents,total,cols)}</div>`;
   html+=`<div class="drill-col"><div class="drill-caption">Pairing Choices</div>${mkTable(sels,total,cols)}</div>`;
   html+='</div></div>';
-  container.innerHTML=html;
+  return html;
 }
 
-/* ── All-Stores Drill-Down ── */
-$('btnLoadAll').addEventListener('click', async()=>{
-  const btn=$('btnLoadAll'), c=$('allStoresContainer');
-  btn.disabled=true; c.style.display='block';
-  c.innerHTML='<div class="prompt-box">Loading all stores… this may take 2–4 minutes.</div>';
-  try{
-    const res  = await fetch(`${API}/api/reports/pick3/drill-down-all-stores`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:reportStart,end_date:reportEnd,variant:apiVariant})});
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok){c.innerHTML=`<div class="prompt-box">Failed: ${esc(data.detail||res.statusText)}</div>`;return;}
-    lastAllStores=data;
-    const stores=data.stores||[];
-    const pT={},sT={};let totAll=0;
-    stores.forEach(s=>{
-      totAll+=s.totalPick3Quantity||0;
-      (s.parentItems||[]).forEach(p=>{pT[p.itemName]=(pT[p.itemName]||0)+p.quantity;});
-      (s.selections||[]).forEach(sel=>{sT[sel.itemName]=(sT[sel.itemName]||0)+sel.quantity;});
-    });
-    renderDrillBlock(c,`All stores combined (${stores.length} locations)`,{
-      totalPick3Quantity:totAll,
-      parentItems:Object.entries(pT).map(([n,q])=>({itemName:n,quantity:q})).sort((a,b)=>b.quantity-a.quantity),
-      selections: Object.entries(sT).map(([n,q])=>({itemName:n,quantity:q})).sort((a,b)=>b.quantity-a.quantity),
-    });
-    $('btnExportAll').style.display='inline-flex';
-  }catch(e){c.innerHTML=`<div class="prompt-box">Error: ${esc(e.message)}</div>`;}
-  finally{btn.disabled=false;}
-});
+function renderDrillBlock(container, title, data){
+  container.innerHTML=renderDrillBlockHtml(title, data, 'Pick 3');
+}
 
-/* ── Export Summary CSV ── */
-$('btnExportSummary').addEventListener('click',()=>{
-  if(!pivotRows.length) return;
-  const hdr=['Store',...pivotDates.map(fmtDate),'Total'];
-  const rows=pivotRows.map(s=>[s.name,...pivotDates.map(d=>s.dq[d]??''),s.total]);
-  const csv=[hdr,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),'pick3_summary.csv');
-});
+function renderPerStoreList(stores){
+  const c=$('perStoreList');
+  const sorted=stores.slice().sort((a,b)=>(a.restaurantName||'').localeCompare(b.restaurantName||''));
+  c.innerHTML=sorted.map((s,i)=>`
+    <div class="store-row" data-idx="${i}">
+      <div class="store-header">${esc(s.restaurantName||s.restaurantGuid)} <span class="help-text">(${fmt(s.totalPick3Quantity)})</span></div>
+      <div class="store-detail" id="storeDetail${i}" style="display:none;"></div>
+    </div>`).join('');
+  c.querySelectorAll('.store-header').forEach(hdr=>{
+    hdr.style.cursor='pointer';
+    hdr.addEventListener('click',function(){
+      const row=this.closest('.store-row');
+      const idx=row.dataset.idx;
+      const det=document.getElementById('storeDetail'+idx);
+      if(det.style.display==='none'){
+        det.style.display='block';
+        if(!det.dataset.loaded){
+          renderDrillBlock(det, sorted[idx].restaurantName||'Store', sorted[idx]);
+          det.dataset.loaded='1';
+        }
+      } else { det.style.display='none'; }
+    });
+  });
+}
 
 /* ── Export All-Stores CSV ── */
 $('btnExportAll').addEventListener('click',()=>{

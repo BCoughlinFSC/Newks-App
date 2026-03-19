@@ -9115,7 +9115,7 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             #     pairings that were sold with a Pick 3 parent item (not all pairings across the menu). ---
             selections_agg: Dict[Tuple[str, str], Dict[str, int]] = {}
             all_item_mod_rows: List[Dict] = []
-            group_by_item_modifier = ["MENU_ITEM", "MODIFIER"]
+            group_by_item_modifier = ["MODIFIER"]
             if days_diff > 7:
                 current_start = start_date
                 while current_start <= end_date:

@@ -180,15 +180,19 @@ def _normalize_modifier_name(mod_name: str) -> str:
 
 def _is_pick3_selection(sel: Dict, variant: str, cfg: Dict) -> bool:
     """True if this order selection counts as a pairing entree for the given variant."""
-    if variant == "olo":
-        display_name = (sel.get("displayName") or "").strip()
+    display_name = (sel.get("displayName") or "").strip()
+    if variant in ("olo", "all"):
         if cfg["olo_parent"] in display_name:
             return True
         item = sel.get("item")
         guid = (item.get("guid") if isinstance(item, dict) else item) if item else ""
         olo_guid = cfg.get("olo_item_guid")
-        return bool(olo_guid and guid and str(guid).strip().lower() == olo_guid.lower())
-    return cfg["pos_parent"] in (sel.get("displayName") or "")
+        if olo_guid and guid and str(guid).strip().lower() == olo_guid.lower():
+            return True
+    if variant in ("pos", "all"):
+        if cfg["pos_parent"] in display_name:
+            return True
+    return False
 
 
 def _normalize_variant(v: Optional[str], choices=("pos", "olo")) -> str:
@@ -362,7 +366,7 @@ async def _compute_pick3_drill_down_for_store(
     """Fetch orders for one store, aggregate pairing entree counts and pairing selections."""
     if cfg is None:
         cfg = REPORT_CONFIGS["pick3"]
-    variant = _normalize_variant(variant, ("pos", "olo"))
+    variant = _normalize_variant(variant, ("pos", "olo", "all"))
     start_bdate = int(to_business_date(start_date))
     end_bdate = int(to_business_date(end_date))
     await get_menu_tags_mapping(client, rguid)
@@ -371,6 +375,7 @@ async def _compute_pick3_drill_down_for_store(
 
     parent_totals: Dict[str, int] = {}
     pairing_totals: Dict[str, int] = {}
+    combo_counts: Dict[Tuple[str, ...], int] = {}   # sorted tuple of pairing names → count
 
     for order in orders:
         obd = order.get("businessDate")
@@ -401,7 +406,10 @@ async def _compute_pick3_drill_down_for_store(
                     mod_name = _normalize_modifier_name((guid_to_name.get(mod_guid) or "").strip())
                     if not mod_name or "(Side)" in mod_name or _is_pick3_premod_name(mod_name):
                         continue
-                    if variant == "olo":
+                    if variant == "all":
+                        if "(POS Pairing Choice)" not in mod_name and not _is_olo_pairing_choice(mod_name):
+                            continue
+                    elif variant == "olo":
                         if not _is_olo_pairing_choice(mod_name):
                             continue
                     else:
@@ -421,7 +429,22 @@ async def _compute_pick3_drill_down_for_store(
                     for mn, mq in sel_pairings:
                         pairing_totals[mn] = pairing_totals.get(mn, 0) + mq
 
+                # Track combo (sorted list of pairing names, preserving duplicates)
+                # Only count combos with the expected number of pairings
+                if sel_pairings:
+                    combo_names = sorted(mn for mn, _ in sel_pairings)
+                    if len(combo_names) == cfg["max_pairings_per_entree"]:
+                        combo_key = tuple(combo_names)
+                        combo_counts[combo_key] = combo_counts.get(combo_key, 0) + sel_qty
+
     total_pick3 = sum(parent_totals.values()) or 0
+
+    # Build top combos list (top 3 most popular pairing combinations)
+    top_combos = [
+        {"items": list(combo), "count": cnt}
+        for combo, cnt in sorted(combo_counts.items(), key=lambda x: -x[1])[:3]
+    ]
+
     return {
         "restaurantGuid": rguid,
         "totalPick3Quantity": total_pick3,
@@ -433,6 +456,7 @@ async def _compute_pick3_drill_down_for_store(
             {"itemName": n, "quantity": q}
             for n, q in sorted(pairing_totals.items(), key=lambda x: (-x[1], x[0]))
         ],
+        "topCombos": top_combos,
     }
 
 
@@ -632,7 +656,8 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
                         "pick3Total": 0,
                     }
                 summary_agg[key]["pick3Total"] += qty
-                parent_items_agg.setdefault(key, {})[name] = parent_items_agg[key].get(name, 0) + qty
+                pi = parent_items_agg.setdefault(key, {})
+                pi[name] = pi.get(name, 0) + qty
 
             for r in summary_agg.values():
                 if r["restaurantGuid"] in guid_to_location:
@@ -640,8 +665,8 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             summary = sorted(summary_agg.values(), key=lambda x: (x["businessDate"], x["restaurantName"]))
             summary_by_key = {(r["restaurantGuid"], r["businessDate"]): r for r in summary}
 
-            # --- Pairing selections (MENU_ITEM + MODIFIER) ---
-            all_item_mod_rows = await _fetch_menu_chunked(["MENU_ITEM", "MODIFIER"])
+            # --- Pairing selections (MODIFIER — includes parent menu item info) ---
+            all_item_mod_rows = await _fetch_menu_chunked(["MODIFIER"])
             selections_agg: Dict[Tuple, Dict[str, int]] = {}
             for row in all_item_mod_rows:
                 parent_name = (row.get("menuItemName") or "").strip()
@@ -667,7 +692,8 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
                 if not rguid or not bdate:
                     continue
                 key = (rguid, bdate)
-                selections_agg.setdefault(key, {})[mod_name] = selections_agg[key].get(mod_name, 0) + qty
+                sa = selections_agg.setdefault(key, {})
+                sa[mod_name] = sa.get(mod_name, 0) + qty
 
             # --- Build drillDown ---
             all_keys = set(summary_by_key.keys()) | set(selections_agg.keys())
@@ -712,7 +738,7 @@ async def pick3_drill_down_orders(request: Pick3DrillDownOrdersRequest = Body(..
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            variant = _normalize_variant(request.variant, ("pos", "olo"))
+            variant = _normalize_variant(request.variant, ("pos", "olo", "all"))
             result  = await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant, cfg)
             locs    = await get_all_active_locations(client)
             rname   = next((format_location_display_name(l) for l in locs if l.restaurantGuid == rguid), "Unknown")
@@ -786,7 +812,7 @@ async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = 
             if not locs:
                 return {"stores": [], "pairingSource": "orders"}
 
-            variant = _normalize_variant(request.variant, ("pos", "olo"))
+            variant = _normalize_variant(request.variant, ("pos", "olo", "all"))
             guid_to_name = {l.restaurantGuid: format_location_display_name(l) for l in locs}
 
             # Prefetch menu tags in parallel
@@ -803,7 +829,7 @@ async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = 
                         return await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant, cfg)
                     except Exception as e:
                         logger.warning("Pick3 all-stores: %s: %s", rguid[:8], e)
-                        return {"restaurantGuid": rguid, "totalPick3Quantity": 0, "parentItems": [], "selections": []}
+                        return {"restaurantGuid": rguid, "totalPick3Quantity": 0, "parentItems": [], "selections": [], "topCombos": []}
 
             results = await asyncio.gather(*[one_store(g) for g in guid_to_name])
             stores = [
@@ -813,6 +839,7 @@ async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = 
                     "totalPick3Quantity": r["totalPick3Quantity"],
                     "parentItems":       r["parentItems"],
                     "selections":        r["selections"],
+                    "topCombos":         r.get("topCombos", []),
                 }
                 for r in results
             ]
