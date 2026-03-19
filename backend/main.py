@@ -38,6 +38,8 @@ from sales_consolidator import SalesConsolidator
 from hierarchical_reports import HierarchicalReportGenerator
 from aloha_sql_importer import import_aloha_sql_range, import_aloha_sql_last_days
 import aloha_db
+import aloha_sales_db
+from aloha_sales_importer import import_aloha_sales_range, import_aloha_sales_last_days
 import toast_orders_db
 from olo_client import (
     list_order_batches,
@@ -441,6 +443,235 @@ def get_aloha_file_path_if_exists(business_date: str) -> Optional[str]:
     if not file_path or not os.path.exists(file_path):
         return None
     return file_path
+
+
+def apply_yoy_aloha_sales(
+    result: dict,
+    report_type: str,
+    raw_rows: list,
+    report_config: "ReportConfig",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> dict:
+    """
+    Enrich a sales_summary or metrics report with prior-year Aloha sales data.
+
+    Parameters
+    ----------
+    result : dict
+        The report result dict (from compute_sales_summary_by_location or
+        pivot_metrics_by_location_and_date).
+    report_type : str
+        "sales_summary" or "metrics".
+    raw_rows : list
+        The raw ERA analytics rows (contain restaurantGuid for location mapping).
+    report_config : ReportConfig
+        Current report configuration (checked for yoyEnabled).
+    start_date, end_date : date
+        The current report date range (Aloha range = same dates, 1 year prior).
+    """
+    if not result or not report_config.yoyEnabled:
+        return result
+    if report_type not in ("sales_summary", "metrics"):
+        return result
+    if not start_date or not end_date:
+        return result
+    if not aloha_sales_db.db_available():
+        return result
+
+    # Prior-year date range (365 days back)
+    aloha_start = (start_date - timedelta(days=365)).isoformat()
+    aloha_end = (end_date - timedelta(days=365)).isoformat()
+
+    # Build restaurant_name -> aloha_location_id lookup
+    #   raw_rows have restaurantGuid + restaurantName
+    #   aloha_location_mapping has toast_guid -> aloha_id
+    loc_mapping = get_aloha_location_mapping()  # toast_guid -> aloha_id
+    if not loc_mapping:
+        logger.info("YoY sales: no aloha_location_mapping.json — skipping enrichment")
+        return result
+
+    # Build name -> aloha_id via the GUID bridge
+    name_to_aloha: Dict[str, str] = {}
+    for row in raw_rows:
+        guid = row.get("restaurantGuid", "")
+        name = row.get("restaurantName", "")
+        if guid and name and guid in loc_mapping:
+            name_to_aloha[name] = loc_mapping[guid]
+
+    if not name_to_aloha:
+        logger.info("YoY sales: no location matches between Toast GUIDs and Aloha mapping")
+        return result
+
+    # Build location filter from selected restaurants (if any)
+    aloha_locations: Optional[List[str]] = None
+    if report_config.restaurantIds:
+        aloha_locations = [
+            loc_mapping[guid] for guid in report_config.restaurantIds
+            if guid in loc_mapping
+        ]
+        if not aloha_locations:
+            return result
+
+    # Also build aloha_id -> restaurant_name reverse map
+    aloha_to_name: Dict[str, str] = {v: k for k, v in name_to_aloha.items()}
+
+    if report_type == "sales_summary":
+        return _enrich_sales_summary(result, aloha_start, aloha_end, aloha_locations, name_to_aloha, aloha_to_name)
+    elif report_type == "metrics":
+        return _enrich_metrics(result, start_date, end_date, aloha_locations, name_to_aloha, aloha_to_name)
+
+    return result
+
+
+def _enrich_sales_summary(
+    result: dict,
+    aloha_start: str,
+    aloha_end: str,
+    aloha_locations: Optional[List[str]],
+    name_to_aloha: Dict[str, str],
+    aloha_to_name: Dict[str, str],
+) -> dict:
+    """Add priorYearNetSales and yoyChangePct to each sales summary row."""
+    aloha_df = aloha_sales_db.query_date_range(aloha_start, aloha_end, locations=aloha_locations)
+    if aloha_df.empty:
+        result["yoySalesInfo"] = {
+            "alohaStartDate": aloha_start, "alohaEndDate": aloha_end,
+            "status": "no_data", "matchedLocations": 0,
+        }
+        return result
+
+    # Build aloha_id -> sales lookups (total, catering, non-catering)
+    aloha_by_loc: Dict[str, float] = {}          # total net sales
+    aloha_catering_by_loc: Dict[str, float] = {}  # catering only
+    aloha_noncat_by_loc: Dict[str, float] = {}    # non-catering (total minus catering)
+    for _, arow in aloha_df.iterrows():
+        loc = str(arow["location"])
+        total_ns = float(arow["net_sales"])
+        catering_ns = float(arow.get("catering_net_sales", 0) or 0)
+        aloha_by_loc[loc] = total_ns
+        aloha_catering_by_loc[loc] = catering_ns
+        aloha_noncat_by_loc[loc] = total_ns - catering_ns
+
+    # Map each table to its appropriate Aloha lookup
+    table_lookups = {
+        "summaryTable": aloha_by_loc,
+        "cateringTable": aloha_catering_by_loc,
+        "nonCateringTable": aloha_noncat_by_loc,
+    }
+
+    matched = 0
+    total_prior = 0.0
+
+    for table_key in ("summaryTable", "cateringTable", "nonCateringTable"):
+        lookup = table_lookups[table_key]
+        table = result.get(table_key, [])
+        for row in table:
+            r_name = row.get("restaurantName", "")
+            aloha_id = name_to_aloha.get(r_name)
+            if aloha_id and aloha_id in lookup:
+                prior_ns = round(lookup[aloha_id], 2)
+                row["priorYearNetSales"] = prior_ns
+                current_ns = row.get("netSales", 0)
+                row["yoyChange"] = round(current_ns - prior_ns, 2)
+                row["yoyChangePct"] = round(((current_ns - prior_ns) / prior_ns) * 100, 1) if prior_ns else 0.0
+                if table_key == "summaryTable":
+                    matched += 1
+                    total_prior += prior_ns
+
+    # Totals
+    for totals_key in ("summaryTotals", "cateringTotals", "nonCateringTotals"):
+        totals = result.get(totals_key)
+        if totals:
+            # Sum prior-year net sales across all matched locations for this totals bucket
+            table_key = totals_key.replace("Totals", "Table")
+            table = result.get(table_key, [])
+            prior_sum = sum(r.get("priorYearNetSales", 0) for r in table)
+            totals["priorYearNetSales"] = round(prior_sum, 2)
+            current_ns = totals.get("netSales", 0)
+            totals["yoyChange"] = round(current_ns - prior_sum, 2)
+            totals["yoyChangePct"] = round(((current_ns - prior_sum) / prior_sum) * 100, 1) if prior_sum else 0.0
+
+    result["yoySalesInfo"] = {
+        "alohaStartDate": aloha_start,
+        "alohaEndDate": aloha_end,
+        "status": "ok",
+        "matchedLocations": matched,
+        "totalPriorYearNetSales": round(total_prior, 2),
+    }
+    return result
+
+
+def _enrich_metrics(
+    result: dict,
+    start_date: date,
+    end_date: date,
+    aloha_locations: Optional[List[str]],
+    name_to_aloha: Dict[str, str],
+    aloha_to_name: Dict[str, str],
+) -> dict:
+    """Add prior-year Aloha net sales columns to the metrics pivot table."""
+    aloha_start = (start_date - timedelta(days=365)).isoformat()
+    aloha_end = (end_date - timedelta(days=365)).isoformat()
+
+    aloha_df = aloha_sales_db.query_date_range_daily(aloha_start, aloha_end, locations=aloha_locations)
+    if aloha_df.empty:
+        result["yoySalesInfo"] = {
+            "alohaStartDate": aloha_start, "alohaEndDate": aloha_end,
+            "status": "no_data", "matchedLocations": 0,
+        }
+        return result
+
+    # Build lookup: (aloha_date, aloha_location) -> net_sales
+    # We need to map aloha dates to the corresponding current-year dates
+    # aloha_date + 365 days = current_date (approximately)
+    aloha_daily: Dict[str, Dict[str, float]] = {}  # current_date_key -> {aloha_id: net_sales}
+    for _, arow in aloha_df.iterrows():
+        aloha_date = arow["business_date"]
+        aloha_loc = str(arow["location"])
+        ns = float(arow["net_sales"])
+        # Map aloha date to the corresponding current-year date
+        try:
+            a_date = date.fromisoformat(aloha_date)
+            current_date = a_date + timedelta(days=365)
+            # Toast metrics use YYYYMMDD format for date keys
+            current_key = current_date.strftime("%Y%m%d")
+        except ValueError:
+            continue
+        if current_key not in aloha_daily:
+            aloha_daily[current_key] = {}
+        aloha_daily[current_key][aloha_loc] = ns
+
+    # Enrich pivot rows
+    pivot_table = result.get("pivotTable", [])
+    for row in pivot_table:
+        r_name = row.get("restaurantName", "")
+        aloha_id = name_to_aloha.get(r_name)
+        if not aloha_id:
+            continue
+        for date_key, loc_sales in aloha_daily.items():
+            if aloha_id in loc_sales:
+                row[f"{date_key}_aloha"] = round(loc_sales[aloha_id], 2)
+
+    # Enrich totals
+    totals = result.get("totals", [])
+    for tot_row in totals:
+        date_key = tot_row.get("date", "")
+        if date_key in aloha_daily:
+            total_aloha = sum(aloha_daily[date_key].values())
+            tot_row["totalNetSalesAloha"] = round(total_aloha, 2)
+
+    matched_locs = len({name_to_aloha[n] for n in name_to_aloha if name_to_aloha[n] in
+                        {loc for daily in aloha_daily.values() for loc in daily}})
+    result["yoySalesInfo"] = {
+        "alohaStartDate": aloha_start,
+        "alohaEndDate": aloha_end,
+        "status": "ok",
+        "matchedLocations": matched_locs,
+        "datesWithData": len(aloha_daily),
+    }
+    return result
+
 
 async def apply_yoy_aloha_quantities(
     result: dict,
@@ -937,6 +1168,17 @@ class AlohaSqlImportRequest(BaseModel):
     overwrite: bool = False
 
 class AlohaSqlRecentImportRequest(BaseModel):
+    days: int = 7
+    batch_days: int = 31
+    overwrite: bool = False
+
+class AlohaSalesImportRequest(BaseModel):
+    start_date: Optional[str] = None  # YYYY-MM-DD
+    end_date: Optional[str] = None  # YYYY-MM-DD
+    batch_days: int = 31
+    overwrite: bool = False
+
+class AlohaSalesRecentImportRequest(BaseModel):
     days: int = 7
     batch_days: int = 31
     overwrite: bool = False
@@ -4751,6 +4993,7 @@ _scheduler.add_job(nightly_orders_cache_job, CronTrigger(hour=3, minute=0),
 @app.on_event("startup")
 async def _on_startup():
     toast_orders_db.initialize_db()
+    aloha_sales_db.initialize_db()
     _scheduler.start()
     logger.info("APScheduler started — nightly orders cache job scheduled at 3:00 AM")
 
@@ -8518,6 +8761,7 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     sum(1 for v in service_charges.values() if v > 0),
                 )
                 pivot_data = pivot_metrics_by_location_and_date(raw_rows, service_charges)
+                pivot_data = apply_yoy_aloha_sales(pivot_data, "metrics", raw_rows, report_config, start_date, end_date)
                 return pivot_data
 
             if report_config.reportType == "sales_summary" and not report_config.groupBy:
@@ -8551,7 +8795,9 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     len(metrics_by_key),
                     sum(m.get("order_count", 0) for m in metrics_by_key.values()),
                 )
-                return compute_sales_summary_by_location(raw_rows, metrics_by_key, catering_item_data)
+                summary_result = compute_sales_summary_by_location(raw_rows, metrics_by_key, catering_item_data)
+                summary_result = apply_yoy_aloha_sales(summary_result, "sales_summary", raw_rows, report_config, start_date, end_date)
+                return summary_result
 
             # Royalty report — just needs ERA net sales, no Orders API calls
             if report_config.reportType == "royalty":
@@ -10730,6 +10976,70 @@ async def import_aloha_sql_recent(request: AlohaSqlRecentImportRequest = Body(..
         "days": request.days,
         **result
     }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Aloha Sales YoY  —  aggregate net sales by location (not per-item)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/yoy/import-aloha-sales-sql")
+async def import_aloha_sales_sql(request: AlohaSalesImportRequest = Body(...)):
+    """Import historical Aloha aggregate sales data from SQL Server."""
+    try:
+        if request.end_date:
+            end_dt = date.fromisoformat(request.end_date)
+        else:
+            end_dt = date.today()
+        if request.start_date:
+            start_dt = date.fromisoformat(request.start_date)
+        else:
+            start_dt = end_dt - timedelta(days=729)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start_date/end_date must be YYYY-MM-DD")
+
+    try:
+        result = await asyncio.to_thread(
+            import_aloha_sales_range,
+            start_dt, end_dt, request.batch_days, request.overwrite,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 500 if "Missing ALOHA_S" in message else 400
+        raise HTTPException(status_code=status_code, detail=message)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Sales SQL import failed: {exc}")
+
+    return {"success": True, "start_date": start_dt.isoformat(), "end_date": end_dt.isoformat(), **result}
+
+
+@app.post("/api/yoy/import-aloha-sales-sql/recent")
+async def import_aloha_sales_sql_recent(request: AlohaSalesRecentImportRequest = Body(...)):
+    """Import recent Aloha sales data for periodic updates."""
+    try:
+        result = await asyncio.to_thread(
+            import_aloha_sales_last_days,
+            request.days, request.overwrite, request.batch_days,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 500 if "Missing ALOHA_S" in message else 400
+        raise HTTPException(status_code=status_code, detail=message)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Sales SQL import failed: {exc}")
+
+    return {"success": True, "days": request.days, **result}
+
+
+@app.get("/api/yoy/aloha-sales-dates")
+async def get_aloha_sales_dates():
+    """Return list of dates with Aloha sales data."""
+    return {"dates": aloha_sales_db.get_available_dates()}
+
+
+@app.get("/api/yoy/aloha-sales-stats")
+async def get_aloha_sales_stats():
+    """Return summary statistics about the Aloha sales database."""
+    return aloha_sales_db.get_stats()
+
 
 @app.post("/api/yoy/compare")
 async def compare_yoy(request: YoYCompareRequest = Body(...)):

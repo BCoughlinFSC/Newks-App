@@ -1377,8 +1377,23 @@
       }
 
       if (yoySection) {
-        if (reportType === 'menu') {
+        const yoyReportTypes = ['menu', 'sales_summary', 'metrics'];
+        if (yoyReportTypes.includes(reportType)) {
           yoySection.classList.remove('hidden');
+          // Update label text based on report type (keep checkbox element intact)
+          const yoyLabel = yoySection.querySelector('.yoy-toggle-label');
+          if (yoyLabel) {
+            const labelText = reportType === 'menu'
+              ? 'Show Aloha Qty column in menu report'
+              : 'Show Prior Year Sales (Aloha)';
+            // Only update the text node after the checkbox, preserving the checkbox element
+            const checkbox = yoyLabel.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+              // Remove all text nodes, keep checkbox
+              Array.from(yoyLabel.childNodes).forEach(n => { if (n.nodeType === 3) n.remove(); });
+              yoyLabel.appendChild(document.createTextNode(' ' + labelText));
+            }
+          }
           if (availableAlohaDates.length === 0) loadAlohaDates();
         } else {
           yoySection.classList.add('hidden');
@@ -2255,22 +2270,48 @@
       const thNavy = 'background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
       const thNavyL = 'background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
       const thGreen = 'background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;';
+      const thAmber = 'background:#92400E;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #78350F;';
       const tdTot   = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
       const tdTotL  = 'text-align:left;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
       const tdGrnT  = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #A7F3D0;background:#ECFDF5;';
+      const tdAmberT = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #FDE68A;background:#FFFBEB;';
       const tdRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;';
       const tdRowL  = 'padding:0.5rem 0.75rem;text-align:left;border:1px solid #E5E7EB;';
+      const tdAmberRow = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #FDE68A;background:#FFFBEB;';
+
+      const hasYoY = results.yoySalesInfo && results.yoySalesInfo.status === 'ok';
+      const yoyColspan = hasYoY ? 12 : 10;
 
       const expandId = 'ss-expand-' + Date.now();
       let html = '';
+
+      // YoY info banner
+      if (hasYoY) {
+        const info = results.yoySalesInfo;
+        html += `<tr><td colspan="${yoyColspan}" style="padding:0.5rem 0.75rem;background:#FFFBEB;border:1px solid #FDE68A;font-size:0.82rem;color:#92400E;">
+          Prior Year (Aloha): ${info.alohaStartDate} to ${info.alohaEndDate} &bull; ${info.matchedLocations} locations matched
+        </td></tr>`;
+      }
+
+      // Helper for YoY % badge
+      const yoyBadge = (pct) => {
+        if (pct == null || pct === 0) return '<span style="color:#6B7280;">—</span>';
+        const color = pct > 0 ? '#059669' : '#DC2626';
+        const arrow = pct > 0 ? '▲' : '▼';
+        return `<span style="color:${color};font-weight:600;">${arrow} ${Math.abs(pct).toFixed(1)}%</span>`;
+      };
 
       // Header row
       html += `<tr>
         <th style="${thNavyL}">Location</th>
         <th style="${thNavy}">Total Tickets</th>
         <th style="${thNavy}">Guest Count</th>
-        <th style="${thGreen}">Newk's Net Sales</th>
-        <th style="${thNavy}">Avg Ticket</th>
+        <th style="${thGreen}">Newk's Net Sales</th>`;
+      if (hasYoY) {
+        html += `<th style="${thAmber}">Prior Year Net Sales</th>
+        <th style="${thAmber}">YoY %</th>`;
+      }
+      html += `<th style="${thNavy}">Avg Ticket</th>
         <th style="${thNavy}">PPA</th>
         <th style="${thNavy}">Discounts</th>
         <th style="${thNavy}">Voids</th>
@@ -2283,8 +2324,12 @@
         <td style="${tdTotL}"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations Totals:</td>
         <td style="${tdTot}">${(tot.orders||0).toLocaleString()}</td>
         <td style="${tdTot}">${(tot.guestCount||0).toLocaleString()}</td>
-        <td style="${tdGrnT}">${formatCell('Sales', tot.netSales||0)}</td>
-        <td style="${tdTot}">${formatCell('Sales', tot.avgTicket||0)}</td>
+        <td style="${tdGrnT}">${formatCell('Sales', tot.netSales||0)}</td>`;
+      if (hasYoY) {
+        html += `<td style="${tdAmberT}">${formatCell('Sales', tot.priorYearNetSales||0)}</td>
+        <td style="${tdAmberT}">${yoyBadge(tot.yoyChangePct)}</td>`;
+      }
+      html += `<td style="${tdTot}">${formatCell('Sales', tot.avgTicket||0)}</td>
         <td style="${tdTot}">${formatCell('Sales', tot.ppa||0)}</td>
         <td style="${tdTot}">${formatCell('Sales', tot.discounts||0)}</td>
         <td style="${tdTot}">${(tot.voids||0).toLocaleString()}</td>
@@ -2298,8 +2343,12 @@
           <td style="${tdRowL} padding-left:2.5rem;">${row.restaurantName||''}</td>
           <td style="${tdRow}">${(row.orders||0).toLocaleString()}</td>
           <td style="${tdRow}">${(row.guestCount||0).toLocaleString()}</td>
-          <td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;">${formatCell('Sales', row.netSales||0)}</td>
-          <td style="${tdRow}">${formatCell('Sales', row.avgTicket||0)}</td>
+          <td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;">${formatCell('Sales', row.netSales||0)}</td>`;
+        if (hasYoY) {
+          html += `<td style="${tdAmberRow}">${row.priorYearNetSales != null ? formatCell('Sales', row.priorYearNetSales) : '—'}</td>
+          <td style="${tdAmberRow}">${row.yoyChangePct != null ? yoyBadge(row.yoyChangePct) : '—'}</td>`;
+        }
+        html += `<td style="${tdRow}">${formatCell('Sales', row.avgTicket||0)}</td>
           <td style="${tdRow}">${formatCell('Sales', row.ppa||0)}</td>
           <td style="${tdRow}">${formatCell('Sales', row.discounts||0)}</td>
           <td style="${tdRow}">${(row.voids||0).toLocaleString()}</td>
@@ -2318,20 +2367,24 @@
         const thS  = `background:${headerBg};color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid ${headerBorder};`;
         const thSL = `background:${headerBg};color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid ${headerBorder};`;
         const thSG = 'background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;';
+        const thSA = 'background:#92400E;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #78350F;';
         const tdS  = `text-align:right;font-weight:700;padding:0.75rem;border:1px solid ${totBorder};background:${totBg};`;
         const tdSL = `text-align:left;font-weight:700;padding:0.75rem;border:1px solid ${totBorder};background:${totBg};`;
         const tdSG = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #A7F3D0;background:#ECFDF5;';
+        const tdSA = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #FDE68A;background:#FFFBEB;';
         const tdR  = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;';
         const tdRL = 'padding:0.5rem 0.75rem;text-align:left;border:1px solid #E5E7EB;';
         const tdRG = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;';
+        const tdRA = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #FDE68A;background:#FFFBEB;';
         const eid  = 'ss-split-' + label.replace(/\s+/g,'') + '-' + Date.now();
-        let h = `<tr><td colspan="10" style="padding:1rem 0 0.25rem;font-weight:700;font-size:1rem;color:#374151;border:none;">${label}</td></tr>`;
+        let h = `<tr><td colspan="${yoyColspan}" style="padding:1rem 0 0.25rem;font-weight:700;font-size:1rem;color:#374151;border:none;">${label}</td></tr>`;
         h += `<tr>
           <th style="${thSL}">Location</th>
           <th style="${thS}">Total Tickets</th>
           <th style="${thS}">Guest Count</th>
-          <th style="${thSG}">Newk's Net Sales</th>
-          <th style="${thS}">Avg Ticket</th>
+          <th style="${thSG}">Newk's Net Sales</th>`;
+        if (hasYoY) h += `<th style="${thSA}">Prior Year Net Sales</th><th style="${thSA}">YoY %</th>`;
+        h += `<th style="${thS}">Avg Ticket</th>
           <th style="${thS}">PPA</th>
           <th style="${thS}">Discounts</th>
           <th style="${thS}">Voids</th>
@@ -2342,8 +2395,9 @@
           <td style="${tdSL}"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations:</td>
           <td style="${tdS}">${(splitTot.orders||0).toLocaleString()}</td>
           <td style="${tdS}">${(splitTot.guestCount||0).toLocaleString()}</td>
-          <td style="${tdSG}">${formatCell('Sales', splitTot.netSales||0)}</td>
-          <td style="${tdS}">${formatCell('Sales', splitTot.avgTicket||0)}</td>
+          <td style="${tdSG}">${formatCell('Sales', splitTot.netSales||0)}</td>`;
+        if (hasYoY) h += `<td style="${tdSA}">${formatCell('Sales', splitTot.priorYearNetSales||0)}</td><td style="${tdSA}">${yoyBadge(splitTot.yoyChangePct)}</td>`;
+        h += `<td style="${tdS}">${formatCell('Sales', splitTot.avgTicket||0)}</td>
           <td style="${tdS}">${formatCell('Sales', splitTot.ppa||0)}</td>
           <td style="${tdS}">${formatCell('Sales', splitTot.discounts||0)}</td>
           <td style="${tdS}">${(splitTot.voids||0).toLocaleString()}</td>
@@ -2355,8 +2409,9 @@
             <td style="${tdRL} padding-left:2.5rem;">${r.restaurantName||''}</td>
             <td style="${tdR}">${(r.orders||0).toLocaleString()}</td>
             <td style="${tdR}">${(r.guestCount||0).toLocaleString()}</td>
-            <td style="${tdRG}">${formatCell('Sales', r.netSales||0)}</td>
-            <td style="${tdR}">${formatCell('Sales', r.avgTicket||0)}</td>
+            <td style="${tdRG}">${formatCell('Sales', r.netSales||0)}</td>`;
+          if (hasYoY) h += `<td style="${tdRA}">${r.priorYearNetSales != null ? formatCell('Sales', r.priorYearNetSales) : '—'}</td><td style="${tdRA}">${r.yoyChangePct != null ? yoyBadge(r.yoyChangePct) : '—'}</td>`;
+          h += `<td style="${tdR}">${formatCell('Sales', r.avgTicket||0)}</td>
             <td style="${tdR}">${formatCell('Sales', r.ppa||0)}</td>
             <td style="${tdR}">${formatCell('Sales', r.discounts||0)}</td>
             <td style="${tdR}">${(r.voids||0).toLocaleString()}</td>
@@ -2659,44 +2714,73 @@
       if (totals.length>0 && pivotTable.length>0) {
         const expandId = 'expand-locations-' + Date.now();
         if (isMetricsReport) {
-          // Toast = navy blue (#1E40AF), Newk's = Newk's green (#065F46)
+          // Toast = navy blue (#1E40AF), Newk's = Newk's green (#065F46), Aloha = amber (#92400E)
           const thToast  = 'background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;';
           const thNewks  = 'background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;';
+          const thAloha  = 'background:#92400E;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #78350F;';
           const tdToastTotal = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #BFDBFE;background:#EFF6FF;';
           const tdNewksTotal = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #A7F3D0;background:#ECFDF5;';
+          const tdAlohaTotal = 'text-align:right;font-weight:700;padding:0.75rem;border:1px solid #FDE68A;background:#FFFBEB;';
           const tdToastRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F8FBFF;';
           const tdNewksRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;';
+          const tdAlohaRow   = 'padding:0.5rem 0.75rem;text-align:right;border:1px solid #FDE68A;background:#FFFBEB;';
+          const hasAlohaMetrics = results.yoySalesInfo && results.yoySalesInfo.status === 'ok';
 
           html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Location</th>';
           sortedColumns.forEach(col => {
+            const colSpan = (hasNewks ? 2 : 1) + (hasAlohaMetrics ? 1 : 0);
             if (hasNewks) {
               html += `<th class="toast-col" style="${thToast}">🍞 ${formatDateHeader(col)}</th>`;
               html += `<th style="${thNewks}">🥗 ${formatDateHeader(col)}</th>`;
             } else {
               html += `<th class="toast-col" style="${thToast}">${formatDateHeader(col)}</th>`;
             }
+            if (hasAlohaMetrics) {
+              html += `<th style="${thAloha}">📊 ${formatDateHeader(col)}</th>`;
+            }
           });
           // Legend row
-          if (hasNewks) {
+          if (hasNewks || hasAlohaMetrics) {
             html += '</tr><tr>';
             html += '<th style="background:#F8FAFC;border:1px solid #E2E8F0;padding:0.25rem 0.75rem;"></th>';
             sortedColumns.forEach(() => {
-              html += `<th class="toast-col" style="background:#EFF6FF;color:#1E40AF;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #BFDBFE;">Toast Net Sales</th>`;
-              html += `<th style="background:#ECFDF5;color:#065F46;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #A7F3D0;">Newk's Net Sales</th>`;
+              if (hasNewks) {
+                html += `<th class="toast-col" style="background:#EFF6FF;color:#1E40AF;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #BFDBFE;">Toast Net Sales</th>`;
+                html += `<th style="background:#ECFDF5;color:#065F46;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #A7F3D0;">Newk's Net Sales</th>`;
+              } else {
+                html += `<th class="toast-col" style="background:#EFF6FF;color:#1E40AF;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #BFDBFE;">Toast Net Sales</th>`;
+              }
+              if (hasAlohaMetrics) {
+                html += `<th style="background:#FFFBEB;color:#92400E;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #FDE68A;">Prior Year (Aloha)</th>`;
+              }
             });
           }
           html += '</tr>';
+
+          // Aloha info banner for metrics
+          if (hasAlohaMetrics) {
+            const info = results.yoySalesInfo;
+            const colCount = 1 + sortedColumns.length * ((hasNewks ? 2 : 1) + 1);
+            html += `<tr><td colspan="${colCount}" style="padding:0.35rem 0.75rem;background:#FFFBEB;border:1px solid #FDE68A;font-size:0.78rem;color:#92400E;">
+              Prior Year (Aloha): ${info.alohaStartDate} to ${info.alohaEndDate} &bull; ${info.matchedLocations} locations matched
+            </td></tr>`;
+          }
+
           html += `<tr class="expandable-header" data-expand-id="${expandId}" style="cursor:pointer;background:#EFF6FF;border:1px solid #BFDBFE;">
             <td style="padding:0.75rem;font-weight:700;border:1px solid #BFDBFE;"><span class="expand-icon" style="display:inline-block;width:20px;text-align:center;margin-right:0.5rem;">▶</span> All Locations Totals:</td>`;
           sortedColumns.forEach(col => {
             const t = totals.find(t=>t.date===col);
             const tv = t ? t.totalNetSales : 0;
             const nv = t && t.totalNetSalesNewks!==undefined ? t.totalNetSalesNewks : tv;
+            const av = t && t.totalNetSalesAloha!==undefined ? t.totalNetSalesAloha : null;
             if (hasNewks) {
               html += `<td class="toast-col" style="${tdToastTotal}">${formatCell('Sales',tv)}</td>`;
               html += `<td style="${tdNewksTotal}">${formatCell('Sales',nv)}</td>`;
             } else {
               html += `<td class="toast-col" style="${tdToastTotal}">${formatCell('Sales',tv)}</td>`;
+            }
+            if (hasAlohaMetrics) {
+              html += `<td style="${tdAlohaTotal}">${av != null ? formatCell('Sales',av) : '—'}</td>`;
             }
           });
           html += '</tr>';
@@ -2706,11 +2790,15 @@
             sortedColumns.forEach(col => {
               const tv = row[col]??0;
               const nv = row[col+'_newks']??tv;
+              const av = row[col+'_aloha'];
               if (hasNewks) {
                 html += `<td class="toast-col" style="${tdToastRow}">${formatCell('Sales',tv)}</td>`;
                 html += `<td style="${tdNewksRow}">${formatCell('Sales',nv)}</td>`;
               } else {
                 html += `<td class="toast-col" style="${tdToastRow}">${formatCell('Sales',tv)}</td>`;
+              }
+              if (hasAlohaMetrics) {
+                html += `<td style="${tdAlohaRow}">${av != null ? formatCell('Sales',av) : '—'}</td>`;
               }
             });
             html += '</tr>';
@@ -2735,15 +2823,18 @@
       } else if (totals.length>0) {
         if (isMetricsReport) {
           const showNewksCol = totals[0]?.hasOwnProperty('totalNetSalesNewks');
+          const showAlohaCol = results.yoySalesInfo && results.yoySalesInfo.status === 'ok' && totals.some(r => r.totalNetSalesAloha != null);
           html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;">Date</th>';
           html += '<th class="toast-col" style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;">🍞 Toast Net Sales</th>';
           if (showNewksCol) html += '<th style="background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;">🥗 Newk\'s Net Sales</th>';
+          if (showAlohaCol) html += '<th style="background:#92400E;color:white;text-align:right;font-weight:700;padding:0.75rem;">📊 Prior Year (Aloha)</th>';
           html += '</tr>';
           totals.forEach(row => {
             html += `<tr>
               <td style="padding:0.75rem;border:1px solid #E5E7EB;"><strong>${formatDateHeader(row.date||'')}</strong></td>
               <td class="toast-col" style="padding:0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F8FBFF;">${formatCell('Sales',row.totalNetSales||0)}</td>`;
             if (showNewksCol) html += `<td style="padding:0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;">${formatCell('Sales',row.totalNetSalesNewks!=null?row.totalNetSalesNewks:row.totalNetSales||0)}</td>`;
+            if (showAlohaCol) html += `<td style="padding:0.75rem;text-align:right;border:1px solid #FDE68A;background:#FFFBEB;">${row.totalNetSalesAloha!=null?formatCell('Sales',row.totalNetSalesAloha):'—'}</td>`;
             html += '</tr>';
           });
         } else {
