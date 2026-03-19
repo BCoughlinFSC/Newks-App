@@ -3303,7 +3303,7 @@
       document.getElementById('updateReportBtn').addEventListener('click', updateReport);
       document.getElementById('deleteReportBtn').addEventListener('click', deleteReport);
       document.getElementById('exportBtn').addEventListener('click', exportExcel);
-      // Toast Pricing Export is now handled by shared-nav.js via window.exportToastPricing
+      window.exportToastPricing = exportToastPricing; // expose for shared-nav.js
       document.getElementById('toggleToastColumnsBtn').addEventListener('click', toggleToastColumns);
       document.getElementById('toggleDailyColumnsBtn').addEventListener('click', toggleDailyColumns);
       document.getElementById('reportType').addEventListener('change', updateFilterByOptions);
