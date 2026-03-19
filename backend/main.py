@@ -11061,9 +11061,17 @@ async def upload_aloha_sales_db(payload: dict = Body(...)):
 
     db_path = aloha_sales_db.ALOHA_SALES_DB_PATH
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+    # Remove WAL/SHM files so SQLite doesn't use stale journal after overwrite
+    for suffix in ("-wal", "-shm"):
+        wal_path = db_path + suffix
+        if os.path.exists(wal_path):
+            os.remove(wal_path)
+
     with open(db_path, "wb") as f:
         f.write(db_bytes)
 
+    # Verify with a fresh connection
     stats = aloha_sales_db.get_stats(db_path)
     logger.info("Aloha sales DB uploaded: %s", stats)
     return {"success": True, "size_mb": round(len(db_bytes) / (1024 * 1024), 2), **stats}
