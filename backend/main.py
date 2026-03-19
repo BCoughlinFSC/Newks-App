@@ -7221,6 +7221,10 @@ async def build_guest_count_report(
 
     grand_qty = sum(r["totalQtySold"] for r in guest_count_table)
     grand_gc = sum(r["totalGuestCount"] for r in guest_count_table)
+    # Count unique items that actually had sales (union across all stores)
+    all_sold_items = set()
+    for info in loc_totals.values():
+        all_sold_items |= info["items"]
 
     # Sort item breakdown by location then item name
     item_rows.sort(key=lambda x: (x["restaurantName"], x["menuItemName"]))
@@ -7231,7 +7235,7 @@ async def build_guest_count_report(
             "totalGuestCount": round(grand_gc, 2),
             "totalQtySold": round(grand_qty, 2),
             "locationCount": len(guest_count_table),
-            "itemCount": len(gc_by_guid),
+            "itemCount": len(all_sold_items),
         },
         "guestCountItemBreakdown": item_rows,
     }

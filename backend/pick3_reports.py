@@ -378,6 +378,8 @@ async def _compute_pick3_drill_down_for_store(
     combo_counts: Dict[Tuple[str, ...], int] = {}   # sorted tuple of pairing names → count
 
     for order in orders:
+        if order.get("voided") or order.get("deleted"):
+            continue
         obd = order.get("businessDate")
         try:
             order_bdate_int = int(obd) if obd is not None else None
@@ -386,7 +388,11 @@ async def _compute_pick3_drill_down_for_store(
         if order_bdate_int is None or not (start_bdate <= order_bdate_int <= end_bdate):
             continue
         for check in order.get("checks") or []:
+            if check.get("voided") or check.get("deleted"):
+                continue
             for sel in check.get("selections") or []:
+                if sel.get("voided"):
+                    continue
                 if not _is_pick3_selection(sel, variant, cfg):
                     continue
                 display_name = (sel.get("displayName") or "").strip()
