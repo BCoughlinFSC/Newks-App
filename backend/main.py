@@ -11041,6 +11041,34 @@ async def get_aloha_sales_stats():
     return aloha_sales_db.get_stats()
 
 
+@app.post("/api/yoy/upload-aloha-sales-db")
+async def upload_aloha_sales_db(payload: dict = Body(...)):
+    """
+    Upload the aloha_sales.db SQLite file as base64-encoded JSON.
+    Expects: {"db_base64": "<base64 string>"}
+    Overwrites the existing aloha_sales.db on the server.
+    """
+    import base64 as _b64
+    db_b64 = payload.get("db_base64")
+    if not db_b64:
+        raise HTTPException(status_code=400, detail="Missing db_base64 field")
+    try:
+        db_bytes = _b64.b64decode(db_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 data")
+    if len(db_bytes) < 100:
+        raise HTTPException(status_code=400, detail="File too small to be a valid SQLite DB")
+
+    db_path = aloha_sales_db.ALOHA_SALES_DB_PATH
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    with open(db_path, "wb") as f:
+        f.write(db_bytes)
+
+    stats = aloha_sales_db.get_stats(db_path)
+    logger.info("Aloha sales DB uploaded: %s", stats)
+    return {"success": True, "size_mb": round(len(db_bytes) / (1024 * 1024), 2), **stats}
+
+
 @app.post("/api/yoy/compare")
 async def compare_yoy(request: YoYCompareRequest = Body(...)):
     """
