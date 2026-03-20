@@ -897,19 +897,21 @@
           btn.classList.add('active');
           
           if (preset === 'wow') {
-            // Week over week: last 7 days vs previous 7 days
+            // Week over week: last 7 days (excluding today)
             const end = new Date();
+            end.setDate(end.getDate() - 1);
             const start = new Date(end);
-            start.setDate(start.getDate() - 7);
+            start.setDate(start.getDate() - 6);
             document.getElementById('dateRangeType').value = 'custom';
             document.getElementById('customStartDate').value = start.toISOString().split('T')[0];
             document.getElementById('customEndDate').value = end.toISOString().split('T')[0];
             toggleCustomDateRange();
           } else if (preset === 'mom') {
-            // Month over month: last 30 days vs previous 30 days
+            // Month over month: last 30 days (excluding today)
             const end = new Date();
+            end.setDate(end.getDate() - 1);
             const start = new Date(end);
-            start.setDate(start.getDate() - 30);
+            start.setDate(start.getDate() - 29);
             document.getElementById('dateRangeType').value = 'custom';
             document.getElementById('customStartDate').value = start.toISOString().split('T')[0];
             document.getElementById('customEndDate').value = end.toISOString().split('T')[0];

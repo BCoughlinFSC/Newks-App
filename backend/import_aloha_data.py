@@ -8,6 +8,9 @@ From SQL Server (requires ALOHA_SQL_* in .env):
   python import_aloha_data.py --sql --sql-start 2024-02-01 --sql-end 2024-12-31
   python import_aloha_data.py --sql-last-days 90
   python import_aloha_data.py --sql --sql-start 2024-01-01 --sql-end 2024-01-31 --overwrite
+
+Import fiscal calendar from CalendarV2:
+  python import_aloha_data.py --fiscal-calendar --sql-start 2024-01-01 --sql-end 2027-12-31
 """
 
 import argparse
@@ -52,6 +55,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sql-last-days", dest="sql_last_days", type=int, help="Import last N days")
     parser.add_argument("--batch-days", dest="batch_days", type=int, default=31, help="Batch size in days")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing dates")
+    parser.add_argument("--fiscal-calendar", dest="fiscal_calendar", action="store_true",
+                        help="Import fiscal calendar from CalendarV2 (use with --sql-start/--sql-end)")
     return parser.parse_args()
 
 
@@ -117,8 +122,34 @@ def _import_from_sql(args: argparse.Namespace) -> None:
     print(f"Skipped dates: {len(result.get('skipped_dates', []))}")
 
 
+def _import_fiscal_calendar(args: argparse.Namespace) -> None:
+    from aloha_sales_importer import import_fiscal_calendar
+
+    if args.sql_end:
+        end_date = date.fromisoformat(args.sql_end)
+    else:
+        end_date = date.today() + timedelta(days=365)
+
+    if args.sql_start:
+        start_date = date.fromisoformat(args.sql_start)
+    else:
+        start_date = end_date - timedelta(days=365 * 4)
+
+    print(f"Importing fiscal calendar: {start_date.isoformat()} to {end_date.isoformat()}")
+    count = import_fiscal_calendar(start_date, end_date)
+    print(f"Imported {count} fiscal calendar rows")
+
+
 def main():
     args = _parse_args()
+
+    if args.fiscal_calendar:
+        try:
+            _import_fiscal_calendar(args)
+        except Exception as exc:
+            print(f"Error importing fiscal calendar: {exc}")
+            sys.exit(1)
+        return
 
     sql_mode = args.sql or args.sql_start or args.sql_end or args.sql_last_days
     if sql_mode:

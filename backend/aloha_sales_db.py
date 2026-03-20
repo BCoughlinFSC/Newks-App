@@ -16,7 +16,12 @@ Schema
     gng_net_sales          REAL NOT NULL DEFAULT 0,
     togo_net_sales         REAL NOT NULL DEFAULT 0,
     curbside_net_sales     REAL NOT NULL DEFAULT 0,
-    curbside_olo_net_sales REAL NOT NULL DEFAULT 0
+    curbside_olo_net_sales REAL NOT NULL DEFAULT 0,
+    dinein_net_sales       REAL NOT NULL DEFAULT 0,
+    callin_net_sales       REAL NOT NULL DEFAULT 0,
+    olo_callin_net_sales   REAL NOT NULL DEFAULT 0,
+    check_count            REAL NOT NULL DEFAULT 0,
+    checks_minus_catering  REAL NOT NULL DEFAULT 0
   )
   UNIQUE INDEX on (business_date, location)
 
@@ -39,6 +44,8 @@ ALOHA_SALES_DB_PATH = os.path.join(
 _SALES_COLS = [
     "net_sales", "olo_net_sales", "delivery_net_sales", "catering_net_sales",
     "gng_net_sales", "togo_net_sales", "curbside_net_sales", "curbside_olo_net_sales",
+    "dinein_net_sales", "callin_net_sales", "olo_callin_net_sales",
+    "check_count", "checks_minus_catering",
 ]
 
 _CREATE_SQL = """
@@ -54,7 +61,12 @@ CREATE TABLE IF NOT EXISTS aloha_sales_data (
     gng_net_sales          REAL    NOT NULL DEFAULT 0,
     togo_net_sales         REAL    NOT NULL DEFAULT 0,
     curbside_net_sales     REAL    NOT NULL DEFAULT 0,
-    curbside_olo_net_sales REAL    NOT NULL DEFAULT 0
+    curbside_olo_net_sales REAL    NOT NULL DEFAULT 0,
+    dinein_net_sales       REAL    NOT NULL DEFAULT 0,
+    callin_net_sales       REAL    NOT NULL DEFAULT 0,
+    olo_callin_net_sales   REAL    NOT NULL DEFAULT 0,
+    check_count            REAL    NOT NULL DEFAULT 0,
+    checks_minus_catering  REAL    NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_aloha_sales_unique
@@ -65,6 +77,26 @@ CREATE INDEX IF NOT EXISTS idx_aloha_sales_date
 
 CREATE INDEX IF NOT EXISTS idx_aloha_sales_loc_date
     ON aloha_sales_data(location, business_date);
+
+CREATE TABLE IF NOT EXISTS fiscal_calendar (
+    date         TEXT PRIMARY KEY,   -- YYYY-MM-DD (current-year date)
+    ly_date      TEXT NOT NULL,      -- YYYY-MM-DD (prior-year date per fiscal calendar)
+    fiscal_year  INTEGER,
+    fiscal_period INTEGER,
+    fiscal_week  INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiscal_cal_ly
+    ON fiscal_calendar(ly_date);
+
+CREATE TABLE IF NOT EXISTS store_info (
+    location         TEXT PRIMARY KEY,   -- Aloha RestaurantID as string
+    restaurant_name  TEXT NOT NULL DEFAULT '',
+    company          TEXT NOT NULL DEFAULT '',   -- e.g. "Newco Dining LLC"
+    comping          TEXT NOT NULL DEFAULT 'N',  -- 'Y' or 'N'
+    comping_date     TEXT,                       -- YYYY-MM-DD or NULL
+    open_date        TEXT                        -- YYYY-MM-DD or NULL
+);
 """
 
 
@@ -82,11 +114,26 @@ def get_connection(db_path: str = ALOHA_SALES_DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+_MIGRATION_COLS = [
+    ("dinein_net_sales", "REAL NOT NULL DEFAULT 0"),
+    ("callin_net_sales", "REAL NOT NULL DEFAULT 0"),
+    ("olo_callin_net_sales", "REAL NOT NULL DEFAULT 0"),
+    ("check_count", "REAL NOT NULL DEFAULT 0"),
+    ("checks_minus_catering", "REAL NOT NULL DEFAULT 0"),
+]
+
+
 def initialize_db(db_path: str = ALOHA_SALES_DB_PATH) -> None:
     """Create the database file and schema if they don't already exist."""
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with get_connection(db_path) as conn:
         conn.executescript(_CREATE_SQL)
+        # Migrate: add columns that may not exist yet
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(aloha_sales_data)").fetchall()}
+        for col_name, col_type in _MIGRATION_COLS:
+            if col_name not in existing:
+                conn.execute(f"ALTER TABLE aloha_sales_data ADD COLUMN {col_name} {col_type}")
+        conn.commit()
 
 
 def db_available(db_path: str = ALOHA_SALES_DB_PATH) -> bool:
@@ -122,20 +169,6 @@ def upsert_date(
     """
     initialize_db(db_path)
 
-    # Map DataFrame column names (from SQL) to SQLite column names
-    col_map = {
-        "RestaurantID":          "location",
-        "RestaurantName":        "restaurant_name",
-        "NetSales":              "net_sales",
-        "OLONetSales":           "olo_net_sales",
-        "DeliveryNetSales":      "delivery_net_sales",
-        "CateringNetSales":      "catering_net_sales",
-        "GNGNetSales":           "gng_net_sales",
-        "ToGoNetSales":          "togo_net_sales",
-        "CurbSideNetSales":      "curbside_net_sales",
-        "CurbSideOLONetSales":   "curbside_olo_net_sales",
-    }
-
     records: List[tuple] = []
     for _, row in df.iterrows():
         location = str(row.get("RestaurantID", "") or "").strip()
@@ -153,6 +186,11 @@ def upsert_date(
             float(row.get("ToGoNetSales", 0) or 0),
             float(row.get("CurbSideNetSales", 0) or 0),
             float(row.get("CurbSideOLONetSales", 0) or 0),
+            float(row.get("DineInNetSales", 0) or 0),
+            float(row.get("CallInNetSales", 0) or 0),
+            float(row.get("OLOCallInNetSales", 0) or 0),
+            float(row.get("CheckCount", 0) or 0),
+            float(row.get("ChecksMinusCatering", 0) or 0),
         ))
 
     with get_connection(db_path) as conn:
@@ -165,8 +203,10 @@ def upsert_date(
                 "INSERT INTO aloha_sales_data"
                 "(business_date, location, restaurant_name,"
                 " net_sales, olo_net_sales, delivery_net_sales, catering_net_sales,"
-                " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
+                " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
+                " check_count, checks_minus_catering)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 records,
             )
     return len(records)
@@ -243,18 +283,9 @@ def query_date_range(
         where_clauses.append(f"location IN ({ph})")
         params.extend(locations)
 
+    sum_cols = ", ".join(f"SUM({c}) AS {c}" for c in _SALES_COLS)
     sql = (
-        "SELECT"
-        "  location,"
-        "  restaurant_name,"
-        "  SUM(net_sales) AS net_sales,"
-        "  SUM(olo_net_sales) AS olo_net_sales,"
-        "  SUM(delivery_net_sales) AS delivery_net_sales,"
-        "  SUM(catering_net_sales) AS catering_net_sales,"
-        "  SUM(gng_net_sales) AS gng_net_sales,"
-        "  SUM(togo_net_sales) AS togo_net_sales,"
-        "  SUM(curbside_net_sales) AS curbside_net_sales,"
-        "  SUM(curbside_olo_net_sales) AS curbside_olo_net_sales "
+        f"SELECT location, restaurant_name, {sum_cols} "
         "FROM aloha_sales_data "
         "WHERE " + " AND ".join(where_clauses) + " "
         "GROUP BY location, restaurant_name"
@@ -293,18 +324,7 @@ def query_date_range_daily(
         params.extend(locations)
 
     sql = (
-        "SELECT"
-        "  business_date,"
-        "  location,"
-        "  restaurant_name,"
-        "  net_sales,"
-        "  olo_net_sales,"
-        "  delivery_net_sales,"
-        "  catering_net_sales,"
-        "  gng_net_sales,"
-        "  togo_net_sales,"
-        "  curbside_net_sales,"
-        "  curbside_olo_net_sales "
+        f"SELECT business_date, location, restaurant_name, {', '.join(_SALES_COLS)} "
         "FROM aloha_sales_data "
         "WHERE " + " AND ".join(where_clauses) + " "
         "ORDER BY business_date, location"
@@ -356,3 +376,171 @@ def get_stats(db_path: str = ALOHA_SALES_DB_PATH) -> dict:
         }
     except Exception:
         return empty
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fiscal Calendar
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_fiscal_calendar(
+    rows: list,
+    db_path: str = ALOHA_SALES_DB_PATH,
+) -> int:
+    """
+    Insert/replace fiscal calendar rows.
+
+    Each row is a dict with keys: date, ly_date, fiscal_year, fiscal_period, fiscal_week.
+    Returns the number of rows inserted.
+    """
+    initialize_db(db_path)
+    records = [
+        (r["date"], r["ly_date"], r.get("fiscal_year"), r.get("fiscal_period"), r.get("fiscal_week"))
+        for r in rows
+    ]
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO fiscal_calendar"
+            "(date, ly_date, fiscal_year, fiscal_period, fiscal_week)"
+            " VALUES (?, ?, ?, ?, ?)",
+            records,
+        )
+    return len(records)
+
+
+def get_fiscal_ly_dates(
+    start_date: str,
+    end_date: str,
+    db_path: str = ALOHA_SALES_DB_PATH,
+) -> dict:
+    """
+    Look up fiscal calendar prior-year dates for a date range.
+
+    Returns dict mapping current-year date (YYYY-MM-DD) -> prior-year date (YYYY-MM-DD).
+    Only returns dates that exist in the fiscal_calendar table.
+    """
+    initialize_db(db_path)
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute(
+                "SELECT date, ly_date FROM fiscal_calendar"
+                " WHERE date BETWEEN ? AND ?",
+                (start_date, end_date),
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+    except Exception:
+        return {}
+
+
+def fiscal_calendar_available(db_path: str = ALOHA_SALES_DB_PATH) -> bool:
+    """Return True if the fiscal_calendar table has at least one row."""
+    if not os.path.exists(db_path):
+        return False
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute("SELECT 1 FROM fiscal_calendar LIMIT 1").fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
+def get_fiscal_calendar_stats(db_path: str = ALOHA_SALES_DB_PATH) -> dict:
+    """Return min_date, max_date, row_count for fiscal_calendar table."""
+    empty = {"min_date": None, "max_date": None, "row_count": 0}
+    if not os.path.exists(db_path):
+        return empty
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT MIN(date), MAX(date), COUNT(*) FROM fiscal_calendar"
+            ).fetchone()
+        if not row or row[2] == 0:
+            return empty
+        return {"min_date": row[0], "max_date": row[1], "row_count": row[2]}
+    except Exception:
+        return empty
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Store Info
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_store_info(
+    rows: list,
+    db_path: str = ALOHA_SALES_DB_PATH,
+) -> int:
+    """
+    Insert/replace store info rows.
+
+    Each row is a dict with keys: location, restaurant_name, company, comping, comping_date, open_date.
+    Returns the number of rows inserted.
+    """
+    initialize_db(db_path)
+    records = [
+        (
+            str(r.get("location", r.get("RestaurantID", ""))).strip(),
+            str(r.get("restaurant_name", r.get("RestaurantName", ""))).strip(),
+            str(r.get("company", r.get("Company", ""))).strip(),
+            str(r.get("comping", r.get("Comping", "N"))).strip().upper()[:1],
+            r.get("comping_date", r.get("CompingDate")) or None,
+            r.get("open_date", r.get("OpenDate")) or None,
+        )
+        for r in rows
+    ]
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO store_info"
+            "(location, restaurant_name, company, comping, comping_date, open_date)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            records,
+        )
+    return len(records)
+
+
+def get_store_info(
+    locations: Optional[List[str]] = None,
+    db_path: str = ALOHA_SALES_DB_PATH,
+) -> dict:
+    """
+    Return store info as dict keyed by location.
+
+    Each value is a dict: {restaurant_name, company, comping, comping_date, open_date}
+    """
+    initialize_db(db_path)
+    try:
+        with get_connection(db_path) as conn:
+            if locations:
+                ph = ",".join("?" * len(locations))
+                rows = conn.execute(
+                    f"SELECT location, restaurant_name, company, comping, comping_date, open_date "
+                    f"FROM store_info WHERE location IN ({ph})",
+                    locations,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT location, restaurant_name, company, comping, comping_date, open_date "
+                    "FROM store_info ORDER BY CAST(location AS INTEGER)"
+                ).fetchall()
+        return {
+            r[0]: {
+                "restaurant_name": r[1],
+                "company": r[2],
+                "comping": r[3],
+                "comping_date": r[4],
+                "open_date": r[5],
+            }
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+
+def store_info_available(db_path: str = ALOHA_SALES_DB_PATH) -> bool:
+    """Return True if the store_info table has at least one row."""
+    if not os.path.exists(db_path):
+        return False
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute("SELECT 1 FROM store_info LIMIT 1").fetchone()
+        return row is not None
+    except Exception:
+        return False

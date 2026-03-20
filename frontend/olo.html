@@ -214,7 +214,8 @@
 
     (function setDefaultDates() {
       const end = new Date();
-      const start = new Date();
+      end.setDate(end.getDate() - 1);
+      const start = new Date(end);
       start.setDate(start.getDate() - 6);
       document.getElementById('endDate').value = end.toISOString().slice(0, 10);
       document.getElementById('startDate').value = start.toISOString().slice(0, 10);

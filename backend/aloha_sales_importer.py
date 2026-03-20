@@ -34,17 +34,23 @@ _EXPECTED_COLS = [
     "BusinessDate", "RestaurantID", "RestaurantName",
     "NetSales", "OLONetSales", "DeliveryNetSales", "CateringNetSales",
     "GNGNetSales", "ToGoNetSales", "CurbSideNetSales", "CurbSideOLONetSales",
+    "DineInNetSales", "CallInNetSales", "OLOCallInNetSales",
+    "CheckCount", "ChecksMinusCatering",
 ]
 
 _SALES_VALUE_COLS = [
     "NetSales", "OLONetSales", "DeliveryNetSales", "CateringNetSales",
     "GNGNetSales", "ToGoNetSales", "CurbSideNetSales", "CurbSideOLONetSales",
+    "DineInNetSales", "CallInNetSales", "OLOCallInNetSales",
+    "CheckCount", "ChecksMinusCatering",
 ]
 
 _CSV_COLS = [
     "RestaurantID", "RestaurantName",
     "NetSales", "OLONetSales", "DeliveryNetSales", "CateringNetSales",
     "GNGNetSales", "ToGoNetSales", "CurbSideNetSales", "CurbSideOLONetSales",
+    "DineInNetSales", "CallInNetSales", "OLOCallInNetSales",
+    "CheckCount", "ChecksMinusCatering",
 ]
 
 
@@ -193,3 +199,46 @@ def import_aloha_sales_last_days(
     end_date = date.today()
     start_date = end_date - timedelta(days=days - 1)
     return import_aloha_sales_range(start_date, end_date, batch_days=batch_days, overwrite=overwrite)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fiscal Calendar import from CalendarV2
+# ──────────────────────────────────────────────────────────────────────────────
+
+def fetch_fiscal_calendar(start_date: date, end_date: date) -> List[Dict]:
+    """
+    Fetch fiscal calendar mappings from dev_aloha.dbo.CalendarV2.
+
+    Returns list of dicts with keys: date, ly_date, fiscal_year, fiscal_period, fiscal_week.
+    """
+    conn_str = _build_connection_string()
+    query = (
+        "SELECT CONVERT(varchar(10), [Date], 120) AS [date],"
+        "       CONVERT(varchar(10), LYDate, 120) AS ly_date,"
+        "       FiscalYear AS fiscal_year,"
+        "       FiscalPeriod AS fiscal_period,"
+        "       FiscalWeek AS fiscal_week"
+        " FROM dev_aloha.dbo.CalendarV2"
+        f" WHERE [Date] >= '{start_date.isoformat()}'"
+        f"   AND [Date] <= '{end_date.isoformat()}'"
+        " ORDER BY [Date]"
+    )
+    with pyodbc.connect(conn_str) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
+def import_fiscal_calendar(start_date: date, end_date: date) -> int:
+    """
+    Import fiscal calendar from CalendarV2 into local SQLite.
+
+    Returns number of rows imported.
+    """
+    from aloha_sales_db import upsert_fiscal_calendar
+
+    rows = fetch_fiscal_calendar(start_date, end_date)
+    if not rows:
+        return 0
+    return upsert_fiscal_calendar(rows)

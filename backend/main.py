@@ -39,7 +39,7 @@ from hierarchical_reports import HierarchicalReportGenerator
 from aloha_sql_importer import import_aloha_sql_range, import_aloha_sql_last_days
 import aloha_db
 import aloha_sales_db
-from aloha_sales_importer import import_aloha_sales_range, import_aloha_sales_last_days
+from aloha_sales_importer import import_aloha_sales_range, import_aloha_sales_last_days, import_fiscal_calendar
 import toast_orders_db
 from olo_client import (
     list_order_batches,
@@ -479,9 +479,29 @@ def apply_yoy_aloha_sales(
     if not aloha_sales_db.db_available():
         return result
 
-    # Prior-year date range (365 days back)
-    aloha_start = (start_date - timedelta(days=365)).isoformat()
-    aloha_end = (end_date - timedelta(days=365)).isoformat()
+    yoy_mode = getattr(report_config, "yoyMode", "same_date")
+
+    # Fiscal calendar mode: look up per-day LYDate mappings
+    fiscal_date_map: Optional[Dict[str, str]] = None  # current_date -> ly_date
+    if yoy_mode == "fiscal":
+        fiscal_date_map = aloha_sales_db.get_fiscal_ly_dates(
+            start_date.isoformat(), end_date.isoformat()
+        )
+        if not fiscal_date_map:
+            logger.info("YoY sales: fiscal mode selected but no fiscal calendar data — falling back to same_date")
+            yoy_mode = "same_date"
+            fiscal_date_map = None
+
+    # Prior-year date range
+    if fiscal_date_map:
+        ly_dates = sorted(fiscal_date_map.values())
+        aloha_start = ly_dates[0]
+        aloha_end = ly_dates[-1]
+        yoy_offset = None  # not a fixed offset in fiscal mode
+    else:
+        yoy_offset = 364 if yoy_mode == "same_day" else 365
+        aloha_start = (start_date - timedelta(days=yoy_offset)).isoformat()
+        aloha_end = (end_date - timedelta(days=yoy_offset)).isoformat()
 
     # Build restaurant_name -> aloha_location_id lookup
     #   raw_rows have restaurantGuid + restaurantName
@@ -517,9 +537,9 @@ def apply_yoy_aloha_sales(
     aloha_to_name: Dict[str, str] = {v: k for k, v in name_to_aloha.items()}
 
     if report_type == "sales_summary":
-        return _enrich_sales_summary(result, aloha_start, aloha_end, aloha_locations, name_to_aloha, aloha_to_name)
+        return _enrich_sales_summary(result, aloha_start, aloha_end, aloha_locations, name_to_aloha, aloha_to_name, raw_rows, yoy_offset, fiscal_date_map)
     elif report_type == "metrics":
-        return _enrich_metrics(result, start_date, end_date, aloha_locations, name_to_aloha, aloha_to_name)
+        return _enrich_metrics(result, start_date, end_date, aloha_locations, name_to_aloha, aloha_to_name, yoy_offset, fiscal_date_map)
 
     return result
 
@@ -531,6 +551,9 @@ def _enrich_sales_summary(
     aloha_locations: Optional[List[str]],
     name_to_aloha: Dict[str, str],
     aloha_to_name: Dict[str, str],
+    raw_rows: Optional[list] = None,
+    yoy_offset: Optional[int] = 365,
+    fiscal_date_map: Optional[Dict[str, str]] = None,
 ) -> dict:
     """Add priorYearNetSales and yoyChangePct to each sales summary row."""
     aloha_df = aloha_sales_db.query_date_range(aloha_start, aloha_end, locations=aloha_locations)
@@ -599,6 +622,60 @@ def _enrich_sales_summary(
         "matchedLocations": matched,
         "totalPriorYearNetSales": round(total_prior, 2),
     }
+
+    # ── Daily YoY breakdown ─────────────────────────────────────────────────
+    if raw_rows:
+        # 1. Aggregate Toast net sales by business date
+        toast_daily: Dict[str, float] = {}
+        for row in raw_rows:
+            b_date = row.get("businessDate", "")
+            if not b_date:
+                continue
+            toast_daily[b_date] = toast_daily.get(b_date, 0.0) + float(row.get("netSalesAmount") or 0)
+
+        # 2. Query Aloha daily data for the prior year range
+        aloha_daily_df = aloha_sales_db.query_date_range_daily(
+            aloha_start, aloha_end, locations=aloha_locations
+        )
+        # Sum Aloha net_sales by date (across all locations)
+        aloha_daily: Dict[str, float] = {}
+        if not aloha_daily_df.empty:
+            for _, arow in aloha_daily_df.iterrows():
+                a_date = arow["business_date"]
+                aloha_daily[a_date] = aloha_daily.get(a_date, 0.0) + float(arow["net_sales"])
+
+        # 3. Build the daily breakdown list
+        daily_breakdown = []
+        for b_date in sorted(toast_daily.keys()):
+            try:
+                # ERA businessDate can be YYYYMMDD or YYYY-MM-DD
+                if len(b_date) == 8 and "-" not in b_date:
+                    d = date(int(b_date[:4]), int(b_date[4:6]), int(b_date[6:8]))
+                else:
+                    d = date.fromisoformat(b_date)
+                if fiscal_date_map and d.isoformat() in fiscal_date_map:
+                    aloha_date = fiscal_date_map[d.isoformat()]
+                else:
+                    aloha_date = (d - timedelta(days=yoy_offset or 365)).isoformat()
+                day_of_week = d.strftime("%A")
+            except (ValueError, IndexError):
+                continue
+            toast_ns = round(toast_daily[b_date], 2)
+            aloha_ns = round(aloha_daily.get(aloha_date, 0), 2) if aloha_date in aloha_daily else None
+            yoy_pct = None
+            if aloha_ns and aloha_ns > 0:
+                yoy_pct = round(((toast_ns - aloha_ns) / aloha_ns) * 100, 1)
+            daily_breakdown.append({
+                "businessDate": d.isoformat(),  # normalize to YYYY-MM-DD
+                "dayOfWeek": day_of_week,
+                "toastNetSales": toast_ns,
+                "alohaDate": aloha_date,
+                "alohaNetSales": aloha_ns,
+                "yoyChangePct": yoy_pct,
+            })
+
+        result["dailyBreakdown"] = daily_breakdown
+
     return result
 
 
@@ -609,10 +686,17 @@ def _enrich_metrics(
     aloha_locations: Optional[List[str]],
     name_to_aloha: Dict[str, str],
     aloha_to_name: Dict[str, str],
+    yoy_offset: Optional[int] = 365,
+    fiscal_date_map: Optional[Dict[str, str]] = None,
 ) -> dict:
     """Add prior-year Aloha net sales columns to the metrics pivot table."""
-    aloha_start = (start_date - timedelta(days=365)).isoformat()
-    aloha_end = (end_date - timedelta(days=365)).isoformat()
+    if fiscal_date_map:
+        ly_dates = sorted(fiscal_date_map.values())
+        aloha_start = ly_dates[0]
+        aloha_end = ly_dates[-1]
+    else:
+        aloha_start = (start_date - timedelta(days=yoy_offset or 365)).isoformat()
+        aloha_end = (end_date - timedelta(days=yoy_offset or 365)).isoformat()
 
     aloha_df = aloha_sales_db.query_date_range_daily(aloha_start, aloha_end, locations=aloha_locations)
     if aloha_df.empty:
@@ -622,20 +706,26 @@ def _enrich_metrics(
         }
         return result
 
-    # Build lookup: (aloha_date, aloha_location) -> net_sales
-    # We need to map aloha dates to the corresponding current-year dates
-    # aloha_date + 365 days = current_date (approximately)
-    aloha_daily: Dict[str, Dict[str, float]] = {}  # current_date_key -> {aloha_id: net_sales}
+    # Build reverse fiscal map: ly_date -> current_date (for fiscal mode)
+    _ly_to_current: Dict[str, str] = {}
+    if fiscal_date_map:
+        for cur_d, ly_d in fiscal_date_map.items():
+            _ly_to_current[ly_d] = cur_d
+
+    # Build lookup: current_date_key -> {aloha_id: net_sales}
+    aloha_daily: Dict[str, Dict[str, float]] = {}
     for _, arow in aloha_df.iterrows():
         aloha_date = arow["business_date"]
         aloha_loc = str(arow["location"])
         ns = float(arow["net_sales"])
         # Map aloha date to the corresponding current-year date
         try:
-            a_date = date.fromisoformat(aloha_date)
-            current_date = a_date + timedelta(days=365)
-            # Toast metrics use YYYYMMDD format for date keys
-            current_key = current_date.strftime("%Y%m%d")
+            if fiscal_date_map and aloha_date in _ly_to_current:
+                current_key = _ly_to_current[aloha_date].replace("-", "")
+            else:
+                a_date = date.fromisoformat(aloha_date)
+                current_date = a_date + timedelta(days=yoy_offset or 365)
+                current_key = current_date.strftime("%Y%m%d")
         except ValueError:
             continue
         if current_key not in aloha_daily:
@@ -688,9 +778,25 @@ async def apply_yoy_aloha_quantities(
     aloha_end = None
 
     if start_date is not None and end_date is not None:
-        # YoY: use same date range as report, 1 year prior
-        aloha_start = start_date - timedelta(days=365)
-        aloha_end = end_date - timedelta(days=365)
+        yoy_mode = getattr(report_config, "yoyMode", "same_date")
+
+        # Fiscal calendar mode for menu reports
+        fiscal_date_map: Optional[Dict[str, str]] = None
+        if yoy_mode == "fiscal":
+            fiscal_date_map = aloha_sales_db.get_fiscal_ly_dates(
+                start_date.isoformat(), end_date.isoformat()
+            )
+            if not fiscal_date_map:
+                yoy_mode = "same_date"  # fallback
+
+        if fiscal_date_map:
+            ly_dates = sorted(fiscal_date_map.values())
+            aloha_start = date.fromisoformat(ly_dates[0])
+            aloha_end = date.fromisoformat(ly_dates[-1])
+        else:
+            yoy_offset = 364 if yoy_mode == "same_day" else 365
+            aloha_start = start_date - timedelta(days=yoy_offset)
+            aloha_end = end_date - timedelta(days=yoy_offset)
 
         # ── Resolve location and order-mode filters BEFORE the query ──────────
         loc_filter: Optional[List[str]] = None
@@ -1010,6 +1116,7 @@ async def apply_yoy_aloha_quantities(
     yoy_info = result.setdefault("yoyInfo", {})
     yoy_info["alohaDateRange"] = {"start": aloha_start.isoformat(), "end": aloha_end.isoformat()}
     yoy_info["alohaDate"] = aloha_start.isoformat()
+    yoy_info["yoyMode"] = getattr(report_config, "yoyMode", "same_date")
     yoy_info["debug"] = {
         "alohaDistinctItems": int(len(aloha_qty_by_name)),
         "alohaNonZeroItems": int(sum(1 for qty in aloha_qty_by_name.values() if qty)),
@@ -1129,6 +1236,7 @@ class ReportConfig(BaseModel):
     itemTags: List[str] = []  # For menu reports - filter by item tags
     includeZeroSales: bool = False  # Include items with 0 sales in breakdown
     yoyEnabled: bool = False  # Show YoY (Aloha) quantities in menu reports
+    yoyMode: str = "same_date"  # "same_date" (365 days), "same_day" (364 days / 52 weeks), or "fiscal" (Newk's fiscal calendar)
     alohaDate: Optional[str] = None  # YYYY-MM-DD for Aloha comparison
     orderModeFilter: Optional[str] = None  # e.g. "Dine In", "Delivery" — filters Aloha YoY data by channel
     debug: bool = False  # Include debugInfo in response for troubleshooting tag/mapping issues
@@ -5131,14 +5239,14 @@ def calculate_date_range_from_request(request: V2InsightRequest) -> Tuple[date, 
         start_date = date.fromisoformat(request.customStartDate)
         end_date = date.fromisoformat(request.customEndDate)
     elif request.dateRangeType == "last_7_days":
-        end_date = date.today()
-        start_date = end_date - timedelta(days=7)
+        end_date = date.today() - timedelta(days=1)
+        start_date = end_date - timedelta(days=6)
     elif request.dateRangeType == "last_30_days":
-        end_date = date.today()
-        start_date = end_date - timedelta(days=30)
+        end_date = date.today() - timedelta(days=1)
+        start_date = end_date - timedelta(days=29)
     elif request.dateRangeType == "last_90_days":
-        end_date = date.today()
-        start_date = end_date - timedelta(days=90)
+        end_date = date.today() - timedelta(days=1)
+        start_date = end_date - timedelta(days=89)
     else:
         raise HTTPException(status_code=400, detail="Invalid date range type")
     
@@ -7855,14 +7963,14 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
         start_date = date.fromisoformat(report_config.customStartDate)
         end_date = date.fromisoformat(report_config.customEndDate)
     elif report_config.dateRangeType == "last_7_days":
-        end_date = date.today()
-        start_date = end_date - timedelta(days=7)
+        end_date = date.today() - timedelta(days=1)
+        start_date = end_date - timedelta(days=6)
     elif report_config.dateRangeType == "last_30_days":
-        end_date = date.today()
-        start_date = end_date - timedelta(days=30)
+        end_date = date.today() - timedelta(days=1)
+        start_date = end_date - timedelta(days=29)
     elif report_config.dateRangeType == "last_90_days":
-        end_date = date.today()
-        start_date = end_date - timedelta(days=90)
+        end_date = date.today() - timedelta(days=1)
+        start_date = end_date - timedelta(days=89)
     else:
         raise HTTPException(status_code=400, detail="Invalid date range type")
     
@@ -11039,6 +11147,341 @@ async def get_aloha_sales_dates():
 async def get_aloha_sales_stats():
     """Return summary statistics about the Aloha sales database."""
     return aloha_sales_db.get_stats()
+
+
+@app.get("/api/yoy/fiscal-calendar-stats")
+async def get_fiscal_calendar_stats():
+    """Return summary statistics about the fiscal calendar table."""
+    return aloha_sales_db.get_fiscal_calendar_stats()
+
+
+@app.post("/api/yoy/import-fiscal-calendar")
+async def import_fiscal_calendar_endpoint(payload: dict = Body(...)):
+    """
+    Import fiscal calendar from CalendarV2 into local SQLite.
+    Expects: {"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}
+    """
+    start_str = payload.get("start_date")
+    end_str = payload.get("end_date")
+    if not start_str or not end_str:
+        raise HTTPException(status_code=400, detail="start_date and end_date required")
+    try:
+        start = date.fromisoformat(start_str)
+        end = date.fromisoformat(end_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    try:
+        count = import_fiscal_calendar(start, end)
+        stats = aloha_sales_db.get_fiscal_calendar_stats()
+        return {"success": True, "rows_imported": count, **stats}
+    except Exception as exc:
+        logger.error("Fiscal calendar import failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Weekly Sales Report — WPY Comparative
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Channel definitions matching the old SSRS stored procedure
+_WPY_CHANNELS = {
+    "Net":              {"cols": ["net_sales"], "label": "Net Sales"},
+    "GNG":              {"cols": ["gng_net_sales"], "label": "Grab & Go"},
+    "Catering":         {"cols": ["catering_net_sales"], "label": "Catering"},
+    "OLO":              {"cols": ["olo_net_sales"], "label": "OLO"},
+    "NonCatering":      {"cols": ["net_sales", "-catering_net_sales"], "label": "Non-Catering"},
+    "NonCateringChecks":{"cols": ["checks_minus_catering"], "label": "Non-Catering Checks"},
+    "Checks":           {"cols": ["check_count"], "label": "Checks"},
+    "DineInNet":        {"cols": ["dinein_net_sales"], "label": "Dine In"},
+    "DeliveryNet":      {"cols": ["delivery_net_sales"], "label": "Delivery"},
+    "ToGoNet":          {"cols": ["togo_net_sales"], "label": "To Go"},
+    "CallInNet":        {"cols": ["callin_net_sales", "olo_callin_net_sales"], "label": "Call In"},
+    "CurbSide":         {"cols": ["curbside_net_sales", "curbside_olo_net_sales"], "label": "CurbSide"},
+}
+
+
+def _compute_channel_value(row_dict: dict, col_spec: list) -> float:
+    """Sum column values for a channel. Prefix '-' means subtract."""
+    total = 0.0
+    for c in col_spec:
+        if c.startswith("-"):
+            total -= float(row_dict.get(c[1:], 0) or 0)
+        else:
+            total += float(row_dict.get(c, 0) or 0)
+    return total
+
+
+def _make_totals(cur: float, prior: float) -> dict:
+    """Build a totals dict with variance and comp %."""
+    var = cur - prior
+    comp = round((var / prior) * 100, 2) if prior else 0.0
+    return {"currentYR": round(cur, 2), "priorYR": round(prior, 2), "variance": round(var, 2), "compPct": comp}
+
+
+def _build_wpy_period(
+    current_start: str, current_end: str,
+    prior_start: str, prior_end: str,
+    locations: Optional[List[str]] = None,
+    store_info: Optional[dict] = None,
+) -> dict:
+    """
+    Build one period (WTD/PTD/QTD/YTD) of the WPY report.
+
+    store_info: dict keyed by location from aloha_sales_db.get_store_info()
+    """
+    cur_df = aloha_sales_db.query_date_range(current_start, current_end, locations=locations)
+    prior_df = aloha_sales_db.query_date_range(prior_start, prior_end, locations=locations)
+
+    # Index by location
+    cur_by_loc = {}
+    if not cur_df.empty:
+        for _, row in cur_df.iterrows():
+            cur_by_loc[str(row["location"])] = row.to_dict()
+
+    prior_by_loc = {}
+    if not prior_df.empty:
+        for _, row in prior_df.iterrows():
+            prior_by_loc[str(row["location"])] = row.to_dict()
+
+    all_locs = sorted(set(list(cur_by_loc.keys()) + list(prior_by_loc.keys())))
+
+    # Get store metadata
+    si = store_info or {}
+
+    _COMPANY_ENTITY = "Newco Dining LLC"
+
+    channels = {}
+    for ch_key, ch_def in _WPY_CHANNELS.items():
+        col_spec = ch_def["cols"]
+        loc_rows = []
+        total_cur = 0.0
+        total_prior = 0.0
+        comping_cur = 0.0
+        comping_prior = 0.0
+        co_cur = 0.0
+        co_prior = 0.0
+        co_comp_cur = 0.0
+        co_comp_prior = 0.0
+        fr_cur = 0.0
+        fr_prior = 0.0
+        fr_comp_cur = 0.0
+        fr_comp_prior = 0.0
+
+        for loc in all_locs:
+            cur_val = _compute_channel_value(cur_by_loc.get(loc, {}), col_spec)
+            prior_val = _compute_channel_value(prior_by_loc.get(loc, {}), col_spec)
+            variance = cur_val - prior_val
+            comp_pct = round((variance / prior_val) * 100, 2) if prior_val else 0.0
+
+            loc_info = si.get(loc, {})
+            loc_name = loc_info.get("restaurant_name", "")
+            if not loc_name:
+                loc_name = cur_by_loc.get(loc, {}).get("restaurant_name", "") or prior_by_loc.get(loc, {}).get("restaurant_name", "")
+
+            is_comping = loc_info.get("comping") == "Y"
+            is_company = loc_info.get("company") == _COMPANY_ENTITY
+
+            loc_rows.append({
+                "location": loc,
+                "restaurantName": loc_name,
+                "company": loc_info.get("company", ""),
+                "comping": loc_info.get("comping", ""),
+                "openDate": loc_info.get("open_date", ""),
+                "currentYR": round(cur_val, 2),
+                "priorYR": round(prior_val, 2),
+                "variance": round(variance, 2),
+                "compPct": comp_pct,
+            })
+            total_cur += cur_val
+            total_prior += prior_val
+
+            if is_comping:
+                comping_cur += cur_val
+                comping_prior += prior_val
+
+            if is_company:
+                co_cur += cur_val
+                co_prior += prior_val
+                if is_comping:
+                    co_comp_cur += cur_val
+                    co_comp_prior += prior_val
+            else:
+                fr_cur += cur_val
+                fr_prior += prior_val
+                if is_comping:
+                    fr_comp_cur += cur_val
+                    fr_comp_prior += prior_val
+
+        channels[ch_key] = {
+            "label": ch_def["label"],
+            "locations": loc_rows,
+            "totals": {
+                "allRestaurants": _make_totals(total_cur, total_prior),
+                "comping": _make_totals(comping_cur, comping_prior),
+                "companyAll": _make_totals(co_cur, co_prior),
+                "companySss": _make_totals(co_comp_cur, co_comp_prior),
+                "franchiseAll": _make_totals(fr_cur, fr_prior),
+                "franchiseSss": _make_totals(fr_comp_cur, fr_comp_prior),
+            },
+        }
+
+    return {
+        "currentRange": {"start": current_start, "end": current_end},
+        "priorRange": {"start": prior_start, "end": prior_end},
+        "channels": channels,
+    }
+
+
+@app.get("/api/aloha-sales/locations")
+async def list_aloha_sales_locations():
+    """Return distinct Aloha locations that have sales data."""
+    if not aloha_sales_db.db_available():
+        return []
+    conn = aloha_sales_db.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT location, restaurant_name FROM aloha_sales_data "
+            "WHERE net_sales > 0 ORDER BY CAST(location AS INTEGER)"
+        ).fetchall()
+        return [{"id": r[0], "name": r[1]} for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post("/api/wpy-report")
+async def run_wpy_report(payload: dict = Body(...)):
+    """
+    Run the Weekly Sales Report — WPY Comparative.
+
+    Expects: {"report_date": "YYYY-MM-DD"} — the "as of" date.
+    Uses fiscal calendar to compute WTD, PTD, QTD, YTD date ranges and
+    their prior-year equivalents.
+    """
+    report_date_str = payload.get("report_date")
+    if not report_date_str:
+        raise HTTPException(status_code=400, detail="report_date required (YYYY-MM-DD)")
+    try:
+        report_date = date.fromisoformat(report_date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="report_date must be YYYY-MM-DD")
+
+    if not aloha_sales_db.db_available():
+        raise HTTPException(status_code=400, detail="Aloha sales database not available")
+    if not aloha_sales_db.fiscal_calendar_available():
+        raise HTTPException(status_code=400, detail="Fiscal calendar not loaded — import it first")
+
+    # Look up fiscal calendar for report_date to get fiscal period/week info
+    fc = aloha_sales_db.get_fiscal_ly_dates(report_date_str, report_date_str)
+    if not fc:
+        raise HTTPException(status_code=400, detail=f"No fiscal calendar entry for {report_date_str}")
+
+    # Get fiscal info for report_date
+    conn = aloha_sales_db.get_connection()
+    try:
+        cal_row = conn.execute(
+            "SELECT fiscal_year, fiscal_period, fiscal_week FROM fiscal_calendar WHERE date = ?",
+            (report_date_str,)
+        ).fetchone()
+        if not cal_row:
+            raise HTTPException(status_code=400, detail=f"No fiscal calendar entry for {report_date_str}")
+        fy, fp, fw = cal_row
+
+        # WTD: Find the start of the current fiscal week
+        # The fiscal week starts on Monday (datefirst=1 in the SP)
+        # Find the Monday on or before report_date
+        weekday = report_date.weekday()  # 0=Monday
+        wtd_start = report_date - timedelta(days=weekday)
+        wtd_end = report_date
+
+        # PTD: fiscal period start
+        ptd_row = conn.execute(
+            "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ? AND fiscal_period = ?",
+            (fy, fp)
+        ).fetchone()
+        ptd_start = date.fromisoformat(ptd_row[0]) if ptd_row and ptd_row[0] else wtd_start
+        ptd_end = report_date
+
+        # QTD: fiscal quarter start (periods 1-3=Q1, 4-6=Q2, 7-9=Q3, 10-12=Q4)
+        q_start_period = ((fp - 1) // 3) * 3 + 1
+        qtd_row = conn.execute(
+            "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ? AND fiscal_period = ?",
+            (fy, q_start_period)
+        ).fetchone()
+        qtd_start = date.fromisoformat(qtd_row[0]) if qtd_row and qtd_row[0] else ptd_start
+        qtd_end = report_date
+
+        # YTD: fiscal year start
+        ytd_row = conn.execute(
+            "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ?",
+            (fy,)
+        ).fetchone()
+        ytd_start = date.fromisoformat(ytd_row[0]) if ytd_row and ytd_row[0] else qtd_start
+        ytd_end = report_date
+
+    finally:
+        conn.close()
+
+    # ── Prior-year date ranges ──────────────────────────────────
+    # WTD: use fiscal calendar per-day LY mapping (week-aligned)
+    def get_ly_range_fiscal(start_d: date, end_d: date):
+        """Get the fiscal calendar prior-year start/end for a date range (per-day mapping)."""
+        ly_map = aloha_sales_db.get_fiscal_ly_dates(start_d.isoformat(), end_d.isoformat())
+        if ly_map:
+            ly_dates = sorted(ly_map.values())
+            return ly_dates[0], ly_dates[-1]
+        return (start_d - timedelta(days=365)).isoformat(), (end_d - timedelta(days=365)).isoformat()
+
+    # PTD/QTD/YTD: find prior fiscal year's same period start, then offset same # of days
+    def get_ly_range_period(cy_period_start: date, cy_end: date, py_fy: int, py_period: int):
+        """Prior year = same period start in prior FY + same day-count offset."""
+        py_start_row = conn2.execute(
+            "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ? AND fiscal_period = ?",
+            (py_fy, py_period)
+        ).fetchone()
+        if py_start_row and py_start_row[0]:
+            py_start = date.fromisoformat(py_start_row[0])
+            day_offset = (cy_end - cy_period_start).days
+            py_end = py_start + timedelta(days=day_offset)
+            return py_start.isoformat(), py_end.isoformat()
+        return get_ly_range_fiscal(cy_period_start, cy_end)
+
+    conn2 = aloha_sales_db.get_connection()
+    try:
+        wtd_ly = get_ly_range_fiscal(wtd_start, wtd_end)
+
+        # PTD PY: FY-1 same period start + same offset
+        ptd_ly = get_ly_range_period(ptd_start, ptd_end, fy - 1, fp)
+
+        # QTD PY: FY-1 same quarter-start period + same offset
+        qtd_ly = get_ly_range_period(qtd_start, qtd_end, fy - 1, q_start_period)
+
+        # YTD PY: FY-1 period 1 start + same offset
+        ytd_ly = get_ly_range_period(ytd_start, ytd_end, fy - 1, 1)
+    finally:
+        conn2.close()
+
+    # Optional location filter
+    locations = payload.get("locations")  # list of Aloha RestaurantID strings
+
+    # Load store metadata for comping/company totals
+    store_info = aloha_sales_db.get_store_info()
+
+    # Build each period
+    result = {
+        "reportDate": report_date_str,
+        "fiscalYear": fy,
+        "fiscalPeriod": fp,
+        "fiscalWeek": fw,
+        "periods": {
+            "WTD": _build_wpy_period(wtd_start.isoformat(), wtd_end.isoformat(), wtd_ly[0], wtd_ly[1], locations, store_info),
+            "PTD": _build_wpy_period(ptd_start.isoformat(), ptd_end.isoformat(), ptd_ly[0], ptd_ly[1], locations, store_info),
+            "QTD": _build_wpy_period(qtd_start.isoformat(), qtd_end.isoformat(), qtd_ly[0], qtd_ly[1], locations, store_info),
+            "YTD": _build_wpy_period(ytd_start.isoformat(), ytd_end.isoformat(), ytd_ly[0], ytd_ly[1], locations, store_info),
+        },
+        "channelOrder": list(_WPY_CHANNELS.keys()),
+        "channelLabels": {k: v["label"] for k, v in _WPY_CHANNELS.items()},
+    }
+    return result
 
 
 @app.post("/api/yoy/upload-aloha-sales-db")

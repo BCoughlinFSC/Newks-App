@@ -23,6 +23,7 @@
     { key: 'pick3',         label: 'Pick 3',             href: '/pick3.html' },
     { key: 'pick2',         label: 'Pick 2',             href: '/pick2.html' },
     { key: 'full-pairings', label: 'Full Pairings',      href: '/full-pairings.html' },
+    { key: 'wpy',           label: 'Weekly Sales (WPY)',  href: '/wpy.html' },
   ];
 
   const ADMIN_LINKS = [
@@ -46,6 +47,7 @@
     if (path.endsWith('/pick3.html'))                return 'pick3';
     if (path.endsWith('/pick2.html'))                return 'pick2';
     if (path.endsWith('/full-pairings.html'))        return 'full-pairings';
+    if (path.endsWith('/wpy.html'))                  return 'wpy';
     if (path.endsWith('/olo.html'))                   return 'olo';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';

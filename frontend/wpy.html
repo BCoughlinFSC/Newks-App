@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Weekly Sales (WPY) – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- xlsx-js-style for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0; padding: 0;
+      background: #F8FAFC; color: #2c2c2c;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.5rem; font-weight: 700; }
+    .header p  { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.5); }
+
+    /* Layout */
+    .container {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 2rem;
+      max-width: 1700px;
+      margin: 0 auto;
+    }
+    @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+
+    /* Card */
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      border: 1px solid #e8e0d5;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .card h2 {
+      margin: 0 0 1.25rem 0;
+      color: #C41E3A;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    /* Controls row */
+    .controls-row {
+      display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .form-group input, .form-group select {
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #D1D5DB;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    .btn-primary {
+      background: #C41E3A; color: #fff; border: none;
+      padding: 0.55rem 1.25rem; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem; font-family: inherit;
+      transition: background 0.2s;
+    }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      background: #374151; color: #fff; border: none;
+      padding: 0.55rem 1.25rem; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem; font-family: inherit;
+      transition: background 0.2s;
+    }
+    .btn-secondary:hover:not(:disabled) { background: #1F2937; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Fiscal info banner */
+    .fiscal-info {
+      background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 8px;
+      padding: 0.75rem 1rem; margin-bottom: 1rem;
+      font-size: 0.85rem; color: #0369A1;
+      display: none;
+    }
+    .fiscal-info span { font-weight: 600; }
+
+    /* Channel tabs */
+    .channel-tabs {
+      display: flex; flex-wrap: wrap; gap: 0.25rem;
+      border-bottom: 2px solid #e8e0d5;
+      margin-bottom: 1rem;
+    }
+    .channel-tab {
+      padding: 0.5rem 0.9rem;
+      border: none; background: none;
+      font-size: 0.82rem; font-weight: 600; font-family: inherit;
+      cursor: pointer; color: #6B7280;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .channel-tab:hover { color: #C41E3A; }
+    .channel-tab.active {
+      color: #C41E3A;
+      border-bottom-color: #C41E3A;
+    }
+
+    /* Spreadsheet table */
+    .wpy-table-wrap {
+      overflow-x: auto;
+      border: 1px solid #e8e0d5;
+      border-radius: 8px;
+    }
+    .wpy-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+    .wpy-table th, .wpy-table td {
+      padding: 0.35rem 0.6rem;
+      border: 1px solid #E5E7EB;
+    }
+    /* Period group header row */
+    .wpy-table .period-header-row th {
+      background: #1E3A5F; color: #fff;
+      font-weight: 700; font-size: 0.8rem;
+      text-align: center;
+      border-color: #1E3A5F;
+      padding: 0.45rem 0.6rem;
+    }
+    .wpy-table .period-header-row th.fixed-col {
+      background: #F8FAFC; color: transparent; border-color: #E5E7EB;
+    }
+    /* Date sub-row */
+    .wpy-table .date-row th {
+      background: #F0F4F8; color: #374151;
+      font-size: 0.68rem; font-weight: 500;
+      text-align: center;
+      padding: 0.2rem 0.6rem;
+    }
+    .wpy-table .date-row th.fixed-col { background: #F0F4F8; }
+    /* Column headers */
+    .wpy-table .col-header-row th {
+      background: #F8FAFC; color: #374151;
+      font-weight: 600; font-size: 0.7rem;
+      text-align: right;
+      border-bottom: 2px solid #CBD5E1;
+    }
+    .wpy-table .col-header-row th.left { text-align: left; }
+    .wpy-table .col-header-row th.center { text-align: center; }
+    /* Data cells */
+    .wpy-table td { text-align: right; }
+    .wpy-table td.left { text-align: left; }
+    .wpy-table td.center { text-align: center; font-weight: 600; }
+    .wpy-table td.company { font-size: 0.68rem; color: #6B7280; text-align: left; }
+    .wpy-table td.open-date { font-size: 0.68rem; color: #6B7280; text-align: left; }
+    /* Sticky left columns */
+    .wpy-table .sticky { position: sticky; z-index: 2; background: #fff; }
+    .wpy-table .sticky-0 { left: 0; min-width: 28px; }
+    .wpy-table .sticky-1 { left: 28px; min-width: 190px; }
+    .wpy-table .sticky-2 { left: 218px; min-width: 160px; }
+    .wpy-table .sticky-3 { left: 378px; min-width: 80px; }
+    /* Hover */
+    .wpy-table tbody tr:hover td { background: #F0F9FF; }
+    .wpy-table tbody tr:hover .sticky { background: #F0F9FF; }
+    /* Total rows */
+    .wpy-table .total-row td {
+      font-weight: 700;
+      background: #F0F4F8;
+      border-top: 2px solid #1E3A5F;
+    }
+    .wpy-table .total-row .sticky { background: #F0F4F8; }
+    /* Period separator */
+    .wpy-table .period-sep { border-left: 2px solid #1E3A5F; }
+    .positive { color: #059669; }
+    .negative { color: #DC2626; }
+
+    /* Location picker */
+    .loc-picker {
+      margin-bottom: 1rem;
+    }
+    .loc-picker-header {
+      display: flex; align-items: center; gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .loc-picker-header label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .loc-count { font-size: 0.75rem; color: #6B7280; background: #F0F4F8; padding: 0.15rem 0.5rem; border-radius: 10px; }
+    .loc-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.25rem;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #e8e0d5;
+      border-radius: 8px;
+      padding: 0.5rem;
+      background: #FAFAFA;
+    }
+    .loc-grid::-webkit-scrollbar { width: 6px; }
+    .loc-grid::-webkit-scrollbar-track { background: #F8FAFC; }
+    .loc-grid::-webkit-scrollbar-thumb { background: #d4c9b8; border-radius: 4px; }
+    .loc-item {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.82rem; color: #374151;
+      padding: 0.2rem 0.3rem; border-radius: 4px;
+      cursor: pointer;
+    }
+    .loc-item:hover { background: #F0F9FF; }
+    .loc-item input { accent-color: #C41E3A; width: 14px; height: 14px; cursor: pointer; }
+
+    /* Status */
+    .status-msg {
+      padding: 1.5rem; text-align: center;
+      color: #6B7280; font-size: 0.9rem;
+    }
+    .error-msg {
+      padding: 1rem; text-align: center;
+      color: #DC2626; font-size: 0.9rem;
+      background: #FEF2F2; border-radius: 8px;
+      border: 1px solid #FECACA;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Weekly Sales Report – WPY Comparative</h1>
+        <p>Fiscal calendar year-over-year sales comparison by channel</p>
+      </div>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <a href="/" class="home-btn">&#127968; Home</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <div class="container">
+    <div id="shared-sidebar"></div>
+
+    <div class="main-content">
+      <div class="card">
+        <h2>WPY Report</h2>
+
+        <!-- Controls -->
+        <div class="controls-row">
+          <div class="form-group">
+            <label>Report Date</label>
+            <input type="date" id="reportDate" />
+          </div>
+          <button class="btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
+          <button class="btn-secondary" id="exportBtn" onclick="exportExcel()" disabled>Export Excel</button>
+        </div>
+
+        <!-- Location picker -->
+        <div class="loc-picker">
+          <div class="loc-picker-header">
+            <label>Locations</label>
+            <label style="font-weight:normal; font-size:0.82rem; cursor:pointer;">
+              <input type="checkbox" id="selectAllLocs" checked style="accent-color:#C41E3A;" /> Select All
+            </label>
+            <span class="loc-count" id="locCount">Loading...</span>
+          </div>
+          <div class="loc-grid" id="locGrid">
+            <span style="color:#6B7280; font-size:0.82rem;">Loading locations...</span>
+          </div>
+        </div>
+
+        <!-- Fiscal info -->
+        <div class="fiscal-info" id="fiscalInfo"></div>
+
+        <!-- Channel tabs -->
+        <div class="channel-tabs" id="channelTabs" style="display:none;"></div>
+
+        <!-- Report content -->
+        <div id="reportContent">
+          <div class="status-msg">Select a date and click "Run Report" to generate the WPY Comparative report.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/shared-nav.js"></script>
+  <script>
+    // ─── State ───────────────────────────────────────
+    let reportData = null;
+    let activeChannel = 'Net';
+    let allLocations = []; // [{id, name}, ...]
+
+    // Set default date to yesterday
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    document.getElementById('reportDate').value = yesterday.toISOString().split('T')[0];
+
+    // ─── Auth ────────────────────────────────────────
+    function getToken() { return localStorage.getItem('auth_token') || ''; }
+
+    // ─── Load Locations ──────────────────────────────
+    async function loadLocations() {
+      const grid = document.getElementById('locGrid');
+      const countEl = document.getElementById('locCount');
+      try {
+        const resp = await fetch('/api/aloha-sales/locations', {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        allLocations = await resp.json();
+
+        if (allLocations.length === 0) {
+          grid.innerHTML = '<span style="color:#6B7280; font-size:0.82rem;">No locations found.</span>';
+          countEl.textContent = '0';
+          return;
+        }
+
+        grid.innerHTML = allLocations.map(loc =>
+          `<label class="loc-item">
+            <input type="checkbox" class="loc-cb" value="${esc(loc.id)}" checked />
+            <span>${esc(loc.id)} – ${esc(loc.name)}</span>
+          </label>`
+        ).join('');
+
+        updateLocCount();
+
+        // Wire up select-all
+        document.getElementById('selectAllLocs').addEventListener('change', (e) => {
+          grid.querySelectorAll('.loc-cb').forEach(cb => cb.checked = e.target.checked);
+          updateLocCount();
+        });
+
+        // Update count on individual change
+        grid.addEventListener('change', () => {
+          updateLocCount();
+          const cbs = grid.querySelectorAll('.loc-cb');
+          const allChecked = Array.from(cbs).every(cb => cb.checked);
+          document.getElementById('selectAllLocs').checked = allChecked;
+        });
+
+      } catch (err) {
+        grid.innerHTML = `<span style="color:#DC2626; font-size:0.82rem;">Failed to load locations: ${esc(err.message)}</span>`;
+        countEl.textContent = 'Error';
+      }
+    }
+
+    function updateLocCount() {
+      const checked = document.querySelectorAll('.loc-cb:checked').length;
+      const total = document.querySelectorAll('.loc-cb').length;
+      document.getElementById('locCount').textContent = `${checked} / ${total} selected`;
+    }
+
+    function getSelectedLocations() {
+      const cbs = document.querySelectorAll('.loc-cb:checked');
+      const total = document.querySelectorAll('.loc-cb').length;
+      // If all selected, don't filter (null = all)
+      if (cbs.length === total) return null;
+      return Array.from(cbs).map(cb => cb.value);
+    }
+
+    // Load on page init
+    loadLocations();
+
+    // ─── Run Report ──────────────────────────────────
+    async function runReport() {
+      const dateStr = document.getElementById('reportDate').value;
+      if (!dateStr) { alert('Please select a report date.'); return; }
+
+      const btn = document.getElementById('runBtn');
+      const content = document.getElementById('reportContent');
+      btn.disabled = true; btn.textContent = 'Loading...';
+      content.innerHTML = '<div class="status-msg">Fetching WPY data...</div>';
+      document.getElementById('channelTabs').style.display = 'none';
+      document.getElementById('fiscalInfo').style.display = 'none';
+      document.getElementById('exportBtn').disabled = true;
+
+      try {
+        const resp = await fetch('/api/wpy-report', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${getToken()}`
+          },
+          body: JSON.stringify({ report_date: dateStr, locations: getSelectedLocations() })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        reportData = await resp.json();
+        renderReport();
+        document.getElementById('exportBtn').disabled = false;
+      } catch (err) {
+        content.innerHTML = `<div class="error-msg">Error: ${esc(err.message)}</div>`;
+        reportData = null;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Run Report';
+      }
+    }
+
+    // ─── Render ──────────────────────────────────────
+    function renderReport() {
+      if (!reportData) return;
+
+      // Fiscal info
+      const fi = document.getElementById('fiscalInfo');
+      fi.style.display = 'block';
+      fi.innerHTML = `
+        Report Date: <span>${reportData.reportDate}</span> &nbsp;|&nbsp;
+        Fiscal Year: <span>${reportData.fiscalYear}</span> &nbsp;|&nbsp;
+        Period: <span>${reportData.fiscalPeriod}</span> &nbsp;|&nbsp;
+        Week: <span>${reportData.fiscalWeek}</span>
+      `;
+
+      // Channel tabs
+      const tabsEl = document.getElementById('channelTabs');
+      tabsEl.style.display = 'flex';
+      const order = reportData.channelOrder || [];
+      const labels = reportData.channelLabels || {};
+      tabsEl.innerHTML = order.map(ch =>
+        `<button class="channel-tab${ch === activeChannel ? ' active' : ''}" data-ch="${ch}">${esc(labels[ch] || ch)}</button>`
+      ).join('');
+      tabsEl.querySelectorAll('.channel-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activeChannel = btn.dataset.ch;
+          tabsEl.querySelectorAll('.channel-tab').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          renderChannelContent();
+        });
+      });
+
+      // Make sure activeChannel is valid
+      if (!order.includes(activeChannel)) activeChannel = order[0] || 'Net';
+
+      renderChannelContent();
+    }
+
+    function renderChannelContent() {
+      const content = document.getElementById('reportContent');
+      if (!reportData || !reportData.periods) {
+        content.innerHTML = '<div class="status-msg">No data.</div>';
+        return;
+      }
+
+      const periods = ['WTD', 'PTD', 'QTD', 'YTD'];
+      const isCheckChannel = activeChannel === 'Checks' || activeChannel === 'NonCateringChecks';
+      const fmtVal = isCheckChannel ? fmtNum : fmtDollar;
+
+      // Get locations from WTD
+      const wtdCh = reportData.periods.WTD?.channels[activeChannel];
+      const locations = wtdCh ? wtdCh.locations : [];
+
+      let html = '<div class="wpy-table-wrap"><table class="wpy-table">';
+
+      // Row 1: Period group headers (spanning 4 cols each)
+      html += '<thead>';
+      html += '<tr class="period-header-row">';
+      html += '<th class="fixed-col sticky sticky-0"></th>';
+      html += '<th class="fixed-col sticky sticky-1"></th>';
+      html += '<th class="fixed-col sticky sticky-2"></th>';
+      html += '<th class="fixed-col sticky sticky-3"></th>';
+      for (const pKey of periods) {
+        html += `<th colspan="4" class="period-sep">${pKey}</th>`;
+      }
+      html += '</tr>';
+
+      // Row 2: Date ranges
+      html += '<tr class="date-row">';
+      html += '<th class="fixed-col sticky sticky-0"></th>';
+      html += '<th class="fixed-col sticky sticky-1"></th>';
+      html += '<th class="fixed-col sticky sticky-2"></th>';
+      html += '<th class="fixed-col sticky sticky-3"></th>';
+      for (const pKey of periods) {
+        const pData = reportData.periods[pKey];
+        if (pData) {
+          const cy = `${fmtDateShort(pData.currentRange.start)}–${fmtDateShort(pData.currentRange.end)}`;
+          const py = `${fmtDateShort(pData.priorRange.start)}–${fmtDateShort(pData.priorRange.end)}`;
+          html += `<th colspan="4" class="period-sep">CY: ${cy} &nbsp; PY: ${py}</th>`;
+        } else {
+          html += '<th colspan="4" class="period-sep"></th>';
+        }
+      }
+      html += '</tr>';
+
+      // Row 3: Column sub-headers
+      html += '<tr class="col-header-row">';
+      html += '<th class="center sticky sticky-0">C</th>';
+      html += '<th class="left sticky sticky-1">Location</th>';
+      html += '<th class="left sticky sticky-2">Company</th>';
+      html += '<th class="left sticky sticky-3">Open</th>';
+      for (const pKey of periods) {
+        html += `<th class="period-sep">Current YR</th><th>Prior YR</th><th>Variance</th><th>Comp %</th>`;
+      }
+      html += '</tr></thead>';
+
+      // Data rows
+      html += '<tbody>';
+      for (const loc of locations) {
+        const compFlag = loc.comping === 'Y' ? 'C' : '';
+        const compColor = compFlag ? '#059669' : '#9CA3AF';
+        html += '<tr>';
+        html += `<td class="center sticky sticky-0" style="color:${compColor}">${compFlag}</td>`;
+        html += `<td class="left sticky sticky-1" title="${esc(loc.location)}">${esc(loc.restaurantName || loc.location)}</td>`;
+        html += `<td class="company sticky sticky-2">${esc(loc.company)}</td>`;
+        html += `<td class="open-date sticky sticky-3">${loc.openDate || ''}</td>`;
+
+        for (const pKey of periods) {
+          const pCh = reportData.periods[pKey]?.channels[activeChannel];
+          const pLoc = pCh ? pCh.locations.find(l => l.location === loc.location) : null;
+          const cur = pLoc ? pLoc.currentYR : 0;
+          const prior = pLoc ? pLoc.priorYR : 0;
+          const variance = pLoc ? pLoc.variance : 0;
+          const compPct = pLoc ? pLoc.compPct : 0;
+          const vCls = variance >= 0 ? 'positive' : 'negative';
+          const cCls = compPct >= 0 ? 'positive' : 'negative';
+          html += `<td class="period-sep">${fmtVal(cur)}</td>`;
+          html += `<td>${fmtVal(prior)}</td>`;
+          html += `<td class="${vCls}">${fmtVal(variance)}</td>`;
+          html += `<td class="${cCls}">${fmtPct(compPct)}</td>`;
+        }
+        html += '</tr>';
+      }
+
+      // Total rows matching SSRS layout
+      const totalDefs = [
+        { key: 'allRestaurants', label: 'Total Restaurants' },
+        { key: 'comping', label: 'Total Comping Restaurants' },
+        { key: 'companyAll', label: 'Total - All Open Company Restaurants' },
+        { key: 'companySss', label: 'Total - Company SSS Growth' },
+        { key: 'franchiseAll', label: 'Total - All Open Franchise Restaurants' },
+        { key: 'franchiseSss', label: 'Total - Franchise SSS Growth' },
+      ];
+      for (const td of totalDefs) {
+        html += '<tr class="total-row">';
+        html += `<td class="sticky sticky-0"></td>`;
+        html += `<td class="left sticky sticky-1" colspan="1">${td.label}</td>`;
+        html += `<td class="sticky sticky-2"></td>`;
+        html += `<td class="sticky sticky-3"></td>`;
+        for (const pKey of periods) {
+          const pCh = reportData.periods[pKey]?.channels[activeChannel];
+          const t = pCh?.totals[td.key] || { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+          const vCls = t.variance >= 0 ? 'positive' : 'negative';
+          const cCls = t.compPct >= 0 ? 'positive' : 'negative';
+          html += `<td class="period-sep">${fmtVal(t.currentYR)}</td>`;
+          html += `<td>${fmtVal(t.priorYR)}</td>`;
+          html += `<td class="${vCls}">${fmtVal(t.variance)}</td>`;
+          html += `<td class="${cCls}">${fmtPct(t.compPct)}</td>`;
+        }
+        html += '</tr>';
+      }
+
+      html += '</tbody></table></div>';
+      content.innerHTML = html;
+    }
+
+    // ─── Formatting helpers ──────────────────────────
+    function fmtDollar(v) {
+      if (v == null || isNaN(v)) return '-';
+      const neg = v < 0;
+      const abs = Math.abs(v);
+      const s = '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return neg ? `(${s})` : s;
+    }
+    function fmtNum(v) {
+      if (v == null || isNaN(v)) return '-';
+      return v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+    function fmtPct(v) {
+      if (v == null || isNaN(v)) return '-';
+      const neg = v < 0;
+      const s = Math.abs(v).toFixed(1) + '%';
+      return neg ? `(${s})` : s;
+    }
+    function fmtDateShort(d) {
+      if (!d) return '';
+      const parts = d.split('-');
+      return `${parseInt(parts[1])}/${parseInt(parts[2])}`;
+    }
+    function esc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ─── Excel Export ────────────────────────────────
+    function exportExcel() {
+      if (!reportData) return;
+
+      const wb = XLSX.utils.book_new();
+      const order = reportData.channelOrder || [];
+      const labels = reportData.channelLabels || {};
+      const periods = ['WTD', 'PTD', 'QTD', 'YTD'];
+      const isCheck = ch => ch === 'Checks' || ch === 'NonCateringChecks';
+
+      // Style definitions
+      const S = {
+        titleFont: { font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1E3A5F' } }, alignment: { horizontal: 'center' } },
+        periodHeader: { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: 'C41E3A' } }, alignment: { horizontal: 'center' } },
+        dateRow: { font: { sz: 9, color: { rgb: '374151' } }, fill: { fgColor: { rgb: 'F0F4F8' } }, alignment: { horizontal: 'center' } },
+        colHeader: { font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'E5E7EB' } }, alignment: { horizontal: 'right' }, border: { bottom: { style: 'thin', color: { rgb: '999999' } } } },
+        colHeaderLeft: { font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'E5E7EB' } }, alignment: { horizontal: 'left' }, border: { bottom: { style: 'thin', color: { rgb: '999999' } } } },
+        dollar: { numFmt: '$#,##0.00;($#,##0.00);"-"', font: { sz: 9 } },
+        number: { numFmt: '#,##0;(#,##0);"-"', font: { sz: 9 } },
+        pct: { numFmt: '0.0%;(0.0%);"-"', font: { sz: 9 } },
+        positivePct: { numFmt: '0.000000', font: { sz: 9, color: { rgb: '059669' } } },
+        negativePct: { numFmt: '0.000000', font: { sz: 9, color: { rgb: 'DC2626' } } },
+        totalDollar: { numFmt: '$#,##0.00;($#,##0.00);"-"', font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        totalNumber: { numFmt: '#,##0;(#,##0);"-"', font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        totalPct: { numFmt: '0.000000', font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        totalLabel: { font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        locName: { font: { sz: 9 }, alignment: { horizontal: 'left' } },
+      };
+
+      for (const ch of order) {
+        const sheetName = ch.length > 31 ? ch.substring(0, 31) : ch;
+        const rows = [];
+        const merges = [];
+
+        // Row 0: Title
+        const titleRow = [{ v: `${labels[ch] || ch} – WPY Comparative`, s: S.titleFont }];
+        for (let i = 1; i < 20; i++) titleRow.push({ v: '', s: S.titleFont });
+        rows.push(titleRow);
+
+        // Row 1: Report date
+        rows.push([{ v: `Report Date: ${reportData.reportDate}  |  FY${reportData.fiscalYear}  Period ${reportData.fiscalPeriod}  Week ${reportData.fiscalWeek}`, s: S.dateRow }]);
+
+        // Row 2: blank
+        rows.push([]);
+
+        // Row 3: Period headers
+        // Layout: A=Tab, B=C flag, C=Location, D=Company, E=OpenDate, then 4 cols per period
+        const fixedCols = 5;
+        const headerRow = [];
+        for (let i = 0; i < fixedCols; i++) headerRow.push({ v: '', s: S.colHeaderLeft });
+        for (const pKey of periods) {
+          const pData = reportData.periods[pKey];
+          const curR = pData ? pData.currentRange : {};
+          const prR = pData ? pData.priorRange : {};
+          const dateLabel = `${pKey}: ${fmtDateShort(curR.start)}-${fmtDateShort(curR.end)} vs ${fmtDateShort(prR.start)}-${fmtDateShort(prR.end)}`;
+          headerRow.push({ v: dateLabel, s: S.periodHeader });
+          headerRow.push({ v: '', s: S.periodHeader });
+          headerRow.push({ v: '', s: S.periodHeader });
+          headerRow.push({ v: '', s: S.periodHeader });
+          const startCol = fixedCols + periods.indexOf(pKey) * 4;
+          merges.push({ s: { r: 3, c: startCol }, e: { r: 3, c: startCol + 3 } });
+        }
+        rows.push(headerRow);
+
+        // Row 4: Column sub-headers
+        const subRow = [
+          { v: ch, s: S.colHeaderLeft },
+          { v: 'C', s: S.colHeader },
+          { v: 'Location', s: S.colHeaderLeft },
+          { v: 'Company', s: S.colHeaderLeft },
+          { v: 'Open Date', s: S.colHeaderLeft },
+        ];
+        for (const pKey of periods) {
+          subRow.push({ v: 'Current YR', s: S.colHeader });
+          subRow.push({ v: 'Prior YR', s: S.colHeader });
+          subRow.push({ v: 'Variance', s: S.colHeader });
+          subRow.push({ v: 'Comp Sales %', s: S.colHeader });
+        }
+        rows.push(subRow);
+
+        // Data rows
+        const wtdCh = reportData.periods.WTD?.channels[ch];
+        const locations = wtdCh ? wtdCh.locations : [];
+
+        for (const loc of locations) {
+          const row = [
+            { v: ch, s: S.locName },
+            { v: loc.comping === 'Y' ? 'C' : '', s: S.locName },
+            { v: loc.restaurantName || loc.location, s: S.locName },
+            { v: loc.company || '', s: S.locName },
+            { v: loc.openDate || '', s: S.locName },
+          ];
+          for (const pKey of periods) {
+            const pCh = reportData.periods[pKey]?.channels[ch];
+            const pLoc = pCh ? pCh.locations.find(l => l.location === loc.location) : null;
+            const cur = pLoc ? pLoc.currentYR : 0;
+            const prior = pLoc ? pLoc.priorYR : 0;
+            const variance = pLoc ? pLoc.variance : 0;
+            const comp = pLoc ? pLoc.compPct : 0;
+            const valStyle = isCheck(ch) ? S.number : S.dollar;
+            row.push({ v: cur, s: valStyle });
+            row.push({ v: prior, s: valStyle });
+            row.push({ v: variance, s: valStyle });
+            row.push({ v: comp, s: comp >= 0 ? S.positivePct : S.negativePct });
+          }
+          rows.push(row);
+        }
+
+        // Total rows
+        const totalLabels = [
+          'Total Restaurants',
+          'Total Comping Restaurants',
+          'Total - All Open Company Restaurants',
+          'Total - Company SSS Growth',
+          'Total - All Open Franchise Restaurants',
+          'Total - Franchise SSS Growth',
+        ];
+        const totalKeys = ['allRestaurants', 'comping', 'companyAll', 'companySss', 'franchiseAll', 'franchiseSss'];
+        for (let ti = 0; ti < totalLabels.length; ti++) {
+          const tRow = [
+            { v: '', s: S.totalLabel },
+            { v: '', s: S.totalLabel },
+            { v: totalLabels[ti], s: S.totalLabel },
+            { v: '', s: S.totalLabel },
+            { v: '', s: S.totalLabel },
+          ];
+          for (const pKey of periods) {
+            const pCh = reportData.periods[pKey]?.channels[ch];
+            const t = pCh ? (pCh.totals[totalKeys[ti]] || { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 }) : { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+            const valStyle = isCheck(ch) ? S.totalNumber : S.totalDollar;
+            tRow.push({ v: t.currentYR, s: valStyle });
+            tRow.push({ v: t.priorYR, s: valStyle });
+            tRow.push({ v: t.variance, s: valStyle });
+            tRow.push({ v: t.compPct, s: S.totalPct });
+          }
+          rows.push(tRow);
+        }
+
+        // Merge title row
+        const totalCols = fixedCols + 16;
+        merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
+        merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!merges'] = merges;
+
+        // Column widths
+        ws['!cols'] = [
+          { wch: 6 },   // Tab name
+          { wch: 3 },   // C flag
+          { wch: 28 },  // Location
+          { wch: 24 },  // Company
+          { wch: 12 },  // Open Date
+        ];
+        for (let i = 0; i < 16; i++) ws['!cols'].push({ wch: 14 });
+
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      }
+
+      // Report Dates sheet
+      const datesRows = [
+        [{ v: 'Report Dates', s: S.titleFont }],
+        [],
+        ['Period', 'Current Year Start', 'Current Year End', 'Prior Year Start', 'Prior Year End'],
+      ];
+      for (const pKey of periods) {
+        const pData = reportData.periods[pKey];
+        if (pData) {
+          datesRows.push([pKey, pData.currentRange.start, pData.currentRange.end, pData.priorRange.start, pData.priorRange.end]);
+        }
+      }
+      datesRows.push([]);
+      datesRows.push(['Fiscal Year', reportData.fiscalYear]);
+      datesRows.push(['Fiscal Period', reportData.fiscalPeriod]);
+      datesRows.push(['Fiscal Week', reportData.fiscalWeek]);
+      const datesWs = XLSX.utils.aoa_to_sheet(datesRows);
+      datesWs['!cols'] = [{ wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }];
+      XLSX.utils.book_append_sheet(wb, datesWs, 'Report Dates');
+
+      const filename = `WPY_Comparative_${reportData.reportDate}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    }
+  </script>
+</body>
+</html>

@@ -691,7 +691,21 @@
               <input type="checkbox" id="enableYoY" />
               Show Aloha Qty column in menu report
             </label>
-            <div class="yoy-hint">Compares to the same date range, 1 year prior (from your imported Aloha data).</div>
+            <div class="yoy-mode-row" style="margin:6px 0 4px 22px; display:none;" id="yoyModeRow">
+              <label style="margin-right:12px; cursor:pointer;">
+                <input type="radio" name="yoyMode" value="same_date" checked /> Same Date
+                <span style="color:#6b7280; font-size:0.85em;">(e.g. Mar 20 → Mar 20 last year)</span>
+              </label>
+              <label style="cursor:pointer; margin-right:12px;">
+                <input type="radio" name="yoyMode" value="same_day" /> Same Day of Week
+                <span style="color:#6b7280; font-size:0.85em;">(e.g. Friday → Friday, 52 weeks prior)</span>
+              </label>
+              <label style="cursor:pointer;">
+                <input type="radio" name="yoyMode" value="fiscal" /> Fiscal Calendar
+                <span style="color:#6b7280; font-size:0.85em;">(matches old SSRS report)</span>
+              </label>
+            </div>
+            <div class="yoy-hint" id="yoyHint">Compares to the same date range, 1 year prior (from your imported Aloha data).</div>
             <div id="alohaRangeWarning" class="aloha-range-warning hidden"></div>
             <details class="aloha-import-help">
               <summary>How do I import more Aloha data?</summary>
@@ -1234,12 +1248,13 @@
       if (type === 'custom' && customStart && customEnd) {
         return { start: customStart, end: customEnd };
       }
-      const today = new Date();
-      const end = today.toISOString().slice(0, 10);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const end = yesterday.toISOString().slice(0, 10);
       let start;
-      if (type === 'last_7_days') { start = new Date(today); start.setDate(start.getDate() - 6); start = start.toISOString().slice(0, 10); }
-      else if (type === 'last_30_days') { start = new Date(today); start.setDate(start.getDate() - 29); start = start.toISOString().slice(0, 10); }
-      else if (type === 'last_90_days') { start = new Date(today); start.setDate(start.getDate() - 89); start = start.toISOString().slice(0, 10); }
+      if (type === 'last_7_days') { start = new Date(yesterday); start.setDate(start.getDate() - 6); start = start.toISOString().slice(0, 10); }
+      else if (type === 'last_30_days') { start = new Date(yesterday); start.setDate(start.getDate() - 29); start = start.toISOString().slice(0, 10); }
+      else if (type === 'last_90_days') { start = new Date(yesterday); start.setDate(start.getDate() - 89); start = start.toISOString().slice(0, 10); }
       else { start = end; }
       return { start, end };
     }
@@ -1250,8 +1265,23 @@
       if (!start || !end) return null;
       const s = new Date(start);
       const e = new Date(end);
-      s.setFullYear(s.getFullYear() - 1);
-      e.setFullYear(e.getFullYear() - 1);
+      const mode = getYoYMode();
+      if (mode === 'same_day') {
+        // 52 weeks back = 364 days — preserves day-of-week alignment
+        s.setDate(s.getDate() - 364);
+        e.setDate(e.getDate() - 364);
+      } else if (mode === 'fiscal') {
+        // Fiscal calendar shifts dates ~1 day; approximate with 365 for warning purposes
+        // The backend uses the actual fiscal calendar mapping
+        s.setFullYear(s.getFullYear() - 1);
+        e.setFullYear(e.getFullYear() - 1);
+        // Add a day buffer since fiscal dates can shift slightly
+        s.setDate(s.getDate() - 1);
+        e.setDate(e.getDate() + 1);
+      } else {
+        s.setFullYear(s.getFullYear() - 1);
+        e.setFullYear(e.getFullYear() - 1);
+      }
       return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
     }
 
@@ -1306,7 +1336,28 @@
     function updateYoYControls() {
       const enableYoY = document.getElementById('enableYoY');
       if (!enableYoY) return;
+      const modeRow = document.getElementById('yoyModeRow');
+      if (modeRow) modeRow.style.display = enableYoY.checked ? '' : 'none';
+      updateYoYHint();
       updateAlohaRangeWarning();
+    }
+
+    function getYoYMode() {
+      const checked = document.querySelector('input[name="yoyMode"]:checked');
+      return checked ? checked.value : 'same_date';
+    }
+
+    function updateYoYHint() {
+      const hint = document.getElementById('yoyHint');
+      if (!hint) return;
+      const mode = getYoYMode();
+      if (mode === 'same_day') {
+        hint.textContent = 'Compares to the same day of week, 52 weeks prior (from your imported Aloha data).';
+      } else if (mode === 'fiscal') {
+        hint.textContent = 'Uses Newk\'s fiscal calendar to map prior-year dates (matches the old SSRS Weekly Sales Report).';
+      } else {
+        hint.textContent = 'Compares to the same date range, 1 year prior (from your imported Aloha data).';
+      }
     }
 
     // ──────────────────────────────────────────────────────────
@@ -1471,6 +1522,9 @@
         if (report.config.reportType === 'menu') {
           const enableYoY = document.getElementById('enableYoY');
           if (enableYoY) enableYoY.checked = !!report.config.yoyEnabled;
+          const savedMode = report.config.yoyMode || 'same_date';
+          const modeRadio = document.querySelector(`input[name="yoyMode"][value="${savedMode}"]`);
+          if (modeRadio) modeRadio.checked = true;
           updateYoYControls();
         }
       }, 100);
@@ -1494,7 +1548,8 @@
         groupBy: [],
         itemTags: selectedItemTags,
         includeZeroSales: document.getElementById('includeZeroSales')?.checked || false,
-        yoyEnabled: document.getElementById('enableYoY')?.checked || false
+        yoyEnabled: document.getElementById('enableYoY')?.checked || false,
+        yoyMode: getYoYMode()
       };
     }
 
@@ -1848,11 +1903,12 @@
       let startDate = config.customStartDate;
       let endDate   = config.customEndDate;
       if (config.dateRangeType !== 'custom') {
-        const today = new Date();
-        const daysMap = { last_7_days: 7, last_30_days: 30, last_90_days: 90 };
-        const days = daysMap[config.dateRangeType] || 7;
-        endDate   = today.toISOString().split('T')[0];
-        startDate = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const daysMap = { last_7_days: 6, last_30_days: 29, last_90_days: 89 };
+        const days = daysMap[config.dateRangeType] || 6;
+        endDate   = yesterday.toISOString().split('T')[0];
+        startDate = new Date(yesterday.getTime() - days * 86400000).toISOString().split('T')[0];
       }
 
       // 4. Fetch labor data from backend
@@ -2433,6 +2489,45 @@
         );
       }
 
+      // ── Daily YoY Breakdown ──────────────────────────────────────────────
+      const dailyBreakdown = results.dailyBreakdown || [];
+      if (hasYoY && dailyBreakdown.length > 0) {
+        const fmtDate = s => { if (!s) return '—'; const [y,m,d] = s.split('-'); return `${parseInt(m)}/${parseInt(d)}/${y.slice(2)}`; };
+        const dbId = 'ss-daily-' + Date.now();
+        html += `<tr><td colspan="${yoyColspan}" style="padding:1rem 0 0.25rem;font-weight:700;font-size:1rem;color:#374151;border:none;">Daily YoY Breakdown</td></tr>`;
+        html += `<tr>
+          <th style="${thNavyL}">Date</th>
+          <th style="${thNavy}">Day</th>
+          <th style="background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #047857;">Toast Net Sales</th>
+          <th style="${thAmber}">Prior Year Net Sales</th>
+          <th style="${thAmber}">Prior Year Date</th>
+          <th style="${thAmber}">YoY %</th>
+        </tr>`;
+        let totalToast = 0, totalAloha = 0;
+        dailyBreakdown.forEach((day, idx) => {
+          const alt = idx % 2 === 1 ? 'background:#F9FAFB;' : '';
+          totalToast += day.toastNetSales || 0;
+          if (day.alohaNetSales != null) totalAloha += day.alohaNetSales;
+          html += `<tr style="${alt}">
+            <td style="padding:0.5rem 0.75rem;border:1px solid #E5E7EB;font-weight:600;">${fmtDate(day.businessDate)}</td>
+            <td style="padding:0.5rem 0.75rem;border:1px solid #E5E7EB;">${day.dayOfWeek || ''}</td>
+            <td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #E5E7EB;background:#F0FDF4;">${formatCell('Sales', day.toastNetSales||0)}</td>
+            <td style="${tdAmberRow}">${day.alohaNetSales != null ? formatCell('Sales', day.alohaNetSales) : '—'}</td>
+            <td style="${tdAmberRow}">${fmtDate(day.alohaDate)}</td>
+            <td style="${tdAmberRow}">${day.yoyChangePct != null ? yoyBadge(day.yoyChangePct) : '—'}</td>
+          </tr>`;
+        });
+        const totalYoyPct = totalAloha > 0 ? Math.round(((totalToast - totalAloha) / totalAloha) * 1000) / 10 : null;
+        html += `<tr style="font-weight:700;background:#EFF6FF;">
+          <td style="padding:0.5rem 0.75rem;border:1px solid #BFDBFE;">TOTAL</td>
+          <td style="padding:0.5rem 0.75rem;border:1px solid #BFDBFE;"></td>
+          <td style="padding:0.5rem 0.75rem;text-align:right;border:1px solid #A7F3D0;background:#ECFDF5;">${formatCell('Sales', totalToast)}</td>
+          <td style="${tdAmberT}">${totalAloha > 0 ? formatCell('Sales', totalAloha) : '—'}</td>
+          <td style="${tdAmberT}"></td>
+          <td style="${tdAmberT}">${totalYoyPct != null ? yoyBadge(totalYoyPct) : '—'}</td>
+        </tr>`;
+      }
+
       head.innerHTML=''; body.innerHTML=html;
       document.getElementById('exportBtn').classList.remove('hidden');
       document.getElementById('resultsSummary').textContent =
@@ -2958,12 +3053,13 @@
         const e = document.getElementById('customEndDate')?.value;
         dateStr = s && e ? `${fmtD(s)}_${fmtD(e)}` : new Date().toISOString().split('T')[0];
       } else {
-        const today = new Date();
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
         const daysMap = { last_7_days: 6, last_30_days: 29, last_90_days: 89 };
         const offset = daysMap[drType] ?? 6;
-        const start = new Date(today); start.setDate(start.getDate() - offset);
+        const start = new Date(yesterday); start.setDate(start.getDate() - offset);
         const toISO = d => d.toISOString().split('T')[0];
-        dateStr = `${fmtD(toISO(start))}_${fmtD(toISO(today))}`;
+        dateStr = `${fmtD(toISO(start))}_${fmtD(toISO(yesterday))}`;
       }
 
       // ── Style palette ──────────────────────────────────────────────────────
@@ -3011,6 +3107,13 @@
         dRalt: mkS(alt,   '1F2937', false, true),
         dLbld: mkS(null,  '1F2937', true,  false),
         dRbld: mkS(null,  '1F2937', true,  true),
+        // Amber (YoY columns)
+        amberL:  mkS('92400E', 'FFFFFF', true,  false),
+        amberR:  mkS('92400E', 'FFFFFF', true,  true),
+        lAmberL: mkS('FEF3C7', '92400E', false, false),
+        lAmberR: mkS('FEF3C7', '92400E', false, true),
+        lAmberLalt: mkS('FDE68A', '92400E', false, false),
+        lAmberRalt: mkS('FDE68A', '92400E', false, true),
         // Warning
         warnL: mkS(warn,  warnTxt, true, false, true),
       };
@@ -3088,45 +3191,67 @@
       if (currentResults.summaryTable !== undefined) {
         const rows = currentResults.summaryTable || [];
         const tot  = currentResults.summaryTotals || {};
+        const hasYoY = currentResults.yoySalesInfo && currentResults.yoySalesInfo.status === 'ok';
         const hdr = [
           c('Location', S.navyL), c('Total Tickets', S.navyR), c('Guest Count', S.navyR),
-          c("Newk's Net Sales", S.navyR), c('Avg Ticket', S.navyR), c('PPA', S.navyR),
-          c('Discounts', S.navyR), c('Voids', S.navyR), c('Cash', S.navyR), c('Card', S.navyR),
+          c("Newk's Net Sales", S.navyR),
         ];
+        if (hasYoY) { hdr.push(c('Prior Year Net Sales', S.amberR), c('YoY %', S.amberR)); }
+        hdr.push(c('Avg Ticket', S.navyR), c('PPA', S.navyR),
+          c('Discounts', S.navyR), c('Voids', S.navyR), c('Cash', S.navyR), c('Card', S.navyR));
         const totRow = [
           c('TOTAL', S.navyL), n(tot.orders||0, S.navyR), n(tot.guestCount||0, S.navyR),
-          n(tot.netSales||0, S.navyR), n(tot.avgTicket||0, S.navyR), n(tot.ppa||0, S.navyR),
-          n(tot.discounts||0, S.navyR), n(tot.voids||0, S.navyR),
-          n(tot.cash||0, S.navyR), n(tot.card||0, S.navyR),
+          n(tot.netSales||0, S.navyR),
         ];
+        if (hasYoY) { totRow.push(n(tot.priorYearNetSales||0, S.amberR), c(tot.yoyChangePct != null ? `${tot.yoyChangePct}%` : '—', S.amberR)); }
+        totRow.push(n(tot.avgTicket||0, S.navyR), n(tot.ppa||0, S.navyR),
+          n(tot.discounts||0, S.navyR), n(tot.voids||0, S.navyR),
+          n(tot.cash||0, S.navyR), n(tot.card||0, S.navyR));
         const dataRows = rows.map((row, idx) => {
           const alt = idx % 2 === 1;
           const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
-          return [
+          const aR = alt ? S.lAmberRalt : S.lAmberR;
+          const r = [
             c(row.restaurantName||'', dL), n(row.orders||0, dR), n(row.guestCount||0, dR),
-            n(row.netSales||0, dR), n(row.avgTicket||0, dR), n(row.ppa||0, dR),
-            n(row.discounts||0, dR), n(row.voids||0, dR),
-            n(row.cash||0, dR), n(row.card||0, dR),
+            n(row.netSales||0, dR),
           ];
+          if (hasYoY) { r.push(n(row.priorYearNetSales||0, aR), c(row.yoyChangePct != null ? `${row.yoyChangePct}%` : '—', aR)); }
+          r.push(n(row.avgTicket||0, dR), n(row.ppa||0, dR),
+            n(row.discounts||0, dR), n(row.voids||0, dR),
+            n(row.cash||0, dR), n(row.card||0, dR));
+          return r;
         });
         addWS(WB, [hdr, totRow, ...dataRows], 'Sales Summary');
 
         // Non-Catering sheet
         const splitHdr = [
           c('Location', S.navyL), c('Total Tickets', S.navyR), c('Guest Count', S.navyR),
-          c("Newk's Net Sales", S.navyR), c('Avg Ticket', S.navyR), c('PPA', S.navyR),
-          c('Discounts', S.navyR), c('Voids', S.navyR), c('Cash', S.navyR), c('Card', S.navyR),
+          c("Newk's Net Sales", S.navyR),
         ];
-        const mkSplitRow = (r, dL, dR) => [
-          c(r.restaurantName||'', dL), n(r.orders||0, dR), n(r.guestCount||0, dR),
-          n(r.netSales||0, dR), n(r.avgTicket||0, dR), n(r.ppa||0, dR),
-          n(r.discounts||0, dR), n(r.voids||0, dR), n(r.cash||0, dR), n(r.card||0, dR),
-        ];
-        const mkSplitTotRow = t => [
-          c('TOTAL', S.navyL), n(t.orders||0, S.navyR), n(t.guestCount||0, S.navyR),
-          n(t.netSales||0, S.navyR), n(t.avgTicket||0, S.navyR), n(t.ppa||0, S.navyR),
-          n(t.discounts||0, S.navyR), n(t.voids||0, S.navyR), n(t.cash||0, S.navyR), n(t.card||0, S.navyR),
-        ];
+        if (hasYoY) { splitHdr.push(c('Prior Year Net Sales', S.amberR), c('YoY %', S.amberR)); }
+        splitHdr.push(c('Avg Ticket', S.navyR), c('PPA', S.navyR),
+          c('Discounts', S.navyR), c('Voids', S.navyR), c('Cash', S.navyR), c('Card', S.navyR));
+        const mkSplitRow = (r, dL, dR) => {
+          const aR = dR === S.dRalt ? S.lAmberRalt : S.lAmberR;
+          const row = [
+            c(r.restaurantName||'', dL), n(r.orders||0, dR), n(r.guestCount||0, dR),
+            n(r.netSales||0, dR),
+          ];
+          if (hasYoY) { row.push(n(r.priorYearNetSales||0, aR), c(r.yoyChangePct != null ? `${r.yoyChangePct}%` : '—', aR)); }
+          row.push(n(r.avgTicket||0, dR), n(r.ppa||0, dR),
+            n(r.discounts||0, dR), n(r.voids||0, dR), n(r.cash||0, dR), n(r.card||0, dR));
+          return row;
+        };
+        const mkSplitTotRow = t => {
+          const row = [
+            c('TOTAL', S.navyL), n(t.orders||0, S.navyR), n(t.guestCount||0, S.navyR),
+            n(t.netSales||0, S.navyR),
+          ];
+          if (hasYoY) { row.push(n(t.priorYearNetSales||0, S.amberR), c(t.yoyChangePct != null ? `${t.yoyChangePct}%` : '—', S.amberR)); }
+          row.push(n(t.avgTicket||0, S.navyR), n(t.ppa||0, S.navyR),
+            n(t.discounts||0, S.navyR), n(t.voids||0, S.navyR), n(t.cash||0, S.navyR), n(t.card||0, S.navyR));
+          return row;
+        };
 
         const ncRows = currentResults.nonCateringTable || [];
         const ncTot  = currentResults.nonCateringTotals || {};
@@ -3136,6 +3261,33 @@
         const catRows2 = currentResults.cateringTable || [];
         const catTot2  = currentResults.cateringTotals || {};
         addWS(WB, [splitHdr, mkSplitTotRow(catTot2), ...catRows2.map((r,i) => mkSplitRow(r, i%2?S.dLalt:S.dL, i%2?S.dRalt:S.dR))], 'Catering');
+
+        // Daily YoY Breakdown sheet
+        const dailyBD = currentResults.dailyBreakdown || [];
+        if (hasYoY && dailyBD.length > 0) {
+          const fmtD2 = s => { if (!s) return '—'; const [y,m,d] = s.split('-'); return `${parseInt(m)}/${parseInt(d)}/${y.slice(2)}`; };
+          const dbRows = [];
+          dbRows.push([c('Date', S.navyL), c('Day', S.navyL), c('Toast Net Sales', S.greenR), c('Prior Year Net Sales', S.amberR), c('Prior Year Date', S.amberR), c('YoY %', S.amberR)]);
+          let dbTotalToast = 0, dbTotalAloha = 0;
+          dailyBD.forEach((day, idx) => {
+            const alt = idx % 2 === 1;
+            const dL = alt ? S.dLalt : S.dL;
+            const dR = alt ? S.dRalt : S.dR;
+            const aR = alt ? S.lAmberRalt : S.lAmberR;
+            dbTotalToast += day.toastNetSales || 0;
+            if (day.alohaNetSales != null) dbTotalAloha += day.alohaNetSales;
+            dbRows.push([
+              c(fmtD2(day.businessDate), dL), c(day.dayOfWeek || '', dL),
+              n(day.toastNetSales || 0, dR),
+              day.alohaNetSales != null ? n(day.alohaNetSales, aR) : c('—', aR),
+              c(fmtD2(day.alohaDate), aR),
+              c(day.yoyChangePct != null ? `${day.yoyChangePct}%` : '—', aR),
+            ]);
+          });
+          const dbYoyPct = dbTotalAloha > 0 ? (((dbTotalToast - dbTotalAloha) / dbTotalAloha) * 100).toFixed(1) + '%' : '—';
+          dbRows.push([c('TOTAL', S.navyL), c('', S.navyL), n(dbTotalToast, S.navyR), n(dbTotalAloha, S.amberR), c('', S.amberR), c(dbYoyPct, S.amberR)]);
+          addWS(WB, dbRows, 'Daily YoY');
+        }
       } else if (currentResults.pivotTable !== undefined) {
         const pivotTable        = currentResults.pivotTable || [];
         const totals            = currentResults.totals || [];
@@ -3202,6 +3354,7 @@
           const rows = [];
 
           if (isMetrics) {
+            const showAlohaCol = currentResults.yoySalesInfo && currentResults.yoySalesInfo.status === 'ok' && totals.some(r => r.totalNetSalesAloha != null);
             // Newk's Net Sales only (Toast columns removed) + TOTAL column at right
             const hdr = [c("Restaurant Location", S.navyL)];
             dc.forEach(col => hdr.push(c(formatDateHeader(col), S.navyR)));
@@ -3229,6 +3382,31 @@
             });
             totRow.push(n(grandTotal, S.navyR));
             rows.push(totRow);
+            // Prior Year (Aloha) totals row
+            if (showAlohaCol) {
+              const alohaRow = [c('PRIOR YEAR (ALOHA)', S.amberR)];
+              let alohaGrandTotal = 0;
+              dc.forEach(col => {
+                const t = totals.find(t => t.date === col);
+                const val = t?.totalNetSalesAloha ?? 0;
+                alohaGrandTotal += val;
+                alohaRow.push(n(val, S.amberR));
+              });
+              alohaRow.push(n(alohaGrandTotal, S.amberR));
+              rows.push(alohaRow);
+              // YoY % row
+              const yoyRow = [c('YoY %', S.amberR)];
+              dc.forEach(col => {
+                const t = totals.find(t => t.date === col);
+                const current = hasNewks ? (t?.totalNetSalesNewks ?? 0) : (t?.totalNetSales ?? 0);
+                const prior = t?.totalNetSalesAloha ?? 0;
+                const pct = prior ? (((current - prior) / prior) * 100).toFixed(1) + '%' : '—';
+                yoyRow.push(c(pct, S.amberR));
+              });
+              const totalPct = alohaGrandTotal ? (((grandTotal - alohaGrandTotal) / alohaGrandTotal) * 100).toFixed(1) + '%' : '—';
+              yoyRow.push(c(totalPct, S.amberR));
+              rows.push(yoyRow);
+            }
           } else {
             const hdr = [c('Restaurant Location', S.navyL), ...colNames.map(n2 => c(n2, S.navyR))];
             rows.push(hdr);
@@ -3265,6 +3443,13 @@
             // Sales
             sumRows.push([c('SALES', S.navyL), c('', S.navyL)]);
             sumRows.push([c("Newk's Net Sales", S.dLbld), c(fmtDollar(exportNewksTotal), S.dR)]);
+            const showAlohaSummary = currentResults.yoySalesInfo && currentResults.yoySalesInfo.status === 'ok' && totals.some(r => r.totalNetSalesAloha != null);
+            if (showAlohaSummary) {
+              const exportAlohaTotal = totals.reduce((sum, t) => sum + (t.totalNetSalesAloha || 0), 0);
+              sumRows.push([c("Prior Year (Aloha)", S.dLbld), c(fmtDollar(exportAlohaTotal), S.dR)]);
+              const yoyPct = exportAlohaTotal ? (((exportNewksTotal - exportAlohaTotal) / exportAlohaTotal) * 100).toFixed(1) : '—';
+              sumRows.push([c("YoY Change", S.dLbld), c(yoyPct !== '—' ? `${yoyPct}%` : '—', S.dR)]);
+            }
             sumRows.push([blank(), blank()]);
             // Labor — populated if KPI panel loaded, otherwise note
             sumRows.push([c('LABOR', S.navyL), c('', S.navyL)]);
@@ -3406,6 +3591,7 @@
       document.getElementById('customEndDate').addEventListener('change', updateAlohaRangeWarning);
       document.getElementById('selectAllLocations').addEventListener('change', toggleAllLocations);
       document.getElementById('enableYoY').addEventListener('change', updateYoYControls);
+      document.querySelectorAll('input[name="yoyMode"]').forEach(r => r.addEventListener('change', () => { updateYoYHint(); updateAlohaRangeWarning(); }));
       document.getElementById('retryLocationsBtn').addEventListener('click', () => loadLocations(true));
 
       const menuItemFilterInput = document.getElementById('menuItemFilterInput');

@@ -218,7 +218,9 @@ let lastAllStores = null;
 
 /* ── Default dates ── */
 (function(){
-  const e = new Date(), s = new Date();
+  const e = new Date();
+  e.setDate(e.getDate()-1);
+  const s = new Date(e);
   s.setDate(s.getDate()-6);
   document.getElementById('endDate').value   = e.toISOString().slice(0,10);
   document.getElementById('startDate').value = s.toISOString().slice(0,10);
