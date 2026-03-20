@@ -13546,7 +13546,7 @@ class MenuMixRequest(BaseModel):
 @app.post("/api/reports/menu-mix/generate")
 async def generate_menu_mix_report(req: MenuMixRequest):
     """Generate the Menu Mix Performance Report as an Excel download."""
-    from starlette.responses import StreamingResponse
+    from starlette.responses import Response as _Response
 
     cy_start = date.fromisoformat(req.startDate)
     cy_end = date.fromisoformat(req.endDate)
@@ -14019,10 +14019,13 @@ async def generate_menu_mix_report(req: MenuMixRequest):
 
         date_label = f"{cy_start.strftime('%Y%m%d')}_{cy_end.strftime('%Y%m%d')}"
         filename = f"Menu_Mix_Performance_{date_label}.xlsx"
-        return StreamingResponse(
-            io.BytesIO(xlsx_bytes),
+        return _Response(
+            content=xlsx_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(xlsx_bytes)),
+            },
         )
 
 
