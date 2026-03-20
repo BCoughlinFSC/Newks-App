@@ -13546,8 +13546,7 @@ class MenuMixRequest(BaseModel):
 @app.post("/api/reports/menu-mix/generate")
 async def generate_menu_mix_report(req: MenuMixRequest):
     """Generate the Menu Mix Performance Report as an Excel download."""
-    from starlette.responses import FileResponse as _FileResponse
-    import tempfile
+    import base64
 
     cy_start = date.fromisoformat(req.startDate)
     cy_end = date.fromisoformat(req.endDate)
@@ -14021,16 +14020,11 @@ async def generate_menu_mix_report(req: MenuMixRequest):
         date_label = f"{cy_start.strftime('%Y%m%d')}_{cy_end.strftime('%Y%m%d')}"
         filename = f"Menu_Mix_Performance_{date_label}.xlsx"
 
-        # Write to temp file — FileResponse is most reliable for binary downloads through proxies
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        tmp.write(xlsx_bytes)
-        tmp.close()
-
-        return _FileResponse(
-            path=tmp.name,
-            filename=filename,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        # Return as base64 JSON — avoids binary streaming issues through nginx proxies
+        return {
+            "filename": filename,
+            "data": base64.b64encode(xlsx_bytes).decode("ascii"),
+        }
 
 
 # ------------------

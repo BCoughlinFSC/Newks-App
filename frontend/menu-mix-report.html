@@ -328,15 +328,15 @@
 
         progressFill.style.width = '100%';
 
-        const blob = await resp.blob();
+        const result = await resp.json();
+        const byteChars = atob(result.data);
+        const byteArray = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([byteArray], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
         const url = URL.createObjectURL(blob);
-        const disposition = resp.headers.get('Content-Disposition') || '';
-        const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
-        const filename = filenameMatch ? filenameMatch[1] : 'Menu_Mix_Performance.xlsx';
-
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename;
+        a.download = result.filename || 'Menu_Mix_Performance.xlsx';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
