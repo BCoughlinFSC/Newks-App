@@ -9423,6 +9423,10 @@ async def admin_run_flash_import(
     start_str = payload.get("start_date") or payload.get("date")
     end_str = payload.get("end_date") or start_str
 
+    # Block if already running
+    if _flash_import_progress.get("running"):
+        raise HTTPException(status_code=409, detail="A flash import is already running. Wait for it to finish.")
+
     if start_str and end_str:
         try:
             start_d = date.fromisoformat(start_str)

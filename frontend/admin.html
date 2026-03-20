@@ -1192,16 +1192,21 @@
               ${failCount > 0 ? ` &mdash; <span style="color:#DC2626;">${failCount} failed</span>` : ''}
             </div>
           </div>`;
+          // Disable buttons while running
+          document.getElementById('runFlashImportBtn').disabled = true;
+          document.getElementById('flashBackfillBtn').disabled = true;
           // Auto-refresh while running
           if (!_flashPollTimer) {
             _flashPollTimer = setInterval(loadFlashImportStatus, 3000);
           }
         } else {
-          // Stop polling when done
+          // Stop polling when done, re-enable buttons
           if (_flashPollTimer) {
             clearInterval(_flashPollTimer);
             _flashPollTimer = null;
           }
+          document.getElementById('runFlashImportBtn').disabled = false;
+          document.getElementById('flashBackfillBtn').disabled = false;
 
           // Show completion banner if just finished
           if (p && !p.running && p.completed_at) {
