@@ -5147,7 +5147,58 @@ _DINING_OPTION_TO_DB_COL = {
     # "Union Aramark (POS 2)": n/a
 }
 
+# GNG (Grab N Go) sales category GUID — items with this salesCategory are GNG revenue
+_GNG_SALES_CATEGORY_GUID = "497c8ee0-a5f3-44bf-a699-11c3e8ebf9a0"
+
 _nightly_flash_last_result: Dict[str, Any] = {}
+
+
+async def _compute_sc_and_gng(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    business_date_yyyymmdd: str,
+) -> Tuple[float, float]:
+    """
+    Walk orders for one restaurant+day and compute:
+      1. Total restaurant-destination service charges (to subtract from net sales)
+      2. Total GNG (Grab N Go) item sales (salesCategory GUID match)
+
+    Returns (service_charge_total, gng_sales_total).
+    Reuses the existing orders cache / fetch infrastructure.
+    """
+    orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
+
+    total_sc = 0.0
+    total_gng = 0.0
+
+    for order in orders:
+        if order.get("voided"):
+            continue
+        for check in order.get("checks", []):
+            if check.get("voided"):
+                continue
+            # Service charges
+            for applied_sc in check.get("appliedServiceCharges", []):
+                charge_amount = float(applied_sc.get("chargeAmount") or 0)
+                if charge_amount <= 0:
+                    continue
+                destination = applied_sc.get("destination") or "RESTAURANT"
+                if destination == "RESTAURANT":
+                    total_sc += charge_amount
+            # GNG from selections
+            for sel in check.get("selections", []):
+                if sel.get("voided"):
+                    continue
+                sc_obj = sel.get("salesCategory") or {}
+                if sc_obj.get("guid") == _GNG_SALES_CATEGORY_GUID:
+                    total_gng += float(sel.get("price") or 0)
+
+    # Also populate the SC cache so other code paths benefit
+    global _sc_daily_cache
+    cache_key = f"{restaurant_guid}|{business_date_yyyymmdd}"
+    _sc_daily_cache[cache_key] = total_sc
+
+    return total_sc, total_gng
 
 
 async def nightly_flash_import_job():
@@ -5216,9 +5267,9 @@ async def nightly_flash_import_job():
                 if dining_opt in ("Catering", "X-EzCater", "X-Online Catering"):
                     loc_data[loc_id]["_catering_checks"] += orders
 
-            # 5. Compute service charges via Orders API for each location
-            #    and subtract from net_sales to get Newk's net sales
+            # 5. Walk orders for each location: compute service charges + GNG sales
             sc_total = 0.0
+            gng_total = 0.0
             sc_count = 0
             for loc_id, data in loc_data.items():
                 guid = data.pop("_guid", "")
@@ -5227,20 +5278,22 @@ async def nightly_flash_import_job():
 
                 if guid:
                     try:
-                        sc_amount = await _compute_restaurant_service_charges(
+                        sc_amount, gng_amount = await _compute_sc_and_gng(
                             client, guid, yesterday_yyyymmdd
                         )
                         if sc_amount > 0:
                             data["net_sales"] -= sc_amount
                             sc_total += sc_amount
                             sc_count += 1
-                            logger.debug("Flash import SC for %s: -$%.2f", loc_id, sc_amount)
+                        if gng_amount > 0:
+                            data["gng_net_sales"] = gng_amount
+                            gng_total += gng_amount
                         await asyncio.sleep(0.3)  # Rate limit courtesy
                     except Exception as exc:
-                        logger.warning("Flash import: SC fetch failed for %s: %s", loc_id, exc)
+                        logger.warning("Flash import: SC/GNG fetch failed for %s: %s", loc_id, exc)
 
-            logger.info("Nightly flash: service charges subtracted: $%.2f across %d locations",
-                        sc_total, sc_count)
+            logger.info("Nightly flash: SC subtracted=$%.2f (%d locs), GNG=$%.2f",
+                        sc_total, sc_count, gng_total)
 
             # 6. Get store info for restaurant names
             store_info = aloha_sales_db.get_store_info()
@@ -5281,7 +5334,7 @@ async def nightly_flash_import_job():
             "rows_inserted": inserted,
             "service_charges_total": round(sc_total, 2),
             "service_charges_locations": sc_count,
-            "gng_note": "GNG=$0 — needs separate sales category solution",
+            "gng_total": round(gng_total, 2),
             "completed_at": datetime.now().isoformat(),
             "status": "success",
         })
@@ -9448,7 +9501,7 @@ async def _run_flash_import_for_date(target_date: date):
                 if dining_opt in ("Catering", "X-EzCater", "X-Online Catering"):
                     loc_data[loc_id]["_catering_checks"] += orders
 
-            # Service charges
+            # Service charges + GNG from orders
             for loc_id, data in loc_data.items():
                 guid = data.pop("_guid", "")
                 cat_checks = data.pop("_catering_checks", 0)
@@ -9456,14 +9509,16 @@ async def _run_flash_import_for_date(target_date: date):
 
                 if guid:
                     try:
-                        sc_amount = await _compute_restaurant_service_charges(
+                        sc_amount, gng_amount = await _compute_sc_and_gng(
                             client, guid, target_yyyymmdd
                         )
                         if sc_amount > 0:
                             data["net_sales"] -= sc_amount
+                        if gng_amount > 0:
+                            data["gng_net_sales"] = gng_amount
                         await asyncio.sleep(0.3)
                     except Exception as exc:
-                        logger.warning("Flash import SC for %s: %s", loc_id, exc)
+                        logger.warning("Flash import SC/GNG for %s: %s", loc_id, exc)
 
             store_info = aloha_sales_db.get_store_info()
             rows_for_df = []
