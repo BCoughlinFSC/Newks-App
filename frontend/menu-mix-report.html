@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Menu Mix Performance Report – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0; padding: 0;
+      background: #F8FAFC; color: #2c2c2c;
+      min-height: 100vh;
+    }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.5rem; font-weight: 700; }
+    .header p  { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+    .container {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 2rem;
+      max-width: 1800px;
+      margin: 0 auto;
+    }
+    @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+    .card {
+      background: #fff; border-radius: 12px; padding: 1.5rem;
+      border: 1px solid #e8e0d5; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .card h2 { margin: 0 0 1.25rem 0; color: #C41E3A; font-size: 1.1rem; font-weight: 700; }
+    .card-subtitle { color: #6B7280; font-size: 0.85rem; margin: -0.75rem 0 1rem 0; }
+
+    /* Form elements */
+    .form-row { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .form-group input, .form-group select {
+      padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB;
+      border-radius: 6px; font-size: 0.9rem; font-family: inherit;
+      background: #fff; color: #2c2c2c;
+    }
+    .form-group input:focus { outline: none; border-color: #C41E3A; box-shadow: 0 0 0 3px rgba(196,30,58,0.1); }
+    .form-hint { font-size: 0.78rem; color: #9CA3AF; margin-top: 0.15rem; }
+
+    /* Locations grid */
+    .scroll-grid {
+      max-height: 160px; overflow-y: auto;
+      padding: 0.6rem 0.75rem; background: #F8FAFC;
+      border-radius: 6px; border: 1px solid #D1D5DB;
+    }
+    .scroll-grid::-webkit-scrollbar { width: 6px; }
+    .scroll-grid::-webkit-scrollbar-track { background: #F8FAFC; border-radius: 4px; }
+    .scroll-grid::-webkit-scrollbar-thumb { background: #d4c9b8; border-radius: 4px; }
+    .scroll-grid label {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.3rem 0; font-weight: normal; margin: 0;
+      color: #374151; font-size: 0.85rem; cursor: pointer;
+    }
+    .scroll-grid label:hover { color: #C41E3A; }
+    .scroll-grid input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: #C41E3A; flex-shrink: 0; }
+    .select-all-row {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;
+    }
+    .select-all-label {
+      display: flex; align-items: center; gap: 0.5rem;
+      color: #374151; font-weight: 600; font-size: 0.875rem; cursor: pointer;
+    }
+    .select-all-label input[type="checkbox"] { width: 15px; height: 15px; accent-color: #C41E3A; }
+    .count-badge { font-size: 0.8rem; font-weight: normal; color: #C41E3A; }
+
+    /* Buttons */
+    .btn-primary {
+      background: #C41E3A; color: #fff; border: none;
+      padding: 0.6rem 1.5rem; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem; font-family: inherit;
+      transition: all 0.2s;
+    }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; transform: translateY(-1px); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Status messages */
+    .status { padding: 0.65rem 0.85rem; border-radius: 8px; margin-top: 0.75rem; font-size: 0.875rem; display: none; }
+    .status.info    { background: #EFF6FF; border: 1px solid #93c5fd; color: #1d4ed8; display: block; }
+    .status.success { background: #f0fdf4; border: 1px solid #86efac; color: #15803d; display: block; }
+    .status.error   { background: #FEF2F2; border: 1px solid #fca5a5; color: #dc2626; display: block; }
+
+    /* Progress bar */
+    .progress-bar {
+      width: 100%; height: 8px; background: #E5E7EB; border-radius: 4px;
+      margin-top: 0.75rem; overflow: hidden; display: none;
+    }
+    .progress-bar .fill {
+      height: 100%; background: #C41E3A; border-radius: 4px;
+      transition: width 0.5s; width: 0%;
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      z-index: 9999; gap: 1rem;
+    }
+    .loading-overlay.hidden { display: none !important; }
+    .loading-spinner {
+      width: 56px; height: 56px;
+      border: 5px solid #e8e0d5;
+      border-top: 5px solid #C41E3A;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    .loading-text { color: #fff; font-size: 1rem; font-weight: 600; text-align: center; }
+    @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Menu Mix Performance Report</h1>
+        <p>Generate an Excel report with Recipe Summary, Item Summary, Combo counts, and per-store comparison</p>
+      </div>
+      <a href="/legacy.html" class="home-btn">Back to Reports</a>
+    </div>
+  </div>
+
+  <!-- Loading overlay -->
+  <div class="loading-overlay hidden" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">Generating report...</div>
+  </div>
+
+  <!-- Main layout -->
+  <div class="container">
+    <!-- Shared sidebar nav -->
+    <div id="shared-sidebar"></div>
+
+    <!-- Main content -->
+    <div>
+      <div class="card">
+        <h2>Report Parameters</h2>
+        <p class="card-subtitle">Select date ranges and locations, then generate the Excel report.</p>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>CY Start Date</label>
+            <input type="date" id="startDate" />
+          </div>
+          <div class="form-group">
+            <label>CY End Date</label>
+            <input type="date" id="endDate" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>LY Start Date <span style="font-weight:normal;color:#9CA3AF;">(optional)</span></label>
+            <input type="date" id="lyStartDate" />
+          </div>
+          <div class="form-group">
+            <label>LY End Date <span style="font-weight:normal;color:#9CA3AF;">(optional)</span></label>
+            <input type="date" id="lyEndDate" />
+          </div>
+        </div>
+        <div class="form-hint" style="margin-top:-0.5rem;margin-bottom:1rem;">Leave LY dates blank to default to same dates minus 1 year.</div>
+
+        <!-- Locations -->
+        <div class="form-group" style="margin-bottom:1rem;">
+          <label>Locations</label>
+          <div class="select-all-row">
+            <label class="select-all-label">
+              <input type="checkbox" id="selectAllLocations" checked />
+              Select All
+            </label>
+            <span class="count-badge" id="locationCount"></span>
+          </div>
+          <div class="scroll-grid" id="locationsGrid">
+            <div style="padding:0.25rem;color:#6B7280;font-size:0.85rem;">Loading locations...</div>
+          </div>
+        </div>
+
+        <div style="margin-top:1rem;">
+          <button class="btn-primary" id="generateBtn">Generate Excel Report</button>
+        </div>
+
+        <div class="status" id="statusEl"></div>
+        <div class="progress-bar" id="progressBar">
+          <div class="fill" id="progressFill"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/shared-nav.js"></script>
+  <script>
+    const locationsGrid = document.getElementById('locationsGrid');
+    const selectAllCb = document.getElementById('selectAllLocations');
+    const locationCountEl = document.getElementById('locationCount');
+    const generateBtn = document.getElementById('generateBtn');
+    const statusEl = document.getElementById('statusEl');
+    const progressBar = document.getElementById('progressBar');
+    const progressFill = document.getElementById('progressFill');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingText = document.getElementById('loadingText');
+
+    let locations = [];
+
+    // Default dates: last 30 days
+    const today = new Date();
+    const thirtyAgo = new Date(today);
+    thirtyAgo.setDate(thirtyAgo.getDate() - 30);
+    document.getElementById('endDate').value = today.toISOString().split('T')[0];
+    document.getElementById('startDate').value = thirtyAgo.toISOString().split('T')[0];
+
+    // ─── Load locations ───────────────────────────
+    async function loadLocations() {
+      try {
+        const resp = await fetch('/locations');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        locations = await resp.json();
+
+        if (!Array.isArray(locations) || locations.length === 0) {
+          locationsGrid.textContent = 'No locations found.';
+          return;
+        }
+
+        locationCountEl.textContent = `${locations.length} locations`;
+        locationsGrid.innerHTML = '';
+        locations.forEach(loc => {
+          const lbl = document.createElement('label');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.value = loc.restaurantGuid;
+          cb.checked = true;
+          cb.classList.add('loc-cb');
+          cb.addEventListener('change', updateCount);
+          lbl.appendChild(cb);
+          lbl.appendChild(document.createTextNode(' ' + loc.restaurantName));
+          locationsGrid.appendChild(lbl);
+        });
+      } catch (err) {
+        locationsGrid.textContent = 'Failed to load locations: ' + err.message;
+      }
+    }
+
+    function updateCount() {
+      const checked = locationsGrid.querySelectorAll('.loc-cb:checked').length;
+      const total = locationsGrid.querySelectorAll('.loc-cb').length;
+      locationCountEl.textContent = `${checked} / ${total} selected`;
+      selectAllCb.checked = checked === total;
+      selectAllCb.indeterminate = checked > 0 && checked < total;
+    }
+
+    selectAllCb.addEventListener('change', () => {
+      locationsGrid.querySelectorAll('.loc-cb').forEach(cb => cb.checked = selectAllCb.checked);
+      updateCount();
+    });
+
+    function showStatus(type, msg) {
+      statusEl.className = 'status ' + type;
+      statusEl.textContent = msg;
+    }
+
+    // ─── Generate report ──────────────────────────
+    generateBtn.addEventListener('click', async () => {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      if (!startDate || !endDate) { showStatus('error', 'Please select CY start and end dates.'); return; }
+
+      const selectedLocs = Array.from(locationsGrid.querySelectorAll('.loc-cb:checked')).map(cb => cb.value);
+      if (selectedLocs.length === 0) { showStatus('error', 'Please select at least one location.'); return; }
+
+      const body = {
+        startDate,
+        endDate,
+        restaurantIds: selectAllCb.checked ? [] : selectedLocs,
+      };
+
+      const lyStart = document.getElementById('lyStartDate').value;
+      const lyEnd = document.getElementById('lyEndDate').value;
+      if (lyStart && lyEnd) {
+        body.lyStartDate = lyStart;
+        body.lyEndDate = lyEnd;
+      }
+
+      generateBtn.disabled = true;
+      loadingOverlay.classList.remove('hidden');
+      loadingText.textContent = 'Generating report... This may take a few minutes for large date ranges.';
+      showStatus('info', 'Fetching data from Toast API and Aloha database...');
+      progressBar.style.display = 'block';
+
+      let progress = 0;
+      const progressInterval = setInterval(() => {
+        progress = Math.min(progress + 1.5, 90);
+        progressFill.style.width = progress + '%';
+      }, 1000);
+
+      try {
+        const resp = await fetch('/api/reports/menu-mix/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        clearInterval(progressInterval);
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+
+        progressFill.style.width = '100%';
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const disposition = resp.headers.get('Content-Disposition') || '';
+        const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+        const filename = filenameMatch ? filenameMatch[1] : 'Menu_Mix_Performance.xlsx';
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showStatus('success', 'Report downloaded successfully!');
+      } catch (err) {
+        showStatus('error', 'Error: ' + err.message);
+        progressFill.style.width = '0%';
+      } finally {
+        generateBtn.disabled = false;
+        loadingOverlay.classList.add('hidden');
+        setTimeout(() => { progressBar.style.display = 'none'; }, 2000);
+      }
+    });
+
+    loadLocations();
+  </script>
+</body>
+</html>

@@ -13186,6 +13186,846 @@ async def proxy_menu_api(request: Request):
 async def proxy_debug_menu(request: Request):
     return await _proxy_to_menuboard(request, "api/debug/menu")
 
+# ------------------------------------------------------------------
+# Menu Mix Performance Report  (Excel download)
+# ------------------------------------------------------------------
+
+# Recipe tags – items marked Y in the Recipe Tags CSV.
+# These are the specific recipe-level tags (Caesar, BlackBleu, etc.)
+_RECIPE_TAGS: set = {
+    "Caesar", "Favorite", "Garden", "Ultimate", "Greek", "Cobb",
+    "StrawberryFields", "GreenGoddess", "ChickenPesto", "Steakhouse",
+    "SalmonCaesar", "ShrimpAvo", "Southern", "BlackBleu", "Chef",
+    "ChickenCaesar", "SummerBerry", "ChickenAsianSalad", "ChiliTacoSalad",
+    "ShrimpCajunSalad", "PestoPastaCaesar",
+    "CakeStrawberry", "CakeChocolate", "CakeCheesecakeNY", "CakeCaramel",
+    "CakeRedVelvet", "CakeCoconut", "CakeBananaNut", "CakeLemon",
+    "CakeMintChocolateChip", "CakePeanutButterChocolate", "CakePumpkin",
+    "ChickenSalad", "Club", "NewksQ", "ChickenBaconSpicy", "ShrimpSpicy",
+    "MacCheese", "MacCheesePimiento", "MacCheeseKids", "MacCheeseChili",
+    "ChknSaladCrois", "TurkeyCrois", "HamCrois", "ClubWheat", "ClubCrois",
+    "TurkeyAvo", "ChickenBaconClub", "Italian", "FrenchDip", "TurkeyBreast",
+    "ChickenPestoGrilled", "NewksPhilly", "Ham", "SteakQ", "ShrimpPoBoy",
+    "RoastBeef", "TurkeyKids", "PortabellaVeg", "GrilledChsKids",
+    "DoubleClub", "GrilledChsAdult", "HamKids", "NewksCheesesteak",
+    "TunaSalad", "TunaMelt",
+    "SoupLoadedPotato", "SoupLobsterCrab", "SoupTomatoBasil",
+    "SoupChickenTortilla", "SoupBroccoliCheese", "SoupBeefChili",
+    "SoupCrawfish", "SoupGumbo", "SoupMarylandCrab",
+    "TreatPBCrisby", "TreatBigCrispy", "TreatCookieCChip", "TreatBrownie",
+    "Debra", "ChickenSpicy", "Mediterranean", "Supreme", "ChickenBBQ",
+    "PepperoniKids", "CheeseKids", "Margherita", "PepperoniMushroom",
+    "PepperoniSausage", "Pepperoni",
+    "ChickenGreek", "GrilledSteak", "ChickenGarden", "HamWheat",
+    "RoastBeefCrois", "RoastBeefWheat", "ShrimpCajunPoBoy", "TurkeyWheat",
+    "BowlFruit", "BowlPastaSalad", "BowlPotatoSalad", "PimientoCheese",
+    "Trio", "Parisian", "BBQChicken", "Chicken",
+    "ChickenBaconClubCrios", "ChickenBaconClubFP", "ChickenBaconClubRoll",
+    "ChickenBaconClubWheat", "ChickenPastaBowl", "ChickenPestoWheat",
+    "ChickenSaladCrois", "ChickenSaladFP", "ChickenSaladRoll",
+    "ChickenSaladWheat",
+    "ChipsBakedLays", "ChipsBBQ", "ChipsCheetos", "ChipsDoritos",
+    "ChipsFritos", "ChipsJalapeno", "ChipsOriginal", "ChipsSunChips",
+    "ClubFP", "ClubRoll",
+    "DrBalsamicVin", "DrBBQ", "DrBleuCheese", "DrCaesar", "DrComeback",
+    "DrGreek", "DrGreenGoddess", "DrHoneyMust", "DrLemonVin", "DrNoDressing",
+    "DrRanch", "DrSherryVin", "DrWhiteBBQ", "DrGinger", "DrChipotle",
+    "Fruit", "HamCrios", "HamFP", "HamRoll",
+    "ItalianCrios", "ItalianFP", "ItalianRoll", "ItalianWheat",
+    "PastaSalad", "PestoChickenCrios", "PestoChickenFP", "PestoChickenRoll",
+    "PimientoCheeseCrois", "PimientoCheeseRoll", "PortabellaVegWheat",
+    "PotatoSalad", "RoastBeefRoll",
+    "ShrimpPastaBowl", "SoupChickenTortila", "Southen", "SouthernDuo",
+    "TreatAssorted", "TreatBigCrispy", "TreatBrownie", "TreatCookie",
+    "TreatDessert", "TreatPBCrispy", "TripleTake",
+    "TunaSaladCrois", "TunaSaladFP", "TunaSaladRoll", "TunaSaladWheat",
+    "TurkeyAvoCrois", "TurkeyAvoFP", "TurkeyAvoRoll", "TurkeyAvoWheat",
+    "TurkeyFP", "TurkeyRoll",
+}
+
+
+def _load_mapping_for_mix() -> pd.DataFrame:
+    """Load mapping table with all columns needed for mix report."""
+    for path in [MAPPING_FILE, FALLBACK_MAPPING_FILE]:
+        if os.path.exists(path):
+            try:
+                return pd.read_excel(path)
+            except Exception:
+                continue
+    return pd.DataFrame()
+
+
+def _extract_recipe_tag(tags_str: str) -> str:
+    """Extract the recipe tag from a comma-separated Tags string."""
+    if not tags_str or pd.isna(tags_str):
+        return ""
+    for tag in str(tags_str).split(","):
+        tag = tag.strip()
+        if tag in _RECIPE_TAGS:
+            return tag
+    return ""
+
+
+def _extract_ee_value(ee_tag: str) -> float:
+    """Convert EntreEquivTag to numeric value."""
+    if not ee_tag or pd.isna(ee_tag):
+        return 0.0
+    ee = str(ee_tag).strip()
+    if ee == "EE 1":
+        return 1.0
+    if ee == "EE .5":
+        return 0.5
+    if ee == "EE 12":
+        return 12.0
+    return 0.0
+
+
+def _build_mix_excel(
+    report_details: dict,
+    summary_combos: dict,
+    recipe_summary: list,
+    item_summary: list,
+    item_counts: list,
+) -> bytes:
+    """Build the 5-sheet Mix Performance Report Excel file."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill("solid", fgColor="4472C4")
+    header_font_white = Font(bold=True, size=11, color="FFFFFF")
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+    num_fmt_dec2 = "0.00"
+    num_fmt_int = "#,##0"
+    num_fmt_pct = "0.0%"
+
+    # ── Sheet 1: Report Details ──
+    ws1 = wb.active
+    ws1.title = "Report Details"
+    loc_label = report_details.get("location_label", "All locations combined")
+    ws1["A1"] = loc_label
+    ws1["A1"].font = Font(bold=True, size=14)
+    ws1["C2"] = "#stores being reported"
+    ws1["D2"] = report_details["num_stores"]
+    ws1["C3"] = "# days being reported"
+    ws1["D3"] = report_details["num_days"]
+    ws1["C2"].font = header_font
+    ws1["C3"].font = header_font
+    ws1.column_dimensions["A"].width = 30
+    ws1.column_dimensions["C"].width = 25
+    ws1.column_dimensions["D"].width = 12
+
+    # ── Sheet 2: Summary Combos ──
+    ws2 = wb.create_sheet("Summary Combos")
+    ws2["D2"] = "Units"
+    ws2["G2"] = "Per Store Per Day"
+    ws2["D3"] = "This Y"
+    ws2["E3"] = "Last Y"
+    ws2["G3"] = "TY"
+    ws2["H3"] = "LY"
+    for cell in ["D2", "G2"]:
+        ws2[cell].font = header_font_white
+        ws2[cell].fill = header_fill
+    for cell in ["D3", "E3", "G3", "H3"]:
+        ws2[cell].font = header_font
+    ws2["B4"] = "Combos ( Totals for all)"
+    ws2["B4"].font = Font(bold=True, size=12)
+
+    na_font = Font(italic=True, color="999999")
+    combo_rows = summary_combos.get("combos", [])
+    row = 5
+    for item in combo_rows:
+        ws2[f"C{row}"] = item["name"]
+        ws2[f"D{row}"] = item.get("ty_units", 0)
+        ws2[f"D{row}"].number_format = num_fmt_int
+        ws2[f"G{row}"] = item.get("ty_pspd", 0)
+        ws2[f"G{row}"].number_format = num_fmt_dec2
+        if item.get("ly_units") is not None:
+            ws2[f"E{row}"] = item["ly_units"]
+            ws2[f"E{row}"].number_format = num_fmt_int
+            ws2[f"H{row}"] = item["ly_pspd"]
+            ws2[f"H{row}"].number_format = num_fmt_dec2
+        else:
+            ws2[f"E{row}"] = "N/A"
+            ws2[f"E{row}"].font = na_font
+            ws2[f"H{row}"] = "N/A"
+            ws2[f"H{row}"].font = na_font
+        row += 1
+
+    row += 1
+    ws2[f"B{row}"] = "Combo Upcharges"
+    ws2[f"B{row}"].font = Font(bold=True, size=12)
+    row += 1
+    for item in summary_combos.get("upcharges", []):
+        ws2[f"C{row}"] = item["name"]
+        ws2[f"D{row}"] = item.get("ty_units", 0)
+        ws2[f"D{row}"].number_format = num_fmt_int
+        ws2[f"G{row}"] = item.get("ty_pspd", 0)
+        ws2[f"G{row}"].number_format = num_fmt_dec2
+        if item.get("ly_units") is not None:
+            ws2[f"E{row}"] = item["ly_units"]
+            ws2[f"E{row}"].number_format = num_fmt_int
+            ws2[f"H{row}"] = item["ly_pspd"]
+            ws2[f"H{row}"].number_format = num_fmt_dec2
+        else:
+            ws2[f"E{row}"] = "N/A"
+            ws2[f"E{row}"].font = na_font
+            ws2[f"H{row}"] = "N/A"
+            ws2[f"H{row}"].font = na_font
+        row += 1
+
+    for col in ["B", "C", "D", "E", "F", "G", "H"]:
+        ws2.column_dimensions[col].width = 18
+
+    # ── Sheet 3: Recipe Summary ──
+    ws3 = wb.create_sheet("Recipe summary")
+    ws3["B3"] = "Recipe Summary All selected locations"
+    ws3["B3"].font = Font(bold=True, size=13)
+    ws3["C4"] = "All Entrée Equivalents"
+    ws3["H4"] = "Full Entrée"
+    ws3["M4"] = "Half Entrée"
+    for cell in ["C4", "H4", "M4"]:
+        ws3[cell].font = header_font_white
+        ws3[cell].fill = header_fill
+    ws3["C5"] = "PSPD"
+    ws3["D5"] = "PSPD"
+    ws3["F5"] = "Mix Change"
+    ws3["H5"] = "PSPD"
+    ws3["I5"] = "PSPD"
+    ws3["K5"] = "Mix Change"
+    ws3["M5"] = "PSPD"
+    ws3["N5"] = "PSPD"
+    ws3["P5"] = "Mix Change"
+    ws3["A6"] = "Consolidated Tag"
+    ws3["B6"] = "Recipe Tag"
+    ws3["C6"] = "TY"
+    ws3["D6"] = "LY"
+    ws3["H6"] = "TY"
+    ws3["I6"] = "LY"
+    ws3["M6"] = "TY"
+    ws3["N6"] = "LY"
+    for cell in ["A6", "B6", "C5", "C6", "D5", "D6", "F5", "H5", "H6", "I5", "I6", "K5", "M5", "M6", "N5", "N6", "P5"]:
+        ws3[cell].font = header_font
+
+    row = 7
+    for rec in recipe_summary:
+        ws3[f"A{row}"] = rec.get("consolidated_tag", "")
+        ws3[f"B{row}"] = rec.get("recipe_tag", "")
+        ws3[f"C{row}"] = rec.get("all_ee_pspd_ty", 0)
+        ws3[f"D{row}"] = rec.get("all_ee_pspd_ly", 0)
+        ws3[f"F{row}"] = rec.get("all_mix_change", 0)
+        ws3[f"H{row}"] = rec.get("full_ee_pspd_ty", 0)
+        ws3[f"I{row}"] = rec.get("full_ee_pspd_ly", 0)
+        ws3[f"K{row}"] = rec.get("full_mix_change", 0)
+        ws3[f"M{row}"] = rec.get("half_ee_pspd_ty", 0)
+        ws3[f"N{row}"] = rec.get("half_ee_pspd_ly", 0)
+        ws3[f"P{row}"] = rec.get("half_mix_change", 0)
+        for c in ["C", "D", "H", "I", "M", "N"]:
+            ws3[f"{c}{row}"].number_format = num_fmt_dec2
+        for c in ["F", "K", "P"]:
+            ws3[f"{c}{row}"].number_format = num_fmt_pct
+        row += 1
+
+    for col_letter in "ABCDEFGHIJKLMNOP":
+        ws3.column_dimensions[col_letter].width = 14
+
+    # ── Sheet 4: Item Summary ──
+    ws4 = wb.create_sheet("Item Summary")
+    loc_label_item = report_details.get("location_label", "All locations combined")
+    ws4["C3"] = loc_label_item
+    ws4["C3"].font = Font(bold=True, size=13)
+    # Header row 5
+    ws4["D5"] = "Consolidated Tag"
+    ws4["E5"] = "Recipe Tag Name"
+    ws4["H5"] = "Units"
+    ws4["J5"] = "Entrée Equivalent"
+    ws4["L5"] = "PSPD"
+    ws4["O5"] = "Entrée Equivalent PSPD"
+    ws4["R5"] = "Premium Flag?"
+    for cell in ["D5", "E5", "H5", "J5", "L5", "O5", "R5"]:
+        ws4[cell].font = header_font_white
+        ws4[cell].fill = header_fill
+    # Header row 6 sub-headers
+    ws4["B6"] = "Toast PLU"
+    ws4["C6"] = "Item_Name_T"
+    ws4["F6"] = "EE Tag"
+    ws4["H6"] = "TY"
+    ws4["I6"] = "LY"
+    ws4["L6"] = "TY"
+    ws4["M6"] = "LY"
+    ws4["O6"] = "TY"
+    ws4["P6"] = "LY"
+    for cell in ["B6", "C6", "F6", "H6", "I6", "L6", "M6", "O6", "P6"]:
+        ws4[cell].font = header_font
+
+    row = 7
+    for item in item_summary:
+        ws4[f"B{row}"] = item.get("toast_plu", "")
+        ws4[f"C{row}"] = item.get("item_name", "")
+        ws4[f"D{row}"] = item.get("consolidated_tag", "")
+        ws4[f"E{row}"] = item.get("recipe_tag", "")
+        ws4[f"F{row}"] = item.get("ee_tag", "")
+        ws4[f"H{row}"] = item.get("units_ty", 0)
+        ws4[f"I{row}"] = item.get("units_ly", 0)
+        ws4[f"J{row}"] = item.get("ee_value", 0)
+        ws4[f"L{row}"] = item.get("pspd_ty", 0)
+        ws4[f"M{row}"] = item.get("pspd_ly", 0)
+        ws4[f"O{row}"] = item.get("ee_pspd_ty", 0)
+        ws4[f"P{row}"] = item.get("ee_pspd_ly", 0)
+        ws4[f"R{row}"] = item.get("premium_flag", "")
+        ws4[f"H{row}"].number_format = num_fmt_int
+        ws4[f"I{row}"].number_format = num_fmt_int
+        ws4[f"J{row}"].number_format = num_fmt_dec2
+        ws4[f"L{row}"].number_format = num_fmt_dec2
+        ws4[f"M{row}"].number_format = num_fmt_dec2
+        ws4[f"O{row}"].number_format = num_fmt_dec2
+        ws4[f"P{row}"].number_format = num_fmt_dec2
+        row += 1
+
+    for col_letter in "BCDEFGHIJKLMNOPQR":
+        ws4.column_dimensions[col_letter].width = 16
+    ws4.column_dimensions["C"].width = 40
+
+    # ── Sheet 5: Item Counts Compare ──
+    ws5 = wb.create_sheet("Item Counts Compare")
+    headers5 = ["StoreNum", "StoreName", "Recipe", "ItemMLI", "EntreeEquivalents",
+                 "ItemID_T", "Item_Name_T", "ItemID_A", "Item_Name_A",
+                 "CYItemCount", "LYItemCount", "BlankCol", "CY_Equiv_Count", "LY_Equiv_Count"]
+    for col_idx, h in enumerate(headers5, 1):
+        cell = ws5.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font_white
+        cell.fill = header_fill
+
+    row = 2
+    for rec in item_counts:
+        ws5[f"A{row}"] = rec.get("store_num", "")
+        ws5[f"B{row}"] = rec.get("store_name", "")
+        ws5[f"C{row}"] = rec.get("recipe", "")
+        ws5[f"D{row}"] = rec.get("item_mli", "")
+        ws5[f"E{row}"] = rec.get("ee", 0)
+        ws5[f"F{row}"] = rec.get("item_id_t", "")
+        ws5[f"G{row}"] = rec.get("item_name_t", "")
+        ws5[f"H{row}"] = rec.get("item_id_a", "")
+        ws5[f"I{row}"] = rec.get("item_name_a", "")
+        ws5[f"J{row}"] = rec.get("cy_count", 0)
+        ws5[f"K{row}"] = rec.get("ly_count", 0)
+        ws5[f"L{row}"] = ""
+        ws5[f"M{row}"] = rec.get("cy_equiv", 0)
+        ws5[f"N{row}"] = rec.get("ly_equiv", 0)
+        ws5[f"E{row}"].number_format = num_fmt_dec2
+        ws5[f"J{row}"].number_format = num_fmt_int
+        ws5[f"K{row}"].number_format = num_fmt_int
+        ws5[f"M{row}"].number_format = num_fmt_dec2
+        ws5[f"N{row}"].number_format = num_fmt_dec2
+        row += 1
+
+    for col_letter in "ABCDEFGHIJKLMN":
+        ws5.column_dimensions[col_letter].width = 16
+    ws5.column_dimensions["D"].width = 30
+    ws5.column_dimensions["G"].width = 40
+    ws5.column_dimensions["I"].width = 30
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+class MenuMixRequest(BaseModel):
+    startDate: str          # YYYY-MM-DD
+    endDate: str            # YYYY-MM-DD
+    restaurantIds: List[str] = []   # empty = all
+    lyStartDate: Optional[str] = None  # override LY range
+    lyEndDate: Optional[str] = None
+
+
+@app.post("/api/reports/menu-mix/generate")
+async def generate_menu_mix_report(req: MenuMixRequest):
+    """Generate the Menu Mix Performance Report as an Excel download."""
+    from starlette.responses import StreamingResponse
+
+    cy_start = date.fromisoformat(req.startDate)
+    cy_end = date.fromisoformat(req.endDate)
+    num_days = (cy_end - cy_start).days + 1
+
+    # LY dates: default to same dates minus 1 year
+    if req.lyStartDate and req.lyEndDate:
+        ly_start_str = req.lyStartDate
+        ly_end_str = req.lyEndDate
+    else:
+        ly_start = cy_start.replace(year=cy_start.year - 1)
+        ly_end = cy_end.replace(year=cy_end.year - 1)
+        ly_start_str = ly_start.isoformat()
+        ly_end_str = ly_end.isoformat()
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Get locations
+        all_locations = await get_all_active_locations(client)
+        if req.restaurantIds:
+            locations = [loc for loc in all_locations if loc.restaurantGuid in req.restaurantIds]
+        else:
+            locations = list(all_locations)
+        restaurant_ids = [loc.restaurantGuid for loc in locations]
+        num_stores = len(locations)
+
+        if num_stores == 0:
+            raise HTTPException(status_code=400, detail="No locations selected")
+
+        location_label = "All locations combined" if not req.restaurantIds else ", ".join(
+            loc.restaurantName for loc in locations[:5]
+        )
+        if len(locations) > 5:
+            location_label += f" (+{len(locations) - 5} more)"
+
+        # ── Load mapping table ──
+        mapping_df = _load_mapping_for_mix()
+        if mapping_df.empty:
+            raise HTTPException(status_code=500, detail="Mapping table not found")
+
+        # Build lookup dicts from mapping
+        # normalized_toast_name → row data
+        mapping_by_norm_name: Dict[str, dict] = {}
+        mapping_by_mli: Dict[str, dict] = {}
+        mapping_by_guid: Dict[str, dict] = {}
+        aloha_to_recipe: Dict[str, dict] = {}
+
+        for _, mrow in mapping_df.iterrows():
+            toast_name = str(mrow.get("Toast_Item_Name", "") or "").strip()
+            norm = _normalize_item_name(toast_name)
+            aloha_name = str(mrow.get("AlohaItemName", "") or "").strip() if pd.notna(mrow.get("AlohaItemName")) else ""
+            cons_cat = str(mrow.get("ConsolidatedCat", "") or "").strip() if pd.notna(mrow.get("ConsolidatedCat")) else ""
+            tags_str = str(mrow.get("Tags", "") or "").strip() if pd.notna(mrow.get("Tags")) else ""
+            ee_tag = str(mrow.get("EntreEquivTag", "") or "").strip() if pd.notna(mrow.get("EntreEquivTag")) else ""
+            recipe_tag = _extract_recipe_tag(tags_str)
+            ee_val = _extract_ee_value(ee_tag)
+            mli = str(mrow.get("MultiLocationId", "") or "").strip() if pd.notna(mrow.get("MultiLocationId")) else ""
+            guid = str(mrow.get("item_guid", "") or "").strip() if pd.notna(mrow.get("item_guid")) else ""
+            toast_plu = str(mrow.get("ToastPLU", "") or "").strip() if pd.notna(mrow.get("ToastPLU")) else ""
+
+            row_data = {
+                "toast_name": toast_name,
+                "norm_name": norm,
+                "aloha_name": aloha_name,
+                "consolidated_tag": cons_cat,
+                "recipe_tag": recipe_tag,
+                "ee_tag": ee_tag,
+                "ee_value": ee_val,
+                "mli": mli,
+                "guid": guid,
+                "toast_plu": toast_plu,
+            }
+
+            if norm and norm not in mapping_by_norm_name:
+                mapping_by_norm_name[norm] = row_data
+            if mli and mli not in mapping_by_mli:
+                mapping_by_mli[mli] = row_data
+            if guid and guid not in mapping_by_guid:
+                mapping_by_guid[guid] = row_data
+            if aloha_name:
+                aloha_norm = aloha_name.lower().strip()
+                if aloha_norm not in aloha_to_recipe:
+                    aloha_to_recipe[aloha_norm] = row_data
+
+        def _lookup_mapping(item_guid: str, item_name: str) -> dict:
+            """Look up mapping by GUID first, then by normalized name."""
+            if item_guid:
+                hit = mapping_by_guid.get(item_guid)
+                if hit:
+                    return hit
+            norm = _normalize_item_name(item_name)
+            for key in _mapping_lookup_keys(norm):
+                hit = mapping_by_norm_name.get(key)
+                if hit:
+                    return hit
+            return {}
+
+        # ── CY: Fetch Toast Analytics MENU_ITEM data ──
+        logger.info(f"Menu Mix: Fetching CY data {cy_start} to {cy_end} for {num_stores} stores")
+        all_menu_item_rows: List[Dict] = []
+        current_start = cy_start
+        while current_start <= cy_end:
+            chunk_end = min(current_start + timedelta(days=6), cy_end)
+            report_guid = await request_toast_report(
+                client, current_start, chunk_end, restaurant_ids, "menu", ["MENU_ITEM"]
+            )
+            chunk_rows = await fetch_toast_report(client, report_guid, "menu")
+            if chunk_rows:
+                all_menu_item_rows.extend(chunk_rows)
+            current_start = chunk_end + timedelta(days=1)
+
+        # Also fetch MODIFIER data for modifiers with recipe tags
+        all_modifier_rows: List[Dict] = []
+        logger.info(f"Menu Mix: Fetching CY modifier data")
+        current_start = cy_start
+        while current_start <= cy_end:
+            chunk_end = min(current_start + timedelta(days=6), cy_end)
+            try:
+                mod_report_guid = await request_toast_report(
+                    client, current_start, chunk_end, restaurant_ids, "menu", ["MODIFIER"]
+                )
+                mod_rows = await fetch_toast_report(client, mod_report_guid, "menu")
+                if mod_rows:
+                    all_modifier_rows.extend(mod_rows)
+            except Exception as e:
+                logger.warning(f"Menu Mix: Failed to fetch modifier data for {current_start}-{chunk_end}: {e}")
+            current_start = chunk_end + timedelta(days=1)
+
+        logger.info(f"Menu Mix: Got {len(all_menu_item_rows)} MENU_ITEM rows + {len(all_modifier_rows)} MODIFIER rows")
+
+        # Aggregate CY by item (GUID + name) per store
+        # cy_items: {item_key: {guid, name, qty_total, qty_by_store, is_modifier}}
+        cy_items: Dict[str, Dict] = {}
+
+        # MENU_ITEM rows
+        for row in all_menu_item_rows:
+            guid = row.get("menuItemGuid") or ""
+            name = (row.get("menuItemName") or "").strip()
+            qty = float(row.get("quantitySold", 0) or 0)
+            store = row.get("restaurantGuid", "")
+            if not name or qty == 0:
+                continue
+            key = f"{guid}|{_normalize_item_name(name)}"
+            if key not in cy_items:
+                cy_items[key] = {"guid": guid, "name": name, "qty_total": 0, "qty_by_store": {}, "is_modifier": False}
+            cy_items[key]["qty_total"] += qty
+            cy_items[key]["qty_by_store"][store] = cy_items[key]["qty_by_store"].get(store, 0) + qty
+
+        # MODIFIER rows (tagged so combo counting can skip them)
+        for row in all_modifier_rows:
+            guid = row.get("modifierOptionGuid") or ""
+            name = (row.get("modifierOptionName") or "").strip()
+            qty = float(row.get("quantitySold", 0) or 0)
+            store = row.get("restaurantGuid", "")
+            if not name or qty == 0:
+                continue
+            key = f"mod|{guid}|{_normalize_item_name(name)}"
+            if key not in cy_items:
+                cy_items[key] = {"guid": guid, "name": name, "qty_total": 0, "qty_by_store": {}, "is_modifier": True}
+            cy_items[key]["qty_total"] += qty
+            cy_items[key]["qty_by_store"][store] = cy_items[key]["qty_by_store"].get(store, 0) + qty
+
+        # ── LY: Query aloha_db ──
+        aloha_loc_map = get_aloha_location_mapping()
+        aloha_loc_ids = [aloha_loc_map[rid] for rid in restaurant_ids if rid in aloha_loc_map]
+
+        logger.info(f"Menu Mix: Querying aloha_db for LY {ly_start_str} to {ly_end_str}, {len(aloha_loc_ids)} locations")
+        ly_df = aloha_db.query_date_range(
+            ly_start_str, ly_end_str,
+            locations=aloha_loc_ids if aloha_loc_ids else None,
+        )
+        logger.info(f"Menu Mix: Got {len(ly_df)} LY rows from aloha_db")
+
+        # Aggregate LY by Aloha item per store
+        # ly_items: {aloha_item_lower: {qty_total, qty_by_store: {aloha_loc: qty}}}
+        ly_items: Dict[str, Dict] = {}
+        for _, arow in ly_df.iterrows():
+            aloha_item = str(arow.get("AlohaItem", "")).strip()
+            qty = float(arow.get("Quantity", 0) or 0)
+            loc = str(arow.get("Location", "")).strip()
+            if not aloha_item or qty == 0:
+                continue
+            key = aloha_item.lower().strip()
+            if key not in ly_items:
+                ly_items[key] = {"name": aloha_item, "qty_total": 0, "qty_by_store": {}}
+            ly_items[key]["qty_total"] += qty
+            ly_items[key]["qty_by_store"][loc] = ly_items[key]["qty_by_store"].get(loc, 0) + qty
+
+        # ── Use SalesConsolidator for proper Toast→Aloha mapping (same as menu report YoY) ──
+        consolidator = get_yoy_consolidator()
+        toast_to_aloha = consolidator.toast_to_aloha_map
+        toast_name_to_aloha = consolidator.toast_name_to_aloha_map
+
+        # Build aloha qty lookup from LY data
+        aloha_qty_by_name: Dict[str, float] = {}
+        for _, arow in ly_df.iterrows():
+            aloha_item = str(arow.get("AlohaItem", "")).strip()
+            qty = float(arow.get("Quantity", 0) or 0)
+            if aloha_item:
+                aloha_qty_by_name[aloha_item] = aloha_qty_by_name.get(aloha_item, 0) + qty
+
+        def _lookup_ly_qty(item_guid: str, item_name: str) -> float:
+            """Look up LY quantity using SalesConsolidator mapping (same logic as menu report YoY)."""
+            # Try by GUID first
+            if item_guid:
+                aloha_name = toast_to_aloha.get(item_guid)
+                if aloha_name:
+                    return float(aloha_qty_by_name.get(aloha_name, 0))
+            # Then by normalized Toast name
+            if item_name:
+                normalized = consolidator.normalize_name(item_name)
+                aloha_name = toast_name_to_aloha.get(normalized)
+                if aloha_name:
+                    return float(aloha_qty_by_name.get(aloha_name, 0))
+                # Direct match on Aloha item name
+                norm_qty = {consolidator.normalize_name(k): v for k, v in aloha_qty_by_name.items() if consolidator.normalize_name(k)}
+                if normalized in norm_qty:
+                    return float(norm_qty[normalized])
+            # Try mapping table AlohaItemName
+            mapping_row = _lookup_mapping(item_guid, item_name)
+            aloha_name = mapping_row.get("aloha_name", "")
+            if aloha_name:
+                return float(aloha_qty_by_name.get(aloha_name, 0))
+            return 0.0
+
+        # ── Build Item Summary (Sheet 4) — ONLY items with a recipe tag ──
+        item_summary_list = []
+        recipe_agg: Dict[str, Dict] = {}  # key = "cons_tag|recipe_tag"
+        ly_num_days = (date.fromisoformat(ly_end_str) - date.fromisoformat(ly_start_str)).days + 1
+        skipped_no_recipe = 0
+
+        for item_key, cy_data in cy_items.items():
+            mapping_row = _lookup_mapping(cy_data["guid"], cy_data["name"])
+            recipe_tag = mapping_row.get("recipe_tag", "")
+
+            # *** FILTER: Only include items that have a recipe tag (IsRecipeTag=Y) ***
+            if not recipe_tag:
+                skipped_no_recipe += 1
+                continue
+
+            cons_tag = mapping_row.get("consolidated_tag", "")
+            ee_tag = mapping_row.get("ee_tag", "")
+            ee_val = mapping_row.get("ee_value", 0)
+            toast_plu = mapping_row.get("toast_plu", "")
+
+            # Look up LY quantity using consolidator mapping
+            ly_qty = _lookup_ly_qty(cy_data["guid"], cy_data["name"])
+
+            cy_qty = cy_data["qty_total"]
+            pspd_ty = cy_qty / num_stores / num_days if num_stores and num_days else 0
+            pspd_ly = ly_qty / num_stores / ly_num_days if num_stores and ly_num_days else 0
+            ee_pspd_ty = pspd_ty * ee_val
+            ee_pspd_ly = pspd_ly * ee_val
+
+            item_summary_list.append({
+                "toast_plu": toast_plu,
+                "item_name": cy_data["name"],
+                "consolidated_tag": cons_tag,
+                "recipe_tag": recipe_tag,
+                "ee_tag": ee_tag,
+                "ee_value": ee_val,
+                "units_ty": cy_qty,
+                "units_ly": ly_qty,
+                "pspd_ty": round(pspd_ty, 4),
+                "pspd_ly": round(pspd_ly, 4),
+                "ee_pspd_ty": round(ee_pspd_ty, 4),
+                "ee_pspd_ly": round(ee_pspd_ly, 4),
+                "premium_flag": "",
+            })
+
+            # Aggregate for recipe summary
+            rkey = f"{cons_tag}|{recipe_tag}"
+            if rkey not in recipe_agg:
+                recipe_agg[rkey] = {
+                    "consolidated_tag": cons_tag,
+                    "recipe_tag": recipe_tag,
+                    "all_ee_ty": 0, "all_ee_ly": 0,
+                    "full_ee_ty": 0, "full_ee_ly": 0,
+                    "half_ee_ty": 0, "half_ee_ly": 0,
+                }
+            recipe_agg[rkey]["all_ee_ty"] += cy_qty * ee_val
+            recipe_agg[rkey]["all_ee_ly"] += ly_qty * ee_val
+            if ee_val >= 1.0:
+                recipe_agg[rkey]["full_ee_ty"] += cy_qty * ee_val
+                recipe_agg[rkey]["full_ee_ly"] += ly_qty * ee_val
+            elif ee_val == 0.5:
+                recipe_agg[rkey]["half_ee_ty"] += cy_qty * ee_val
+                recipe_agg[rkey]["half_ee_ly"] += ly_qty * ee_val
+
+        logger.info(f"Menu Mix: {len(item_summary_list)} items with recipe tags, {skipped_no_recipe} skipped (no recipe tag)")
+
+        # Sort item summary by consolidated tag then recipe tag then item name
+        item_summary_list.sort(key=lambda x: (x["consolidated_tag"], x["recipe_tag"], x["item_name"]))
+
+        # ── Build Recipe Summary (Sheet 3) ──
+        # Compute totals for mix change calculation
+        total_all_ee_ty = sum(r["all_ee_ty"] for r in recipe_agg.values())
+        total_all_ee_ly = sum(r["all_ee_ly"] for r in recipe_agg.values())
+        total_full_ee_ty = sum(r["full_ee_ty"] for r in recipe_agg.values())
+        total_full_ee_ly = sum(r["full_ee_ly"] for r in recipe_agg.values())
+        total_half_ee_ty = sum(r["half_ee_ty"] for r in recipe_agg.values())
+        total_half_ee_ly = sum(r["half_ee_ly"] for r in recipe_agg.values())
+
+        recipe_summary_list = []
+        for rkey in sorted(recipe_agg.keys()):
+            r = recipe_agg[rkey]
+            all_pspd_ty = r["all_ee_ty"] / num_stores / num_days if num_stores and num_days else 0
+            ly_nd = (date.fromisoformat(ly_end_str) - date.fromisoformat(ly_start_str)).days + 1
+            all_pspd_ly = r["all_ee_ly"] / num_stores / ly_nd if num_stores and ly_nd else 0
+            full_pspd_ty = r["full_ee_ty"] / num_stores / num_days if num_stores and num_days else 0
+            full_pspd_ly = r["full_ee_ly"] / num_stores / ly_nd if num_stores and ly_nd else 0
+            half_pspd_ty = r["half_ee_ty"] / num_stores / num_days if num_stores and num_days else 0
+            half_pspd_ly = r["half_ee_ly"] / num_stores / ly_nd if num_stores and ly_nd else 0
+
+            # Mix Change = TY% - LY%
+            all_mix_ty = r["all_ee_ty"] / total_all_ee_ty if total_all_ee_ty else 0
+            all_mix_ly = r["all_ee_ly"] / total_all_ee_ly if total_all_ee_ly else 0
+            full_mix_ty = r["full_ee_ty"] / total_full_ee_ty if total_full_ee_ty else 0
+            full_mix_ly = r["full_ee_ly"] / total_full_ee_ly if total_full_ee_ly else 0
+            half_mix_ty = r["half_ee_ty"] / total_half_ee_ty if total_half_ee_ty else 0
+            half_mix_ly = r["half_ee_ly"] / total_half_ee_ly if total_half_ee_ly else 0
+
+            recipe_summary_list.append({
+                "consolidated_tag": r["consolidated_tag"],
+                "recipe_tag": r["recipe_tag"],
+                "all_ee_pspd_ty": round(all_pspd_ty, 4),
+                "all_ee_pspd_ly": round(all_pspd_ly, 4),
+                "all_mix_change": round(all_mix_ty - all_mix_ly, 4),
+                "full_ee_pspd_ty": round(full_pspd_ty, 4),
+                "full_ee_pspd_ly": round(full_pspd_ly, 4),
+                "full_mix_change": round(full_mix_ty - full_mix_ly, 4),
+                "half_ee_pspd_ty": round(half_pspd_ty, 4),
+                "half_ee_pspd_ly": round(half_pspd_ly, 4),
+                "half_mix_change": round(half_mix_ty - half_mix_ly, 4),
+            })
+
+        # ── Build Summary Combos (Sheet 2) ──
+        # Combo identification by item name patterns (matching how Pick 3 / Full Pairings reports work)
+        combo_defs = [
+            # (label, CY name matchers — checks if ANY pattern is in the item name)
+            ("Pick 3",                    ["(pick 3 entree)", "pick 3 (olo)"]),
+            ("Large Pairings",            ["(full pairing entree)", "full value pairings (olo)"]),
+            ("Half Pairings",             ["(half pairing", "pick 2 (olo)"]),
+            ("Pizza Family Meal Deal",    ["pizza family meal deal"]),
+            ("3 Pizza Meal Deal",         ["3 pizza meal deal"]),
+            ("Half Sandwich Combo Deal",  ["half sandwich meal deal"]),
+        ]
+        upcharge_defs = [
+            ("Half Sandwich Premium Upcharge $",  ["half sandwich premium upcharge"]),
+            ("Half Salad Premium Upcharge $",     ["half salad premium upcharge"]),
+            ("Premium Soup Upcharge Lg&sm",       ["premium soup upcharge"]),
+            ("Pick 3 Upcharge Bowl Fruit $",      ["pick 3 upcharge bowl fruit"]),
+            ("Pairing Upcharge Bowl Fruit $",     ["pairing upcharge bowl fruit"]),
+        ]
+
+        def _count_combo(patterns: List[str]) -> float:
+            """Count CY units for MENU_ITEM rows matching name patterns (skip modifiers)."""
+            cy_total = 0.0
+            for item_key, cy_data in cy_items.items():
+                if cy_data.get("is_modifier"):
+                    continue
+                name_lower = cy_data["name"].lower()
+                if any(p in name_lower for p in patterns):
+                    cy_total += cy_data["qty_total"]
+            return cy_total
+
+        combos_list = []
+        for label, patterns in combo_defs:
+            cy_u = _count_combo(patterns)
+            combos_list.append({
+                "name": label,
+                "ty_units": cy_u,
+                "ly_units": None,  # LY combo data not available from Aloha
+                "ty_pspd": round(cy_u / num_stores / num_days, 2) if num_stores and num_days else 0,
+                "ly_pspd": None,
+            })
+
+        upcharges_list = []
+        for label, patterns in upcharge_defs:
+            cy_u = _count_combo(patterns)
+            upcharges_list.append({
+                "name": label,
+                "ty_units": cy_u,
+                "ly_units": None,
+                "ty_pspd": round(cy_u / num_stores / num_days, 2) if num_stores and num_days else 0,
+                "ly_pspd": None,
+            })
+
+        # ── Build Item Counts Compare (Sheet 5) ──
+        # Per-store × recipe × item detail — only items with recipe tags
+        item_counts_list = []
+
+        # Build per-store LY lookup: {aloha_item_lower: {aloha_loc: qty}}
+        ly_by_store: Dict[str, Dict[str, float]] = {}
+        for _, arow in ly_df.iterrows():
+            aloha_item = str(arow.get("AlohaItem", "")).strip()
+            qty = float(arow.get("Quantity", 0) or 0)
+            loc = str(arow.get("Location", "")).strip()
+            if aloha_item and qty:
+                key = aloha_item.lower().strip()
+                if key not in ly_by_store:
+                    ly_by_store[key] = {}
+                ly_by_store[key][loc] = ly_by_store[key].get(loc, 0) + qty
+
+        for item_key, cy_data in cy_items.items():
+            mapping_row = _lookup_mapping(cy_data["guid"], cy_data["name"])
+            recipe_tag = mapping_row.get("recipe_tag", "")
+
+            # Only include items with a recipe tag
+            if not recipe_tag:
+                continue
+
+            ee_val = mapping_row.get("ee_value", 0)
+            mli = mapping_row.get("mli", "")
+            toast_plu = mapping_row.get("toast_plu", "")
+
+            # Resolve aloha item name via consolidator
+            aloha_name = ""
+            if cy_data["guid"]:
+                aloha_name = toast_to_aloha.get(cy_data["guid"], "")
+            if not aloha_name:
+                normalized = consolidator.normalize_name(cy_data["name"])
+                aloha_name = toast_name_to_aloha.get(normalized, "")
+            if not aloha_name:
+                aloha_name = mapping_row.get("aloha_name", "")
+
+            for store_guid, store_qty in cy_data.get("qty_by_store", {}).items():
+                loc_obj = next((l for l in locations if l.restaurantGuid == store_guid), None)
+                store_num = aloha_loc_map.get(store_guid, "")
+                store_name = loc_obj.restaurantName if loc_obj else ""
+
+                # LY for this specific store
+                ly_store_qty = 0
+                if aloha_name and store_num:
+                    ly_store_qty = ly_by_store.get(aloha_name.lower().strip(), {}).get(store_num, 0)
+
+                item_counts_list.append({
+                    "store_num": store_num,
+                    "store_name": store_name,
+                    "recipe": recipe_tag,
+                    "item_mli": mli,
+                    "ee": ee_val,
+                    "item_id_t": toast_plu,
+                    "item_name_t": cy_data["name"],
+                    "item_id_a": "",
+                    "item_name_a": aloha_name,
+                    "cy_count": store_qty,
+                    "ly_count": ly_store_qty,
+                    "cy_equiv": store_qty * ee_val,
+                    "ly_equiv": ly_store_qty * ee_val,
+                })
+
+        item_counts_list.sort(key=lambda x: (x["store_num"], x["recipe"], x["item_name_t"]))
+
+        # ── Generate Excel ──
+        logger.info(f"Menu Mix: Building Excel with {len(item_summary_list)} items, {len(recipe_summary_list)} recipes, {len(item_counts_list)} store-item rows")
+        xlsx_bytes = _build_mix_excel(
+            report_details={
+                "location_label": location_label,
+                "num_stores": num_stores,
+                "num_days": num_days,
+            },
+            summary_combos={
+                "combos": combos_list,
+                "upcharges": upcharges_list,
+            },
+            recipe_summary=recipe_summary_list,
+            item_summary=item_summary_list,
+            item_counts=item_counts_list,
+        )
+
+        date_label = f"{cy_start.strftime('%Y%m%d')}_{cy_end.strftime('%Y%m%d')}"
+        filename = f"Menu_Mix_Performance_{date_label}.xlsx"
+        return StreamingResponse(
+            io.BytesIO(xlsx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+
 # ------------------
 # Static Frontend
 # ------------------

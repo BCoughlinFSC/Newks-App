@@ -25,6 +25,7 @@
     { key: 'full-pairings', label: 'Full Pairings',      href: '/full-pairings.html' },
     { key: 'wpy',           label: 'Weekly Sales (WPY)',  href: '/wpy.html' },
     { key: 'daily-flash',   label: 'Daily Sales Flash',   href: '/daily-flash.html' },
+    { key: 'menu-mix',      label: 'Menu Mix Report',     href: '/menu-mix-report.html' },
   ];
 
   const ADMIN_LINKS = [
@@ -50,6 +51,7 @@
     if (path.endsWith('/full-pairings.html'))        return 'full-pairings';
     if (path.endsWith('/wpy.html'))                  return 'wpy';
     if (path.endsWith('/daily-flash.html'))         return 'daily-flash';
+    if (path.endsWith('/menu-mix-report.html'))     return 'menu-mix';
     if (path.endsWith('/olo.html'))                   return 'olo';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
