@@ -5151,6 +5151,7 @@ _DINING_OPTION_TO_DB_COL = {
 _GNG_SALES_CATEGORY_GUID = "497c8ee0-a5f3-44bf-a699-11c3e8ebf9a0"
 
 _nightly_flash_last_result: Dict[str, Any] = {}
+_flash_import_progress: Dict[str, Any] = {}  # live progress for in-flight imports
 
 
 async def _compute_sc_and_gng(
@@ -9429,24 +9430,72 @@ async def admin_run_flash_import(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format — use YYYY-MM-DD")
 
+        total_days = (end_d - start_d).days + 1
+
         async def _run_backfill():
+            _flash_import_progress.update({
+                "running": True,
+                "type": "backfill",
+                "range": f"{start_str} to {end_str}",
+                "total_days": total_days,
+                "completed_days": 0,
+                "current_date": start_str,
+                "started_at": datetime.now().isoformat(),
+                "failed_dates": [],
+            })
             d = start_d
+            completed = 0
             while d <= end_d:
-                logger.info("Flash import backfill: %s", d.isoformat())
-                await _run_flash_import_for_date(d)
+                _flash_import_progress["current_date"] = d.isoformat()
+                logger.info("Flash import backfill: %s (%d/%d)", d.isoformat(), completed + 1, total_days)
+                try:
+                    await _run_flash_import_for_date(d)
+                except Exception as exc:
+                    logger.error("Flash backfill failed for %s: %s", d.isoformat(), exc)
+                    _flash_import_progress["failed_dates"].append(d.isoformat())
+                completed += 1
+                _flash_import_progress["completed_days"] = completed
                 d += timedelta(days=1)
+            _flash_import_progress.update({
+                "running": False,
+                "completed_at": datetime.now().isoformat(),
+            })
 
         asyncio.create_task(_run_backfill())
-        return {"status": "started", "range": f"{start_str} to {end_str}"}
+        return {"status": "started", "range": f"{start_str} to {end_str}", "total_days": total_days}
     else:
-        asyncio.create_task(nightly_flash_import_job())
+        _flash_import_progress.update({
+            "running": True,
+            "type": "single",
+            "range": "yesterday",
+            "total_days": 1,
+            "completed_days": 0,
+            "current_date": (date.today() - timedelta(days=1)).isoformat(),
+            "started_at": datetime.now().isoformat(),
+            "failed_dates": [],
+        })
+
+        async def _run_single():
+            try:
+                await nightly_flash_import_job()
+            finally:
+                _flash_import_progress.update({
+                    "running": False,
+                    "completed_days": 1,
+                    "completed_at": datetime.now().isoformat(),
+                })
+
+        asyncio.create_task(_run_single())
         return {"status": "started", "date": "yesterday"}
 
 
 @app.get("/api/admin/flash-import/status")
 async def admin_flash_import_status(admin_user: User = Depends(get_current_admin_user)):
-    """Return the last flash import job result."""
-    return _nightly_flash_last_result or {"status": "never_run"}
+    """Return the flash import status including live progress."""
+    result = dict(_nightly_flash_last_result) if _nightly_flash_last_result else {"status": "never_run"}
+    if _flash_import_progress:
+        result["progress"] = dict(_flash_import_progress)
+    return result
 
 
 async def _run_flash_import_for_date(target_date: date):

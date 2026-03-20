@@ -1155,6 +1155,8 @@
     // ──────────────────────────────────────────────────────
     // Flash Sales Import
     // ──────────────────────────────────────────────────────
+    let _flashPollTimer = null;
+
     async function loadFlashImportStatus() {
       try {
         const resp = await fetch('/api/admin/flash-import/status', { headers: getAuthHeaders() });
@@ -1166,17 +1168,70 @@
             <div style="font-size:0.78rem;color:#6B7280;margin-bottom:0.3rem;">${label}</div>
             <div style="font-size:1.3rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
           </div>`;
-        if (s.status === 'never_run') {
-          el.innerHTML = `<div style="grid-column:1/-1;color:#6B7280;font-size:0.85rem;">No flash import has run yet.</div>`;
+
+        const p = s.progress;
+        let html = '';
+
+        // Show progress banner if running
+        if (p && p.running) {
+          const pct = p.total_days > 0 ? Math.round((p.completed_days / p.total_days) * 100) : 0;
+          const failCount = (p.failed_dates || []).length;
+          html += `<div style="grid-column:1/-1;background:#EFF6FF;border:1px solid #93C5FD;border-radius:10px;padding:1rem;margin-bottom:0.5rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+              <div style="font-weight:700;color:#1E40AF;font-size:0.95rem;">
+                Import Running: ${escHtml(p.range || '')}
+              </div>
+              <div style="font-size:0.85rem;color:#1E40AF;">${p.completed_days} / ${p.total_days} days (${pct}%)</div>
+            </div>
+            <div style="background:#DBEAFE;border-radius:6px;height:20px;overflow:hidden;">
+              <div style="background:#2563EB;height:100%;width:${pct}%;transition:width 0.5s;border-radius:6px;"></div>
+            </div>
+            <div style="margin-top:0.5rem;font-size:0.82rem;color:#374151;">
+              Currently processing: <strong>${escHtml(p.current_date || '')}</strong>
+              ${p.started_at ? ' &mdash; started ' + new Date(p.started_at).toLocaleTimeString() : ''}
+              ${failCount > 0 ? ` &mdash; <span style="color:#DC2626;">${failCount} failed</span>` : ''}
+            </div>
+          </div>`;
+          // Auto-refresh while running
+          if (!_flashPollTimer) {
+            _flashPollTimer = setInterval(loadFlashImportStatus, 3000);
+          }
         } else {
-          el.innerHTML =
-            card('Status', s.status === 'success' ? 'OK' : 'Failed', s.status === 'success' ? '#059669' : '#DC2626') +
-            card('Date', s.business_date || '—', '#374151') +
+          // Stop polling when done
+          if (_flashPollTimer) {
+            clearInterval(_flashPollTimer);
+            _flashPollTimer = null;
+          }
+
+          // Show completion banner if just finished
+          if (p && !p.running && p.completed_at) {
+            const failCount = (p.failed_dates || []).length;
+            html += `<div style="grid-column:1/-1;background:${failCount > 0 ? '#FEF2F2' : '#F0FDF4'};border:1px solid ${failCount > 0 ? '#FCA5A5' : '#86EFAC'};border-radius:10px;padding:1rem;margin-bottom:0.5rem;">
+              <div style="font-weight:700;color:${failCount > 0 ? '#991B1B' : '#166534'};font-size:0.95rem;">
+                Backfill Complete: ${escHtml(p.range || '')} &mdash; ${p.completed_days}/${p.total_days} days
+                ${failCount > 0 ? ` (${failCount} failed)` : ''}
+              </div>
+              <div style="font-size:0.82rem;color:#374151;margin-top:0.25rem;">
+                Finished at ${new Date(p.completed_at).toLocaleString()}
+                ${failCount > 0 ? ' &mdash; Failed dates: ' + p.failed_dates.join(', ') : ''}
+              </div>
+            </div>`;
+          }
+        }
+
+        // Last completed import cards
+        if (s.status === 'never_run' && !p) {
+          html += `<div style="grid-column:1/-1;color:#6B7280;font-size:0.85rem;">No flash import has run yet.</div>`;
+        } else if (s.status && s.status !== 'never_run') {
+          html +=
+            card('Last Status', s.status === 'success' ? 'OK' : 'Failed', s.status === 'success' ? '#059669' : '#DC2626') +
+            card('Last Date', s.business_date || '—', '#374151') +
             card('Locations', s.locations || 0, '#1E3A5F') +
             card('Rows', s.rows_inserted || 0, '#1E3A5F') +
-            card('Service Charges', '$' + (s.service_charges_total || 0).toLocaleString(), '#B45309') +
+            card('GNG Total', '$' + (s.gng_total || 0).toLocaleString(undefined, {minimumFractionDigits:2}), '#7C3AED') +
             card('Completed', s.completed_at ? new Date(s.completed_at).toLocaleString() : '—', '#6B7280');
         }
+        el.innerHTML = html;
       } catch (err) {
         document.getElementById('flashImportStatus').innerHTML =
           `<div style="color:#991B1B;font-size:0.85rem;grid-column:1/-1;">Error loading flash import status: ${escHtml(err.message)}</div>`;
@@ -1191,7 +1246,8 @@
           body: JSON.stringify({})
         });
         if (resp.ok) {
-          showStatus('Flash import started for yesterday. Check back in a few minutes.', 'success');
+          showStatus('Flash import started for yesterday.', 'success');
+          loadFlashImportStatus();  // Immediately refresh to show progress
         } else {
           showStatus('Failed to start flash import', 'error');
         }
@@ -1211,8 +1267,9 @@
         });
         if (resp.ok) {
           const data = await resp.json();
-          msgEl.textContent = `Backfill started: ${data.range}. Running in background...`;
+          msgEl.textContent = `Backfill started: ${data.range} (${data.total_days} days). Watch progress above.`;
           msgEl.style.color = '#059669';
+          loadFlashImportStatus();  // Immediately refresh to show progress bar
         } else {
           msgEl.textContent = 'Failed to start backfill';
           msgEl.style.color = '#DC2626';
