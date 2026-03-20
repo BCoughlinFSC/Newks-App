@@ -1640,8 +1640,8 @@ async def request_toast_report(
         "excludedRestaurantIds": [],
     }
     
-    # Add groupBy if provided (only supported for day/week time ranges per Toast API)
-    if group_by and time_range in ["day", "week"]:
+    # Add groupBy if provided
+    if group_by:
         body["groupBy"] = group_by
     
     # Choose endpoint
@@ -5098,12 +5098,215 @@ _scheduler.add_job(nightly_orders_cache_job, CronTrigger(hour=3, minute=0),
                    id="nightly_orders_cache", replace_existing=True)
 
 
+# ------------------
+# Nightly Flash Sales Import — Toast ERA API → aloha_sales_db
+# Replaces Don Wilson's SQL Server ETL pipeline entirely.
+# ------------------
+
+# Granular mapping: ERA dining option → aloha_sales_db column
+# Some columns need sub-splits (e.g. callin vs olo_callin, curbside vs curbside_olo)
+_DINING_OPTION_TO_DB_COL = {
+    # callin_net_sales (non-OLO call-ins)
+    "Call-In":              "callin_net_sales",
+    # olo_callin_net_sales (OLO-originated call-ins)
+    "X-Call In-OLO":        "olo_callin_net_sales",
+    "X-KEA Call In":        "olo_callin_net_sales",
+    # togo_net_sales
+    "ToGo":                 "togo_net_sales",
+    "X-To Go (K)":          "togo_net_sales",
+    "Drive Thru":           "togo_net_sales",
+    "X-Drive Thru-OLO":     "togo_net_sales",
+    # olo_net_sales
+    "X-ToGo-OLO":          "olo_net_sales",
+    # dinein_net_sales
+    "Dine In":              "dinein_net_sales",
+    "X-Dine-In (K)":        "dinein_net_sales",
+    "X-Dine-In-OLO":        "dinein_net_sales",
+    # delivery_net_sales
+    "Delivery":             "delivery_net_sales",
+    "X-Delivery-OLO":       "delivery_net_sales",
+    "X-Doordash (R)":       "delivery_net_sales",
+    "X-UberEats (R)":       "delivery_net_sales",
+    "X-GrubHub (R)":        "delivery_net_sales",
+    "X-Dispatch DD":        "delivery_net_sales",
+    "X-Dispatch DL":        "delivery_net_sales",
+    "X-Dispatch PM":        "delivery_net_sales",
+    "X-Dispatch SC":        "delivery_net_sales",
+    "X-Dispatch Uber":      "delivery_net_sales",
+    "X-Dispatch (Generic)": "delivery_net_sales",
+    "X-Rails (Generic)":    "delivery_net_sales",
+    # curbside_net_sales (non-OLO)
+    "Curbside":             "curbside_net_sales",
+    # curbside_olo_net_sales (OLO-originated curbside)
+    "X-Curbside-OLO":       "curbside_olo_net_sales",
+    # catering_net_sales
+    "Catering":             "catering_net_sales",
+    "X-EzCater":            "catering_net_sales",
+    "X-Online Catering":    "catering_net_sales",
+    # POS2 — not a column in aloha_sales_db, skip
+    # "Union Aramark (POS 2)": n/a
+}
+
+_nightly_flash_last_result: Dict[str, Any] = {}
+
+
+async def nightly_flash_import_job():
+    """
+    Nightly job: fetch yesterday's sales from Toast ERA API (by dining option),
+    compute service charges from Orders API, and write Newk's net sales into
+    aloha_sales_db — fully replacing Don Wilson's SQL Server ETL pipeline.
+    """
+    yesterday = date.today() - timedelta(days=1)
+    yesterday_str = yesterday.isoformat()  # YYYY-MM-DD
+    yesterday_yyyymmdd = yesterday.strftime("%Y%m%d")
+    logger.info("Nightly flash import started for %s", yesterday_str)
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # 1. Get all active restaurants
+            locations = await get_all_active_locations(client)
+            restaurant_ids = [loc.restaurantGuid for loc in locations]
+            guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
+
+            # 2. Load GUID → Aloha location mapping
+            guid_to_loc = _get_flash_loc_mapping()
+
+            # 3. Fetch ERA metrics with DINING_OPTION groupBy for yesterday
+            report_guid = await request_toast_report(
+                client, yesterday, yesterday, restaurant_ids,
+                report_type="metrics", group_by=["DINING_OPTION"],
+            )
+            era_rows = await fetch_toast_report(client, report_guid, report_type="metrics")
+            if not isinstance(era_rows, list):
+                era_rows = []
+
+            logger.info("Nightly flash: got %d ERA rows for %s", len(era_rows), yesterday_str)
+
+            # 4. Aggregate ERA data into per-location channel buckets
+            loc_data: Dict[str, Dict[str, float]] = {}
+            for row in era_rows:
+                guid = row.get("restaurantGuid", "")
+                loc_id = guid_to_loc.get(guid)
+                if not loc_id:
+                    continue
+
+                dining_opt = str(row.get("diningOption", "") or "").strip()
+                net = float(row.get("netSalesAmount", 0) or 0)
+                orders = float(row.get("ordersCount", 0) or 0)
+
+                if loc_id not in loc_data:
+                    loc_data[loc_id] = {
+                        "net_sales": 0, "olo_net_sales": 0, "delivery_net_sales": 0,
+                        "catering_net_sales": 0, "gng_net_sales": 0, "togo_net_sales": 0,
+                        "curbside_net_sales": 0, "curbside_olo_net_sales": 0,
+                        "dinein_net_sales": 0, "callin_net_sales": 0, "olo_callin_net_sales": 0,
+                        "check_count": 0, "checks_minus_catering": 0,
+                        "_guid": guid, "_catering_checks": 0,
+                    }
+
+                loc_data[loc_id]["net_sales"] += net
+                loc_data[loc_id]["check_count"] += orders
+
+                # Map to specific DB column
+                db_col = _DINING_OPTION_TO_DB_COL.get(dining_opt)
+                if db_col and db_col in loc_data[loc_id]:
+                    loc_data[loc_id][db_col] += net
+
+                # Track catering checks for NonCateringChecks
+                if dining_opt in ("Catering", "X-EzCater", "X-Online Catering"):
+                    loc_data[loc_id]["_catering_checks"] += orders
+
+            # 5. Compute service charges via Orders API for each location
+            #    and subtract from net_sales to get Newk's net sales
+            sc_total = 0.0
+            sc_count = 0
+            for loc_id, data in loc_data.items():
+                guid = data.pop("_guid", "")
+                cat_checks = data.pop("_catering_checks", 0)
+                data["checks_minus_catering"] = data["check_count"] - cat_checks
+
+                if guid:
+                    try:
+                        sc_amount = await _compute_restaurant_service_charges(
+                            client, guid, yesterday_yyyymmdd
+                        )
+                        if sc_amount > 0:
+                            data["net_sales"] -= sc_amount
+                            sc_total += sc_amount
+                            sc_count += 1
+                            logger.debug("Flash import SC for %s: -$%.2f", loc_id, sc_amount)
+                        await asyncio.sleep(0.3)  # Rate limit courtesy
+                    except Exception as exc:
+                        logger.warning("Flash import: SC fetch failed for %s: %s", loc_id, exc)
+
+            logger.info("Nightly flash: service charges subtracted: $%.2f across %d locations",
+                        sc_total, sc_count)
+
+            # 6. Get store info for restaurant names
+            store_info = aloha_sales_db.get_store_info()
+
+            # 7. Build DataFrame and upsert into aloha_sales_db
+            rows_for_df = []
+            for loc_id, data in loc_data.items():
+                si = store_info.get(loc_id, {})
+                rows_for_df.append({
+                    "RestaurantID": loc_id,
+                    "RestaurantName": si.get("restaurant_name", guid_to_name.get(data.get("_guid", ""), "")),
+                    "NetSales": data["net_sales"],
+                    "OLONetSales": data["olo_net_sales"],
+                    "DeliveryNetSales": data["delivery_net_sales"],
+                    "CateringNetSales": data["catering_net_sales"],
+                    "GNGNetSales": data["gng_net_sales"],
+                    "ToGoNetSales": data["togo_net_sales"],
+                    "CurbSideNetSales": data["curbside_net_sales"],
+                    "CurbSideOLONetSales": data["curbside_olo_net_sales"],
+                    "DineInNetSales": data["dinein_net_sales"],
+                    "CallInNetSales": data["callin_net_sales"],
+                    "OLOCallInNetSales": data["olo_callin_net_sales"],
+                    "CheckCount": data["check_count"],
+                    "ChecksMinusCatering": data["checks_minus_catering"],
+                })
+
+            if rows_for_df:
+                df = pd.DataFrame(rows_for_df)
+                inserted = aloha_sales_db.upsert_date(df, yesterday_str)
+                logger.info("Nightly flash import: inserted %d rows for %s", inserted, yesterday_str)
+            else:
+                inserted = 0
+                logger.warning("Nightly flash import: no data to insert for %s", yesterday_str)
+
+        _nightly_flash_last_result.update({
+            "business_date": yesterday_str,
+            "locations": len(loc_data),
+            "rows_inserted": inserted,
+            "service_charges_total": round(sc_total, 2),
+            "service_charges_locations": sc_count,
+            "gng_note": "GNG=$0 — needs separate sales category solution",
+            "completed_at": datetime.now().isoformat(),
+            "status": "success",
+        })
+
+    except Exception as exc:
+        logger.error("Nightly flash import failed: %s", exc, exc_info=True)
+        _nightly_flash_last_result.update({
+            "business_date": yesterday_str,
+            "status": "failed",
+            "error": str(exc),
+            "completed_at": datetime.now().isoformat(),
+        })
+
+
+# Schedule: run at 4:00 AM daily (after the 3 AM orders cache job finishes)
+_scheduler.add_job(nightly_flash_import_job, CronTrigger(hour=4, minute=0),
+                   id="nightly_flash_import", replace_existing=True)
+
+
 @app.on_event("startup")
 async def _on_startup():
     toast_orders_db.initialize_db()
     aloha_sales_db.initialize_db()
     _scheduler.start()
-    logger.info("APScheduler started — nightly orders cache job scheduled at 3:00 AM")
+    logger.info("APScheduler started — nightly jobs scheduled (orders@3AM, flash import@4AM)")
 
 
 @app.on_event("shutdown")
@@ -9153,6 +9356,160 @@ async def admin_run_nightly_job(admin_user: User = Depends(get_current_admin_use
     return {"status": "started"}
 
 
+@app.post("/api/admin/flash-import/run")
+async def admin_run_flash_import(
+    payload: dict = Body(default={}),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Manually trigger the flash sales import.
+    By default imports yesterday. Pass {"date": "YYYY-MM-DD"} for a specific date,
+    or {"start_date": "...", "end_date": "..."} for a backfill range.
+    """
+    start_str = payload.get("start_date") or payload.get("date")
+    end_str = payload.get("end_date") or start_str
+
+    if start_str and end_str:
+        try:
+            start_d = date.fromisoformat(start_str)
+            end_d = date.fromisoformat(end_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format — use YYYY-MM-DD")
+
+        async def _run_backfill():
+            d = start_d
+            while d <= end_d:
+                logger.info("Flash import backfill: %s", d.isoformat())
+                await _run_flash_import_for_date(d)
+                d += timedelta(days=1)
+
+        asyncio.create_task(_run_backfill())
+        return {"status": "started", "range": f"{start_str} to {end_str}"}
+    else:
+        asyncio.create_task(nightly_flash_import_job())
+        return {"status": "started", "date": "yesterday"}
+
+
+@app.get("/api/admin/flash-import/status")
+async def admin_flash_import_status(admin_user: User = Depends(get_current_admin_user)):
+    """Return the last flash import job result."""
+    return _nightly_flash_last_result or {"status": "never_run"}
+
+
+async def _run_flash_import_for_date(target_date: date):
+    """Run the flash import for a specific date (used for backfill)."""
+    target_str = target_date.isoformat()
+    target_yyyymmdd = target_date.strftime("%Y%m%d")
+    logger.info("Flash import for %s", target_str)
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            locations = await get_all_active_locations(client)
+            restaurant_ids = [loc.restaurantGuid for loc in locations]
+            guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
+            guid_to_loc = _get_flash_loc_mapping()
+
+            report_guid = await request_toast_report(
+                client, target_date, target_date, restaurant_ids,
+                report_type="metrics", group_by=["DINING_OPTION"],
+            )
+            era_rows = await fetch_toast_report(client, report_guid, report_type="metrics")
+            if not isinstance(era_rows, list):
+                era_rows = []
+
+            loc_data: Dict[str, Dict[str, float]] = {}
+            for row in era_rows:
+                guid = row.get("restaurantGuid", "")
+                loc_id = guid_to_loc.get(guid)
+                if not loc_id:
+                    continue
+
+                dining_opt = str(row.get("diningOption", "") or "").strip()
+                net = float(row.get("netSalesAmount", 0) or 0)
+                orders = float(row.get("ordersCount", 0) or 0)
+
+                if loc_id not in loc_data:
+                    loc_data[loc_id] = {
+                        "net_sales": 0, "olo_net_sales": 0, "delivery_net_sales": 0,
+                        "catering_net_sales": 0, "gng_net_sales": 0, "togo_net_sales": 0,
+                        "curbside_net_sales": 0, "curbside_olo_net_sales": 0,
+                        "dinein_net_sales": 0, "callin_net_sales": 0, "olo_callin_net_sales": 0,
+                        "check_count": 0, "checks_minus_catering": 0,
+                        "_guid": guid, "_catering_checks": 0,
+                    }
+
+                loc_data[loc_id]["net_sales"] += net
+                loc_data[loc_id]["check_count"] += orders
+
+                db_col = _DINING_OPTION_TO_DB_COL.get(dining_opt)
+                if db_col and db_col in loc_data[loc_id]:
+                    loc_data[loc_id][db_col] += net
+
+                if dining_opt in ("Catering", "X-EzCater", "X-Online Catering"):
+                    loc_data[loc_id]["_catering_checks"] += orders
+
+            # Service charges
+            for loc_id, data in loc_data.items():
+                guid = data.pop("_guid", "")
+                cat_checks = data.pop("_catering_checks", 0)
+                data["checks_minus_catering"] = data["check_count"] - cat_checks
+
+                if guid:
+                    try:
+                        sc_amount = await _compute_restaurant_service_charges(
+                            client, guid, target_yyyymmdd
+                        )
+                        if sc_amount > 0:
+                            data["net_sales"] -= sc_amount
+                        await asyncio.sleep(0.3)
+                    except Exception as exc:
+                        logger.warning("Flash import SC for %s: %s", loc_id, exc)
+
+            store_info = aloha_sales_db.get_store_info()
+            rows_for_df = []
+            for loc_id, data in loc_data.items():
+                si = store_info.get(loc_id, {})
+                rows_for_df.append({
+                    "RestaurantID": loc_id,
+                    "RestaurantName": si.get("restaurant_name", ""),
+                    "NetSales": data["net_sales"],
+                    "OLONetSales": data["olo_net_sales"],
+                    "DeliveryNetSales": data["delivery_net_sales"],
+                    "CateringNetSales": data["catering_net_sales"],
+                    "GNGNetSales": data["gng_net_sales"],
+                    "ToGoNetSales": data["togo_net_sales"],
+                    "CurbSideNetSales": data["curbside_net_sales"],
+                    "CurbSideOLONetSales": data["curbside_olo_net_sales"],
+                    "DineInNetSales": data["dinein_net_sales"],
+                    "CallInNetSales": data["callin_net_sales"],
+                    "OLOCallInNetSales": data["olo_callin_net_sales"],
+                    "CheckCount": data["check_count"],
+                    "ChecksMinusCatering": data["checks_minus_catering"],
+                })
+
+            if rows_for_df:
+                df = pd.DataFrame(rows_for_df)
+                inserted = aloha_sales_db.upsert_date(df, target_str)
+                logger.info("Flash import: %d rows for %s", inserted, target_str)
+
+                _nightly_flash_last_result.update({
+                    "business_date": target_str,
+                    "locations": len(loc_data),
+                    "rows_inserted": inserted,
+                    "completed_at": datetime.now().isoformat(),
+                    "status": "success",
+                })
+
+    except Exception as exc:
+        logger.error("Flash import failed for %s: %s", target_str, exc, exc_info=True)
+        _nightly_flash_last_result.update({
+            "business_date": target_str,
+            "status": "failed",
+            "error": str(exc),
+            "completed_at": datetime.now().isoformat(),
+        })
+
+
 class MsiDiscrepancyParseRequest(BaseModel):
     text: str
 
@@ -11482,6 +11839,493 @@ async def run_wpy_report(payload: dict = Body(...)):
         "channelLabels": {k: v["label"] for k, v in _WPY_CHANNELS.items()},
     }
     return result
+
+
+# ── Daily Sales Flash Report ─────────────────────────────────────────
+
+# Dining option → flash channel mapping
+# Source: toast.dbo.cfg_DiningOptions JOIN toast.dbo.cfg_map_DiningOptionToOrderMode
+_DINING_OPTION_TO_CHANNEL = {
+    # CallInNet (FlashTab=CallInNet, FlashSort=2)
+    "Call-In":              "CallInNet",
+    "X-Call In-OLO":        "CallInNet",
+    "X-KEA Call In":        "CallInNet",
+    # ToGoNet (FlashTab=ToGoNet, FlashSort=3)
+    "ToGo":                 "ToGoNet",
+    "X-To Go (K)":          "ToGoNet",
+    "Drive Thru":           "ToGoNet",
+    "X-Drive Thru-OLO":     "ToGoNet",
+    # OLO (FlashTab=OLO, FlashSort=4)
+    "X-ToGo-OLO":          "OLO",
+    # DineInNet (FlashTab=DineInNet, FlashSort=5)
+    "Dine In":              "DineInNet",
+    "X-Dine-In (K)":        "DineInNet",
+    "X-Dine-In-OLO":        "DineInNet",
+    # DeliveryNet (FlashTab=DeliveryNet, FlashSort=6)
+    "Delivery":             "DeliveryNet",
+    "X-Delivery-OLO":       "DeliveryNet",
+    "X-Doordash (R)":       "DeliveryNet",
+    "X-UberEats (R)":       "DeliveryNet",
+    "X-GrubHub (R)":        "DeliveryNet",
+    "X-Dispatch DD":        "DeliveryNet",
+    "X-Dispatch DL":        "DeliveryNet",
+    "X-Dispatch PM":        "DeliveryNet",
+    "X-Dispatch SC":        "DeliveryNet",
+    "X-Dispatch Uber":      "DeliveryNet",
+    "X-Dispatch (Generic)": "DeliveryNet",
+    "X-Rails (Generic)":    "DeliveryNet",
+    # CurbSide (FlashTab=CurbSide, FlashSort=7)
+    "Curbside":             "CurbSide",
+    "X-Curbside-OLO":       "CurbSide",
+    # POS2 (FlashTab=POS2, FlashSort=8)
+    "Union Aramark (POS 2)":"POS2",
+    # Catering — FlashTab says "NOT USED IN FLASH" but we include it as a channel
+    "Catering":             "Catering",
+    "X-EzCater":            "Catering",
+    "X-Online Catering":    "Catering",
+}
+
+# Flash channels in display order
+_FLASH_CHANNEL_KEYS = [
+    "Net", "CallInNet", "ToGoNet", "GNG", "Catering", "OLO",
+    "NonCatering", "NonCateringChecks", "CheckCount",
+    "DineInNet", "DeliveryNet", "CurbSide",
+]
+_FLASH_CHANNEL_LABELS = {
+    "Net": "R-Net", "CallInNet": "CallInNet", "ToGoNet": "ToGoNet",
+    "GNG": "GNG", "Catering": "Catering (cat)", "OLO": "OLO",
+    "NonCatering": "NonCatering", "NonCateringChecks": "NonCateringChecks",
+    "CheckCount": "CheckCount", "DineInNet": "DineInNet",
+    "DeliveryNet": "DeliveryNet", "CurbSide": "CurbSide",
+    "CheckAverage": "CheckAverage", "POS2": "POS2",
+}
+
+
+async def _fetch_flash_era_data(
+    start_date: date, end_date: date,
+    restaurant_ids: List[str],
+) -> List[dict]:
+    """
+    Call Toast ERA metrics API with groupBy diningOption.
+    Returns list of rows: {restaurantGuid, restaurantName, diningOption, netSalesAmount, guestCount, ordersCount, ...}
+    """
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        report_guid = await request_toast_report(
+            client, start_date, end_date, restaurant_ids,
+            report_type="metrics",
+            group_by=["DINING_OPTION"],
+        )
+        data = await fetch_toast_report(client, report_guid, report_type="metrics")
+    return data if isinstance(data, list) else []
+
+
+def _aggregate_flash_by_location(
+    rows: List[dict],
+    guid_to_loc: dict,
+) -> dict:
+    """
+    Aggregate ERA metrics rows (with diningOption) into per-location channel totals.
+    Returns: {loc_id: {channel_key: net_sales_amount, "Net": total, "CheckCount": count, ...}}
+    """
+    result = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        guid = row.get("restaurantGuid", "")
+        loc_id = guid_to_loc.get(guid)
+        if not loc_id:
+            continue
+
+        net = float(row.get("netSalesAmount", 0) or 0)
+        orders = float(row.get("ordersCount", 0) or 0)
+        guests = float(row.get("guestCount", 0) or 0)
+        dining_opt = str(row.get("diningOption", "") or "").strip()
+
+        if loc_id not in result:
+            result[loc_id] = {ch: 0.0 for ch in _FLASH_CHANNEL_KEYS}
+            result[loc_id]["POS2"] = 0.0
+            result[loc_id]["_orders"] = 0.0
+            result[loc_id]["_guests"] = 0.0
+
+        # Map dining option to channel
+        channel = _DINING_OPTION_TO_CHANNEL.get(dining_opt)
+        if channel and channel in result[loc_id]:
+            result[loc_id][channel] += net
+
+        # Net is always total regardless of dining option
+        result[loc_id]["Net"] += net
+        result[loc_id]["CheckCount"] += orders
+        result[loc_id]["_orders"] += orders
+        result[loc_id]["_guests"] += guests
+
+    # Compute derived channels
+    for loc_id, ch in result.items():
+        ch["NonCatering"] = ch["Net"] - ch["Catering"]
+        ch["NonCateringChecks"] = ch["CheckCount"] - 0  # TODO: subtract catering checks if available
+
+    return result
+
+def _build_flash_period_from_api(
+    cur_by_loc: dict,
+    prior_by_loc: dict,
+    current_start: str, current_end: str,
+    prior_start: str, prior_end: str,
+    store_info: dict,
+) -> dict:
+    """
+    Build one period of the Daily Flash report from pre-aggregated API data.
+    cur_by_loc / prior_by_loc: {loc_id: {channel_key: value, ...}}
+    store_info: {loc_id: {restaurant_name, company, comping, open_date, ...}}
+    """
+    all_locs = sorted(set(list(cur_by_loc.keys()) + list(prior_by_loc.keys())))
+    _COMPANY_ENTITY = "Newco Dining LLC"
+
+    all_channel_keys = _FLASH_CHANNEL_KEYS + ["POS2"]
+    channels = {}
+    nc_cur_by_loc = {}; nc_prior_by_loc = {}
+    ncch_cur_by_loc = {}; ncch_prior_by_loc = {}
+
+    for ch_key in all_channel_keys:
+        loc_rows = []
+        total_cur = 0.0; total_prior = 0.0
+        comping_cur = 0.0; comping_prior = 0.0
+        co_cur = 0.0; co_prior = 0.0
+        co_comp_cur = 0.0; co_comp_prior = 0.0
+        fr_cur = 0.0; fr_prior = 0.0
+        fr_comp_cur = 0.0; fr_comp_prior = 0.0
+
+        for loc in all_locs:
+            cur_val = cur_by_loc.get(loc, {}).get(ch_key, 0.0)
+            prior_val = prior_by_loc.get(loc, {}).get(ch_key, 0.0)
+            variance = cur_val - prior_val
+            comp_pct = round((variance / prior_val) * 100, 2) if prior_val else 0.0
+
+            si = store_info.get(loc, {})
+            loc_name = si.get("restaurant_name", "")
+            company = si.get("company", "")
+            comping_flag = si.get("comping", "")
+            open_date = si.get("open_date", "")
+            is_comping = str(comping_flag).strip().upper() == "Y"
+            is_company = company == _COMPANY_ENTITY
+
+            loc_rows.append({
+                "location": loc,
+                "restaurantName": loc_name,
+                "company": company,
+                "comping": "Y" if is_comping else "N",
+                "openDate": str(open_date) if open_date else "",
+                "currentYR": round(cur_val, 2),
+                "priorYR": round(prior_val, 2),
+                "variance": round(variance, 2),
+                "compPct": comp_pct,
+            })
+            total_cur += cur_val; total_prior += prior_val
+            if is_comping:
+                comping_cur += cur_val; comping_prior += prior_val
+            if is_company:
+                co_cur += cur_val; co_prior += prior_val
+                if is_comping:
+                    co_comp_cur += cur_val; co_comp_prior += prior_val
+            else:
+                fr_cur += cur_val; fr_prior += prior_val
+                if is_comping:
+                    fr_comp_cur += cur_val; fr_comp_prior += prior_val
+
+            if ch_key == "NonCatering":
+                nc_cur_by_loc[loc] = cur_val; nc_prior_by_loc[loc] = prior_val
+            elif ch_key == "NonCateringChecks":
+                ncch_cur_by_loc[loc] = cur_val; ncch_prior_by_loc[loc] = prior_val
+
+        channels[ch_key] = {
+            "label": _FLASH_CHANNEL_LABELS.get(ch_key, ch_key),
+            "locations": loc_rows,
+            "totals": {
+                "allRestaurants": _make_totals(total_cur, total_prior),
+                "comping": _make_totals(comping_cur, comping_prior),
+                "companyAll": _make_totals(co_cur, co_prior),
+                "companySss": _make_totals(co_comp_cur, co_comp_prior),
+                "franchiseAll": _make_totals(fr_cur, fr_prior),
+                "franchiseSss": _make_totals(fr_comp_cur, fr_comp_prior),
+            },
+        }
+
+    # ── CheckAverage = NonCatering / NonCateringChecks ──
+    def _safe_div(a, b):
+        return round(a / b, 6) if b else 0.0
+
+    ca_loc_rows = []
+    ca_total_nc_cur = 0.0; ca_total_nc_prior = 0.0
+    ca_total_ncch_cur = 0.0; ca_total_ncch_prior = 0.0
+    ca_comp_nc_cur = 0.0; ca_comp_nc_prior = 0.0; ca_comp_ncch_cur = 0.0; ca_comp_ncch_prior = 0.0
+    ca_co_nc_cur = 0.0; ca_co_nc_prior = 0.0; ca_co_ncch_cur = 0.0; ca_co_ncch_prior = 0.0
+    ca_cocomp_nc_cur = 0.0; ca_cocomp_nc_prior = 0.0; ca_cocomp_ncch_cur = 0.0; ca_cocomp_ncch_prior = 0.0
+    ca_fr_nc_cur = 0.0; ca_fr_nc_prior = 0.0; ca_fr_ncch_cur = 0.0; ca_fr_ncch_prior = 0.0
+    ca_frcomp_nc_cur = 0.0; ca_frcomp_nc_prior = 0.0; ca_frcomp_ncch_cur = 0.0; ca_frcomp_ncch_prior = 0.0
+
+    for loc in all_locs:
+        nc_c = nc_cur_by_loc.get(loc, 0); nc_p = nc_prior_by_loc.get(loc, 0)
+        ncch_c = ncch_cur_by_loc.get(loc, 0); ncch_p = ncch_prior_by_loc.get(loc, 0)
+        cur_val = _safe_div(nc_c, ncch_c)
+        prior_val = _safe_div(nc_p, ncch_p)
+        variance = round(cur_val - prior_val, 6)
+        comp_pct = round((variance / prior_val) * 100, 2) if prior_val else 0.0
+
+        si = store_info.get(loc, {})
+        is_comping = str(si.get("comping", "")).strip().upper() == "Y"
+        is_company = si.get("company", "") == _COMPANY_ENTITY
+
+        ca_loc_rows.append({
+            "location": loc, "restaurantName": si.get("restaurant_name", ""),
+            "company": si.get("company", ""),
+            "comping": "Y" if is_comping else "N",
+            "openDate": str(si.get("open_date", "")) if si.get("open_date") else "",
+            "currentYR": cur_val, "priorYR": prior_val,
+            "variance": variance, "compPct": comp_pct,
+        })
+        ca_total_nc_cur += nc_c; ca_total_nc_prior += nc_p
+        ca_total_ncch_cur += ncch_c; ca_total_ncch_prior += ncch_p
+        if is_comping:
+            ca_comp_nc_cur += nc_c; ca_comp_nc_prior += nc_p
+            ca_comp_ncch_cur += ncch_c; ca_comp_ncch_prior += ncch_p
+        if is_company:
+            ca_co_nc_cur += nc_c; ca_co_nc_prior += nc_p
+            ca_co_ncch_cur += ncch_c; ca_co_ncch_prior += ncch_p
+            if is_comping:
+                ca_cocomp_nc_cur += nc_c; ca_cocomp_nc_prior += nc_p
+                ca_cocomp_ncch_cur += ncch_c; ca_cocomp_ncch_prior += ncch_p
+        else:
+            ca_fr_nc_cur += nc_c; ca_fr_nc_prior += nc_p
+            ca_fr_ncch_cur += ncch_c; ca_fr_ncch_prior += ncch_p
+            if is_comping:
+                ca_frcomp_nc_cur += nc_c; ca_frcomp_nc_prior += nc_p
+                ca_frcomp_ncch_cur += ncch_c; ca_frcomp_ncch_prior += ncch_p
+
+    def _make_ca_totals(nc_c, nc_p, ncch_c, ncch_p):
+        c = _safe_div(nc_c, ncch_c); p = _safe_div(nc_p, ncch_p)
+        v = round(c - p, 6)
+        comp = round((v / p) * 100, 2) if p else 0.0
+        return {"currentYR": c, "priorYR": p, "variance": v, "compPct": comp}
+
+    channels["CheckAverage"] = {
+        "label": "CheckAverage",
+        "locations": ca_loc_rows,
+        "totals": {
+            "allRestaurants": _make_ca_totals(ca_total_nc_cur, ca_total_nc_prior, ca_total_ncch_cur, ca_total_ncch_prior),
+            "comping": _make_ca_totals(ca_comp_nc_cur, ca_comp_nc_prior, ca_comp_ncch_cur, ca_comp_ncch_prior),
+            "companyAll": _make_ca_totals(ca_co_nc_cur, ca_co_nc_prior, ca_co_ncch_cur, ca_co_ncch_prior),
+            "companySss": _make_ca_totals(ca_cocomp_nc_cur, ca_cocomp_nc_prior, ca_cocomp_ncch_cur, ca_cocomp_ncch_prior),
+            "franchiseAll": _make_ca_totals(ca_fr_nc_cur, ca_fr_nc_prior, ca_fr_ncch_cur, ca_fr_ncch_prior),
+            "franchiseSss": _make_ca_totals(ca_frcomp_nc_cur, ca_frcomp_nc_prior, ca_frcomp_ncch_cur, ca_frcomp_ncch_prior),
+        },
+    }
+
+    return {
+        "currentRange": {"start": current_start, "end": current_end},
+        "priorRange": {"start": prior_start, "end": prior_end},
+        "channels": channels,
+    }
+
+
+def _get_flash_loc_mapping() -> dict:
+    """Load Toast GUID → Aloha location ID mapping."""
+    mapping_path = os.path.join(os.path.dirname(__file__), "data", "aloha", "aloha_location_mapping.json")
+    if os.path.exists(mapping_path):
+        with open(mapping_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _aggregate_flash_from_aloha(start_date: str, end_date: str, locations: Optional[List[str]] = None) -> dict:
+    """
+    Query aloha_sales_db for the given date range and return data in the same
+    {loc_id: {channel_key: value}} format as _aggregate_flash_by_location().
+    """
+    df = aloha_sales_db.query_date_range(start_date, end_date, locations=locations)
+    if df.empty:
+        return {}
+
+    result = {}
+    for _, row in df.iterrows():
+        loc_id = str(row["location"]).strip()
+        if not loc_id:
+            continue
+        ch = {k: 0.0 for k in _FLASH_CHANNEL_KEYS}
+        ch["POS2"] = 0.0
+        ch["Net"] = float(row.get("net_sales", 0) or 0)
+        ch["CallInNet"] = float(row.get("callin_net_sales", 0) or 0) + float(row.get("olo_callin_net_sales", 0) or 0)
+        ch["ToGoNet"] = float(row.get("togo_net_sales", 0) or 0)
+        ch["GNG"] = float(row.get("gng_net_sales", 0) or 0)
+        ch["Catering"] = float(row.get("catering_net_sales", 0) or 0)
+        ch["OLO"] = float(row.get("olo_net_sales", 0) or 0)
+        ch["DineInNet"] = float(row.get("dinein_net_sales", 0) or 0)
+        ch["DeliveryNet"] = float(row.get("delivery_net_sales", 0) or 0)
+        ch["CurbSide"] = float(row.get("curbside_net_sales", 0) or 0) + float(row.get("curbside_olo_net_sales", 0) or 0)
+        ch["CheckCount"] = float(row.get("check_count", 0) or 0)
+        ch["NonCateringChecks"] = float(row.get("checks_minus_catering", 0) or 0)
+        ch["NonCatering"] = ch["Net"] - ch["Catering"]
+        ch["_orders"] = ch["CheckCount"]
+        ch["_guests"] = 0.0
+        result[loc_id] = ch
+    return result
+
+
+@app.post("/api/daily-flash-report")
+async def run_daily_flash_report(payload: dict = Body(...)):
+    """
+    Run the Daily Sales Flash Report using Toast ERA API.
+    Expects: {"report_date": "YYYY-MM-DD", "locations": [...] (optional)}
+    Returns 5 periods: Daily, WTD, PTD, QTD, YTD with 14 channels + company grouping.
+    """
+    report_date_str = payload.get("report_date")
+    if not report_date_str:
+        raise HTTPException(status_code=400, detail="report_date required (YYYY-MM-DD)")
+    try:
+        report_date = date.fromisoformat(report_date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="report_date must be YYYY-MM-DD")
+
+    # Get fiscal calendar from local SQLite
+    if not aloha_sales_db.fiscal_calendar_available():
+        raise HTTPException(status_code=400, detail="Fiscal calendar not loaded — import it first")
+
+    conn = aloha_sales_db.get_connection()
+    try:
+        cal_row = conn.execute(
+            "SELECT fiscal_year, fiscal_period, fiscal_week FROM fiscal_calendar WHERE date = ?",
+            (report_date_str,)
+        ).fetchone()
+        if not cal_row:
+            raise HTTPException(status_code=400, detail=f"No fiscal calendar entry for {report_date_str}")
+        fy, fp, fw = cal_row
+
+        # CY date ranges
+        weekday = report_date.weekday()
+        wtd_start = report_date - timedelta(days=weekday)
+
+        ptd_row = conn.execute(
+            "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ? AND fiscal_period = ?",
+            (fy, fp)
+        ).fetchone()
+        ptd_start = date.fromisoformat(ptd_row[0]) if ptd_row and ptd_row[0] else wtd_start
+
+        q_start_period = ((fp - 1) // 3) * 3 + 1
+        qtd_row = conn.execute(
+            "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ? AND fiscal_period = ?",
+            (fy, q_start_period)
+        ).fetchone()
+        qtd_start = date.fromisoformat(qtd_row[0]) if qtd_row and qtd_row[0] else ptd_start
+
+        ytd_row = conn.execute(
+            "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ?", (fy,)
+        ).fetchone()
+        ytd_start = date.fromisoformat(ytd_row[0]) if ytd_row and ytd_row[0] else qtd_start
+    finally:
+        conn.close()
+
+    # PY date ranges — use fiscal calendar LY mapping
+    def _get_ly_range(cy_start: date, cy_end: date, py_fy: int, py_period: int) -> Tuple[str, str]:
+        ly_map = aloha_sales_db.get_fiscal_ly_dates(cy_start.isoformat(), cy_end.isoformat())
+        if ly_map:
+            ly_dates = sorted(ly_map.values())
+            return ly_dates[0], ly_dates[-1]
+        conn2 = aloha_sales_db.get_connection()
+        try:
+            py_row = conn2.execute(
+                "SELECT MIN(date) FROM fiscal_calendar WHERE fiscal_year = ? AND fiscal_period = ?",
+                (py_fy, py_period)
+            ).fetchone()
+            if py_row and py_row[0]:
+                py_start = date.fromisoformat(py_row[0])
+                py_end = py_start + timedelta(days=(cy_end - cy_start).days)
+                return py_start.isoformat(), py_end.isoformat()
+        finally:
+            conn2.close()
+        return (cy_start - timedelta(days=364)).isoformat(), (cy_end - timedelta(days=364)).isoformat()
+
+    daily_ly = _get_ly_range(report_date, report_date, fy - 1, fp)
+    wtd_ly = _get_ly_range(wtd_start, report_date, fy - 1, fp)
+    ptd_ly = _get_ly_range(ptd_start, report_date, fy - 1, fp)
+    qtd_ly = _get_ly_range(qtd_start, report_date, fy - 1, q_start_period)
+    ytd_ly = _get_ly_range(ytd_start, report_date, fy - 1, 1)
+
+    # Get all restaurant GUIDs and mappings
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        all_locations = await get_all_active_locations(client)
+    guid_to_loc = _get_flash_loc_mapping()
+    restaurant_ids = [loc.restaurantGuid for loc in all_locations]
+
+    # Filter locations if requested (by Aloha ID)
+    requested_locs = payload.get("locations")
+    if requested_locs:
+        loc_set = set(requested_locs)
+        restaurant_ids = [rid for rid in restaurant_ids if guid_to_loc.get(rid) in loc_set]
+
+    store_info = aloha_sales_db.get_store_info()
+
+    # Collect all unique date ranges we need to query
+    periods_config = {
+        "Daily": (report_date, report_date, daily_ly[0], daily_ly[1]),
+        "WTD": (wtd_start.isoformat(), report_date_str, wtd_ly[0], wtd_ly[1]),
+        "PTD": (ptd_start.isoformat(), report_date_str, ptd_ly[0], ptd_ly[1]),
+        "QTD": (qtd_start.isoformat(), report_date_str, qtd_ly[0], qtd_ly[1]),
+        "YTD": (ytd_start.isoformat(), report_date_str, ytd_ly[0], ytd_ly[1]),
+    }
+
+    # Normalize date strings
+    all_ranges = set()
+    for pname, (cs, ce, ps, pe) in periods_config.items():
+        cs_str = cs.isoformat() if isinstance(cs, date) else cs
+        ce_str = ce.isoformat() if isinstance(ce, date) else ce
+        ps_str = ps.isoformat() if isinstance(ps, date) else ps
+        pe_str = pe.isoformat() if isinstance(pe, date) else pe
+        periods_config[pname] = (cs_str, ce_str, ps_str, pe_str)
+        all_ranges.add((cs_str, ce_str))
+        all_ranges.add((ps_str, pe_str))
+
+    # Compute Aloha location IDs for the selected restaurants
+    aloha_loc_ids = [guid_to_loc[rid] for rid in restaurant_ids if rid in guid_to_loc]
+
+    # For each unique date range: try Aloha sales DB first (has correct Newk's net sales
+    # with service charges subtracted + GNG data), fall back to Toast ERA API
+    unique_ranges = {}
+    range_source = {}
+    for (s, e) in all_ranges:
+        aloha_data = _aggregate_flash_from_aloha(s, e, locations=aloha_loc_ids if aloha_loc_ids else None)
+        if aloha_data:
+            logger.info("Flash data from Aloha DB: %s to %s (%d locations)", s, e, len(aloha_data))
+            unique_ranges[(s, e)] = aloha_data
+            range_source[(s, e)] = "aloha_db"
+        else:
+            logger.info("No Aloha DB data for %s to %s — using Toast ERA API", s, e)
+            raw = await _fetch_flash_era_data(
+                date.fromisoformat(s), date.fromisoformat(e), restaurant_ids
+            )
+            unique_ranges[(s, e)] = _aggregate_flash_by_location(raw, guid_to_loc)
+            range_source[(s, e)] = "toast_api"
+
+    # Build periods from cached data
+    periods = {}
+    for pname, (cs, ce, ps, pe) in periods_config.items():
+        periods[pname] = _build_flash_period_from_api(
+            unique_ranges[(cs, ce)], unique_ranges[(ps, pe)],
+            cs, ce, ps, pe, store_info,
+        )
+        periods[pname]["dataSource"] = {
+            "cy": range_source.get((cs, ce), "toast_api"),
+            "py": range_source.get((ps, pe), "toast_api"),
+        }
+
+    _flash_channel_order = _FLASH_CHANNEL_KEYS + ["CheckAverage", "POS2"]
+
+    return {
+        "reportDate": report_date_str,
+        "fiscalYear": fy,
+        "fiscalPeriod": fp,
+        "fiscalWeek": fw,
+        "periods": periods,
+        "channelOrder": _flash_channel_order,
+        "channelLabels": _FLASH_CHANNEL_LABELS,
+    }
 
 
 @app.post("/api/yoy/upload-aloha-sales-db")

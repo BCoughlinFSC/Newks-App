@@ -329,6 +329,41 @@
       <!-- Scheduler info -->
       <div id="schedulerInfo" style="margin-top:1rem;font-size:0.82rem;color:#6B7280;"></div>
     </div>
+
+    <!-- ─── Flash Sales Import Section ──────────────────────── -->
+    <div style="margin-top:2.5rem;">
+      <div class="section-header">
+        <div>
+          <h2>Flash Sales Import</h2>
+          <div class="user-count">Toast ERA API &rarr; aloha_sales_db (replaces SQL Server ETL)</div>
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <button class="btn-primary" id="runFlashImportBtn" style="background:#1E3A5F;">Run Yesterday</button>
+        </div>
+      </div>
+
+      <!-- Last run status -->
+      <div id="flashImportStatus" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem;">
+        <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading status&hellip;</div>
+      </div>
+
+      <!-- Backfill form -->
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+        <h3 style="margin:0 0 0.75rem;color:#1E3A5F;font-size:1rem;">Backfill Flash Sales</h3>
+        <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+            <input type="date" id="flashBackfillStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+            <input type="date" id="flashBackfillEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <button class="btn-primary" id="flashBackfillBtn">Start Backfill</button>
+        </div>
+        <div id="flashBackfillMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;"></div>
+      </div>
+    </div>
   </main>
 
   <!-- ─── Auth Modal ───────────────────────────────────── -->
@@ -1118,6 +1153,77 @@
     }
 
     // ──────────────────────────────────────────────────────
+    // Flash Sales Import
+    // ──────────────────────────────────────────────────────
+    async function loadFlashImportStatus() {
+      try {
+        const resp = await fetch('/api/admin/flash-import/status', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        const el = document.getElementById('flashImportStatus');
+        const card = (label, value, color) =>
+          `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1rem;text-align:center;">
+            <div style="font-size:0.78rem;color:#6B7280;margin-bottom:0.3rem;">${label}</div>
+            <div style="font-size:1.3rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
+          </div>`;
+        if (s.status === 'never_run') {
+          el.innerHTML = `<div style="grid-column:1/-1;color:#6B7280;font-size:0.85rem;">No flash import has run yet.</div>`;
+        } else {
+          el.innerHTML =
+            card('Status', s.status === 'success' ? 'OK' : 'Failed', s.status === 'success' ? '#059669' : '#DC2626') +
+            card('Date', s.business_date || '—', '#374151') +
+            card('Locations', s.locations || 0, '#1E3A5F') +
+            card('Rows', s.rows_inserted || 0, '#1E3A5F') +
+            card('Service Charges', '$' + (s.service_charges_total || 0).toLocaleString(), '#B45309') +
+            card('Completed', s.completed_at ? new Date(s.completed_at).toLocaleString() : '—', '#6B7280');
+        }
+      } catch (err) {
+        document.getElementById('flashImportStatus').innerHTML =
+          `<div style="color:#991B1B;font-size:0.85rem;grid-column:1/-1;">Error loading flash import status: ${escHtml(err.message)}</div>`;
+      }
+    }
+
+    async function runFlashImport() {
+      if (!confirm('Run flash sales import for yesterday?')) return;
+      try {
+        const resp = await fetch('/api/admin/flash-import/run', {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({})
+        });
+        if (resp.ok) {
+          showStatus('Flash import started for yesterday. Check back in a few minutes.', 'success');
+        } else {
+          showStatus('Failed to start flash import', 'error');
+        }
+      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+    }
+
+    async function startFlashBackfill() {
+      const startDate = document.getElementById('flashBackfillStart').value;
+      const endDate = document.getElementById('flashBackfillEnd').value;
+      if (!startDate || !endDate) { showStatus('Please select start and end dates', 'error'); return; }
+      if (!confirm(`Backfill flash sales from ${startDate} to ${endDate}? This may take a while for large ranges.`)) return;
+      const msgEl = document.getElementById('flashBackfillMsg');
+      try {
+        const resp = await fetch('/api/admin/flash-import/run', {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({ start_date: startDate, end_date: endDate })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          msgEl.textContent = `Backfill started: ${data.range}. Running in background...`;
+          msgEl.style.color = '#059669';
+        } else {
+          msgEl.textContent = 'Failed to start backfill';
+          msgEl.style.color = '#DC2626';
+        }
+      } catch (err) {
+        msgEl.textContent = 'Error: ' + err.message;
+        msgEl.style.color = '#DC2626';
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
     // Init
     // ──────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', async () => {
@@ -1153,6 +1259,10 @@
       document.getElementById('retryFailedBtn').addEventListener('click', retryFailed);
       document.getElementById('backfillBtn').addEventListener('click', startBackfill);
 
+      // Flash import buttons
+      document.getElementById('runFlashImportBtn').addEventListener('click', runFlashImport);
+      document.getElementById('flashBackfillBtn').addEventListener('click', startFlashBackfill);
+
       // Auth gate
       const isAuth = await checkAuth();
       if (isAuth) {
@@ -1160,6 +1270,7 @@
         await loadAdminUsers();
         loadCacheStats();
         loadFailedImports();
+        loadFlashImportStatus();
       }
     });
   </script>

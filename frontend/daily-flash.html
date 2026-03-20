@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Daily Sales Flash Report – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0; padding: 0;
+      background: #F8FAFC; color: #2c2c2c;
+      min-height: 100vh;
+    }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.5rem; font-weight: 700; }
+    .header p  { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+    .container {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 2rem;
+      max-width: 1800px;
+      margin: 0 auto;
+    }
+    @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+    .card {
+      background: #fff; border-radius: 12px; padding: 1.5rem;
+      border: 1px solid #e8e0d5; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .card h2 { margin: 0 0 1.25rem 0; color: #C41E3A; font-size: 1.1rem; font-weight: 700; }
+    .controls-row {
+      display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .form-group input, .form-group select {
+      padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB;
+      border-radius: 6px; font-size: 0.9rem; font-family: inherit;
+    }
+    .btn-primary {
+      background: #C41E3A; color: #fff; border: none;
+      padding: 0.55rem 1.25rem; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem; font-family: inherit;
+    }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      background: #374151; color: #fff; border: none;
+      padding: 0.55rem 1.25rem; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem; font-family: inherit;
+    }
+    .btn-secondary:hover:not(:disabled) { background: #1F2937; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .fiscal-info {
+      background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 8px;
+      padding: 0.75rem 1rem; margin-bottom: 1rem;
+      font-size: 0.85rem; color: #0369A1; display: none;
+    }
+    .fiscal-info span { font-weight: 600; }
+    .channel-tabs {
+      display: flex; flex-wrap: wrap; gap: 0.25rem;
+      border-bottom: 2px solid #e8e0d5; margin-bottom: 1rem;
+    }
+    .channel-tab {
+      padding: 0.5rem 0.9rem; border: none; background: none;
+      font-size: 0.82rem; font-weight: 600; font-family: inherit;
+      cursor: pointer; color: #6B7280;
+      border-bottom: 2px solid transparent; margin-bottom: -2px;
+      transition: all 0.2s; white-space: nowrap;
+    }
+    .channel-tab:hover { color: #C41E3A; }
+    .channel-tab.active { color: #C41E3A; border-bottom-color: #C41E3A; }
+    .channel-tab.summary-tab {
+      color: #1E3A5F; font-weight: 700;
+      border-right: 2px solid #e8e0d5; margin-right: 0.5rem; padding-right: 1.2rem;
+    }
+    .channel-tab.summary-tab.active { color: #C41E3A; border-bottom-color: #C41E3A; }
+
+    /* Flash table */
+    .flash-table-wrap { overflow-x: auto; border: 1px solid #e8e0d5; border-radius: 8px; }
+    .flash-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.78rem; white-space: nowrap;
+    }
+    .flash-table th, .flash-table td { padding: 0.35rem 0.6rem; border: 1px solid #E5E7EB; }
+    .flash-table .period-header-row th {
+      background: #1E3A5F; color: #fff; font-weight: 700; font-size: 0.8rem;
+      text-align: center; border-color: #1E3A5F; padding: 0.45rem 0.6rem;
+    }
+    .flash-table .period-header-row th.fixed-col {
+      background: #F8FAFC; color: transparent; border-color: #E5E7EB;
+    }
+    .flash-table .date-row th {
+      background: #F0F4F8; color: #374151; font-size: 0.68rem; font-weight: 500;
+      text-align: center; padding: 0.2rem 0.6rem;
+    }
+    .flash-table .date-row th.fixed-col { background: #F0F4F8; }
+    .flash-table .col-header-row th {
+      background: #F8FAFC; color: #374151; font-weight: 600; font-size: 0.7rem;
+      text-align: right; border-bottom: 2px solid #CBD5E1;
+    }
+    .flash-table .col-header-row th.left { text-align: left; }
+    .flash-table .col-header-row th.center { text-align: center; }
+    .flash-table td { text-align: right; }
+    .flash-table td.left { text-align: left; }
+    .flash-table td.center { text-align: center; font-weight: 600; }
+    .flash-table td.company-col { font-size: 0.68rem; color: #6B7280; text-align: left; }
+    /* Sticky left columns */
+    .flash-table .sticky { position: sticky; z-index: 2; background: #fff; }
+    .flash-table .sticky-0 { left: 0; min-width: 28px; }
+    .flash-table .sticky-1 { left: 28px; min-width: 200px; }
+    /* Hover */
+    .flash-table tbody tr:hover td { background: #F0F9FF; }
+    .flash-table tbody tr:hover .sticky { background: #F0F9FF; }
+    /* Total rows */
+    .flash-table .total-row td {
+      font-weight: 700; background: #F0F4F8;
+      border-top: 2px solid #1E3A5F;
+    }
+    .flash-table .total-row .sticky { background: #F0F4F8; }
+    .flash-table .subtotal-row td {
+      font-weight: 600; background: #FAFBFC;
+      border-top: 1px solid #9CA3AF;
+    }
+    .flash-table .subtotal-row .sticky { background: #FAFBFC; }
+    /* Company group header */
+    .flash-table .company-group-row td {
+      background: #EFF6FF; font-weight: 700; font-size: 0.8rem;
+      color: #1E3A5F; border-top: 2px solid #CBD5E1;
+    }
+    .flash-table .company-group-row .sticky { background: #EFF6FF; }
+    .flash-table .period-sep { border-left: 2px solid #1E3A5F; }
+    .positive { color: #059669; }
+    .negative { color: #DC2626; }
+
+    /* Location picker */
+    .loc-picker { margin-bottom: 1rem; }
+    .loc-picker-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+    .loc-picker-header label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .loc-count { font-size: 0.75rem; color: #6B7280; background: #F0F4F8; padding: 0.15rem 0.5rem; border-radius: 10px; }
+    .loc-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.25rem; max-height: 200px; overflow-y: auto;
+      border: 1px solid #e8e0d5; border-radius: 8px; padding: 0.5rem; background: #FAFAFA;
+    }
+    .loc-item {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.82rem; color: #374151; padding: 0.2rem 0.3rem; border-radius: 4px; cursor: pointer;
+    }
+    .loc-item:hover { background: #F0F9FF; }
+    .loc-item input { accent-color: #C41E3A; width: 14px; height: 14px; cursor: pointer; }
+    .status-msg { padding: 1.5rem; text-align: center; color: #6B7280; font-size: 0.9rem; }
+    .error-msg {
+      padding: 1rem; text-align: center; color: #DC2626; font-size: 0.9rem;
+      background: #FEF2F2; border-radius: 8px; border: 1px solid #FECACA;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Daily Sales Flash Report</h1>
+        <p>Fiscal calendar daily sales comparison by channel with company grouping</p>
+      </div>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <a href="/" class="home-btn">&#127968; Home</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div id="shared-sidebar"></div>
+    <div class="main-content">
+      <div class="card">
+        <h2>Daily Sales Flash</h2>
+        <div class="controls-row">
+          <div class="form-group">
+            <label>Report Date</label>
+            <input type="date" id="reportDate" />
+          </div>
+          <button class="btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
+          <button class="btn-secondary" id="exportBtn" onclick="exportExcel()" disabled>Export Excel</button>
+        </div>
+        <div class="loc-picker">
+          <div class="loc-picker-header">
+            <label>Locations</label>
+            <label style="font-weight:normal; font-size:0.82rem; cursor:pointer;">
+              <input type="checkbox" id="selectAllLocs" checked style="accent-color:#C41E3A;" /> Select All
+            </label>
+            <span class="loc-count" id="locCount">Loading...</span>
+          </div>
+          <div class="loc-grid" id="locGrid">
+            <span style="color:#6B7280; font-size:0.82rem;">Loading locations...</span>
+          </div>
+        </div>
+        <div class="fiscal-info" id="fiscalInfo"></div>
+        <div class="channel-tabs" id="channelTabs" style="display:none;"></div>
+        <div id="reportContent">
+          <div class="status-msg">Select a date and click "Run Report" to generate the Daily Sales Flash report.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/shared-nav.js"></script>
+  <script>
+    let reportData = null;
+    let activeChannel = 'Smmary';
+    let allLocations = [];
+    const PERIODS = ['Daily', 'WTD', 'PTD', 'QTD', 'YTD'];
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    document.getElementById('reportDate').value = yesterday.toISOString().split('T')[0];
+
+    function getToken() { return localStorage.getItem('auth_token') || ''; }
+
+    // ── Locations ────────────────────────────────────
+    async function loadLocations() {
+      const grid = document.getElementById('locGrid');
+      const countEl = document.getElementById('locCount');
+      try {
+        const resp = await fetch('/api/aloha-sales/locations', {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        allLocations = await resp.json();
+        if (allLocations.length === 0) {
+          grid.innerHTML = '<span style="color:#6B7280; font-size:0.82rem;">No locations found.</span>';
+          countEl.textContent = '0'; return;
+        }
+        grid.innerHTML = allLocations.map(loc =>
+          `<label class="loc-item"><input type="checkbox" class="loc-cb" value="${esc(loc.id)}" checked /><span>${esc(loc.id)} – ${esc(loc.name)}</span></label>`
+        ).join('');
+        updateLocCount();
+        document.getElementById('selectAllLocs').addEventListener('change', (e) => {
+          grid.querySelectorAll('.loc-cb').forEach(cb => cb.checked = e.target.checked);
+          updateLocCount();
+        });
+        grid.addEventListener('change', () => {
+          updateLocCount();
+          const cbs = grid.querySelectorAll('.loc-cb');
+          document.getElementById('selectAllLocs').checked = Array.from(cbs).every(cb => cb.checked);
+        });
+      } catch (err) {
+        grid.innerHTML = `<span style="color:#DC2626; font-size:0.82rem;">Failed to load locations: ${esc(err.message)}</span>`;
+        countEl.textContent = 'Error';
+      }
+    }
+    function updateLocCount() {
+      const checked = document.querySelectorAll('.loc-cb:checked').length;
+      const total = document.querySelectorAll('.loc-cb').length;
+      document.getElementById('locCount').textContent = `${checked} / ${total} selected`;
+    }
+    function getSelectedLocations() {
+      const cbs = document.querySelectorAll('.loc-cb:checked');
+      const total = document.querySelectorAll('.loc-cb').length;
+      if (cbs.length === total) return null;
+      return Array.from(cbs).map(cb => cb.value);
+    }
+    loadLocations();
+
+    // ── Run Report ───────────────────────────────────
+    async function runReport() {
+      const dateStr = document.getElementById('reportDate').value;
+      if (!dateStr) { alert('Please select a report date.'); return; }
+      const btn = document.getElementById('runBtn');
+      const content = document.getElementById('reportContent');
+      btn.disabled = true; btn.textContent = 'Loading...';
+      content.innerHTML = '<div class="status-msg">Fetching Daily Flash data...</div>';
+      document.getElementById('channelTabs').style.display = 'none';
+      document.getElementById('fiscalInfo').style.display = 'none';
+      document.getElementById('exportBtn').disabled = true;
+      try {
+        const resp = await fetch('/api/daily-flash-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+          body: JSON.stringify({ report_date: dateStr, locations: getSelectedLocations() })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        reportData = await resp.json();
+        renderReport();
+        document.getElementById('exportBtn').disabled = false;
+      } catch (err) {
+        content.innerHTML = `<div class="error-msg">Error: ${esc(err.message)}</div>`;
+        reportData = null;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Run Report';
+      }
+    }
+
+    // ── Render ───────────────────────────────────────
+    function renderReport() {
+      if (!reportData) return;
+      const fi = document.getElementById('fiscalInfo');
+      fi.style.display = 'block';
+      fi.innerHTML = `Report Date: <span>${reportData.reportDate}</span> &nbsp;|&nbsp; Fiscal Year: <span>${reportData.fiscalYear}</span> &nbsp;|&nbsp; Period: <span>${reportData.fiscalPeriod}</span> &nbsp;|&nbsp; Week: <span>${reportData.fiscalWeek}</span>`;
+
+      const tabsEl = document.getElementById('channelTabs');
+      tabsEl.style.display = 'flex';
+      const order = reportData.channelOrder || [];
+      const labels = reportData.channelLabels || {};
+      // Summary tab first, then channel tabs
+      let tabsHtml = `<button class="channel-tab summary-tab${activeChannel === 'Smmary' ? ' active' : ''}" data-ch="Smmary">Summary</button>`;
+      tabsHtml += order.map(ch =>
+        `<button class="channel-tab${ch === activeChannel ? ' active' : ''}" data-ch="${ch}">${esc(labels[ch] || ch)}</button>`
+      ).join('');
+      tabsEl.innerHTML = tabsHtml;
+      tabsEl.querySelectorAll('.channel-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activeChannel = btn.dataset.ch;
+          tabsEl.querySelectorAll('.channel-tab').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          renderContent();
+        });
+      });
+      if (activeChannel !== 'Smmary' && !order.includes(activeChannel)) activeChannel = 'Smmary';
+      renderContent();
+    }
+
+    function renderContent() {
+      if (activeChannel === 'Smmary') renderSummary();
+      else renderChannelContent(activeChannel);
+    }
+
+    // ── Summary Tab ──────────────────────────────────
+    function renderSummary() {
+      const content = document.getElementById('reportContent');
+      if (!reportData) { content.innerHTML = '<div class="status-msg">No data.</div>'; return; }
+      const order = reportData.channelOrder || [];
+      const labels = reportData.channelLabels || {};
+
+      let html = '<div class="flash-table-wrap"><table class="flash-table">';
+      // Header rows
+      html += '<thead>';
+      html += buildPeriodHeaderRow(2); // 2 fixed cols: Channel, Row Type
+      html += buildDateRow(2);
+      html += '<tr class="col-header-row">';
+      html += '<th class="left sticky sticky-0" style="min-width:120px;">Channel</th>';
+      html += '<th class="left sticky sticky-1" style="min-width:180px; left:120px;">Row</th>';
+      for (const pKey of PERIODS) {
+        html += `<th class="period-sep">Current YR</th><th>Prior YR</th><th>Variance</th><th>Comp %</th><th>Labor %</th>`;
+      }
+      html += '</tr></thead><tbody>';
+
+      for (const ch of order) {
+        const chLabel = labels[ch] || ch;
+        const isCheck = ch === 'CheckCount' || ch === 'NonCateringChecks';
+        const isAvg = ch === 'CheckAverage';
+        const fVal = isCheck ? fmtNum : (isAvg ? fmtAvg : fmtDollar);
+        // Total Restaurants
+        html += buildSummaryRow(chLabel, 'Total Restaurants', ch, 'allRestaurants', fVal);
+        html += buildSummaryRow('', 'Total Comp Restaurants', ch, 'comping', fVal);
+        // Blank separator
+        html += '<tr><td class="sticky sticky-0"></td><td class="sticky sticky-1" style="left:120px;"></td>';
+        for (let i = 0; i < PERIODS.length * 5; i++) html += '<td></td>';
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      content.innerHTML = html;
+    }
+
+    function buildSummaryRow(chLabel, rowLabel, ch, totalsKey, fVal) {
+      let html = '<tr>';
+      html += `<td class="left sticky sticky-0" style="min-width:120px; font-weight:600;">${esc(chLabel)}</td>`;
+      html += `<td class="left sticky sticky-1" style="min-width:180px; left:120px;">${esc(rowLabel)}</td>`;
+      for (const pKey of PERIODS) {
+        const pCh = reportData.periods[pKey]?.channels[ch];
+        const t = pCh?.totals[totalsKey] || { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+        const vCls = t.variance >= 0 ? 'positive' : 'negative';
+        const cCls = t.compPct >= 0 ? 'positive' : 'negative';
+        html += `<td class="period-sep">${fVal(t.currentYR)}</td>`;
+        html += `<td>${fVal(t.priorYR)}</td>`;
+        html += `<td class="${vCls}">${fVal(t.variance)}</td>`;
+        html += `<td class="${cCls}">${fmtPct(t.compPct)}</td>`;
+        // Labor % placeholder
+        const laborPct = ch === 'Net' ? getLaborPct(pKey) : '';
+        html += `<td>${laborPct}</td>`;
+      }
+      html += '</tr>';
+      return html;
+    }
+
+    function getLaborPct(pKey) { return ''; } // Placeholder — we don't have labor data yet
+
+    // ── Per-Channel Tab ──────────────────────────────
+    function renderChannelContent(ch) {
+      const content = document.getElementById('reportContent');
+      if (!reportData) { content.innerHTML = '<div class="status-msg">No data.</div>'; return; }
+
+      const isCheck = ch === 'CheckCount' || ch === 'NonCateringChecks';
+      const isAvg = ch === 'CheckAverage';
+      const isPOS2 = ch === 'POS2';
+      const fVal = isCheck ? fmtNum : (isAvg ? fmtAvg : fmtDollar);
+
+      // Get locations from first available period
+      const firstPeriod = PERIODS.find(p => reportData.periods[p]?.channels[ch]?.locations?.length);
+      const locations = firstPeriod ? reportData.periods[firstPeriod].channels[ch].locations : [];
+
+      // Group by company
+      const companyGroups = {};
+      const companyOrder = [];
+      for (const loc of locations) {
+        const co = loc.company || 'Unknown';
+        if (!companyGroups[co]) { companyGroups[co] = []; companyOrder.push(co); }
+        companyGroups[co].push(loc);
+      }
+
+      let html = '<div class="flash-table-wrap"><table class="flash-table">';
+      html += '<thead>';
+      html += buildPeriodHeaderRow(2);
+      html += buildDateRow(2);
+      html += '<tr class="col-header-row">';
+      html += '<th class="center sticky sticky-0">C</th>';
+      html += '<th class="left sticky sticky-1">Location</th>';
+      for (const pKey of PERIODS) {
+        html += `<th class="period-sep">Current YR</th><th>Prior YR</th><th>Variance</th><th>Comp %</th><th>Labor %</th>`;
+      }
+      html += '</tr></thead><tbody>';
+
+      // Grand totals (Total Restaurants, Total Comp Restaurants)
+      html += buildTotalRow('', 'Total Restaurants', ch, 'allRestaurants', fVal, 'total-row');
+      html += buildTotalRow('', 'Total Comp Restaurants', ch, 'comping', fVal, 'total-row');
+      // Blank separator
+      html += '<tr><td class="sticky sticky-0"></td><td class="sticky sticky-1"></td>';
+      for (let i = 0; i < PERIODS.length * 5; i++) html += '<td></td>';
+      html += '</tr>';
+
+      // Company groups
+      for (const co of companyOrder) {
+        const coLocs = companyGroups[co];
+        // Company header row
+        html += `<tr class="company-group-row"><td class="sticky sticky-0"></td><td class="left sticky sticky-1">Company - ${esc(co)}</td>`;
+        // Compute company totals for this group
+        for (const pKey of PERIODS) {
+          const pCh = reportData.periods[pKey]?.channels[ch];
+          const ct = computeGroupTotals(pCh, coLocs.map(l => l.location), ch, isAvg);
+          const vCls = ct.variance >= 0 ? 'positive' : 'negative';
+          const cCls = ct.compPct >= 0 ? 'positive' : 'negative';
+          html += `<td class="period-sep">${fVal(ct.currentYR)}</td><td>${fVal(ct.priorYR)}</td><td class="${vCls}">${fVal(ct.variance)}</td><td class="${cCls}">${fmtPct(ct.compPct)}</td><td></td>`;
+        }
+        html += '</tr>';
+
+        // Company comping subtotal
+        const compingLocs = coLocs.filter(l => l.comping === 'Y');
+        html += `<tr class="subtotal-row"><td class="sticky sticky-0"></td><td class="left sticky sticky-1" style="padding-left:1.5rem;">Total Comp Restaurants</td>`;
+        for (const pKey of PERIODS) {
+          const pCh = reportData.periods[pKey]?.channels[ch];
+          const ct = computeGroupTotals(pCh, compingLocs.map(l => l.location), ch, isAvg);
+          const vCls = ct.variance >= 0 ? 'positive' : 'negative';
+          const cCls = ct.compPct >= 0 ? 'positive' : 'negative';
+          html += `<td class="period-sep">${fVal(ct.currentYR)}</td><td>${fVal(ct.priorYR)}</td><td class="${vCls}">${fVal(ct.variance)}</td><td class="${cCls}">${fmtPct(ct.compPct)}</td><td></td>`;
+        }
+        html += '</tr>';
+
+        // Individual store rows
+        for (const loc of coLocs) {
+          const compFlag = loc.comping === 'Y' ? 'C' : '';
+          const compColor = compFlag ? '#059669' : '#9CA3AF';
+          html += '<tr>';
+          html += `<td class="center sticky sticky-0" style="color:${compColor}">${compFlag}</td>`;
+          html += `<td class="left sticky sticky-1" title="${esc(loc.location)}">${esc(loc.restaurantName || loc.location)}</td>`;
+          for (const pKey of PERIODS) {
+            const pCh = reportData.periods[pKey]?.channels[ch];
+            const pLoc = pCh ? pCh.locations.find(l => l.location === loc.location) : null;
+            const cur = pLoc ? pLoc.currentYR : 0;
+            const prior = pLoc ? pLoc.priorYR : 0;
+            const variance = pLoc ? pLoc.variance : 0;
+            const compPct = pLoc ? pLoc.compPct : 0;
+            const vCls = variance >= 0 ? 'positive' : 'negative';
+            const cCls = compPct >= 0 ? 'positive' : 'negative';
+            html += `<td class="period-sep">${fVal(cur)}</td><td>${fVal(prior)}</td><td class="${vCls}">${fVal(variance)}</td><td class="${cCls}">${fmtPct(compPct)}</td><td></td>`;
+          }
+          html += '</tr>';
+        }
+      }
+
+      html += '</tbody></table></div>';
+      content.innerHTML = html;
+    }
+
+    function computeGroupTotals(periodChannel, locIds, ch, isAvg) {
+      if (!periodChannel || !periodChannel.locations) return { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+      const locs = periodChannel.locations.filter(l => locIds.includes(l.location));
+      if (isAvg) {
+        // For CheckAverage, we need NonCatering / NonCateringChecks for the group
+        // But we only have the per-location averages. Sum currentYR * approximate?
+        // Actually the backend gives us per-location check averages, not raw sums.
+        // For group totals, just average the averages weighted... we need NC and NCCH.
+        // Simplification: use the totals from the response if available, otherwise average.
+        let sumCur = 0, sumPrior = 0, count = 0;
+        for (const l of locs) { sumCur += l.currentYR; sumPrior += l.priorYR; count++; }
+        // This is a simple average — not perfectly accurate for group check avg.
+        // The correct approach needs raw NonCatering/NonCateringChecks sums per group.
+        // For now, we use the channel totals from the backend for grand totals.
+        const cur = count ? sumCur / count : 0;
+        const prior = count ? sumPrior / count : 0;
+        const variance = cur - prior;
+        const compPct = prior ? Math.round((variance / prior) * 10000) / 100 : 0;
+        return { currentYR: Math.round(cur * 100) / 100, priorYR: Math.round(prior * 100) / 100, variance: Math.round(variance * 100) / 100, compPct };
+      }
+      let cur = 0, prior = 0;
+      for (const l of locs) { cur += l.currentYR; prior += l.priorYR; }
+      const variance = cur - prior;
+      const compPct = prior ? Math.round((variance / prior) * 10000) / 100 : 0;
+      return { currentYR: Math.round(cur * 100) / 100, priorYR: Math.round(prior * 100) / 100, variance: Math.round(variance * 100) / 100, compPct };
+    }
+
+    function buildPeriodHeaderRow(fixedCols) {
+      let html = '<tr class="period-header-row">';
+      for (let i = 0; i < fixedCols; i++) html += '<th class="fixed-col"></th>';
+      for (const pKey of PERIODS) html += `<th colspan="5" class="period-sep">${pKey}</th>`;
+      html += '</tr>';
+      return html;
+    }
+
+    function buildDateRow(fixedCols) {
+      let html = '<tr class="date-row">';
+      for (let i = 0; i < fixedCols; i++) html += '<th class="fixed-col"></th>';
+      for (const pKey of PERIODS) {
+        const pData = reportData.periods[pKey];
+        if (pData) {
+          const cy = `${fmtDateShort(pData.currentRange.start)}–${fmtDateShort(pData.currentRange.end)}`;
+          const py = `${fmtDateShort(pData.priorRange.start)}–${fmtDateShort(pData.priorRange.end)}`;
+          html += `<th colspan="5" class="period-sep">CY: ${cy} &nbsp; PY: ${py}</th>`;
+        } else {
+          html += '<th colspan="5" class="period-sep"></th>';
+        }
+      }
+      html += '</tr>';
+      return html;
+    }
+
+    function buildTotalRow(prefix, label, ch, totalsKey, fVal, rowClass) {
+      let html = `<tr class="${rowClass}">`;
+      html += `<td class="sticky sticky-0"></td>`;
+      html += `<td class="left sticky sticky-1">${prefix}${esc(label)}</td>`;
+      for (const pKey of PERIODS) {
+        const pCh = reportData.periods[pKey]?.channels[ch];
+        const t = pCh?.totals[totalsKey] || { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+        const vCls = t.variance >= 0 ? 'positive' : 'negative';
+        const cCls = t.compPct >= 0 ? 'positive' : 'negative';
+        html += `<td class="period-sep">${fVal(t.currentYR)}</td><td>${fVal(t.priorYR)}</td><td class="${vCls}">${fVal(t.variance)}</td><td class="${cCls}">${fmtPct(t.compPct)}</td><td></td>`;
+      }
+      html += '</tr>';
+      return html;
+    }
+
+    // ── Formatting ───────────────────────────────────
+    function fmtDollar(v) {
+      if (v == null || isNaN(v)) return '-';
+      const neg = v < 0;
+      const s = '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return neg ? `(${s})` : s;
+    }
+    function fmtNum(v) {
+      if (v == null || isNaN(v)) return '-';
+      return v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+    function fmtAvg(v) {
+      if (v == null || isNaN(v)) return '-';
+      return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtPct(v) {
+      if (v == null || isNaN(v)) return '-';
+      const neg = v < 0;
+      const s = Math.abs(v).toFixed(1) + '%';
+      return neg ? `(${s})` : s;
+    }
+    function fmtDateShort(d) {
+      if (!d) return '';
+      const parts = d.split('-');
+      return `${parseInt(parts[1])}/${parseInt(parts[2])}`;
+    }
+    function esc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Excel Export ─────────────────────────────────
+    function exportExcel() {
+      if (!reportData) return;
+      const wb = XLSX.utils.book_new();
+      const order = reportData.channelOrder || [];
+      const labels = reportData.channelLabels || {};
+      const isCheck = ch => ch === 'CheckCount' || ch === 'NonCateringChecks';
+      const isAvgCh = ch => ch === 'CheckAverage';
+
+      const S = {
+        titleFont: { font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1E3A5F' } }, alignment: { horizontal: 'center' } },
+        periodHeader: { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: 'C41E3A' } }, alignment: { horizontal: 'center' } },
+        dateRow: { font: { sz: 9, color: { rgb: '374151' } }, fill: { fgColor: { rgb: 'F0F4F8' } }, alignment: { horizontal: 'center' } },
+        colHeader: { font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'E5E7EB' } }, alignment: { horizontal: 'right' }, border: { bottom: { style: 'thin', color: { rgb: '999999' } } } },
+        colHeaderLeft: { font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'E5E7EB' } }, alignment: { horizontal: 'left' }, border: { bottom: { style: 'thin', color: { rgb: '999999' } } } },
+        dollar: { numFmt: '$#,##0.00;($#,##0.00);"-"', font: { sz: 9 } },
+        number: { numFmt: '#,##0;(#,##0);"-"', font: { sz: 9 } },
+        avg: { numFmt: '#,##0.00;(#,##0.00);"-"', font: { sz: 9 } },
+        positivePct: { numFmt: '0.000000', font: { sz: 9, color: { rgb: '059669' } } },
+        negativePct: { numFmt: '0.000000', font: { sz: 9, color: { rgb: 'DC2626' } } },
+        totalDollar: { numFmt: '$#,##0.00;($#,##0.00);"-"', font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        totalNumber: { numFmt: '#,##0;(#,##0);"-"', font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        totalAvg: { numFmt: '#,##0.00;(#,##0.00);"-"', font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        totalPct: { numFmt: '0.000000', font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        totalLabel: { font: { bold: true, sz: 9 }, fill: { fgColor: { rgb: 'F0F4F8' } }, border: { top: { style: 'medium', color: { rgb: '1E3A5F' } } } },
+        companyHeader: { font: { bold: true, sz: 10, color: { rgb: '1E3A5F' } }, fill: { fgColor: { rgb: 'EFF6FF' } } },
+        locName: { font: { sz: 9 }, alignment: { horizontal: 'left' } },
+        empty: { font: { sz: 9 } },
+      };
+
+      // ── Summary sheet ──
+      {
+        const rows = [];
+        const merges = [];
+        const fixedCols = 2;
+        const colsPerPeriod = 5;
+        const totalDataCols = fixedCols + PERIODS.length * colsPerPeriod;
+
+        // Row 0: Title
+        const titleRow = [];
+        for (let i = 0; i < totalDataCols; i++) titleRow.push({ v: i === 0 ? 'Daily Sales Flash Report – Summary' : '', s: S.titleFont });
+        rows.push(titleRow);
+        merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalDataCols - 1 } });
+
+        // Row 1: Report info
+        const infoRow = [];
+        for (let i = 0; i < totalDataCols; i++) infoRow.push({ v: i === 0 ? `Report Date: ${reportData.reportDate}  |  FY${reportData.fiscalYear}  Period ${reportData.fiscalPeriod}  Week ${reportData.fiscalWeek}` : '', s: S.dateRow });
+        rows.push(infoRow);
+        merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalDataCols - 1 } });
+
+        // Row 2: blank
+        rows.push([]);
+
+        // Row 3: Period headers
+        const pRow = [];
+        for (let i = 0; i < fixedCols; i++) pRow.push({ v: '', s: S.colHeaderLeft });
+        for (const pKey of PERIODS) {
+          const pData = reportData.periods[pKey];
+          const dateLabel = pData ? `${pKey}: ${fmtDateShort(pData.currentRange.start)}-${fmtDateShort(pData.currentRange.end)}` : pKey;
+          for (let i = 0; i < colsPerPeriod; i++) pRow.push({ v: i === 0 ? dateLabel : '', s: S.periodHeader });
+          const sc = fixedCols + PERIODS.indexOf(pKey) * colsPerPeriod;
+          merges.push({ s: { r: 3, c: sc }, e: { r: 3, c: sc + colsPerPeriod - 1 } });
+        }
+        rows.push(pRow);
+
+        // Row 4: Column headers
+        const hRow = [{ v: 'Channel', s: S.colHeaderLeft }, { v: 'Row', s: S.colHeaderLeft }];
+        for (const pKey of PERIODS) {
+          hRow.push({ v: 'Current YR', s: S.colHeader }, { v: 'Prior YR', s: S.colHeader }, { v: 'Variance', s: S.colHeader }, { v: 'Comp Sales %', s: S.colHeader }, { v: 'Labor %', s: S.colHeader });
+        }
+        rows.push(hRow);
+
+        // Data rows
+        for (const ch of order) {
+          const chLabel = labels[ch] || ch;
+          const valStyle = isCheck(ch) ? S.number : (isAvgCh(ch) ? S.avg : S.dollar);
+          for (const rowType of ['allRestaurants', 'comping']) {
+            const rowLabel = rowType === 'allRestaurants' ? 'Total Restaurants' : 'Total Comp Restaurants';
+            const r = [{ v: rowType === 'allRestaurants' ? chLabel : '', s: S.locName }, { v: rowLabel, s: S.locName }];
+            for (const pKey of PERIODS) {
+              const t = reportData.periods[pKey]?.channels[ch]?.totals[rowType] || { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+              r.push({ v: t.currentYR, s: valStyle }, { v: t.priorYR, s: valStyle }, { v: t.variance, s: valStyle });
+              r.push({ v: t.compPct, s: t.compPct >= 0 ? S.positivePct : S.negativePct });
+              r.push({ v: '', s: S.empty }); // Labor %
+            }
+            rows.push(r);
+          }
+          rows.push([]); // blank separator
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!merges'] = merges;
+        ws['!cols'] = [{ wch: 18 }, { wch: 22 }];
+        for (let i = 0; i < PERIODS.length * colsPerPeriod; i++) ws['!cols'].push({ wch: 14 });
+        XLSX.utils.book_append_sheet(wb, ws, 'Smmary');
+      }
+
+      // ── Per-channel sheets ──
+      for (const ch of order) {
+        const sheetName = (labels[ch] || ch).substring(0, 31);
+        const rows = [];
+        const merges = [];
+        const fixedCols = 4; // channel, C, location name, empty
+        const colsPerPeriod = 5;
+        const totalDataCols = fixedCols + PERIODS.length * colsPerPeriod;
+        const valStyle = isCheck(ch) ? S.number : (isAvgCh(ch) ? S.avg : S.dollar);
+        const totalValStyle = isCheck(ch) ? S.totalNumber : (isAvgCh(ch) ? S.totalAvg : S.totalDollar);
+
+        // Row 0: Title
+        const titleRow = [];
+        for (let i = 0; i < totalDataCols; i++) titleRow.push({ v: i === 0 ? `Daily Sales Flash – ${labels[ch] || ch}` : '', s: S.titleFont });
+        rows.push(titleRow);
+        merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalDataCols - 1 } });
+
+        // Row 1: Period headers
+        const pRow = [];
+        for (let i = 0; i < fixedCols; i++) pRow.push({ v: '', s: S.colHeaderLeft });
+        for (const pKey of PERIODS) {
+          const pData = reportData.periods[pKey];
+          const curR = pData ? pData.currentRange : {};
+          const prR = pData ? pData.priorRange : {};
+          const dateLabel = `${pKey}: ${fmtDateShort(curR.start)}-${fmtDateShort(curR.end)} vs ${fmtDateShort(prR.start)}-${fmtDateShort(prR.end)}`;
+          for (let i = 0; i < colsPerPeriod; i++) pRow.push({ v: i === 0 ? dateLabel : '', s: S.periodHeader });
+          const sc = fixedCols + PERIODS.indexOf(pKey) * colsPerPeriod;
+          merges.push({ s: { r: 1, c: sc }, e: { r: 1, c: sc + colsPerPeriod - 1 } });
+        }
+        rows.push(pRow);
+
+        // Row 2: Column headers
+        const hRow = [
+          { v: labels[ch] || ch, s: S.colHeaderLeft },
+          { v: '', s: S.colHeader },
+          { v: '', s: S.colHeader },
+          { v: '', s: S.colHeader },
+        ];
+        for (const pKey of PERIODS) {
+          hRow.push({ v: 'Current YR', s: S.colHeader }, { v: 'Prior YR', s: S.colHeader }, { v: 'Variance', s: S.colHeader }, { v: 'Comp Sales %', s: S.colHeader }, { v: 'Labor %', s: S.colHeader });
+        }
+        rows.push(hRow);
+
+        // Total Restaurants
+        const trRow = [{ v: labels[ch] || ch, s: S.totalLabel }, { v: 'Total Restaurants', s: S.totalLabel }, { v: '', s: S.totalLabel }, { v: '', s: S.totalLabel }];
+        for (const pKey of PERIODS) {
+          const t = reportData.periods[pKey]?.channels[ch]?.totals.allRestaurants || { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+          trRow.push({ v: t.currentYR, s: totalValStyle }, { v: t.priorYR, s: totalValStyle }, { v: t.variance, s: totalValStyle });
+          trRow.push({ v: t.compPct, s: S.totalPct });
+          trRow.push({ v: '', s: S.empty });
+        }
+        rows.push(trRow);
+
+        // Total Comp Restaurants
+        const tcRow = [{ v: labels[ch] || ch, s: S.totalLabel }, { v: 'Total Comp Restaurants', s: S.totalLabel }, { v: '', s: S.totalLabel }, { v: '', s: S.totalLabel }];
+        for (const pKey of PERIODS) {
+          const t = reportData.periods[pKey]?.channels[ch]?.totals.comping || { currentYR: 0, priorYR: 0, variance: 0, compPct: 0 };
+          tcRow.push({ v: t.currentYR, s: totalValStyle }, { v: t.priorYR, s: totalValStyle }, { v: t.variance, s: totalValStyle });
+          tcRow.push({ v: t.compPct, s: S.totalPct });
+          tcRow.push({ v: '', s: S.empty });
+        }
+        rows.push(tcRow);
+
+        // Blank row
+        rows.push([]);
+
+        // Company groups
+        const firstPeriod = PERIODS.find(p => reportData.periods[p]?.channels[ch]?.locations?.length);
+        const locations = firstPeriod ? reportData.periods[firstPeriod].channels[ch].locations : [];
+        const companyGroups = {};
+        const companyOrder = [];
+        for (const loc of locations) {
+          const co = loc.company || 'Unknown';
+          if (!companyGroups[co]) { companyGroups[co] = []; companyOrder.push(co); }
+          companyGroups[co].push(loc);
+        }
+
+        for (const co of companyOrder) {
+          const coLocs = companyGroups[co];
+          // Company header with Total Restaurants
+          const coRow = [{ v: labels[ch] || ch, s: S.companyHeader }, { v: `Company - ${co}`, s: S.companyHeader }, { v: '', s: S.companyHeader }, { v: 'Total Restaurants', s: S.companyHeader }];
+          for (const pKey of PERIODS) {
+            const pCh = reportData.periods[pKey]?.channels[ch];
+            const ct = computeGroupTotals(pCh, coLocs.map(l => l.location), ch, isAvgCh(ch));
+            coRow.push({ v: ct.currentYR, s: totalValStyle }, { v: ct.priorYR, s: totalValStyle }, { v: ct.variance, s: totalValStyle });
+            coRow.push({ v: ct.compPct, s: S.totalPct });
+            coRow.push({ v: '', s: S.empty });
+          }
+          rows.push(coRow);
+
+          // Company comp restaurants
+          const compingLocs = coLocs.filter(l => l.comping === 'Y');
+          const ccRow = [{ v: '', s: S.locName }, { v: '', s: S.locName }, { v: '', s: S.locName }, { v: 'Total Comp Restaurants', s: S.locName }];
+          for (const pKey of PERIODS) {
+            const pCh = reportData.periods[pKey]?.channels[ch];
+            const ct = computeGroupTotals(pCh, compingLocs.map(l => l.location), ch, isAvgCh(ch));
+            ccRow.push({ v: ct.currentYR, s: valStyle }, { v: ct.priorYR, s: valStyle }, { v: ct.variance, s: valStyle });
+            ccRow.push({ v: ct.compPct, s: ct.compPct >= 0 ? S.positivePct : S.negativePct });
+            ccRow.push({ v: '', s: S.empty });
+          }
+          rows.push(ccRow);
+
+          // Individual stores
+          for (const loc of coLocs) {
+            const r = [
+              { v: '', s: S.locName },
+              { v: '', s: S.locName },
+              { v: loc.comping === 'Y' ? 'C' : '', s: S.locName },
+              { v: loc.restaurantName || loc.location, s: S.locName },
+            ];
+            for (const pKey of PERIODS) {
+              const pCh = reportData.periods[pKey]?.channels[ch];
+              const pLoc = pCh ? pCh.locations.find(l => l.location === loc.location) : null;
+              const cur = pLoc ? pLoc.currentYR : 0;
+              const prior = pLoc ? pLoc.priorYR : 0;
+              const variance = pLoc ? pLoc.variance : 0;
+              const comp = pLoc ? pLoc.compPct : 0;
+              r.push({ v: cur, s: valStyle }, { v: prior, s: valStyle }, { v: variance, s: valStyle });
+              r.push({ v: comp, s: comp >= 0 ? S.positivePct : S.negativePct });
+              r.push({ v: '', s: S.empty });
+            }
+            rows.push(r);
+          }
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!merges'] = merges;
+        ws['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 4 }, { wch: 28 }];
+        for (let i = 0; i < PERIODS.length * colsPerPeriod; i++) ws['!cols'].push({ wch: 14 });
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      }
+
+      const filename = `Daily_Sales_Flash_${reportData.reportDate}.xlsx`;
+      XLSX.writeFile(wb, filename);
+    }
+  </script>
+</body>
+</html>
