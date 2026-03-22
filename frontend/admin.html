@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>User Management – Newk's</title>
+  <title>Admin Dashboard – Newk's</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     * { box-sizing: border-box; }
@@ -99,6 +99,61 @@
       font-size: 0.82rem;
       color: #6B7280;
       margin-top: 0.2rem;
+    }
+
+    /* ─── Database health cards ─────────────────────── */
+    .db-health-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .db-card {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .db-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.65rem 1rem;
+      font-weight: 700;
+      font-size: 0.88rem;
+      color: #fff;
+    }
+    .db-card-header .db-size {
+      font-weight: 500;
+      font-size: 0.78rem;
+      opacity: 0.85;
+    }
+    .db-card-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 0;
+    }
+    .db-stat {
+      padding: 0.7rem 0.5rem;
+      text-align: center;
+      border-top: 1px solid #F3F4F6;
+    }
+    .db-stat:not(:last-child) { border-right: 1px solid #F3F4F6; }
+    .db-stat-label {
+      font-size: 0.7rem;
+      color: #6B7280;
+      margin-bottom: 0.15rem;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .db-stat-value {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1E3A5F;
+    }
+    @media (max-width: 560px) {
+      .db-health-grid { grid-template-columns: 1fr; }
     }
 
     /* ─── Admin table ────────────────────────────────── */
@@ -246,7 +301,7 @@
       <div class="header-left">
         <a class="home-btn" href="/legacy.html">&larr; Back to Reports</a>
         <div>
-          <h1>User Management</h1>
+          <h1>Admin Dashboard</h1>
           <p>Newk's Reporting Platform</p>
         </div>
       </div>
@@ -362,6 +417,44 @@
           <button class="btn-primary" id="flashBackfillBtn">Start Backfill</button>
         </div>
         <div id="flashBackfillMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;"></div>
+      </div>
+    </div>
+
+    <!-- ─── Database Health Section ──────────────────────── -->
+    <div style="margin-top:2.5rem;">
+      <div class="section-header">
+        <div>
+          <h2>Database Health</h2>
+          <div class="user-count">All SQLite databases powering the reporting platform</div>
+        </div>
+        <button class="btn-primary" id="refreshDbHealthBtn" style="background:#1E3A5F;">Refresh</button>
+      </div>
+
+      <div id="dbHealthGrid" class="db-health-grid">
+        <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading database stats&hellip;</div>
+      </div>
+    </div>
+
+    <!-- ─── Toast Config Sync Section ──────────────────────── -->
+    <div style="margin-top:2.5rem;">
+      <div class="section-header">
+        <div>
+          <h2>Toast Menu Config</h2>
+          <div class="user-count">Menu items, tags, and attribute map synced from Toast API</div>
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <button class="btn-primary" id="syncAllConfigBtn" style="background:#1E3A5F;">Sync All Locations</button>
+          <button class="btn-primary" id="rebuildAttrMapBtn" style="background:#059669;">Rebuild Attribute Map</button>
+        </div>
+      </div>
+
+      <!-- Stats cards -->
+      <div id="toastConfigStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin-bottom:1.5rem;">
+        <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading config stats&hellip;</div>
+      </div>
+
+      <!-- Sync result -->
+      <div id="toastConfigSyncResult" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
       </div>
     </div>
   </main>
@@ -1286,6 +1379,174 @@
     }
 
     // ──────────────────────────────────────────────────────
+    // Database Health
+    // ──────────────────────────────────────────────────────
+
+    async function loadDbHealth() {
+      const el = document.getElementById('dbHealthGrid');
+      try {
+        const [alohaResp, salesResp, ordersResp, configResp] = await Promise.allSettled([
+          fetch('/api/yoy/aloha-stats', { headers: getAuthHeaders() }),
+          fetch('/api/yoy/aloha-sales-stats', { headers: getAuthHeaders() }),
+          fetch('/api/admin/orders-cache/stats', { headers: getAuthHeaders() }),
+          fetch('/api/admin/toast-config/stats', { headers: getAuthHeaders() }),
+        ]);
+
+        const parse = async (r) => r.status === 'fulfilled' && r.value.ok ? await r.value.json() : null;
+        const aloha = await parse(alohaResp);
+        const sales = await parse(salesResp);
+        const orders = await parse(ordersResp);
+        const config = await parse(configResp);
+
+        const dbCard = (title, color, size, stats) => {
+          const statsHtml = stats.map(s =>
+            `<div class="db-stat">
+              <div class="db-stat-label">${s[0]}</div>
+              <div class="db-stat-value" style="${s[2] ? 'color:'+s[2] : ''}">${s[1]}</div>
+            </div>`
+          ).join('');
+          return `<div class="db-card">
+            <div class="db-card-header" style="background:${color};">
+              <span>${title}</span>
+              <span class="db-size">${size}</span>
+            </div>
+            <div class="db-card-stats">${statsHtml}</div>
+          </div>`;
+        };
+
+        const fmt = n => n != null ? Number(n).toLocaleString() : '—';
+        let html = '';
+
+        // Aloha (YoY Menu Items)
+        if (aloha) {
+          html += dbCard('aloha.db', '#7C3AED', `${(aloha.db_size_mb||0).toFixed(0)} MB`, [
+            ['Rows', fmt(aloha.total_rows)],
+            ['Dates', fmt(aloha.date_count)],
+            ['Locations', fmt(aloha.location_count)],
+            ['Range', aloha.min_date && aloha.max_date ? `${aloha.min_date} to ${aloha.max_date}` : '—', '#374151'],
+          ]);
+        } else {
+          html += dbCard('aloha.db', '#7C3AED', '—', [['Status', 'Not available', '#DC2626']]);
+        }
+
+        // Aloha Sales
+        if (sales) {
+          html += dbCard('aloha_sales.db', '#2563EB', `${(sales.db_size_mb||0).toFixed(1)} MB`, [
+            ['Rows', fmt(sales.total_rows)],
+            ['Locations', fmt(sales.location_count)],
+            ['Range', sales.min_date && sales.max_date ? `${sales.min_date} to ${sales.max_date}` : '—', '#374151'],
+          ]);
+        } else {
+          html += dbCard('aloha_sales.db', '#2563EB', '—', [['Status', 'Not available', '#DC2626']]);
+        }
+
+        // Orders Cache
+        if (orders) {
+          html += dbCard('orders.db', '#0891B2', `${(orders.db_size_mb||0).toFixed(0)} MB`, [
+            ['Orders', fmt(orders.total_orders)],
+            ['Dates', fmt(orders.dates_cached)],
+            ['Restaurants', fmt(orders.total_restaurants)],
+            ['Failed', fmt(orders.failed_count), orders.failed_count > 0 ? '#DC2626' : '#059669'],
+          ]);
+        } else {
+          html += dbCard('orders.db', '#0891B2', '—', [['Status', 'Not available', '#DC2626']]);
+        }
+
+        // Toast Config
+        if (config) {
+          html += dbCard('toast_config.db', '#059669', `${(config.db_size_mb||0).toFixed(0)} MB`, [
+            ['Menu Items', fmt(config.menu_items)],
+            ['Attr Map', fmt(config.attribute_map)],
+            ['Tags', fmt(config.tags)],
+            ['Stores', fmt(config.stores)],
+          ]);
+        } else {
+          html += dbCard('toast_config.db', '#059669', '—', [['Status', 'Not synced yet', '#B45309']]);
+        }
+
+        el.innerHTML = html;
+      } catch (err) {
+        el.innerHTML = `<div style="color:#991B1B;font-size:0.85rem;grid-column:1/-1;">Error loading database stats: ${escHtml(err.message)}</div>`;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
+    // Toast Config Sync
+    // ──────────────────────────────────────────────────────
+
+    async function loadToastConfigStats() {
+      const card = (label, value, color) =>
+        `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1rem;text-align:center;">
+          <div style="font-size:0.78rem;color:#6B7280;margin-bottom:0.3rem;">${label}</div>
+          <div style="font-size:1.3rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
+        </div>`;
+      try {
+        const resp = await fetch('/api/admin/toast-config/stats', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        document.getElementById('toastConfigStats').innerHTML =
+          card('Menu Items', (s.menu_items||0).toLocaleString(), '#1E3A5F') +
+          card('Attribute Map', (s.attribute_map||0).toLocaleString(), '#059669') +
+          card('Tags', (s.tags||0).toLocaleString(), '#1E3A5F') +
+          card('Item-Tags', (s.item_tags||0).toLocaleString(), '#1E3A5F') +
+          card('Sales Cats', (s.sales_cats||0).toLocaleString(), '#1E3A5F') +
+          card('PLU Crossref', s.plu_crossref||0, '#6B7280') +
+          card('Stores', s.stores||0, '#7C3AED') +
+          card('DB Size', `${(s.db_size_mb||0).toFixed(0)} MB`, '#6B7280');
+      } catch (err) {
+        document.getElementById('toastConfigStats').innerHTML =
+          `<div style="color:#991B1B;font-size:0.85rem;grid-column:1/-1;">Error loading config stats: ${escHtml(err.message)}</div>`;
+      }
+    }
+
+    async function syncToastConfig(step) {
+      const label = step === 'all' ? 'Sync All Locations' : 'Rebuild Attribute Map';
+      const btn = step === 'all'
+        ? document.getElementById('syncAllConfigBtn')
+        : document.getElementById('rebuildAttrMapBtn');
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = step === 'all' ? 'Syncing...' : 'Rebuilding...';
+
+      const resultEl = document.getElementById('toastConfigSyncResult');
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<div style="color:#6B7280;font-size:0.85rem;">Running ${label}... this may take several minutes for all locations.</div>`;
+
+      try {
+        const resp = await fetch('/api/admin/toast-config/sync', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ step }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+
+        let html = `<h3 style="margin:0 0 0.75rem;color:#059669;font-size:1rem;">Sync Complete</h3>`;
+        html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;">`;
+        if (data.locations_synced != null) html += `<div><span style="font-size:0.78rem;color:#6B7280;">Locations</span><br><strong>${data.locations_synced}</strong></div>`;
+        if (data.total_items != null) html += `<div><span style="font-size:0.78rem;color:#6B7280;">Items</span><br><strong>${data.total_items.toLocaleString()}</strong></div>`;
+        if (data.total_tags != null) html += `<div><span style="font-size:0.78rem;color:#6B7280;">Tags</span><br><strong>${data.total_tags.toLocaleString()}</strong></div>`;
+        if (data.attribute_map_rows != null) html += `<div><span style="font-size:0.78rem;color:#6B7280;">Attr Map Rows</span><br><strong>${data.attribute_map_rows.toLocaleString()}</strong></div>`;
+        if (data.errors?.length) html += `<div><span style="font-size:0.78rem;color:#DC2626;">Errors</span><br><strong>${data.errors.length}</strong></div>`;
+        html += `</div>`;
+
+        resultEl.innerHTML = html;
+        showStatus(`${label} completed successfully`, 'success');
+        loadToastConfigStats();
+        loadDbHealth();
+      } catch (err) {
+        resultEl.innerHTML = `<div style="color:#991B1B;font-size:0.85rem;">Error: ${escHtml(err.message)}</div>`;
+        showStatus(`${label} failed: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
     // Init
     // ──────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', async () => {
@@ -1325,6 +1586,11 @@
       document.getElementById('runFlashImportBtn').addEventListener('click', runFlashImport);
       document.getElementById('flashBackfillBtn').addEventListener('click', startFlashBackfill);
 
+      // Database health + toast config buttons
+      document.getElementById('refreshDbHealthBtn').addEventListener('click', loadDbHealth);
+      document.getElementById('syncAllConfigBtn').addEventListener('click', () => syncToastConfig('all'));
+      document.getElementById('rebuildAttrMapBtn').addEventListener('click', () => syncToastConfig('attribute-map'));
+
       // Auth gate
       const isAuth = await checkAuth();
       if (isAuth) {
@@ -1333,6 +1599,8 @@
         loadCacheStats();
         loadFailedImports();
         loadFlashImportStatus();
+        loadDbHealth();
+        loadToastConfigStats();
       }
     });
   </script>
