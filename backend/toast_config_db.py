@@ -1,0 +1,625 @@
+"""
+toast_config_db.py  —  SQLite persistence layer for Toast menu configuration data.
+
+Replaces SQL Server tables: cfg_menu_items, cfg_tags, cfg_map_item_tags,
+cfg_Sales_Cats, cfg_map_PLU_Toast_to_Aloha, and the master MLI_PLU_Attribute_Map.
+
+Schema
+------
+  cfg_menu_items        — Menu items from Toast Menus V3 API
+  cfg_tags              — Tag definitions with consolidated category IDs
+  cfg_map_item_tags     — Item-to-tag assignments
+  cfg_sales_cats        — Sales categories
+  cfg_map_plu_toast_to_aloha  — Toast PLU → Aloha PLU cross-reference
+  consolidated_category_ids   — Hardcoded business rule from sp_merge_menu_cfg_tables
+  mli_plu_attribute_map       — Master reference table (SP #1 output)
+
+Usage
+-----
+  from toast_config_db import initialize_db, upsert_menu_items, get_attribute_map, get_stats
+"""
+
+import json
+import logging
+import os
+import sqlite3
+from typing import Dict, List, Optional
+
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# Default path — parallel to other data directories
+TOAST_CONFIG_DB_PATH = os.path.join(
+    os.path.dirname(__file__), "data", "toast_config", "toast_config.db"
+)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Consolidated Category IDs — extracted from sp_merge_menu_cfg_tables
+# Note: "* Consolidated  Soups" has a double space (matches the SP exactly)
+# ──────────────────────────────────────────────────────────────────────────────
+
+CONSOLIDATED_CATEGORY_IDS = {
+    "* Consolidated  Soups": 9002,
+    "* Consolidated 2oz 4oz Dressings": 9097,
+    "* Consolidated Beer": 9007,
+    "* Consolidated Bulk GnG": 9011,
+    "* Consolidated Catering": 27,
+    "* Consolidated Desserts": 9010,
+    "* Consolidated Extras and Misc": 9012,
+    "* Consolidated Modifiers": 9099,
+    "* Consolidated NA Bev": 9006,
+    "* Consolidated Non Food": 9014,
+    "* Consolidated Pasta and Mac": 9003,
+    "* Consolidated Pizza": 9001,
+    "* Consolidated Salads": 9005,
+    "* Consolidated Sandwiches": 9004,
+    "* Consolidated Sides": 9009,
+    "* Consolidated Wine and Spirits": 9008,
+    "* Consolidated Wraps": 9017,
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Schema
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CREATE_SQL = """
+CREATE TABLE IF NOT EXISTS cfg_menu_items (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    store_guid            TEXT NOT NULL,
+    store_num             INTEGER,
+    item_name             TEXT NOT NULL DEFAULT '',
+    item_pos_name         TEXT NOT NULL DEFAULT '',
+    item_guid             TEXT NOT NULL DEFAULT '',
+    item_price            REAL DEFAULT 0,
+    item_pricing_strategy TEXT DEFAULT '',
+    item_is_deferred      INTEGER DEFAULT 0,
+    item_is_discountable  INTEGER DEFAULT 1,
+    sales_cat_guid        TEXT DEFAULT '',
+    sales_cat             TEXT DEFAULT '',
+    item_plu              INTEGER DEFAULT 0,
+    item_sku              TEXT DEFAULT '',
+    item_kitchen_name     TEXT DEFAULT '',
+    guest_count           REAL DEFAULT 0,
+    master_id             TEXT DEFAULT '',
+    multi_location_id     TEXT NOT NULL DEFAULT '',
+    item_is_combo_parent  INTEGER DEFAULT 0,
+    item_tags             TEXT DEFAULT '[]'
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cfg_mi_unique
+    ON cfg_menu_items(store_guid, multi_location_id, sales_cat_guid);
+
+CREATE INDEX IF NOT EXISTS idx_cfg_mi_mli
+    ON cfg_menu_items(multi_location_id);
+
+CREATE INDEX IF NOT EXISTS idx_cfg_mi_store
+    ON cfg_menu_items(store_guid);
+
+CREATE TABLE IF NOT EXISTS cfg_tags (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    store_guid        TEXT NOT NULL,
+    tag_guid          TEXT NOT NULL,
+    tag_name          TEXT NOT NULL DEFAULT '',
+    master_id         TEXT DEFAULT '',
+    multi_location_id TEXT DEFAULT '',
+    consol_cat_id     INTEGER
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cfg_tags_unique
+    ON cfg_tags(store_guid, tag_guid);
+
+CREATE INDEX IF NOT EXISTS idx_cfg_tags_name
+    ON cfg_tags(tag_name);
+
+CREATE TABLE IF NOT EXISTS cfg_map_item_tags (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    store_guid        TEXT NOT NULL,
+    item_guid         TEXT NOT NULL,
+    tag_guid          TEXT NOT NULL,
+    item_plu          INTEGER DEFAULT 0,
+    multi_location_id TEXT DEFAULT ''
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cfg_mit_unique
+    ON cfg_map_item_tags(store_guid, multi_location_id, tag_guid);
+
+CREATE TABLE IF NOT EXISTS cfg_sales_cats (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    store_guid        TEXT NOT NULL,
+    category_guid     TEXT NOT NULL,
+    category_name     TEXT NOT NULL DEFAULT '',
+    master_id         TEXT DEFAULT '',
+    multi_location_id TEXT DEFAULT ''
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cfg_sc_unique
+    ON cfg_sales_cats(store_guid, category_guid);
+
+CREATE TABLE IF NOT EXISTS cfg_map_plu_toast_to_aloha (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    multi_location_id TEXT NOT NULL,
+    toast_plu         INTEGER NOT NULL DEFAULT 0,
+    aloha_plu         INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cfg_plu_unique
+    ON cfg_map_plu_toast_to_aloha(multi_location_id);
+
+CREATE TABLE IF NOT EXISTS consolidated_category_ids (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    tag_name  TEXT NOT NULL UNIQUE,
+    consol_id INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mli_plu_attribute_map (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    multi_location_id TEXT NOT NULL,
+    item_guid         TEXT NOT NULL DEFAULT '',
+    toast_plu         INTEGER DEFAULT 0,
+    aloha_plu         INTEGER DEFAULT 0,
+    toast_item_name   TEXT NOT NULL DEFAULT '',
+    aloha_item_name   TEXT NOT NULL DEFAULT '',
+    consolidated_cat  TEXT NOT NULL DEFAULT '',
+    recipe            TEXT NOT NULL DEFAULT '',
+    guest_count_tag   REAL DEFAULT 0,
+    entree_equiv_tag  REAL DEFAULT 0,
+    lto_tag           TEXT NOT NULL DEFAULT ''
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mli_unique
+    ON mli_plu_attribute_map(multi_location_id, item_guid);
+
+CREATE INDEX IF NOT EXISTS idx_mli_consol
+    ON mli_plu_attribute_map(consolidated_cat);
+"""
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Connection + Schema
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_connection(db_path: str = TOAST_CONFIG_DB_PATH) -> sqlite3.Connection:
+    """Return a WAL-mode SQLite connection."""
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA cache_size=-32000")  # ~32 MB page cache
+    return conn
+
+
+def initialize_db(db_path: str = TOAST_CONFIG_DB_PATH) -> None:
+    """Create the database file, schema, and seed consolidated category IDs."""
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    with get_connection(db_path) as conn:
+        conn.executescript(_CREATE_SQL)
+        _seed_consolidated_category_ids(conn)
+
+
+def _seed_consolidated_category_ids(conn: sqlite3.Connection) -> None:
+    """Insert the 17 hardcoded consolidated category ID mappings if not present."""
+    for tag_name, consol_id in CONSOLIDATED_CATEGORY_IDS.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO consolidated_category_ids (tag_name, consol_id)"
+            " VALUES (?, ?)",
+            (tag_name, consol_id),
+        )
+
+
+def db_available(db_path: str = TOAST_CONFIG_DB_PATH) -> bool:
+    """Return True if the database file exists and has menu items."""
+    if not os.path.exists(db_path):
+        return False
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute("SELECT 1 FROM cfg_menu_items LIMIT 1").fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Writes — cfg_menu_items
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_menu_items(
+    items: List[dict],
+    store_guid: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """
+    Upsert menu items for a store. Each dict should have keys matching
+    the cfg_menu_items columns (snake_case). item_tags should be a JSON string.
+    Returns the number of rows upserted.
+    """
+    if not items:
+        return 0
+    initialize_db(db_path)
+    rows = []
+    for item in items:
+        rows.append((
+            store_guid,
+            item.get("store_num", 0),
+            item.get("item_name", ""),
+            item.get("item_pos_name", ""),
+            item.get("item_guid", ""),
+            item.get("item_price", 0),
+            item.get("item_pricing_strategy", ""),
+            int(item.get("item_is_deferred", 0)),
+            int(item.get("item_is_discountable", 1)),
+            item.get("sales_cat_guid", ""),
+            item.get("sales_cat", ""),
+            item.get("item_plu", 0),
+            item.get("item_sku", ""),
+            item.get("item_kitchen_name", ""),
+            item.get("guest_count", 0),
+            item.get("master_id", ""),
+            item.get("multi_location_id", ""),
+            int(item.get("item_is_combo_parent", 0)),
+            item.get("item_tags", "[]"),
+        ))
+
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO cfg_menu_items (
+                store_guid, store_num, item_name, item_pos_name, item_guid,
+                item_price, item_pricing_strategy, item_is_deferred,
+                item_is_discountable, sales_cat_guid, sales_cat, item_plu,
+                item_sku, item_kitchen_name, guest_count, master_id,
+                multi_location_id, item_is_combo_parent, item_tags
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(store_guid, multi_location_id, sales_cat_guid)
+            DO UPDATE SET
+                store_num=excluded.store_num,
+                item_name=excluded.item_name,
+                item_pos_name=excluded.item_pos_name,
+                item_guid=excluded.item_guid,
+                item_price=excluded.item_price,
+                item_pricing_strategy=excluded.item_pricing_strategy,
+                item_is_deferred=excluded.item_is_deferred,
+                item_is_discountable=excluded.item_is_discountable,
+                sales_cat=excluded.sales_cat,
+                item_plu=excluded.item_plu,
+                item_sku=excluded.item_sku,
+                item_kitchen_name=excluded.item_kitchen_name,
+                guest_count=excluded.guest_count,
+                master_id=excluded.master_id,
+                item_is_combo_parent=excluded.item_is_combo_parent,
+                item_tags=excluded.item_tags
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Writes — cfg_tags
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_tags(
+    tags: List[dict],
+    store_guid: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """Upsert tag definitions for a store. Applies consolidated category IDs."""
+    if not tags:
+        return 0
+    initialize_db(db_path)
+
+    # Look up consolidated category IDs
+    consol_map = get_consolidated_cat_map(db_path)
+
+    rows = []
+    for tag in tags:
+        tag_name = tag.get("tag_name", "")
+        consol_id = consol_map.get(tag_name)
+        rows.append((
+            store_guid,
+            tag.get("tag_guid", ""),
+            tag_name,
+            tag.get("master_id", ""),
+            tag.get("multi_location_id", ""),
+            consol_id,
+        ))
+
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO cfg_tags (
+                store_guid, tag_guid, tag_name, master_id,
+                multi_location_id, consol_cat_id
+            ) VALUES (?,?,?,?,?,?)
+            ON CONFLICT(store_guid, tag_guid)
+            DO UPDATE SET
+                tag_name=excluded.tag_name,
+                master_id=excluded.master_id,
+                multi_location_id=excluded.multi_location_id,
+                consol_cat_id=excluded.consol_cat_id
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Writes — cfg_map_item_tags
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_item_tags(
+    mappings: List[dict],
+    store_guid: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """Upsert item-to-tag assignments for a store."""
+    if not mappings:
+        return 0
+    initialize_db(db_path)
+    rows = []
+    for m in mappings:
+        rows.append((
+            store_guid,
+            m.get("item_guid", ""),
+            m.get("tag_guid", ""),
+            m.get("item_plu", 0),
+            m.get("multi_location_id", ""),
+        ))
+
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO cfg_map_item_tags (
+                store_guid, item_guid, tag_guid, item_plu, multi_location_id
+            ) VALUES (?,?,?,?,?)
+            ON CONFLICT(store_guid, multi_location_id, tag_guid)
+            DO UPDATE SET
+                item_guid=excluded.item_guid,
+                item_plu=excluded.item_plu
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Writes — cfg_sales_cats
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_sales_cats(
+    cats: List[dict],
+    store_guid: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """Upsert sales categories for a store."""
+    if not cats:
+        return 0
+    initialize_db(db_path)
+    rows = []
+    for c in cats:
+        rows.append((
+            store_guid,
+            c.get("category_guid", ""),
+            c.get("category_name", ""),
+            c.get("master_id", ""),
+            c.get("multi_location_id", ""),
+        ))
+
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO cfg_sales_cats (
+                store_guid, category_guid, category_name,
+                master_id, multi_location_id
+            ) VALUES (?,?,?,?,?)
+            ON CONFLICT(store_guid, category_guid)
+            DO UPDATE SET
+                category_name=excluded.category_name,
+                master_id=excluded.master_id,
+                multi_location_id=excluded.multi_location_id
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Writes — cfg_map_plu_toast_to_aloha
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_plu_crossref(
+    rows_in: List[dict],
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """Upsert Toast PLU → Aloha PLU cross-reference."""
+    if not rows_in:
+        return 0
+    initialize_db(db_path)
+    rows = []
+    for r in rows_in:
+        rows.append((
+            r.get("multi_location_id", ""),
+            r.get("toast_plu", 0),
+            r.get("aloha_plu", 0),
+        ))
+
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO cfg_map_plu_toast_to_aloha (
+                multi_location_id, toast_plu, aloha_plu
+            ) VALUES (?,?,?)
+            ON CONFLICT(multi_location_id)
+            DO UPDATE SET
+                toast_plu=excluded.toast_plu,
+                aloha_plu=excluded.aloha_plu
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Writes — mli_plu_attribute_map
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upsert_attribute_map(
+    rows_in: List[dict],
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """Upsert rows into the master attribute map."""
+    if not rows_in:
+        return 0
+    initialize_db(db_path)
+    rows = []
+    for r in rows_in:
+        rows.append((
+            r.get("multi_location_id", ""),
+            r.get("item_guid", ""),
+            r.get("toast_plu", 0),
+            r.get("aloha_plu", 0),
+            r.get("toast_item_name", ""),
+            r.get("aloha_item_name", ""),
+            r.get("consolidated_cat", ""),
+            r.get("recipe", ""),
+            r.get("guest_count_tag", 0),
+            r.get("entree_equiv_tag", 0),
+            r.get("lto_tag", ""),
+        ))
+
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO mli_plu_attribute_map (
+                multi_location_id, item_guid, toast_plu, aloha_plu,
+                toast_item_name, aloha_item_name, consolidated_cat,
+                recipe, guest_count_tag, entree_equiv_tag, lto_tag
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(multi_location_id, item_guid)
+            DO UPDATE SET
+                toast_plu=excluded.toast_plu,
+                aloha_plu=excluded.aloha_plu,
+                toast_item_name=excluded.toast_item_name,
+                aloha_item_name=excluded.aloha_item_name,
+                consolidated_cat=excluded.consolidated_cat,
+                recipe=excluded.recipe,
+                guest_count_tag=excluded.guest_count_tag,
+                entree_equiv_tag=excluded.entree_equiv_tag,
+                lto_tag=excluded.lto_tag
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Reads
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_consolidated_cat_map(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, int]:
+    """Return {tag_name: consol_id} from the consolidated_category_ids table."""
+    if not os.path.exists(db_path):
+        return dict(CONSOLIDATED_CATEGORY_IDS)
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute(
+                "SELECT tag_name, consol_id FROM consolidated_category_ids"
+            ).fetchall()
+        return {r[0]: r[1] for r in rows} if rows else dict(CONSOLIDATED_CATEGORY_IDS)
+    except Exception:
+        return dict(CONSOLIDATED_CATEGORY_IDS)
+
+
+def get_attribute_map(
+    multi_location_ids: Optional[List[str]] = None,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> pd.DataFrame:
+    """
+    Return the master attribute map as a DataFrame.
+    Optionally filter to specific multi_location_ids.
+    """
+    if not os.path.exists(db_path):
+        return pd.DataFrame()
+    try:
+        params: List = []
+        sql = "SELECT * FROM mli_plu_attribute_map"
+        if multi_location_ids:
+            ph = ",".join("?" * len(multi_location_ids))
+            sql += f" WHERE multi_location_id IN ({ph})"
+            params.extend(multi_location_ids)
+        with get_connection(db_path) as conn:
+            return pd.read_sql_query(sql, conn, params=params)
+    except Exception as exc:
+        logger.warning(f"Failed to read attribute map: {exc}")
+        return pd.DataFrame()
+
+
+def get_menu_items_by_store(
+    store_guid: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> List[dict]:
+    """Return all menu items for a store as a list of dicts."""
+    if not os.path.exists(db_path):
+        return []
+    try:
+        with get_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM cfg_menu_items WHERE store_guid = ?",
+                (store_guid,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_all_menu_items(db_path: str = TOAST_CONFIG_DB_PATH) -> pd.DataFrame:
+    """Return all cfg_menu_items rows as a DataFrame (deduplicated by MLI)."""
+    if not os.path.exists(db_path):
+        return pd.DataFrame()
+    try:
+        sql = """
+            SELECT DISTINCT multi_location_id, item_guid, item_name,
+                   item_plu, item_tags, sales_cat_guid, guest_count
+            FROM cfg_menu_items
+            WHERE multi_location_id != ''
+        """
+        with get_connection(db_path) as conn:
+            return pd.read_sql_query(sql, conn)
+    except Exception as exc:
+        logger.warning(f"Failed to read menu items: {exc}")
+        return pd.DataFrame()
+
+
+def get_stats(db_path: str = TOAST_CONFIG_DB_PATH) -> dict:
+    """Return summary statistics about the database contents."""
+    empty = {
+        "menu_items": 0,
+        "tags": 0,
+        "item_tags": 0,
+        "sales_cats": 0,
+        "plu_crossref": 0,
+        "attribute_map": 0,
+        "stores": 0,
+        "db_size_mb": 0.0,
+    }
+    if not os.path.exists(db_path):
+        return empty
+    try:
+        with get_connection(db_path) as conn:
+            counts = {}
+            for table in ["cfg_menu_items", "cfg_tags", "cfg_map_item_tags",
+                          "cfg_sales_cats", "cfg_map_plu_toast_to_aloha",
+                          "mli_plu_attribute_map"]:
+                row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                counts[table] = row[0] if row else 0
+            stores = conn.execute(
+                "SELECT COUNT(DISTINCT store_guid) FROM cfg_menu_items"
+            ).fetchone()
+        size_mb = os.path.getsize(db_path) / (1024 * 1024)
+        return {
+            "menu_items": counts["cfg_menu_items"],
+            "tags": counts["cfg_tags"],
+            "item_tags": counts["cfg_map_item_tags"],
+            "sales_cats": counts["cfg_sales_cats"],
+            "plu_crossref": counts["cfg_map_plu_toast_to_aloha"],
+            "attribute_map": counts["mli_plu_attribute_map"],
+            "stores": stores[0] if stores else 0,
+            "db_size_mb": round(size_mb, 2),
+        }
+    except Exception:
+        return empty

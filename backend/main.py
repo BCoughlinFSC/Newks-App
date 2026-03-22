@@ -41,6 +41,8 @@ import aloha_db
 import aloha_sales_db
 from aloha_sales_importer import import_aloha_sales_range, import_aloha_sales_last_days, import_fiscal_calendar
 import toast_orders_db
+import toast_config_db
+import toast_config_builder
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -200,10 +202,53 @@ def get_consolidated_guid_map() -> Dict[str, str]:
 def _ensure_consolidated_maps() -> None:
     """Load mapping file once and populate consolidated map + report_tag_map in cache.
 
+    Tries toast_config.db (SQLite) first for the attribute map, then falls back
+    to the Excel mapping files.
+
     The Tags column (comma-separated, synced from Toast item tags) is parsed into
     individual tags for report_tag_map.  ConsolidatedCat (also synced from Toast)
     feeds the consolidated_cat_map.
     """
+    cache = _consolidated_cat_cache.get("data")
+
+    # ── Try SQLite attribute map first ──
+    if toast_config_db.db_available():
+        attr_df = toast_config_db.get_attribute_map()
+        if not attr_df.empty:
+            # Check if SQLite data is newer than cache
+            sqlite_key = "__sqlite__"
+            if cache and cache.get("mtimes") == {sqlite_key: len(attr_df)}:
+                return
+            mapping: Dict[str, str] = {}
+            report_tag_map: Dict[str, List[str]] = {}
+            for _, row in attr_df.iterrows():
+                name = _normalize_item_name(row.get("toast_item_name", ""))
+                if not name:
+                    continue
+                consol = str(row.get("consolidated_cat", "")).strip()
+                recipe = str(row.get("recipe", "")).strip()
+                tag_list = []
+                if consol:
+                    tag_list.append(consol)
+                if recipe:
+                    tag_list.append(recipe)
+                for key in _mapping_lookup_keys(name):
+                    is_base_key = key != name
+                    if is_base_key and "(" in name:
+                        continue
+                    if key not in mapping and consol:
+                        mapping[key] = consol
+                    if tag_list and key not in report_tag_map:
+                        report_tag_map[key] = tag_list
+            _consolidated_cat_cache["data"] = {
+                "mtimes": {sqlite_key: len(attr_df)},
+                "map": mapping,
+                "report_tag_map": report_tag_map,
+            }
+            logger.info(f"Consolidated maps loaded from toast_config.db: {len(mapping)} items")
+            return
+
+    # ── Fall back to Excel mapping files ──
     mapping_files = [MAPPING_FILE, FALLBACK_MAPPING_FILE]
     missing = [path for path in mapping_files if not os.path.exists(path)]
     if len(missing) == len(mapping_files):
@@ -211,7 +256,6 @@ def _ensure_consolidated_maps() -> None:
         return
 
     mtimes = {path: os.path.getmtime(path) for path in mapping_files if os.path.exists(path)}
-    cache = _consolidated_cat_cache.get("data")
     if cache and cache.get("mtimes") == mtimes:
         return
 
@@ -2261,7 +2305,13 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
         "hash": current_hash,
         "mapping": mapping
     }
-    
+
+    # Opportunistic write to toast_config.db (non-blocking, best-effort)
+    try:
+        toast_config_builder.merge_menu_config_from_api(menus_data, restaurant_guid)
+    except Exception as exc:
+        logger.debug(f"Opportunistic toast_config write failed for {restaurant_guid}: {exc}")
+
     # Also build a name-to-GUID mapping for modifiers (fallback matching)
     modifier_name_to_guid = {}
     for mod_group_guid, mod_group in modifier_group_refs.items():
@@ -5359,6 +5409,7 @@ _scheduler.add_job(nightly_flash_import_job, CronTrigger(hour=4, minute=0),
 async def _on_startup():
     toast_orders_db.initialize_db()
     aloha_sales_db.initialize_db()
+    toast_config_db.initialize_db()
     _scheduler.start()
     logger.info("APScheduler started — nightly jobs scheduled (orders@3AM, flash import@4AM)")
 
@@ -9502,6 +9553,43 @@ async def admin_flash_import_status(admin_user: User = Depends(get_current_admin
     return result
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Toast Config DB admin endpoints
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/toast-config/stats")
+async def admin_toast_config_stats(admin_user: User = Depends(get_current_admin_user)):
+    """Return toast_config.db statistics."""
+    return toast_config_db.get_stats()
+
+
+@app.post("/api/admin/toast-config/sync")
+async def admin_toast_config_sync(
+    payload: dict = Body(default={}),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Trigger toast config sync from Toast API.
+    Pass {"step": "menu-config"|"attribute-map"|"all"} (default: all).
+    Pass {"restaurant_guid": "..."} to sync a single location.
+    """
+    from sync_toast_config import sync_menu_config, sync_attribute_map, sync_all
+
+    step = payload.get("step", "all")
+    guid = payload.get("restaurant_guid")
+    guids = [guid] if guid else None
+
+    if step == "menu-config":
+        result = await sync_menu_config(guids)
+    elif step == "attribute-map":
+        count = await sync_attribute_map()
+        result = {"attribute_map_rows": count}
+    else:
+        result = await sync_all(guids)
+
+    return result
+
+
 async def _run_flash_import_for_date(target_date: date):
     """Run the flash import for a specific date (used for backfill)."""
     target_str = target_date.isoformat()
@@ -13581,54 +13669,93 @@ async def generate_menu_mix_report(req: MenuMixRequest):
         if len(locations) > 5:
             location_label += f" (+{len(locations) - 5} more)"
 
-        # ── Load mapping table ──
-        mapping_df = _load_mapping_for_mix()
-        if mapping_df.empty:
-            raise HTTPException(status_code=500, detail="Mapping table not found")
-
-        # Build lookup dicts from mapping
-        # normalized_toast_name → row data
+        # ── Load mapping data (SQLite first, Excel fallback) ──
         mapping_by_norm_name: Dict[str, dict] = {}
         mapping_by_mli: Dict[str, dict] = {}
         mapping_by_guid: Dict[str, dict] = {}
         aloha_to_recipe: Dict[str, dict] = {}
 
-        for _, mrow in mapping_df.iterrows():
-            toast_name = str(mrow.get("Toast_Item_Name", "") or "").strip()
-            norm = _normalize_item_name(toast_name)
-            aloha_name = str(mrow.get("AlohaItemName", "") or "").strip() if pd.notna(mrow.get("AlohaItemName")) else ""
-            cons_cat = str(mrow.get("ConsolidatedCat", "") or "").strip() if pd.notna(mrow.get("ConsolidatedCat")) else ""
-            tags_str = str(mrow.get("Tags", "") or "").strip() if pd.notna(mrow.get("Tags")) else ""
-            ee_tag = str(mrow.get("EntreEquivTag", "") or "").strip() if pd.notna(mrow.get("EntreEquivTag")) else ""
-            recipe_tag = _extract_recipe_tag(tags_str)
-            ee_val = _extract_ee_value(ee_tag)
-            mli = str(mrow.get("MultiLocationId", "") or "").strip() if pd.notna(mrow.get("MultiLocationId")) else ""
-            guid = str(mrow.get("item_guid", "") or "").strip() if pd.notna(mrow.get("item_guid")) else ""
-            toast_plu = str(mrow.get("ToastPLU", "") or "").strip() if pd.notna(mrow.get("ToastPLU")) else ""
+        attr_df = toast_config_db.get_attribute_map()
+        if not attr_df.empty:
+            logger.info(f"Menu Mix: Loading mapping from toast_config.db ({len(attr_df)} rows)")
+            for _, mrow in attr_df.iterrows():
+                toast_name = str(mrow.get("toast_item_name", "") or "").strip()
+                norm = _normalize_item_name(toast_name)
+                aloha_name = str(mrow.get("aloha_item_name", "") or "").strip()
+                cons_cat = str(mrow.get("consolidated_cat", "") or "").strip()
+                recipe_tag = str(mrow.get("recipe", "") or "").strip()
+                ee_val = float(mrow.get("entree_equiv_tag", 0) or 0)
+                ee_tag = f"EE {ee_val}" if ee_val else ""
+                mli = str(mrow.get("multi_location_id", "") or "").strip()
+                guid = str(mrow.get("item_guid", "") or "").strip()
+                toast_plu = str(int(mrow.get("toast_plu", 0) or 0)) if mrow.get("toast_plu") else ""
 
-            row_data = {
-                "toast_name": toast_name,
-                "norm_name": norm,
-                "aloha_name": aloha_name,
-                "consolidated_tag": cons_cat,
-                "recipe_tag": recipe_tag,
-                "ee_tag": ee_tag,
-                "ee_value": ee_val,
-                "mli": mli,
-                "guid": guid,
-                "toast_plu": toast_plu,
-            }
+                row_data = {
+                    "toast_name": toast_name,
+                    "norm_name": norm,
+                    "aloha_name": aloha_name,
+                    "consolidated_tag": cons_cat,
+                    "recipe_tag": recipe_tag,
+                    "ee_tag": ee_tag,
+                    "ee_value": ee_val,
+                    "mli": mli,
+                    "guid": guid,
+                    "toast_plu": toast_plu,
+                }
 
-            if norm and norm not in mapping_by_norm_name:
-                mapping_by_norm_name[norm] = row_data
-            if mli and mli not in mapping_by_mli:
-                mapping_by_mli[mli] = row_data
-            if guid and guid not in mapping_by_guid:
-                mapping_by_guid[guid] = row_data
-            if aloha_name:
-                aloha_norm = aloha_name.lower().strip()
-                if aloha_norm not in aloha_to_recipe:
-                    aloha_to_recipe[aloha_norm] = row_data
+                if norm and norm not in mapping_by_norm_name:
+                    mapping_by_norm_name[norm] = row_data
+                if mli and mli not in mapping_by_mli:
+                    mapping_by_mli[mli] = row_data
+                if guid and guid not in mapping_by_guid:
+                    mapping_by_guid[guid] = row_data
+                if aloha_name:
+                    aloha_norm = aloha_name.lower().strip()
+                    if aloha_norm not in aloha_to_recipe:
+                        aloha_to_recipe[aloha_norm] = row_data
+        else:
+            # Fall back to Excel mapping table
+            logger.info("Menu Mix: toast_config.db empty, falling back to Excel mapping")
+            mapping_df = _load_mapping_for_mix()
+            if mapping_df.empty:
+                raise HTTPException(status_code=500, detail="No mapping data available (toast_config.db empty and Excel mapping not found)")
+
+            for _, mrow in mapping_df.iterrows():
+                toast_name = str(mrow.get("Toast_Item_Name", "") or "").strip()
+                norm = _normalize_item_name(toast_name)
+                aloha_name = str(mrow.get("AlohaItemName", "") or "").strip() if pd.notna(mrow.get("AlohaItemName")) else ""
+                cons_cat = str(mrow.get("ConsolidatedCat", "") or "").strip() if pd.notna(mrow.get("ConsolidatedCat")) else ""
+                tags_str = str(mrow.get("Tags", "") or "").strip() if pd.notna(mrow.get("Tags")) else ""
+                ee_tag = str(mrow.get("EntreEquivTag", "") or "").strip() if pd.notna(mrow.get("EntreEquivTag")) else ""
+                recipe_tag = _extract_recipe_tag(tags_str)
+                ee_val = _extract_ee_value(ee_tag)
+                mli = str(mrow.get("MultiLocationId", "") or "").strip() if pd.notna(mrow.get("MultiLocationId")) else ""
+                guid = str(mrow.get("item_guid", "") or "").strip() if pd.notna(mrow.get("item_guid")) else ""
+                toast_plu = str(mrow.get("ToastPLU", "") or "").strip() if pd.notna(mrow.get("ToastPLU")) else ""
+
+                row_data = {
+                    "toast_name": toast_name,
+                    "norm_name": norm,
+                    "aloha_name": aloha_name,
+                    "consolidated_tag": cons_cat,
+                    "recipe_tag": recipe_tag,
+                    "ee_tag": ee_tag,
+                    "ee_value": ee_val,
+                    "mli": mli,
+                    "guid": guid,
+                    "toast_plu": toast_plu,
+                }
+
+                if norm and norm not in mapping_by_norm_name:
+                    mapping_by_norm_name[norm] = row_data
+                if mli and mli not in mapping_by_mli:
+                    mapping_by_mli[mli] = row_data
+                if guid and guid not in mapping_by_guid:
+                    mapping_by_guid[guid] = row_data
+                if aloha_name:
+                    aloha_norm = aloha_name.lower().strip()
+                    if aloha_norm not in aloha_to_recipe:
+                        aloha_to_recipe[aloha_norm] = row_data
 
         def _lookup_mapping(item_guid: str, item_name: str) -> dict:
             """Look up mapping by GUID first, then by normalized name."""
