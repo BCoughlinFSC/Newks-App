@@ -156,21 +156,7 @@ async def _fetch_menus_with_fallback(
     max_retries: int = 5,
 ) -> dict:
     """Fetch menus: try V3, fall back to V2, retry on 429 with exponential backoff."""
-    v3_forbidden = False  # Once 403, skip V3 for this call
-
     for attempt in range(max_retries):
-        # Try V3 (skip if already got 403)
-        if not v3_forbidden:
-            resp = await client.get(f"{TOAST_STANDARD_API_BASE_URL}/menus/v3/menus", headers=headers)
-            if resp.status_code == 200:
-                return resp.json()
-            if resp.status_code == 429:
-                wait = min(5 * (attempt + 1), 30)
-                logger.info(f"    Rate limited (V3), waiting {wait}s...")
-                await asyncio.sleep(wait)
-                continue
-            # 403 or other — mark V3 as forbidden, try V2
-            v3_forbidden = True
 
         # Try V2
         resp2 = await client.get(f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus", headers=headers)
@@ -221,9 +207,9 @@ async def sync_menu_config(
             guid = loc["restaurantGuid"]
             name = loc.get("restaurantName", "")
 
-            # Rate-limit: small delay between locations to avoid 429
+            # Rate-limit: delay between locations to avoid 429
             if i > 0:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(5)
 
             try:
                 headers = await _get_standard_auth_headers()
