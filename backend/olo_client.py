@@ -276,3 +276,105 @@ def aggregate_digital_orders_by_platform(orders: List[Dict[str, Any]]) -> List[D
     result = list(buckets.values())
     result.sort(key=lambda x: (x["platform"], x["clientPlatform"]))
     return result
+
+
+def aggregate_by_handoff_mode(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Aggregate orders by handoff mode (CounterPickup, CurbsidePickup, Dispatch, etc.)
+    with optional store breakdown.
+    """
+    buckets: Dict[tuple, Dict[str, Any]] = {}
+
+    for o in orders:
+        handoff = (o.get("handoff") or "").strip() or "Unknown"
+        store = (o.get("storeName") or "").strip() or "Unknown"
+        key = (handoff, store)
+
+        if key not in buckets:
+            buckets[key] = {
+                "handoff": handoff,
+                "storeName": store,
+                "storeRef": o.get("storeRef", ""),
+                "orderCount": 0,
+                "subtotal": 0.0,
+                "tax": 0.0,
+                "tip": 0.0,
+                "deliveryFee": 0.0,
+                "total": 0.0,
+            }
+        b = buckets[key]
+        b["orderCount"] += 1
+        b["subtotal"] += float(o.get("subtotal") or 0)
+        b["tax"] += float(o.get("tax") or 0)
+        b["tip"] += float(o.get("tip") or 0)
+        b["deliveryFee"] += float(o.get("deliveryFee") or 0)
+        b["total"] += float(o.get("total") or 0)
+
+    result = list(buckets.values())
+    # Round values
+    for r in result:
+        for k in ("subtotal", "tax", "tip", "deliveryFee", "total"):
+            r[k] = round(r[k], 2)
+    result.sort(key=lambda x: (-x["total"], x["handoff"], x["storeName"]))
+    return result
+
+
+def aggregate_orders_placed_ahead(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Find orders where timePlaced date differs from timeWanted date (placed ahead).
+    Returns aggregation by store with counts and average lead time.
+    """
+    from datetime import datetime as dt
+
+    buckets: Dict[str, Dict[str, Any]] = {}
+
+    for o in orders:
+        time_placed = o.get("timePlaced", "")
+        time_wanted = o.get("timeWanted", "")
+        if not time_placed or not time_wanted:
+            continue
+
+        try:
+            placed = dt.fromisoformat(time_placed.replace("Z", "+00:00").replace(" ", "T"))
+            wanted = dt.fromisoformat(time_wanted.replace("Z", "+00:00").replace(" ", "T"))
+        except (ValueError, TypeError):
+            continue
+
+        # Calculate lead time in hours
+        lead_hours = (wanted - placed).total_seconds() / 3600
+        is_placed_ahead = placed.date() != wanted.date() or lead_hours > 2
+
+        store = (o.get("storeName") or "").strip() or "Unknown"
+        if store not in buckets:
+            buckets[store] = {
+                "storeName": store,
+                "storeRef": o.get("storeRef", ""),
+                "totalOrders": 0,
+                "placedAhead": 0,
+                "sameDay": 0,
+                "totalLeadHours": 0.0,
+            }
+        b = buckets[store]
+        b["totalOrders"] += 1
+        if is_placed_ahead:
+            b["placedAhead"] += 1
+            b["totalLeadHours"] += lead_hours
+        else:
+            b["sameDay"] += 1
+
+    result = []
+    for b in buckets.values():
+        pct = round((b["placedAhead"] / b["totalOrders"]) * 100, 1) if b["totalOrders"] else 0
+        avg_lead = round(b["totalLeadHours"] / b["placedAhead"], 1) if b["placedAhead"] else 0
+        result.append({
+            "storeName": b["storeName"],
+            "storeRef": b["storeRef"],
+            "totalOrders": b["totalOrders"],
+            "placedAhead": b["placedAhead"],
+            "sameDay": b["sameDay"],
+            "placedAheadPct": pct,
+            "avgLeadTimeHours": avg_lead,
+        })
+
+    result.sort(key=lambda x: -x["placedAheadPct"])
+    return result

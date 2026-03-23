@@ -152,6 +152,14 @@
 
     <main>
       <div class="content-card">
+        <!-- Report Type Tabs -->
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;">
+          <button class="btn olo-tab active" data-report="platform" onclick="switchOloTab('platform',this)">By Platform</button>
+          <button class="btn olo-tab" data-report="handoff" onclick="switchOloTab('handoff',this)" style="background:#6B7280;">By Handoff Mode</button>
+          <button class="btn olo-tab" data-report="ahead" onclick="switchOloTab('ahead',this)" style="background:#6B7280;">Placed Ahead</button>
+        </div>
+        <style>.olo-tab{font-size:0.85rem;padding:0.4rem 1rem;border-radius:6px;cursor:pointer;border:none;color:#fff;}.olo-tab.active{background:#C41E3A !important;}</style>
+
         <h2>Date range</h2>
         <p class="help-text">Choose the date range for the report. The app will load the correct OLO batches for those dates automatically.</p>
         <div class="date-inputs">
@@ -168,21 +176,22 @@
 
       <div class="content-card">
         <h2>Run report</h2>
-        <p class="help-text">Results are aggregated by Platform and Client Platform (e.g. iOS, Android, Web, Kiosk). Click column headers to sort.</p>
+        <p class="help-text" id="reportDescription">Results are aggregated by Platform and Client Platform (e.g. iOS, Android, Web, Kiosk). Click column headers to sort.</p>
         <div class="toolbar">
-          <button type="button" class="btn" id="runReportBtn">Run Digital Orders by Platform</button>
+          <button type="button" class="btn" id="runReportBtn">Run Report</button>
         </div>
         <div id="reportStatus" class="status" style="display: none;"></div>
       </div>
 
       <div class="content-card" id="resultsCard" style="display: none;">
         <h2>Results</h2>
+        <div id="statCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0.75rem;margin-bottom:1rem;"></div>
         <div class="toolbar">
           <button type="button" class="btn btn-secondary" id="exportCsvBtn">Export CSV</button>
         </div>
         <div class="report-table-wrap">
           <table class="report-table" id="reportTable">
-            <thead>
+            <thead id="reportHead">
               <tr>
                 <th data-col="platform" data-type="string">Platform<span class="sort-icon"></span></th>
                 <th data-col="clientPlatform" data-type="string">Client Platform<span class="sort-icon"></span></th>
@@ -328,6 +337,146 @@
     }
     function formatNum(n) { return Number(n).toLocaleString(); }
     function formatMoney(n) { return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+    // ── Tab switching ──────────────────────────────────────
+    let currentOloReport = 'platform';
+
+    function switchOloTab(report, btn) {
+      currentOloReport = report;
+      document.querySelectorAll('.olo-tab').forEach(t => { t.classList.remove('active'); t.style.background = '#6B7280'; });
+      btn.classList.add('active');
+      btn.style.background = '';
+      document.getElementById('resultsCard').style.display = 'none';
+      document.getElementById('statCards').innerHTML = '';
+      hideStatus('reportStatus');
+
+      const desc = document.getElementById('reportDescription');
+      if (report === 'platform') {
+        desc.textContent = 'Results are aggregated by Platform and Client Platform (e.g. iOS, Android, Web, Kiosk). Click column headers to sort.';
+      } else if (report === 'handoff') {
+        desc.textContent = 'OLO sales broken out by handoff mode (CounterPickup, CurbsidePickup, Dispatch, etc.) with store detail.';
+      } else if (report === 'ahead') {
+        desc.textContent = 'Orders where the customer placed the order ahead of time (timePlaced differs from timeWanted by store).';
+      }
+    }
+
+    // Override the run button to dispatch by tab
+    document.getElementById('runReportBtn').removeEventListener('click', () => {});
+    document.getElementById('runReportBtn').onclick = async function() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      if (!startDate || !endDate) { showStatus('reportStatus', 'Please select both dates.', 'error'); return; }
+
+      const btn = this;
+      btn.disabled = true;
+      showStatus('reportStatus', 'Loading batches and building report...', 'loading');
+
+      const endpoints = {
+        platform: '/api/olo/digital-orders-by-platform-by-date',
+        handoff: '/api/olo/sales-by-handoff',
+        ahead: '/api/olo/orders-placed-ahead',
+      };
+
+      try {
+        const res = await fetch(API + endpoints[currentOloReport], {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: startDate, end_date: endDate })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { showStatus('reportStatus', data.detail || 'Report failed', 'error'); return; }
+
+        reportRows = data.rows || [];
+        const stats = document.getElementById('statCards');
+
+        if (currentOloReport === 'platform') {
+          renderPlatformHead();
+          renderReportTable(reportRows);
+          stats.innerHTML = '';
+        } else if (currentOloReport === 'handoff') {
+          renderHandoffHead();
+          renderHandoffTable(reportRows);
+          const totalOrders = reportRows.reduce((s,r) => s + r.orderCount, 0);
+          const totalRev = reportRows.reduce((s,r) => s + r.total, 0);
+          stats.innerHTML = statCard(totalOrders, 'TOTAL ORDERS') + statCard(formatMoney(totalRev), 'TOTAL REVENUE');
+        } else if (currentOloReport === 'ahead') {
+          renderAheadHead();
+          renderAheadTable(reportRows);
+          stats.innerHTML = statCard(data.totalOrders || 0, 'TOTAL ORDERS') +
+            statCard(data.totalPlacedAhead || 0, 'PLACED AHEAD') +
+            statCard((data.placedAheadPct || 0) + '%', 'AHEAD %');
+        }
+
+        document.getElementById('resultsCard').style.display = 'block';
+        showStatus('reportStatus', `Report complete. ${data.totalOrders || reportRows.length} orders processed.`, 'success');
+      } catch (e) {
+        showStatus('reportStatus', 'Error: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    function statCard(val, label) {
+      return `<div style="text-align:center;padding:0.75rem;background:#F9FAFB;border-radius:8px;border:1px solid #E5E7EB;">
+        <div style="font-size:1.25rem;font-weight:700;color:#C41E3A;">${val}</div>
+        <div style="font-size:0.7rem;color:#6B7280;text-transform:uppercase;">${label}</div>
+      </div>`;
+    }
+
+    function renderPlatformHead() {
+      document.getElementById('reportHead').innerHTML = `<tr>
+        <th data-col="platform" data-type="string">Platform</th>
+        <th data-col="clientPlatform" data-type="string">Client Platform</th>
+        <th data-col="orderCount" data-type="num" class="num">Order Count</th>
+        <th data-col="netSales" data-type="num" class="num">Net Sales</th>
+      </tr>`;
+    }
+
+    function renderHandoffHead() {
+      document.getElementById('reportHead').innerHTML = `<tr>
+        <th data-col="handoff" data-type="string">Handoff Mode</th>
+        <th data-col="storeName" data-type="string">Store</th>
+        <th data-col="orderCount" data-type="num" class="num">Orders</th>
+        <th data-col="subtotal" data-type="num" class="num">Subtotal</th>
+        <th data-col="tax" data-type="num" class="num">Tax</th>
+        <th data-col="deliveryFee" data-type="num" class="num">Delivery Fee</th>
+        <th data-col="total" data-type="num" class="num">Total</th>
+      </tr>`;
+    }
+
+    function renderHandoffTable(rows) {
+      document.getElementById('reportBody').innerHTML = rows.map(r => `<tr>
+        <td>${escapeHtml(r.handoff)}</td>
+        <td>${escapeHtml(r.storeName)}</td>
+        <td class="num">${formatNum(r.orderCount)}</td>
+        <td class="num">${formatMoney(r.subtotal)}</td>
+        <td class="num">${formatMoney(r.tax)}</td>
+        <td class="num">${formatMoney(r.deliveryFee)}</td>
+        <td class="num">${formatMoney(r.total)}</td>
+      </tr>`).join('');
+    }
+
+    function renderAheadHead() {
+      document.getElementById('reportHead').innerHTML = `<tr>
+        <th data-col="storeName" data-type="string">Store</th>
+        <th data-col="totalOrders" data-type="num" class="num">Total Orders</th>
+        <th data-col="placedAhead" data-type="num" class="num">Placed Ahead</th>
+        <th data-col="sameDay" data-type="num" class="num">Same Day</th>
+        <th data-col="placedAheadPct" data-type="num" class="num">Ahead %</th>
+        <th data-col="avgLeadTimeHours" data-type="num" class="num">Avg Lead (hrs)</th>
+      </tr>`;
+    }
+
+    function renderAheadTable(rows) {
+      document.getElementById('reportBody').innerHTML = rows.map(r => `<tr>
+        <td>${escapeHtml(r.storeName)}</td>
+        <td class="num">${formatNum(r.totalOrders)}</td>
+        <td class="num">${formatNum(r.placedAhead)}</td>
+        <td class="num">${formatNum(r.sameDay)}</td>
+        <td class="num">${r.placedAheadPct}%</td>
+        <td class="num">${r.avgLeadTimeHours}</td>
+      </tr>`).join('');
+    }
   </script>
   <script src="/shared-nav.js"></script>
 </body>

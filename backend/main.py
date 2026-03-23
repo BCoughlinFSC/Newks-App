@@ -50,6 +50,8 @@ from olo_client import (
     download_batch_zip,
     extract_orders_from_zip,
     aggregate_digital_orders_by_platform,
+    aggregate_by_handoff_mode,
+    aggregate_orders_placed_ahead,
     filter_batches_by_date_range,
 )
 from email_service import send_invite_email
@@ -6537,6 +6539,67 @@ async def olo_digital_orders_by_platform_by_date(body: OloDigitalOrdersByDateReq
         "rows": rows,
         "totalOrders": len(all_orders),
         "batchIds": batch_ids,
+        "startDate": body.start_date,
+        "endDate": body.end_date,
+    }
+
+
+@olo_router.post("/sales-by-handoff")
+async def olo_sales_by_handoff(body: OloDigitalOrdersByDateRequest = Body(...)):
+    """OLO sales broken out by handoff mode (pickup, delivery, etc.)."""
+    try:
+        all_batches = await list_order_batches()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    filtered = filter_batches_by_date_range(
+        all_batches, body.start_date.strip(), body.end_date.strip()
+    )
+    if not filtered:
+        raise HTTPException(status_code=404, detail="No OLO batches found for that date range.")
+    all_orders = []
+    for batch_id in [b["batchId"] for b in filtered]:
+        try:
+            zip_bytes = await download_batch_zip(batch_id)
+            orders = extract_orders_from_zip(zip_bytes)
+            all_orders.extend(orders)
+        except Exception as e:
+            logger.warning(f"OLO batch {batch_id} failed: {e}")
+    rows = aggregate_by_handoff_mode(all_orders)
+    return {
+        "rows": rows,
+        "totalOrders": len(all_orders),
+        "startDate": body.start_date,
+        "endDate": body.end_date,
+    }
+
+
+@olo_router.post("/orders-placed-ahead")
+async def olo_orders_placed_ahead(body: OloDigitalOrdersByDateRequest = Body(...)):
+    """Orders placed ahead of time (timePlaced differs from timeWanted)."""
+    try:
+        all_batches = await list_order_batches()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    filtered = filter_batches_by_date_range(
+        all_batches, body.start_date.strip(), body.end_date.strip()
+    )
+    if not filtered:
+        raise HTTPException(status_code=404, detail="No OLO batches found for that date range.")
+    all_orders = []
+    for batch_id in [b["batchId"] for b in filtered]:
+        try:
+            zip_bytes = await download_batch_zip(batch_id)
+            orders = extract_orders_from_zip(zip_bytes)
+            all_orders.extend(orders)
+        except Exception as e:
+            logger.warning(f"OLO batch {batch_id} failed: {e}")
+    rows = aggregate_orders_placed_ahead(all_orders)
+    total_ahead = sum(r["placedAhead"] for r in rows)
+    return {
+        "rows": rows,
+        "totalOrders": len(all_orders),
+        "totalPlacedAhead": total_ahead,
+        "placedAheadPct": round((total_ahead / len(all_orders)) * 100, 1) if all_orders else 0,
         "startDate": body.start_date,
         "endDate": body.end_date,
     }
