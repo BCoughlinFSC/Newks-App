@@ -685,7 +685,7 @@ def update_mapping_table_rows(
                 r.get("lto_tag", ""),
             ))
         conn.executemany(
-            """INSERT INTO mli_plu_attribute_map (
+            """INSERT OR REPLACE INTO mli_plu_attribute_map (
                 multi_location_id, item_guid, toast_plu, aloha_plu,
                 toast_item_name, aloha_item_name, consolidated_cat,
                 recipe, guest_count_tag, entree_equiv_tag, lto_tag
