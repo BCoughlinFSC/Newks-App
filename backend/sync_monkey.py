@@ -24,10 +24,21 @@ import sys
 import argparse
 import logging
 import time
-import pyodbc
 import sqlite3
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+
+try:
+    import pymssql
+    HAS_PYMSSQL = True
+except ImportError:
+    HAS_PYMSSQL = False
+
+try:
+    import pyodbc
+    HAS_PYODBC = True
+except ImportError:
+    HAS_PYODBC = False
 
 load_dotenv()
 
@@ -51,51 +62,63 @@ def get_azure_connection():
             "MONKEY_DB_NAME, MONKEY_DB_USER, MONKEY_DB_PASS"
         )
 
-    # Try ODBC Driver 18 first, then 17, then FreeTDS
-    drivers = [
-        "ODBC Driver 18 for SQL Server",
-        "ODBC Driver 17 for SQL Server",
-        "FreeTDS",
-    ]
-
-    available = [d for d in pyodbc.drivers() if d in drivers]
-    if not available:
-        # On Linux with FreeTDS, it might not show in pyodbc.drivers()
-        # but still work via /etc/odbcinst.ini
-        available = ["FreeTDS"]
-
-    last_err = None
-    for driver in available:
+    # Try pymssql first (no ODBC driver needed), then pyodbc
+    if HAS_PYMSSQL:
         try:
-            if driver == "FreeTDS":
-                conn_str = (
-                    f"DRIVER={{{driver}}};"
-                    f"SERVER={server};"
-                    f"PORT=1433;"
-                    f"DATABASE={database};"
-                    f"UID={user};"
-                    f"PWD={password};"
-                    f"TDS_Version=7.4;"
-                )
-            else:
-                conn_str = (
-                    f"DRIVER={{{driver}}};"
-                    f"SERVER={server},1433;"
-                    f"DATABASE={database};"
-                    f"UID={user};"
-                    f"PWD={password};"
-                    f"Encrypt=yes;"
-                    f"TrustServerCertificate=yes;"
-                    f"Connection Timeout=30;"
-                )
-            conn = pyodbc.connect(conn_str, timeout=30)
-            logger.info("Connected to Azure SQL via %s", driver)
+            conn = pymssql.connect(
+                server=server,
+                user=user,
+                password=password,
+                database=database,
+                port=1433,
+                login_timeout=30,
+                as_dict=False,
+            )
+            logger.info("Connected to Azure SQL via pymssql")
             return conn
         except Exception as e:
-            last_err = e
-            logger.debug("Driver %s failed: %s", driver, e)
+            logger.warning("pymssql failed: %s", e)
 
-    raise RuntimeError(f"Could not connect to Azure SQL. Last error: {last_err}")
+    if HAS_PYODBC:
+        drivers = [
+            "ODBC Driver 18 for SQL Server",
+            "ODBC Driver 17 for SQL Server",
+            "FreeTDS",
+        ]
+        available = [d for d in pyodbc.drivers() if d in drivers] or ["FreeTDS"]
+
+        last_err = None
+        for driver in available:
+            try:
+                if driver == "FreeTDS":
+                    conn_str = (
+                        f"DRIVER={{{driver}}};"
+                        f"SERVER={server};"
+                        f"PORT=1433;"
+                        f"DATABASE={database};"
+                        f"UID={user};"
+                        f"PWD={password};"
+                        f"TDS_Version=7.4;"
+                    )
+                else:
+                    conn_str = (
+                        f"DRIVER={{{driver}}};"
+                        f"SERVER={server},1433;"
+                        f"DATABASE={database};"
+                        f"UID={user};"
+                        f"PWD={password};"
+                        f"Encrypt=yes;"
+                        f"TrustServerCertificate=yes;"
+                        f"Connection Timeout=30;"
+                    )
+                conn = pyodbc.connect(conn_str, timeout=30)
+                logger.info("Connected to Azure SQL via pyodbc (%s)", driver)
+                return conn
+            except Exception as e:
+                last_err = e
+        raise RuntimeError(f"pyodbc failed: {last_err}")
+
+    raise RuntimeError("Neither pymssql nor pyodbc available")
 
 
 # ── Table sync definitions ──────────────────────────────────────────
