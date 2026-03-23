@@ -45,6 +45,7 @@ import toast_config_db
 import toast_config_builder
 import monkey_db
 import crunchtime_db
+import punchh_db
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -14852,6 +14853,77 @@ async def crunchtime_gross_profit(payload: dict = Body(...)):
     return crunchtime_db.rpt_gross_profit_by_item(
         fiscal_week_start=payload.get("fiscalWeekStart"),
         store_ids=payload.get("storeIds"),
+    )
+
+
+# ── Punchh Loyalty Reports ────────────────────────────────────────
+
+@app.get("/api/punchh/stats")
+async def punchh_stats():
+    return punchh_db.get_stats()
+
+@app.get("/api/punchh/stores")
+async def punchh_stores():
+    conn = punchh_db.get_connection()
+    rows = conn.execute(
+        "SELECT DISTINCT store_number, location_name FROM coupon WHERE store_number IS NOT NULL AND store_number != '' ORDER BY store_number"
+    ).fetchall()
+    conn.close()
+    return [{"storeNumber": r[0], "locationName": r[1] or ""} for r in rows]
+
+@app.post("/api/punchh/reports/daily-point-balance")
+async def punchh_daily_points(payload: dict = Body(...)):
+    return punchh_db.rpt_daily_point_balance(
+        start_date=payload.get("startDate"),
+        end_date=payload.get("endDate"),
+        store_numbers=payload.get("storeNumbers"),
+    )
+
+@app.post("/api/punchh/reports/coupon-dollars")
+async def punchh_coupon_dollars(payload: dict = Body(...)):
+    return punchh_db.rpt_coupon_dollars_counts(
+        start_date=payload.get("startDate"),
+        end_date=payload.get("endDate"),
+        store_numbers=payload.get("storeNumbers"),
+    )
+
+@app.post("/api/punchh/reports/coupon-summary")
+async def punchh_coupon_summary(payload: dict = Body(...)):
+    return punchh_db.rpt_coupon_summary(
+        start_date=payload.get("startDate"),
+        end_date=payload.get("endDate"),
+        store_numbers=payload.get("storeNumbers"),
+    )
+
+@app.post("/api/punchh/reports/redeemable-dollars")
+async def punchh_redeemable_dollars(payload: dict = Body(...)):
+    return punchh_db.rpt_redeemable_dollars_counts(
+        start_date=payload.get("startDate"),
+        end_date=payload.get("endDate"),
+        store_numbers=payload.get("storeNumbers"),
+    )
+
+@app.post("/api/punchh/reports/redeemable-summary")
+async def punchh_redeemable_summary(payload: dict = Body(...)):
+    return punchh_db.rpt_redeemable_summary(
+        start_date=payload.get("startDate"),
+        end_date=payload.get("endDate"),
+        store_numbers=payload.get("storeNumbers"),
+    )
+
+@app.post("/api/punchh/reports/summary-rollup")
+async def punchh_summary_rollup(payload: dict = Body(...)):
+    return punchh_db.rpt_summary_rollup(
+        start_date=payload.get("startDate"),
+        end_date=payload.get("endDate"),
+        store_numbers=payload.get("storeNumbers"),
+    )
+
+@app.post("/api/punchh/reports/google-ads-export")
+async def punchh_google_ads(payload: dict = Body(...)):
+    return punchh_db.rpt_google_ads_export(
+        start_date=payload.get("startDate"),
+        end_date=payload.get("endDate"),
     )
 
 
