@@ -457,6 +457,60 @@
       <div id="toastConfigSyncResult" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
       </div>
     </div>
+
+    <!-- ─── Validation Reports ───────────────────────────── -->
+    <div class="section-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div>
+          <h2>Validation Reports</h2>
+          <p class="text-muted">Compare ERA net sales vs order-level data, and CY vs LY item counts</p>
+        </div>
+      </div>
+
+      <!-- Net Sales Validation -->
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+        <h3 style="margin:0 0 0.75rem 0;">Net Sales Validation</h3>
+        <p style="color:#6B7280;font-size:0.85rem;margin-bottom:1rem;">Compares ERA aggregate net sales vs order-level calculated net. Flags discrepancies &gt; $1.</p>
+        <div style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap;">
+          <label>Start <input type="date" id="valNetStart" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:6px;"></label>
+          <label>End <input type="date" id="valNetEnd" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:6px;"></label>
+          <button class="btn-primary" onclick="runNetSalesValidation()">Run Validation</button>
+        </div>
+        <div id="valNetResult" style="margin-top:1rem;"></div>
+      </div>
+
+      <!-- Item Count Validation -->
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;">
+        <h3 style="margin:0 0 0.75rem 0;">Item Count Validation (CY vs LY)</h3>
+        <p style="color:#6B7280;font-size:0.85rem;margin-bottom:1rem;">Compares Toast CY item counts vs Aloha LY counts by category. Uses fiscal calendar for YoY dates.</p>
+        <div style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap;">
+          <label>Start <input type="date" id="valItemStart" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:6px;"></label>
+          <label>End <input type="date" id="valItemEnd" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:6px;"></label>
+          <label>Category
+            <select id="valItemCat" style="padding:6px 10px;border:1px solid #D1D5DB;border-radius:6px;">
+              <option value="">(All Categories)</option>
+              <option value="* Consolidated Sandwiches">Sandwiches</option>
+              <option value="* Consolidated Salads">Salads</option>
+              <option value="* Consolidated Pizza">Pizza</option>
+              <option value="* Consolidated  Soups">Soups</option>
+              <option value="* Consolidated Pasta and Mac">Pasta & Mac</option>
+              <option value="* Consolidated Desserts">Desserts</option>
+              <option value="* Consolidated NA Bev">NA Beverages</option>
+              <option value="* Consolidated Beer">Beer</option>
+              <option value="* Consolidated Wine and Spirits">Wine & Spirits</option>
+              <option value="* Consolidated Sides">Sides</option>
+              <option value="* Consolidated Extras and Misc">Extras & Misc</option>
+              <option value="* Consolidated Catering">Catering</option>
+              <option value="* Consolidated Wraps">Wraps</option>
+              <option value="* Consolidated Bulk GnG">Bulk GnG</option>
+              <option value="* Consolidated Non Food">Non Food</option>
+            </select>
+          </label>
+          <button class="btn-primary" onclick="runItemCountValidation()">Run Validation</button>
+        </div>
+        <div id="valItemResult" style="margin-top:1rem;"></div>
+      </div>
+    </div>
   </main>
 
   <!-- ─── Auth Modal ───────────────────────────────────── -->
@@ -1603,6 +1657,109 @@
         loadToastConfigStats();
       }
     });
+
+    // ──────────────────────────────────────────────────────
+    // Validation Reports
+    // ──────────────────────────────────────────────────────
+
+    async function runNetSalesValidation() {
+      const start = document.getElementById('valNetStart').value;
+      const end = document.getElementById('valNetEnd').value;
+      const el = document.getElementById('valNetResult');
+      if (!start || !end) { el.innerHTML = '<p style="color:#EF4444;">Please select start and end dates.</p>'; return; }
+
+      el.innerHTML = '<p>Running validation...</p>';
+      try {
+        const resp = await fetch('/api/admin/validation/net-sales', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ start_date: start, end_date: end }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const s = data.summary;
+
+        let html = `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+          <div class="stat-card"><div class="stat-label">ERA Total</div><div class="stat-value">$${s.total_era.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="stat-label">Orders Total</div><div class="stat-value">$${s.total_orders.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="stat-label">Difference</div><div class="stat-value" style="color:${Math.abs(s.total_diff) > 10 ? '#EF4444' : '#10B981'}">$${s.total_diff.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="stat-label">Discrepancies</div><div class="stat-value" style="color:${s.discrepancies > 0 ? '#F59E0B' : '#10B981'}">${s.discrepancies}</div></div>
+          <div class="stat-card"><div class="stat-label">Dates / Stores</div><div class="stat-value">${s.dates_checked} / ${s.stores_checked}</div></div>
+        </div>`;
+
+        if (data.rows.length) {
+          // Only show rows with discrepancies > threshold
+          const flagged = data.rows.filter(r => Math.abs(r.difference) > s.threshold);
+          if (flagged.length) {
+            html += `<p style="font-size:0.85rem;color:#6B7280;margin-bottom:0.5rem;">${flagged.length} rows with discrepancy > $${s.threshold} (sorted by largest)</p>`;
+            html += '<div style="max-height:400px;overflow-y:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Store</th><th>ERA Net</th><th>Orders Net</th><th>Diff</th><th>%</th></tr></thead><tbody>';
+            for (const r of flagged.slice(0, 200)) {
+              const color = Math.abs(r.difference) > 100 ? '#FEE2E2' : Math.abs(r.difference) > 10 ? '#FEF3C7' : '';
+              html += `<tr style="background:${color}"><td>${r.business_date}</td><td>${r.store_name || r.store_num}</td>
+                <td style="text-align:right">$${r.era_net_sales.toLocaleString()}</td>
+                <td style="text-align:right">$${r.orders_net_sales.toLocaleString()}</td>
+                <td style="text-align:right;font-weight:600">$${r.difference.toLocaleString()}</td>
+                <td style="text-align:right">${r.pct_diff}%</td></tr>`;
+            }
+            html += '</tbody></table></div>';
+          } else {
+            html += '<p style="color:#10B981;font-weight:600;">All rows within $' + s.threshold + ' tolerance.</p>';
+          }
+        }
+        el.innerHTML = html;
+      } catch (err) {
+        el.innerHTML = `<p style="color:#EF4444;">Error: ${err.message}</p>`;
+      }
+    }
+
+    async function runItemCountValidation() {
+      const start = document.getElementById('valItemStart').value;
+      const end = document.getElementById('valItemEnd').value;
+      const category = document.getElementById('valItemCat').value;
+      const el = document.getElementById('valItemResult');
+      if (!start || !end) { el.innerHTML = '<p style="color:#EF4444;">Please select start and end dates.</p>'; return; }
+
+      el.innerHTML = '<p>Running item count validation (this may take a minute)...</p>';
+      try {
+        const resp = await fetch('/api/admin/validation/item-counts', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ start_date: start, end_date: end, category }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const s = data.summary;
+
+        let html = `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+          <div class="stat-card"><div class="stat-label">Category</div><div class="stat-value" style="font-size:0.9rem">${s.category}</div></div>
+          <div class="stat-card"><div class="stat-label">CY Total</div><div class="stat-value">${s.total_cy.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="stat-label">LY Total</div><div class="stat-value">${s.total_ly.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="stat-label">Matched</div><div class="stat-value" style="color:#10B981">${s.items_matched}</div></div>
+          <div class="stat-card"><div class="stat-label">CY Only</div><div class="stat-value" style="color:${s.items_cy_only ? '#F59E0B' : '#10B981'}">${s.items_cy_only}</div></div>
+          <div class="stat-card"><div class="stat-label">LY Only</div><div class="stat-value" style="color:${s.items_ly_only ? '#EF4444' : '#10B981'}">${s.items_ly_only}</div></div>
+        </div>`;
+
+        if (data.rows.length) {
+          html += '<div style="max-height:500px;overflow-y:auto;"><table class="data-table"><thead><tr><th>Recipe</th><th>Toast Item</th><th>Aloha Item</th><th>EE</th><th>CY Count</th><th>LY Count</th><th>Change</th><th>%</th></tr></thead><tbody>';
+          for (const r of data.rows) {
+            const color = !r.cy_count ? '#FEE2E2' : !r.ly_count ? '#FEF3C7' : Math.abs(r.change_pct) > 50 ? '#FEF3C7' : '';
+            html += `<tr style="background:${color}">
+              <td>${r.recipe}</td><td>${r.toast_item_name}</td><td>${r.aloha_item_name}</td>
+              <td style="text-align:right">${r.entree_equiv}</td>
+              <td style="text-align:right">${r.cy_count.toLocaleString()}</td>
+              <td style="text-align:right">${r.ly_count.toLocaleString()}</td>
+              <td style="text-align:right;font-weight:600">${r.change > 0 ? '+' : ''}${r.change.toLocaleString()}</td>
+              <td style="text-align:right">${r.change_pct > 0 ? '+' : ''}${r.change_pct}%</td></tr>`;
+          }
+          html += '</tbody></table></div>';
+        } else {
+          html += '<p style="color:#6B7280;">No items found for this category/date range.</p>';
+        }
+        el.innerHTML = html;
+      } catch (err) {
+        el.innerHTML = `<p style="color:#EF4444;">Error: ${err.message}</p>`;
+      }
+    }
   </script>
 </body>
 </html>

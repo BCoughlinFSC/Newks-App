@@ -9669,6 +9669,279 @@ async def admin_backfill_aloha(
     return {"updated": updated, "submitted": len(mappings)}
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Validation Reports (migrated from sp_rpt_Toast_Net_Sales_Validation
+# and sp_rpt_IT_Menu_Item_Count_Validation)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/admin/validation/net-sales")
+async def admin_validation_net_sales(
+    payload: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Compare ERA net sales vs order-level calculated net per store per day.
+    Replaces sp_rpt_Toast_Net_Sales_Validation.
+    """
+    start_date = payload.get("start_date")
+    end_date = payload.get("end_date")
+    if not start_date or not end_date:
+        raise HTTPException(status_code=400, detail="start_date and end_date required")
+
+    # Load GUID → store number mapping
+    loc_mapping = get_aloha_location_mapping()  # {guid: store_num}
+    reverse_mapping = {str(v): k for k, v in loc_mapping.items()}  # {store_num: guid}
+
+    # 1. ERA net sales by date/store
+    era_df = aloha_sales_db.query_date_range_daily(start_date, end_date)
+    era_lookup: Dict[str, Dict] = {}  # "date|store" → {net_sales, name}
+    if not era_df.empty:
+        for _, row in era_df.iterrows():
+            key = f"{row['business_date']}|{row['location']}"
+            era_lookup[key] = {
+                "net_sales": float(row.get("net_sales", 0) or 0),
+                "name": row.get("restaurant_name", ""),
+            }
+
+    # 2. Orders net sales by date/store (JSON aggregation)
+    # Convert date format: aloha_sales uses YYYY-MM-DD, orders uses YYYYMMDD
+    start_yyyymmdd = start_date.replace("-", "")
+    end_yyyymmdd = end_date.replace("-", "")
+
+    orders_lookup: Dict[str, float] = {}  # "date|store" → calc_net
+    try:
+        orders_conn = toast_orders_db.get_connection()
+        rows = orders_conn.execute("""
+            SELECT business_date, restaurant_guid,
+                   SUM(
+                       (SELECT COALESCE(SUM(json_extract(c.value, '$.amount')), 0)
+                        FROM json_each(json_extract(order_json, '$.checks')) c
+                        WHERE COALESCE(json_extract(c.value, '$.voided'), 0) != 1
+                       )
+                   ) as calc_net
+            FROM orders
+            WHERE business_date BETWEEN ? AND ?
+            GROUP BY business_date, restaurant_guid
+        """, (start_yyyymmdd, end_yyyymmdd)).fetchall()
+        orders_conn.close()
+
+        for bdate, guid, calc_net in rows:
+            store_num = str(loc_mapping.get(guid, ""))
+            if store_num:
+                # Convert YYYYMMDD → YYYY-MM-DD
+                formatted_date = f"{bdate[:4]}-{bdate[4:6]}-{bdate[6:]}"
+                key = f"{formatted_date}|{store_num}"
+                orders_lookup[key] = round(float(calc_net or 0), 2)
+    except Exception as exc:
+        logger.warning(f"Validation: orders query failed: {exc}")
+
+    # 3. Join and compare
+    all_keys = set(era_lookup.keys()) | set(orders_lookup.keys())
+    result_rows = []
+    total_era = 0.0
+    total_orders = 0.0
+    discrepancies = 0
+    THRESHOLD = 1.00  # $1 tolerance
+
+    for key in sorted(all_keys):
+        parts = key.split("|")
+        bdate = parts[0]
+        store_num = parts[1]
+        era_info = era_lookup.get(key, {})
+        era_net = era_info.get("net_sales", 0)
+        store_name = era_info.get("name", f"Store {store_num}")
+        orders_net = orders_lookup.get(key, 0)
+        diff = round(era_net - orders_net, 2)
+        pct = round((diff / era_net * 100), 2) if era_net else 0
+
+        total_era += era_net
+        total_orders += orders_net
+        if abs(diff) > THRESHOLD:
+            discrepancies += 1
+
+        result_rows.append({
+            "business_date": bdate,
+            "store_num": store_num,
+            "store_name": store_name,
+            "era_net_sales": round(era_net, 2),
+            "orders_net_sales": round(orders_net, 2),
+            "difference": diff,
+            "pct_diff": pct,
+        })
+
+    # Sort by largest absolute difference
+    result_rows.sort(key=lambda x: abs(x["difference"]), reverse=True)
+
+    dates_checked = len(set(k.split("|")[0] for k in all_keys))
+    stores_checked = len(set(k.split("|")[1] for k in all_keys))
+
+    return {
+        "rows": result_rows,
+        "summary": {
+            "total_era": round(total_era, 2),
+            "total_orders": round(total_orders, 2),
+            "total_diff": round(total_era - total_orders, 2),
+            "dates_checked": dates_checked,
+            "stores_checked": stores_checked,
+            "discrepancies": discrepancies,
+            "threshold": THRESHOLD,
+        },
+    }
+
+
+@app.post("/api/admin/validation/item-counts")
+async def admin_validation_item_counts(
+    payload: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Compare CY item counts (Toast Analytics) vs LY item counts (Aloha DB)
+    for a given category. Replaces sp_rpt_IT_Menu_Item_Count_Validation.
+    """
+    start_date_str = payload.get("start_date")
+    end_date_str = payload.get("end_date")
+    category = payload.get("category", "")
+    if not start_date_str or not end_date_str:
+        raise HTTPException(status_code=400, detail="start_date and end_date required")
+
+    start_dt = date.fromisoformat(start_date_str)
+    end_dt = date.fromisoformat(end_date_str)
+
+    # Get attribute map for item metadata + category filtering
+    attr_df = toast_config_db.get_attribute_map()
+    if attr_df.empty:
+        raise HTTPException(status_code=500, detail="Attribute map not available")
+
+    # Filter to category if specified
+    if category:
+        cat_df = attr_df[attr_df["consolidated_cat"] == category]
+    else:
+        cat_df = attr_df[attr_df["consolidated_cat"] != ""]
+
+    if cat_df.empty:
+        return {"rows": [], "summary": {"category": category, "total_cy": 0, "total_ly": 0,
+                                         "items_cy_only": 0, "items_ly_only": 0, "items_matched": 0}}
+
+    # Build item_guid → metadata lookup
+    guid_meta: Dict[str, dict] = {}
+    aloha_to_meta: Dict[str, dict] = {}
+    for _, row in cat_df.iterrows():
+        guid = row.get("item_guid", "")
+        meta = {
+            "toast_item_name": row.get("toast_item_name", ""),
+            "aloha_item_name": row.get("aloha_item_name", ""),
+            "consolidated_cat": row.get("consolidated_cat", ""),
+            "entree_equiv": float(row.get("entree_equiv_tag", 0) or 0),
+            "recipe": row.get("recipe", ""),
+        }
+        if guid:
+            guid_meta[guid] = meta
+        aname = row.get("aloha_item_name", "")
+        if aname:
+            aloha_to_meta[aname] = meta
+
+    # CY: Fetch Toast Analytics for menu items
+    cy_counts: Dict[str, float] = {}  # toast_item_name → qty
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            locs = await get_all_active_locations(client)
+            restaurant_ids = [loc.restaurantGuid for loc in locs]
+
+            report_guid = await request_toast_report(
+                client, start_dt, end_dt, restaurant_ids, "menu", ["MENU_ITEM"]
+            )
+            analytics_rows = await fetch_toast_report(client, report_guid, "menu") or []
+
+            for arow in analytics_rows:
+                item_guid = arow.get("menuItemGuid", "")
+                qty = float(arow.get("quantitySold", 0) or 0)
+                if item_guid in guid_meta and qty:
+                    name = guid_meta[item_guid]["toast_item_name"]
+                    cy_counts[name] = cy_counts.get(name, 0) + qty
+    except Exception as exc:
+        logger.warning(f"Item count validation: CY fetch failed: {exc}")
+
+    # LY: Get fiscal calendar dates, query Aloha DB
+    ly_counts: Dict[str, float] = {}  # aloha_item_name → qty
+    try:
+        ly_dates = aloha_sales_db.get_fiscal_ly_dates(start_date_str, end_date_str)
+        if ly_dates:
+            ly_start = min(ly_dates.values())
+            ly_end = max(ly_dates.values())
+            aloha_df = aloha_db.query_date_range(ly_start, ly_end)
+            if not aloha_df.empty:
+                for _, arow in aloha_df.iterrows():
+                    aname = arow.get("AlohaItem", "")
+                    qty = float(arow.get("Quantity", 0) or 0)
+                    if aname in aloha_to_meta:
+                        ly_counts[aname] = ly_counts.get(aname, 0) + qty
+    except Exception as exc:
+        logger.warning(f"Item count validation: LY fetch failed: {exc}")
+
+    # Join CY and LY
+    result_rows = []
+    all_toast_names = set(cy_counts.keys())
+    all_aloha_names = set(ly_counts.keys())
+    matched = 0
+    cy_only = 0
+    ly_only = 0
+
+    # Match by toast_item_name → aloha_item_name
+    for tname, cy_qty in cy_counts.items():
+        meta = next((m for m in guid_meta.values() if m["toast_item_name"] == tname), {})
+        aname = meta.get("aloha_item_name", "")
+        ly_qty = ly_counts.pop(aname, 0) if aname else 0
+        change = round(cy_qty - ly_qty, 1)
+        pct = round((change / ly_qty * 100), 1) if ly_qty else 0
+
+        if ly_qty:
+            matched += 1
+        else:
+            cy_only += 1
+
+        result_rows.append({
+            "recipe": meta.get("recipe", ""),
+            "toast_item_name": tname,
+            "aloha_item_name": aname,
+            "entree_equiv": meta.get("entree_equiv", 0),
+            "cy_count": round(cy_qty, 1),
+            "ly_count": round(ly_qty, 1),
+            "change": change,
+            "change_pct": pct,
+        })
+
+    # Remaining LY items not matched
+    for aname, ly_qty in ly_counts.items():
+        meta = aloha_to_meta.get(aname, {})
+        ly_only += 1
+        result_rows.append({
+            "recipe": meta.get("recipe", ""),
+            "toast_item_name": meta.get("toast_item_name", ""),
+            "aloha_item_name": aname,
+            "entree_equiv": meta.get("entree_equiv", 0),
+            "cy_count": 0,
+            "ly_count": round(ly_qty, 1),
+            "change": round(-ly_qty, 1),
+            "change_pct": -100.0,
+        })
+
+    result_rows.sort(key=lambda x: abs(x["change"]), reverse=True)
+    total_cy = sum(r["cy_count"] for r in result_rows)
+    total_ly = sum(r["ly_count"] for r in result_rows)
+
+    return {
+        "rows": result_rows,
+        "summary": {
+            "category": category or "(all categories)",
+            "total_cy": round(total_cy, 1),
+            "total_ly": round(total_ly, 1),
+            "items_cy_only": cy_only,
+            "items_ly_only": ly_only,
+            "items_matched": matched,
+        },
+    }
+
+
 async def _run_flash_import_for_date(target_date: date):
     """Run the flash import for a specific date (used for backfill)."""
     target_str = target_date.isoformat()
