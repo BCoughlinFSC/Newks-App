@@ -289,7 +289,7 @@ def rpt_sales_by_channel_by_weekday(
     try:
         sql = """
             SELECT
-                CASE strftime('%w', date_reqd)
+                CASE strftime('%w', DATE(date_reqd))
                     WHEN '0' THEN 'Sunday'
                     WHEN '1' THEN 'Monday'
                     WHEN '2' THEN 'Tuesday'
@@ -311,7 +311,7 @@ def rpt_sales_by_channel_by_weekday(
                 COALESCE(SUM(subtotal), 0) AS subtotal,
                 COALESCE(SUM(total), 0) AS total
             FROM orders
-            WHERE date_reqd BETWEEN ? AND ?
+            WHERE DATE(date_reqd) BETWEEN ? AND ?
               AND deleted = 0
               AND status NOT IN ('Cancelled', 'Void')
         """
@@ -407,7 +407,7 @@ def rpt_catering_by_handoff_mode(
                 COALESCE(SUM(o.total), 0) AS total
             FROM orders o
             LEFT JOIN stores s ON o.store_id = s.store_id
-            WHERE o.date_reqd BETWEEN ? AND ?
+            WHERE DATE(o.date_reqd) BETWEEN ? AND ?
               AND o.deleted = 0
               AND o.status NOT IN ('Cancelled', 'Void')
         """
@@ -537,7 +537,7 @@ def rpt_discounts_by_user(
                 o.total
             FROM orders o
             LEFT JOIN stores s ON o.store_id = s.store_id
-            WHERE o.date_reqd BETWEEN ? AND ?
+            WHERE DATE(o.date_reqd) BETWEEN ? AND ?
               AND o.deleted = 0
               AND o.discount > 0
         """
@@ -588,7 +588,7 @@ def rpt_refunds_by_user(
             FROM refunds r
             JOIN orders o ON r.order_id = o.order_id
             LEFT JOIN stores s ON o.store_id = s.store_id
-            WHERE r.refund_date BETWEEN ? AND ?
+            WHERE DATE(r.refund_date) BETWEEN ? AND ?
         """
         params = [start_date, end_date]
         if store_ids:
@@ -681,7 +681,7 @@ def rpt_order_notes(
                 o.order_note
             FROM orders o
             LEFT JOIN stores s ON o.store_id = s.store_id
-            WHERE o.date_reqd BETWEEN ? AND ?
+            WHERE DATE(o.date_reqd) BETWEEN ? AND ?
               AND o.deleted = 0
               AND o.order_note IS NOT NULL
               AND TRIM(o.order_note) != ''
