@@ -461,6 +461,27 @@
       </div>
     </div>
 
+    <!-- ─── CrunchTime / Sigma Upload ──────────────────────── -->
+    <div class="section-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div>
+          <h2>CrunchTime / Sigma Import</h2>
+          <div class="user-count">Upload weekly Sigma (BizIQ) Excel export to update food cost data</div>
+        </div>
+      </div>
+
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+          <input type="file" id="sigmaFile" accept=".xlsx,.xls" style="flex:1;min-width:200px;" />
+          <button onclick="uploadSigmaFile()" class="btn" style="background:#DC2626;color:#fff;">Upload &amp; Import</button>
+        </div>
+        <div id="sigmaUploadStatus" style="margin-top:0.75rem;display:none;"></div>
+      </div>
+
+      <div id="sigmaUploadResult" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;">
+      </div>
+    </div>
+
     <!-- ─── Validation Reports ───────────────────────────── -->
     <div class="section-card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
@@ -1713,6 +1734,66 @@
         loadToastConfigStats();
       }
     });
+
+    // ──────────────────────────────────────────────────────
+    // CrunchTime / Sigma Upload
+    // ──────────────────────────────────────────────────────
+
+    async function uploadSigmaFile() {
+      const fileInput = document.getElementById('sigmaFile');
+      const statusEl = document.getElementById('sigmaUploadStatus');
+      const resultEl = document.getElementById('sigmaUploadResult');
+
+      if (!fileInput.files.length) {
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = '<span style="color:#B45309;">Please select a file first.</span>';
+        return;
+      }
+
+      const file = fileInput.files[0];
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span style="color:#6B7280;">Uploading and importing... this may take a moment.</span>';
+      resultEl.style.display = 'none';
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const headers = {};
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+        const resp = await fetch('/api/admin/crunchtime/upload-sigma', {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
+
+        if (!resp.ok) {
+          const err = await resp.text();
+          throw new Error(err);
+        }
+
+        const data = await resp.json();
+        statusEl.innerHTML = `<span style="color:#059669;">Import complete: ${data.totalRows.toLocaleString()} total rows imported.</span>`;
+
+        let html = '<h4 style="margin:0 0 0.75rem;">Import Results</h4>';
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;">';
+        for (const [table, count] of Object.entries(data.tables)) {
+          html += `<div style="text-align:center;padding:0.75rem;background:#F9FAFB;border-radius:8px;">
+            <div style="font-size:1.25rem;font-weight:700;color:#059669;">${count.toLocaleString()}</div>
+            <div style="font-size:0.75rem;color:#6B7280;text-transform:uppercase;">${table.replace(/_/g, ' ')}</div>
+          </div>`;
+        }
+        html += '</div>';
+        resultEl.innerHTML = html;
+        resultEl.style.display = 'block';
+
+        // Refresh DB health
+        loadDbHealth();
+      } catch (e) {
+        statusEl.innerHTML = `<span style="color:#DC2626;">Upload failed: ${e.message}</span>`;
+      }
+    }
 
     // ──────────────────────────────────────────────────────
     // Validation Reports

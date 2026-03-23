@@ -513,3 +513,148 @@ def import_csv(table: str, csv_path: str, columns: list, db_path: str = CRUNCHTI
     conn.close()
     logger.info("Imported %d rows into crunchtime.%s", count, table)
     return count
+
+
+# ── Sigma Excel Import ─────────────────────────────────────────────
+
+# Sheet name → (table, column mapping from Sigma header → DB column)
+_SIGMA_SHEET_MAP = {
+    "Gross Profit by Item": {
+        "table": "gross_profit_by_item",
+        "columns": {
+            "StoreID": "store_id",
+            "FiscalWeek": "fiscal_week",
+            "FiscalWeekStart": "fiscal_week_start",
+            "DateOfBusiness": "date_of_business",
+            "ItemID": "item_id",
+            "GrossProfit": "gross_profit",
+        },
+    },
+    "Actual Costs by GL Account": {
+        "table": "actual_costs_by_gl",
+        "columns": {
+            "StoreID": "store_id",
+            "ReportingPeriod": "reporting_period",
+            "FiscalWeekStart": "fiscal_week_start",
+            "GLCode": "gl_code",
+            "BeginningInvValue": "beginning_inv_value",
+            "VendorOrderPurchasesValue": "vendor_order_purchases_value",
+            "OutgoingTransferValue": "outgoing_transfer_value",
+            "EndingInvValue": "ending_inv_value",
+            "PBIDetailAmount": "pbi_detail_amount",
+            "IncomingTransferValue": "incoming_transfer_value",
+            "PurchasesValue": "purchases_value",
+            "ProductionValue": "production_value",
+            "ProductionConsumptValue": "production_consumpt_value",
+            "ActualCost": "actual_cost",
+        },
+    },
+    "Actual Costs - For Ops Compa": {
+        "table": "actual_costs",
+        "columns": {
+            "Location Code": "store_id",
+            "FiscalPeriod": "fiscal_period",
+            "ReportingPeriod": "fiscal_week",
+            "FiscalWeekStart": "fiscal_week_start",
+            "ActualCost": "actual_cost",
+        },
+    },
+    "Weekly Product COGS": {
+        "table": "cogs_by_product",
+        "columns": {
+            "StoreID": "location_code",
+            "FilterPeriod": "reporting_period",
+            "Category": "category",
+            "Subcategory": "subcategory",
+            "ProductName": "product_name",
+            "ATVarianceValue": "at_variance_value",
+            "ActConsumptValue": "act_consumpt_value",
+            "BeginningInvValue": "beginning_inv_value",
+            "EndingInvValue": "ending_inv_value",
+            "InvAdjustmentValue": "inv_adjustment_value",
+            "PurchasesValue": "purchases_value",
+            "TheoreticalValue": "theoretical_value",
+        },
+    },
+}
+
+
+def import_sigma_excel(file_path: str, db_path: str = CRUNCHTIME_DB_PATH) -> dict:
+    """
+    Import a Sigma/BizIQ Excel export into crunchtime.db.
+
+    The Excel file has 4 sheets matching _SIGMA_SHEET_MAP.
+    Returns dict of {table_name: rows_imported}.
+    """
+    import openpyxl
+    from datetime import datetime
+
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    results = {}
+
+    wb = openpyxl.load_workbook(file_path, read_only=True)
+
+    for sheet_name, config in _SIGMA_SHEET_MAP.items():
+        if sheet_name not in wb.sheetnames:
+            logger.warning("Sheet '%s' not found in Excel file", sheet_name)
+            results[config["table"]] = 0
+            continue
+
+        ws = wb[sheet_name]
+        table = config["table"]
+        col_map = config["columns"]
+
+        rows_iter = ws.iter_rows(values_only=True)
+        header = next(rows_iter, None)
+        if not header:
+            results[table] = 0
+            continue
+
+        # Map header positions to DB columns
+        header_str = [str(h).strip() if h else "" for h in header]
+        col_indices = []  # list of (excel_idx, db_col)
+        for i, h in enumerate(header_str):
+            if h in col_map:
+                col_indices.append((i, col_map[h]))
+
+        if not col_indices:
+            logger.warning("No matching columns in sheet '%s'", sheet_name)
+            results[table] = 0
+            continue
+
+        db_cols = [c[1] for c in col_indices]
+        ph = ",".join("?" * len(db_cols))
+        col_str = ",".join(db_cols)
+
+        count = 0
+        for row in rows_iter:
+            vals = []
+            for idx, db_col in col_indices:
+                v = row[idx] if idx < len(row) else None
+                # Convert datetime to ISO string
+                if isinstance(v, datetime):
+                    v = v.strftime("%Y-%m-%d")
+                elif v is None or v == "NULL":
+                    v = None
+                else:
+                    v = str(v)
+                vals.append(v)
+
+            try:
+                conn.execute(f"INSERT OR REPLACE INTO {table} ({col_str}) VALUES ({ph})", vals)
+                count += 1
+            except Exception as e:
+                if count == 0:
+                    logger.warning("Insert error on first row of %s: %s (vals=%s)", table, e, vals[:3])
+
+            if count % 10000 == 0:
+                conn.commit()
+
+        conn.commit()
+        results[table] = count
+        logger.info("Sigma import: %d rows into %s", count, table)
+
+    wb.close()
+    conn.close()
+    return results

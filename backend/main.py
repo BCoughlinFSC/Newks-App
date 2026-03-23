@@ -14792,6 +14792,40 @@ async def crunchtime_gross_profit(payload: dict = Body(...)):
     )
 
 
+# ── CrunchTime Sigma Excel Upload ─────────────────────────────────
+
+@app.post("/api/admin/crunchtime/upload-sigma")
+async def admin_upload_sigma_excel(
+    file: UploadFile = File(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Upload a Sigma/BizIQ Excel export to update CrunchTime data."""
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
+
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    try:
+        content = await file.read()
+        tmp.write(content)
+        tmp.close()
+
+        results = crunchtime_db.import_sigma_excel(tmp.name)
+        total = sum(results.values())
+        logger.info("Sigma upload by %s: %d total rows (%s)", admin_user.email, total, results)
+        return {
+            "status": "success",
+            "tables": results,
+            "totalRows": total,
+            "stats": crunchtime_db.get_stats(),
+        }
+    except Exception as e:
+        logger.error("Sigma upload failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.unlink(tmp.name)
+
+
 if os.path.isdir(kiosk_path):
     app.mount("/kiosk", StaticFiles(directory=kiosk_path, html=True), name="kiosk")
 
