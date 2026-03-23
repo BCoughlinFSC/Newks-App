@@ -9636,6 +9636,39 @@ async def admin_toast_config_sync(
     return result
 
 
+@app.post("/api/admin/toast-config/backfill-aloha")
+async def admin_backfill_aloha(
+    payload: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Backfill aloha_plu and aloha_item_name into mli_plu_attribute_map.
+    Expects {"mappings": [{"multi_location_id": "...", "aloha_plu": 123, "aloha_item_name": "..."}, ...]}
+    """
+    mappings = payload.get("mappings", [])
+    if not mappings:
+        raise HTTPException(status_code=400, detail="No mappings provided")
+
+    conn = toast_config_db.get_connection()
+    updated = 0
+    try:
+        for m in mappings:
+            mli = m.get("multi_location_id", "")
+            aplu = m.get("aloha_plu", 0)
+            aname = m.get("aloha_item_name", "")
+            if mli and (aplu or aname):
+                result = conn.execute(
+                    "UPDATE mli_plu_attribute_map SET aloha_plu = ?, aloha_item_name = ? WHERE multi_location_id = ?",
+                    (aplu, aname, mli),
+                )
+                updated += result.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"updated": updated, "submitted": len(mappings)}
+
+
 async def _run_flash_import_for_date(target_date: date):
     """Run the flash import for a specific date (used for backfill)."""
     target_str = target_date.isoformat()
