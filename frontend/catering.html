@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Catering Reports - Newk's Back Office</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231E3A5F'/%3E%3C/svg%3E" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c; }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p { margin: 0.5rem 0 0 0; color: #fff; opacity: 0.9; font-size: 0.9rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.5); }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .left-nav {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border: 1px solid #e8e0d5;
+      height: fit-content;
+    }
+    .left-nav h3 { margin: 0 0 1rem 0; color: #C41E3A; font-size: 1rem; font-weight: 700; }
+    .content-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border: 1px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+    }
+    .content-card h2 { margin: 0 0 1rem 0; color: #C41E3A; font-size: 1.25rem; font-weight: 700; }
+    .btn {
+      background: #C41E3A;
+      color: white;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #A01A2E; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-secondary { background: #6B7280; color: white; }
+    .btn-secondary:hover { background: #4B5563; }
+    .report-table-wrap { overflow-x: auto; margin-top: 1rem; }
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .report-table th,
+    .report-table td {
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #e8e0d5;
+    }
+    .report-table th {
+      background: #F0F9FF;
+      color: #1E3A5F;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .report-table th:hover { background: #E0F2FE; }
+    .report-table th .sort-icon { opacity: 0.5; margin-left: 0.25rem; font-size: 0.75rem; }
+    .report-table th.sorted-asc .sort-icon::after { content: ' \u25B2'; opacity: 1; }
+    .report-table th.sorted-desc .sort-icon::after { content: ' \u25BC'; opacity: 1; }
+    .report-table tbody tr:nth-child(even) { background: #FAFBFC; }
+    .report-table tbody tr:hover { background: #F0F9FF; }
+    .report-table .num { text-align: right; }
+    .report-table .total-row { font-weight: 700; background: #F0F9FF !important; border-top: 2px solid #C41E3A; }
+    .status { padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-top: 0.5rem; }
+    .status.loading { background: #FEF3C7; color: #92400E; }
+    .status.error { background: #FEE2E2; color: #991B1B; }
+    .status.success { background: #D1FAE5; color: #065F46; }
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    .help-text { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+    .date-inputs { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    .date-inputs label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+    .date-inputs input[type="date"] { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+    .date-inputs select { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      padding: 0.75rem 1.25rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #6B7280;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      white-space: nowrap;
+      transition: all 0.2s;
+      font-family: inherit;
+      position: relative;
+    }
+    .tab-btn:hover { color: #C41E3A; background: #FFF5F5; }
+    .tab-btn.active { color: #C41E3A; border-bottom-color: #C41E3A; }
+    .tab-btn .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #C41E3A;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      min-width: 18px;
+      height: 18px;
+      border-radius: 9px;
+      padding: 0 5px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Stat cards */
+    .stat-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: #F8FAFC;
+      border: 1px solid #e8e0d5;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      text-align: center;
+    }
+    .stat-card .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #C41E3A;
+      margin-bottom: 0.25rem;
+    }
+    .stat-card .stat-label {
+      font-size: 0.8rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    /* DB stats bar */
+    .db-stats-bar {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 0.5rem 0;
+      font-size: 0.82rem;
+      color: #666;
+    }
+    .db-stats-bar strong { color: #1E3A5F; }
+
+    /* Alert cards */
+    .alert-section { margin-bottom: 1.5rem; }
+    .alert-section h3 { margin: 0 0 0.75rem 0; color: #1E3A5F; font-size: 1rem; font-weight: 600; }
+    .alert-count-label {
+      display: inline-block;
+      background: #FEE2E2;
+      color: #991B1B;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      margin-left: 0.5rem;
+    }
+    .alert-count-label.zero { background: #D1FAE5; color: #065F46; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Catering Reports</h1>
+        <p>Monkey Media catering orders, delivery, and client analytics</p>
+      </div>
+      <a href="/" class="home-btn">&#127968; Home</a>
+    </div>
+  </div>
+
+  <div class="main-layout">
+    <div id="shared-sidebar"></div>
+
+    <main>
+      <!-- DB Stats -->
+      <div class="content-card" id="dbStatsCard">
+        <div class="db-stats-bar" id="dbStatsBar">Loading database stats...</div>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="content-card" style="padding-bottom: 0;">
+        <div class="tab-bar" id="tabBar">
+          <button class="tab-btn active" data-tab="sales-channel">Sales by Channel</button>
+          <button class="tab-btn" data-tab="delivery">Delivery Partners</button>
+          <button class="tab-btn" data-tab="handoff">Handoff Mode</button>
+          <button class="tab-btn" data-tab="top-clients">Top Clients</button>
+          <button class="tab-btn" data-tab="discounts">Discounts</button>
+          <button class="tab-btn" data-tab="refunds">Refunds</button>
+          <button class="tab-btn" data-tab="alerts">Alerts<span class="badge" id="alertsBadge" style="display:none;">0</span></button>
+        </div>
+      </div>
+
+      <!-- ============ Sales by Channel ============ -->
+      <div class="tab-panel active" id="panel-sales-channel">
+        <div class="content-card">
+          <h2>Sales by Channel</h2>
+          <p class="help-text">Sales breakdown by channel (Online, Store, Voice, CSM, Marketplace) and weekday.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Start</span> <input type="date" id="sc-start" /></label>
+            <label><span>End</span> <input type="date" id="sc-end" /></label>
+            <label><span>Store</span>
+              <select id="sc-store"><option value="">All Stores</option></select>
+            </label>
+            <button class="btn" id="sc-run">Run Report</button>
+            <button class="btn btn-secondary" id="sc-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="sc-status" class="status" style="display:none;"></div>
+          <div id="sc-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="sc-table" style="display:none;">
+              <thead><tr id="sc-thead"></tr></thead>
+              <tbody id="sc-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Delivery Partners ============ -->
+      <div class="tab-panel" id="panel-delivery">
+        <div class="content-card">
+          <h2>Delivery Partners</h2>
+          <p class="help-text">Delivery order counts by partner (DoorDash, Deliver That, etc.).</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Start</span> <input type="date" id="del-start" /></label>
+            <label><span>End</span> <input type="date" id="del-end" /></label>
+            <label><span>Store</span>
+              <select id="del-store"><option value="">All Stores</option></select>
+            </label>
+            <button class="btn" id="del-run">Run Report</button>
+            <button class="btn btn-secondary" id="del-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="del-status" class="status" style="display:none;"></div>
+          <div id="del-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="del-table" style="display:none;">
+              <thead><tr id="del-thead"></tr></thead>
+              <tbody id="del-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Handoff Mode ============ -->
+      <div class="tab-panel" id="panel-handoff">
+        <div class="content-card">
+          <h2>Handoff Mode</h2>
+          <p class="help-text">Pickup vs Delivery breakdown by store.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Start</span> <input type="date" id="ho-start" /></label>
+            <label><span>End</span> <input type="date" id="ho-end" /></label>
+            <label><span>Store</span>
+              <select id="ho-store"><option value="">All Stores</option></select>
+            </label>
+            <button class="btn" id="ho-run">Run Report</button>
+            <button class="btn btn-secondary" id="ho-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="ho-status" class="status" style="display:none;"></div>
+          <div id="ho-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="ho-table" style="display:none;">
+              <thead><tr id="ho-thead"></tr></thead>
+              <tbody id="ho-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Top Clients ============ -->
+      <div class="tab-panel" id="panel-top-clients">
+        <div class="content-card">
+          <h2>Top Clients</h2>
+          <p class="help-text">Top spending clients with lifetime totals. Minimum spend threshold can be adjusted.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Min Total ($)</span>
+              <input type="number" id="tc-min" value="500" min="0" step="100" style="padding:0.5rem 0.75rem;border-radius:6px;border:1px solid #d1d5db;font-size:0.9rem;width:100px;" />
+            </label>
+            <button class="btn" id="tc-run">Run Report</button>
+            <button class="btn btn-secondary" id="tc-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="tc-status" class="status" style="display:none;"></div>
+          <div id="tc-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="tc-table" style="display:none;">
+              <thead><tr id="tc-thead"></tr></thead>
+              <tbody id="tc-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Discounts ============ -->
+      <div class="tab-panel" id="panel-discounts">
+        <div class="content-card">
+          <h2>Discounts</h2>
+          <p class="help-text">Discounts applied by user.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Start</span> <input type="date" id="disc-start" /></label>
+            <label><span>End</span> <input type="date" id="disc-end" /></label>
+            <label><span>Store</span>
+              <select id="disc-store"><option value="">All Stores</option></select>
+            </label>
+            <button class="btn" id="disc-run">Run Report</button>
+            <button class="btn btn-secondary" id="disc-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="disc-status" class="status" style="display:none;"></div>
+          <div id="disc-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="disc-table" style="display:none;">
+              <thead><tr id="disc-thead"></tr></thead>
+              <tbody id="disc-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Refunds ============ -->
+      <div class="tab-panel" id="panel-refunds">
+        <div class="content-card">
+          <h2>Refunds</h2>
+          <p class="help-text">Refunds by user.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Start</span> <input type="date" id="ref-start" /></label>
+            <label><span>End</span> <input type="date" id="ref-end" /></label>
+            <label><span>Store</span>
+              <select id="ref-store"><option value="">All Stores</option></select>
+            </label>
+            <button class="btn" id="ref-run">Run Report</button>
+            <button class="btn btn-secondary" id="ref-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="ref-status" class="status" style="display:none;"></div>
+          <div id="ref-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="ref-table" style="display:none;">
+              <thead><tr id="ref-thead"></tr></thead>
+              <tbody id="ref-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Alerts ============ -->
+      <div class="tab-panel" id="panel-alerts">
+        <div class="content-card">
+          <h2>Live Alerts</h2>
+          <p class="help-text">Orders that need attention: not accepted, not posted to POS, or unconfirmed delivery.</p>
+          <div class="toolbar">
+            <button class="btn" id="alerts-refresh">Refresh Alerts</button>
+          </div>
+          <div id="alerts-status" class="status" style="display:none;"></div>
+
+          <div class="alert-section" id="alert-not-accepted">
+            <h3>Not Accepted <span class="alert-count-label" id="na-count">--</span></h3>
+            <div class="report-table-wrap">
+              <table class="report-table" id="na-table" style="display:none;">
+                <thead><tr id="na-thead"></tr></thead>
+                <tbody id="na-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="alert-section" id="alert-not-posted">
+            <h3>Not Posted <span class="alert-count-label" id="np-count">--</span></h3>
+            <div class="report-table-wrap">
+              <table class="report-table" id="np-table" style="display:none;">
+                <thead><tr id="np-thead"></tr></thead>
+                <tbody id="np-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="alert-section" id="alert-unconfirmed">
+            <h3>Unconfirmed <span class="alert-count-label" id="uc-count">--</span></h3>
+            <div class="report-table-wrap">
+              <table class="report-table" id="uc-table" style="display:none;">
+                <thead><tr id="uc-thead"></tr></thead>
+                <tbody id="uc-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    // ─── Auth ──────────────────────────────────────────
+    (function checkAccess() {
+      const token = localStorage.getItem('auth_token');
+      const userStr = localStorage.getItem('user');
+      if (!token || !userStr) { window.location.href = '/'; return; }
+      try {
+        const user = JSON.parse(userStr);
+        if (user.role !== 'admin') { window.location.href = '/'; }
+      } catch (e) { window.location.href = '/'; }
+    })();
+
+    const API = window.location.origin;
+
+    function authHeaders() {
+      const token = localStorage.getItem('auth_token') || '';
+      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+    }
+
+    // ─── Utilities ─────────────────────────────────────
+    function escapeHtml(s) {
+      if (s == null) return '';
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+    function formatNum(n) { return Number(n || 0).toLocaleString(); }
+    function formatMoney(n) { return '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function formatPct(n) { return Number(n || 0).toFixed(1) + '%'; }
+
+    function showStatus(elId, message, type) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.textContent = message;
+      el.className = 'status ' + (type || '');
+      el.style.display = 'block';
+    }
+    function hideStatus(elId) {
+      const el = document.getElementById(elId);
+      if (el) el.style.display = 'none';
+    }
+
+    // ─── Default dates (current month) ─────────────────
+    function setDefaultDates() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const startVal = y + '-' + m + '-01';
+      const endVal = now.toISOString().slice(0, 10);
+      ['sc', 'del', 'ho', 'disc', 'ref'].forEach(prefix => {
+        const s = document.getElementById(prefix + '-start');
+        const e = document.getElementById(prefix + '-end');
+        if (s) s.value = startVal;
+        if (e) e.value = endVal;
+      });
+    }
+    setDefaultDates();
+
+    // ─── Tab switching ─────────────────────────────────
+    document.getElementById('tabBar').addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab-btn');
+      if (!btn) return;
+      const tabId = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      const panel = document.getElementById('panel-' + tabId);
+      if (panel) panel.classList.add('active');
+      // Auto-load alerts when switching to alerts tab
+      if (tabId === 'alerts' && !alertsLoaded) loadAlerts();
+    });
+
+    // ─── Store dropdown ────────────────────────────────
+    async function loadStores() {
+      try {
+        const res = await fetch(API + '/api/monkey/stores', { headers: authHeaders() });
+        if (!res.ok) return;
+        const stores = await res.json();
+        const selects = document.querySelectorAll('#sc-store, #del-store, #ho-store, #disc-store, #ref-store');
+        selects.forEach(sel => {
+          (stores || []).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id || s.storeId || s.name;
+            opt.textContent = s.name || s.storeName || s.id;
+            sel.appendChild(opt);
+          });
+        });
+      } catch (e) { /* stores optional */ }
+    }
+    loadStores();
+
+    // ─── DB stats ──────────────────────────────────────
+    async function loadDbStats() {
+      try {
+        const res = await fetch(API + '/api/monkey/stats', { headers: authHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        const bar = document.getElementById('dbStatsBar');
+        const parts = [];
+        if (data.totalOrders != null) parts.push('<strong>' + formatNum(data.totalOrders) + '</strong> orders');
+        if (data.totalClients != null) parts.push('<strong>' + formatNum(data.totalClients) + '</strong> clients');
+        if (data.totalStores != null) parts.push('<strong>' + formatNum(data.totalStores) + '</strong> stores');
+        if (data.dateRange) parts.push('Date range: <strong>' + escapeHtml(data.dateRange.min || '') + '</strong> to <strong>' + escapeHtml(data.dateRange.max || '') + '</strong>');
+        if (data.lastSync) parts.push('Last sync: <strong>' + escapeHtml(data.lastSync) + '</strong>');
+        bar.innerHTML = parts.length ? parts.join(' &nbsp;|&nbsp; ') : 'Monkey Media database connected';
+      } catch (e) {
+        document.getElementById('dbStatsBar').textContent = 'Could not load DB stats';
+      }
+    }
+    loadDbStats();
+
+    // ─── Generic sortable table renderer ───────────────
+    function renderTable(prefix, columns, rows, totalsRow) {
+      const thead = document.getElementById(prefix + '-thead');
+      const tbody = document.getElementById(prefix + '-tbody');
+      const table = document.getElementById(prefix + '-table');
+
+      // Build header
+      thead.innerHTML = columns.map(col =>
+        '<th data-col="' + col.key + '" data-type="' + (col.type || 'string') + '"' +
+        (col.type === 'num' || col.type === 'money' || col.type === 'pct' ? ' class="num"' : '') +
+        '>' + escapeHtml(col.label) + '<span class="sort-icon"></span></th>'
+      ).join('');
+
+      // Build body
+      let html = '';
+      // Totals row first
+      if (totalsRow) {
+        html += '<tr class="total-row">';
+        columns.forEach(col => {
+          const v = totalsRow[col.key];
+          const cls = (col.type === 'num' || col.type === 'money' || col.type === 'pct') ? ' class="num"' : '';
+          let display = '';
+          if (col.type === 'money') display = formatMoney(v);
+          else if (col.type === 'pct') display = formatPct(v);
+          else if (col.type === 'num') display = formatNum(v);
+          else display = escapeHtml(v);
+          html += '<td' + cls + '>' + display + '</td>';
+        });
+        html += '</tr>';
+      }
+
+      rows.forEach(row => {
+        html += '<tr>';
+        columns.forEach(col => {
+          const v = row[col.key];
+          const cls = (col.type === 'num' || col.type === 'money' || col.type === 'pct') ? ' class="num"' : '';
+          let display = '';
+          if (col.type === 'money') display = formatMoney(v);
+          else if (col.type === 'pct') display = formatPct(v);
+          else if (col.type === 'num') display = formatNum(v);
+          else display = escapeHtml(v);
+          html += '<td' + cls + '>' + display + '</td>';
+        });
+        html += '</tr>';
+      });
+      tbody.innerHTML = html;
+      table.style.display = 'table';
+
+      // Sorting
+      let sortCol = '', sortDir = 1;
+      thead.querySelectorAll('th').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.col;
+          const type = th.dataset.type || 'string';
+          if (sortCol === col) sortDir = -sortDir; else { sortCol = col; sortDir = 1; }
+          const sorted = [...rows].sort((a, b) => {
+            let va = a[col], vb = b[col];
+            if (type === 'num' || type === 'money' || type === 'pct') {
+              va = Number(va) || 0; vb = Number(vb) || 0;
+              return sortDir * (va - vb);
+            }
+            return sortDir * String(va || '').localeCompare(String(vb || ''));
+          });
+          // Re-render body only (keep totals row)
+          let bodyHtml = '';
+          if (totalsRow) {
+            bodyHtml += '<tr class="total-row">';
+            columns.forEach(c => {
+              const v2 = totalsRow[c.key];
+              const cls2 = (c.type === 'num' || c.type === 'money' || c.type === 'pct') ? ' class="num"' : '';
+              let d2 = '';
+              if (c.type === 'money') d2 = formatMoney(v2);
+              else if (c.type === 'pct') d2 = formatPct(v2);
+              else if (c.type === 'num') d2 = formatNum(v2);
+              else d2 = escapeHtml(v2);
+              bodyHtml += '<td' + cls2 + '>' + d2 + '</td>';
+            });
+            bodyHtml += '</tr>';
+          }
+          sorted.forEach(row => {
+            bodyHtml += '<tr>';
+            columns.forEach(c => {
+              const v2 = row[c.key];
+              const cls2 = (c.type === 'num' || c.type === 'money' || c.type === 'pct') ? ' class="num"' : '';
+              let d2 = '';
+              if (c.type === 'money') d2 = formatMoney(v2);
+              else if (c.type === 'pct') d2 = formatPct(v2);
+              else if (c.type === 'num') d2 = formatNum(v2);
+              else d2 = escapeHtml(v2);
+              bodyHtml += '<td' + cls2 + '>' + d2 + '</td>';
+            });
+            bodyHtml += '</tr>';
+          });
+          tbody.innerHTML = bodyHtml;
+          thead.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+          th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+        });
+      });
+    }
+
+    // ─── Generic stat cards renderer ───────────────────
+    function renderStats(elId, stats) {
+      const el = document.getElementById(elId);
+      if (!stats || stats.length === 0) { el.style.display = 'none'; return; }
+      el.innerHTML = stats.map(s =>
+        '<div class="stat-card"><div class="stat-value">' + escapeHtml(s.value) + '</div><div class="stat-label">' + escapeHtml(s.label) + '</div></div>'
+      ).join('');
+      el.style.display = 'grid';
+    }
+
+    // ─── CSV export helper ─────────────────────────────
+    function exportCsv(columns, rows, filename) {
+      const headers = columns.map(c => c.label);
+      const csvRows = rows.map(r => columns.map(c => {
+        let v = r[c.key];
+        if (v == null) v = '';
+        return '"' + String(v).replace(/"/g, '""') + '"';
+      }).join(','));
+      const csv = [headers.join(',')].concat(csvRows).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // ─── Helper: get store filter value ────────────────
+    function storeFilter(prefix) {
+      const val = document.getElementById(prefix + '-store')?.value;
+      return val ? [val] : undefined;
+    }
+
+    // ════════════════════════════════════════════════════
+    // SALES BY CHANNEL
+    // ════════════════════════════════════════════════════
+    let scRows = [], scCols = [];
+    document.getElementById('sc-run').addEventListener('click', async () => {
+      const startDate = document.getElementById('sc-start').value;
+      const endDate = document.getElementById('sc-end').value;
+      if (!startDate || !endDate) { showStatus('sc-status', 'Select both dates.', 'error'); return; }
+      const btn = document.getElementById('sc-run');
+      btn.disabled = true;
+      showStatus('sc-status', 'Loading sales by channel...', 'loading');
+      try {
+        const body = { startDate, endDate };
+        const sf = storeFilter('sc');
+        if (sf) body.storeIds = sf;
+        const res = await fetch(API + '/api/monkey/reports/sales-by-channel', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        scRows = data.rows || [];
+        scCols = [
+          { key: 'channel', label: 'Channel', type: 'string' },
+          { key: 'dayOfWeek', label: 'Day', type: 'string' },
+          { key: 'orderCount', label: 'Orders', type: 'num' },
+          { key: 'subtotal', label: 'Subtotal', type: 'money' },
+          { key: 'tax', label: 'Tax', type: 'money' },
+          { key: 'total', label: 'Total', type: 'money' },
+          { key: 'avgOrder', label: 'Avg Order', type: 'money' },
+        ];
+
+        // Compute totals
+        const totals = { channel: 'TOTAL', dayOfWeek: '', orderCount: 0, subtotal: 0, tax: 0, total: 0, avgOrder: 0 };
+        scRows.forEach(r => { totals.orderCount += (r.orderCount || 0); totals.subtotal += (r.subtotal || 0); totals.tax += (r.tax || 0); totals.total += (r.total || 0); });
+        if (totals.orderCount > 0) totals.avgOrder = totals.total / totals.orderCount;
+
+        renderStats('sc-stats', [
+          { value: formatNum(totals.orderCount), label: 'Total Orders' },
+          { value: formatMoney(totals.total), label: 'Total Revenue' },
+          { value: formatMoney(totals.avgOrder), label: 'Avg Order' },
+        ]);
+        renderTable('sc', scCols, scRows, totals);
+        document.getElementById('sc-csv').style.display = 'inline-flex';
+        showStatus('sc-status', 'Report complete: ' + formatNum(scRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('sc-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('sc-csv').addEventListener('click', () => exportCsv(scCols, scRows, 'catering_sales_by_channel.csv'));
+
+    // ════════════════════════════════════════════════════
+    // DELIVERY PARTNERS
+    // ════════════════════════════════════════════════════
+    let delRows = [], delCols = [];
+    document.getElementById('del-run').addEventListener('click', async () => {
+      const startDate = document.getElementById('del-start').value;
+      const endDate = document.getElementById('del-end').value;
+      if (!startDate || !endDate) { showStatus('del-status', 'Select both dates.', 'error'); return; }
+      const btn = document.getElementById('del-run');
+      btn.disabled = true;
+      showStatus('del-status', 'Loading delivery partner data...', 'loading');
+      try {
+        const body = { startDate, endDate };
+        const sf = storeFilter('del');
+        if (sf) body.storeIds = sf;
+        const res = await fetch(API + '/api/monkey/reports/delivery-by-partner', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        delRows = data.rows || [];
+        delCols = [
+          { key: 'partner', label: 'Partner', type: 'string' },
+          { key: 'storeName', label: 'Store', type: 'string' },
+          { key: 'orderCount', label: 'Orders', type: 'num' },
+          { key: 'total', label: 'Total', type: 'money' },
+          { key: 'avgOrder', label: 'Avg Order', type: 'money' },
+          { key: 'onTimeRate', label: 'On-Time %', type: 'pct' },
+        ];
+
+        const totals = { partner: 'TOTAL', storeName: '', orderCount: 0, total: 0, avgOrder: 0, onTimeRate: null };
+        delRows.forEach(r => { totals.orderCount += (r.orderCount || 0); totals.total += (r.total || 0); });
+        if (totals.orderCount > 0) totals.avgOrder = totals.total / totals.orderCount;
+
+        renderStats('del-stats', [
+          { value: formatNum(totals.orderCount), label: 'Delivery Orders' },
+          { value: formatMoney(totals.total), label: 'Delivery Revenue' },
+          { value: formatMoney(totals.avgOrder), label: 'Avg Delivery' },
+        ]);
+        renderTable('del', delCols, delRows, totals);
+        document.getElementById('del-csv').style.display = 'inline-flex';
+        showStatus('del-status', 'Report complete: ' + formatNum(delRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('del-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('del-csv').addEventListener('click', () => exportCsv(delCols, delRows, 'catering_delivery_partners.csv'));
+
+    // ════════════════════════════════════════════════════
+    // HANDOFF MODE
+    // ════════════════════════════════════════════════════
+    let hoRows = [], hoCols = [];
+    document.getElementById('ho-run').addEventListener('click', async () => {
+      const startDate = document.getElementById('ho-start').value;
+      const endDate = document.getElementById('ho-end').value;
+      if (!startDate || !endDate) { showStatus('ho-status', 'Select both dates.', 'error'); return; }
+      const btn = document.getElementById('ho-run');
+      btn.disabled = true;
+      showStatus('ho-status', 'Loading handoff data...', 'loading');
+      try {
+        const body = { startDate, endDate };
+        const sf = storeFilter('ho');
+        if (sf) body.storeIds = sf;
+        const res = await fetch(API + '/api/monkey/reports/catering-by-handoff', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        hoRows = data.rows || [];
+        hoCols = [
+          { key: 'storeName', label: 'Store', type: 'string' },
+          { key: 'handoffMode', label: 'Handoff', type: 'string' },
+          { key: 'orderCount', label: 'Orders', type: 'num' },
+          { key: 'total', label: 'Total', type: 'money' },
+          { key: 'pctOfStore', label: '% of Store', type: 'pct' },
+        ];
+
+        const totals = { storeName: 'TOTAL', handoffMode: '', orderCount: 0, total: 0, pctOfStore: null };
+        hoRows.forEach(r => { totals.orderCount += (r.orderCount || 0); totals.total += (r.total || 0); });
+
+        renderStats('ho-stats', [
+          { value: formatNum(totals.orderCount), label: 'Total Orders' },
+          { value: formatMoney(totals.total), label: 'Total Revenue' },
+        ]);
+        renderTable('ho', hoCols, hoRows, totals);
+        document.getElementById('ho-csv').style.display = 'inline-flex';
+        showStatus('ho-status', 'Report complete: ' + formatNum(hoRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('ho-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('ho-csv').addEventListener('click', () => exportCsv(hoCols, hoRows, 'catering_handoff_mode.csv'));
+
+    // ════════════════════════════════════════════════════
+    // TOP CLIENTS
+    // ════════════════════════════════════════════════════
+    let tcRows = [], tcCols = [];
+    document.getElementById('tc-run').addEventListener('click', async () => {
+      const minTotal = document.getElementById('tc-min').value || 500;
+      const btn = document.getElementById('tc-run');
+      btn.disabled = true;
+      showStatus('tc-status', 'Loading top clients...', 'loading');
+      try {
+        const res = await fetch(API + '/api/monkey/reports/top-clients?min_total=' + encodeURIComponent(minTotal), {
+          headers: authHeaders()
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        tcRows = data.rows || data || [];
+        tcCols = [
+          { key: 'rank', label: '#', type: 'num' },
+          { key: 'clientName', label: 'Client', type: 'string' },
+          { key: 'company', label: 'Company', type: 'string' },
+          { key: 'orderCount', label: 'Orders', type: 'num' },
+          { key: 'lifetimeTotal', label: 'Lifetime Total', type: 'money' },
+          { key: 'avgOrder', label: 'Avg Order', type: 'money' },
+          { key: 'lastOrderDate', label: 'Last Order', type: 'string' },
+        ];
+
+        // Add rank
+        tcRows.forEach((r, i) => { r.rank = i + 1; });
+
+        const totalSpend = tcRows.reduce((s, r) => s + (r.lifetimeTotal || 0), 0);
+        const totalOrders = tcRows.reduce((s, r) => s + (r.orderCount || 0), 0);
+
+        renderStats('tc-stats', [
+          { value: formatNum(tcRows.length), label: 'Clients' },
+          { value: formatNum(totalOrders), label: 'Total Orders' },
+          { value: formatMoney(totalSpend), label: 'Total Spend' },
+        ]);
+        renderTable('tc', tcCols, tcRows, null);
+        document.getElementById('tc-csv').style.display = 'inline-flex';
+        showStatus('tc-status', 'Found ' + formatNum(tcRows.length) + ' clients above $' + formatNum(minTotal), 'success');
+      } catch (e) {
+        showStatus('tc-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('tc-csv').addEventListener('click', () => exportCsv(tcCols, tcRows, 'catering_top_clients.csv'));
+
+    // ════════════════════════════════════════════════════
+    // DISCOUNTS
+    // ════════════════════════════════════════════════════
+    let discRows = [], discCols = [];
+    document.getElementById('disc-run').addEventListener('click', async () => {
+      const startDate = document.getElementById('disc-start').value;
+      const endDate = document.getElementById('disc-end').value;
+      if (!startDate || !endDate) { showStatus('disc-status', 'Select both dates.', 'error'); return; }
+      const btn = document.getElementById('disc-run');
+      btn.disabled = true;
+      showStatus('disc-status', 'Loading discounts...', 'loading');
+      try {
+        const body = { startDate, endDate };
+        const sf = storeFilter('disc');
+        if (sf) body.storeIds = sf;
+        const res = await fetch(API + '/api/monkey/reports/discounts-by-user', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        discRows = data.rows || [];
+        discCols = [
+          { key: 'userName', label: 'User', type: 'string' },
+          { key: 'discountType', label: 'Discount Type', type: 'string' },
+          { key: 'count', label: 'Count', type: 'num' },
+          { key: 'totalDiscount', label: 'Total Discount', type: 'money' },
+          { key: 'avgDiscount', label: 'Avg Discount', type: 'money' },
+        ];
+
+        const totals = { userName: 'TOTAL', discountType: '', count: 0, totalDiscount: 0, avgDiscount: 0 };
+        discRows.forEach(r => { totals.count += (r.count || 0); totals.totalDiscount += (r.totalDiscount || 0); });
+        if (totals.count > 0) totals.avgDiscount = totals.totalDiscount / totals.count;
+
+        renderStats('disc-stats', [
+          { value: formatNum(totals.count), label: 'Discounts Applied' },
+          { value: formatMoney(totals.totalDiscount), label: 'Total Discounted' },
+          { value: formatMoney(totals.avgDiscount), label: 'Avg Discount' },
+        ]);
+        renderTable('disc', discCols, discRows, totals);
+        document.getElementById('disc-csv').style.display = 'inline-flex';
+        showStatus('disc-status', 'Report complete: ' + formatNum(discRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('disc-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('disc-csv').addEventListener('click', () => exportCsv(discCols, discRows, 'catering_discounts.csv'));
+
+    // ════════════════════════════════════════════════════
+    // REFUNDS
+    // ════════════════════════════════════════════════════
+    let refRows = [], refCols = [];
+    document.getElementById('ref-run').addEventListener('click', async () => {
+      const startDate = document.getElementById('ref-start').value;
+      const endDate = document.getElementById('ref-end').value;
+      if (!startDate || !endDate) { showStatus('ref-status', 'Select both dates.', 'error'); return; }
+      const btn = document.getElementById('ref-run');
+      btn.disabled = true;
+      showStatus('ref-status', 'Loading refunds...', 'loading');
+      try {
+        const body = { startDate, endDate };
+        const sf = storeFilter('ref');
+        if (sf) body.storeIds = sf;
+        const res = await fetch(API + '/api/monkey/reports/refunds-by-user', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        refRows = data.rows || [];
+        refCols = [
+          { key: 'userName', label: 'User', type: 'string' },
+          { key: 'reason', label: 'Reason', type: 'string' },
+          { key: 'count', label: 'Count', type: 'num' },
+          { key: 'totalRefund', label: 'Total Refunded', type: 'money' },
+          { key: 'avgRefund', label: 'Avg Refund', type: 'money' },
+        ];
+
+        const totals = { userName: 'TOTAL', reason: '', count: 0, totalRefund: 0, avgRefund: 0 };
+        refRows.forEach(r => { totals.count += (r.count || 0); totals.totalRefund += (r.totalRefund || 0); });
+        if (totals.count > 0) totals.avgRefund = totals.totalRefund / totals.count;
+
+        renderStats('ref-stats', [
+          { value: formatNum(totals.count), label: 'Refunds Issued' },
+          { value: formatMoney(totals.totalRefund), label: 'Total Refunded' },
+          { value: formatMoney(totals.avgRefund), label: 'Avg Refund' },
+        ]);
+        renderTable('ref', refCols, refRows, totals);
+        document.getElementById('ref-csv').style.display = 'inline-flex';
+        showStatus('ref-status', 'Report complete: ' + formatNum(refRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('ref-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('ref-csv').addEventListener('click', () => exportCsv(refCols, refRows, 'catering_refunds.csv'));
+
+    // ════════════════════════════════════════════════════
+    // ALERTS
+    // ════════════════════════════════════════════════════
+    let alertsLoaded = false;
+
+    async function loadAlerts() {
+      showStatus('alerts-status', 'Loading alerts...', 'loading');
+      let totalAlerts = 0;
+      try {
+        // Load all three alert types in parallel
+        const [naRes, npRes, ucRes] = await Promise.all([
+          fetch(API + '/api/monkey/alerts/not-accepted', { headers: authHeaders() }).then(r => r.json().catch(() => ({}))),
+          fetch(API + '/api/monkey/alerts/not-posted', { headers: authHeaders() }).then(r => r.json().catch(() => ({}))),
+          fetch(API + '/api/monkey/alerts/unconfirmed', { headers: authHeaders() }).then(r => r.json().catch(() => ({}))),
+        ]);
+
+        // Not Accepted
+        const naRows = naRes.rows || naRes || [];
+        const naCountEl = document.getElementById('na-count');
+        naCountEl.textContent = naRows.length;
+        naCountEl.className = 'alert-count-label' + (naRows.length === 0 ? ' zero' : '');
+        if (naRows.length > 0) {
+          const naCols = detectColumns(naRows, ['orderId', 'storeName', 'clientName', 'orderDate', 'total', 'status']);
+          renderAlertTable('na', naCols, naRows);
+        } else {
+          document.getElementById('na-table').style.display = 'none';
+        }
+        totalAlerts += naRows.length;
+
+        // Not Posted
+        const npRows = npRes.rows || npRes || [];
+        const npCountEl = document.getElementById('np-count');
+        npCountEl.textContent = npRows.length;
+        npCountEl.className = 'alert-count-label' + (npRows.length === 0 ? ' zero' : '');
+        if (npRows.length > 0) {
+          const npCols = detectColumns(npRows, ['orderId', 'storeName', 'clientName', 'orderDate', 'total', 'status']);
+          renderAlertTable('np', npCols, npRows);
+        } else {
+          document.getElementById('np-table').style.display = 'none';
+        }
+        totalAlerts += npRows.length;
+
+        // Unconfirmed
+        const ucRows = ucRes.rows || ucRes || [];
+        const ucCountEl = document.getElementById('uc-count');
+        ucCountEl.textContent = ucRows.length;
+        ucCountEl.className = 'alert-count-label' + (ucRows.length === 0 ? ' zero' : '');
+        if (ucRows.length > 0) {
+          const ucCols = detectColumns(ucRows, ['orderId', 'storeName', 'clientName', 'orderDate', 'total', 'deliveryPartner', 'status']);
+          renderAlertTable('uc', ucCols, ucRows);
+        } else {
+          document.getElementById('uc-table').style.display = 'none';
+        }
+        totalAlerts += ucRows.length;
+
+        // Update badge
+        const badge = document.getElementById('alertsBadge');
+        if (totalAlerts > 0) {
+          badge.textContent = totalAlerts;
+          badge.style.display = 'inline-flex';
+        } else {
+          badge.style.display = 'none';
+        }
+
+        alertsLoaded = true;
+        showStatus('alerts-status', totalAlerts === 0 ? 'No active alerts - all clear!' : totalAlerts + ' alert(s) found', totalAlerts === 0 ? 'success' : 'loading');
+      } catch (e) {
+        showStatus('alerts-status', 'Error loading alerts: ' + e.message, 'error');
+      }
+    }
+
+    function detectColumns(rows, preferredKeys) {
+      if (!rows.length) return [];
+      const sampleKeys = Object.keys(rows[0]);
+      const cols = [];
+      // Use preferred order first, then any remaining
+      const used = new Set();
+      preferredKeys.forEach(k => {
+        if (sampleKeys.includes(k)) {
+          used.add(k);
+          const type = isMoneyKey(k) ? 'money' : (isNumKey(k) ? 'num' : 'string');
+          cols.push({ key: k, label: humanizeKey(k), type });
+        }
+      });
+      sampleKeys.forEach(k => {
+        if (!used.has(k)) {
+          const type = isMoneyKey(k) ? 'money' : (isNumKey(k) ? 'num' : 'string');
+          cols.push({ key: k, label: humanizeKey(k), type });
+        }
+      });
+      return cols;
+    }
+
+    function isMoneyKey(k) { return /total|subtotal|amount|price|cost|refund|discount|revenue|fee/i.test(k); }
+    function isNumKey(k) { return /count|qty|quantity|number/i.test(k); }
+    function humanizeKey(k) {
+      return k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+    }
+
+    function renderAlertTable(prefix, columns, rows) {
+      const thead = document.getElementById(prefix + '-thead');
+      const tbody = document.getElementById(prefix + '-tbody');
+      const table = document.getElementById(prefix + '-table');
+      thead.innerHTML = columns.map(col =>
+        '<th' + ((col.type === 'num' || col.type === 'money') ? ' class="num"' : '') + '>' + escapeHtml(col.label) + '</th>'
+      ).join('');
+      tbody.innerHTML = rows.map(row => {
+        return '<tr>' + columns.map(col => {
+          const v = row[col.key];
+          const cls = (col.type === 'num' || col.type === 'money') ? ' class="num"' : '';
+          let display = '';
+          if (col.type === 'money') display = formatMoney(v);
+          else if (col.type === 'num') display = formatNum(v);
+          else display = escapeHtml(v);
+          return '<td' + cls + '>' + display + '</td>';
+        }).join('') + '</tr>';
+      }).join('');
+      table.style.display = 'table';
+    }
+
+    document.getElementById('alerts-refresh').addEventListener('click', () => {
+      alertsLoaded = false;
+      loadAlerts();
+    });
+
+    // Load alert counts on page load (for badge)
+    (async function loadAlertBadge() {
+      try {
+        const [na, np, uc] = await Promise.all([
+          fetch(API + '/api/monkey/alerts/not-accepted', { headers: authHeaders() }).then(r => r.json().catch(() => ([]))),
+          fetch(API + '/api/monkey/alerts/not-posted', { headers: authHeaders() }).then(r => r.json().catch(() => ([]))),
+          fetch(API + '/api/monkey/alerts/unconfirmed', { headers: authHeaders() }).then(r => r.json().catch(() => ([]))),
+        ]);
+        const total = (na.rows || na || []).length + (np.rows || np || []).length + (uc.rows || uc || []).length;
+        const badge = document.getElementById('alertsBadge');
+        if (total > 0) {
+          badge.textContent = total;
+          badge.style.display = 'inline-flex';
+        }
+      } catch (e) { /* silent */ }
+    })();
+  </script>
+  <script src="/shared-nav.js"></script>
+</body>
+</html>

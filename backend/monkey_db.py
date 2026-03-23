@@ -1,0 +1,926 @@
+"""
+monkey_db.py — SQLite layer for Monkey Media (catering) data.
+
+Replaces the SQL Server Monkey_Production database.
+Tables: stores, accounts, clients_and_leads, orders, order_items,
+        items, drivers, payments, refunds
+"""
+
+import os
+import sqlite3
+import logging
+from typing import Optional, List, Dict, Any
+from datetime import date, datetime
+
+logger = logging.getLogger(__name__)
+
+_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+MONKEY_DB_PATH = os.path.join(_DB_DIR, "monkey.db")
+
+# ── Schema ──────────────────────────────────────────────────────────
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS stores (
+    store_id        INTEGER PRIMARY KEY,
+    region_id       INTEGER,
+    region_name     TEXT,
+    store_name      TEXT,
+    store_code      TEXT,
+    store_manager   TEXT,
+    store_manager_email TEXT,
+    phone           TEXT,
+    city            TEXT,
+    state           TEXT,
+    zip             TEXT,
+    latitude        REAL,
+    longitude       REAL,
+    accepts_online_orders INTEGER,
+    status          TEXT DEFAULT 'Active'
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    account_id      INTEGER PRIMARY KEY,
+    house_account   INTEGER,
+    company_name    TEXT,
+    accounts_payable_contact TEXT,
+    email_address   TEXT,
+    phone_number    TEXT,
+    address_1       TEXT,
+    city            TEXT,
+    zip_code        TEXT,
+    state           TEXT,
+    discount_percentage REAL,
+    tax_exempt      INTEGER,
+    payment_terms   INTEGER,
+    marketing_group TEXT,
+    status          TEXT DEFAULT 'active',
+    is_deleted      INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS clients_and_leads (
+    client_id       INTEGER PRIMARY KEY,
+    is_lead         INTEGER,
+    account_name    TEXT,
+    account_id      INTEGER,
+    first_name      TEXT,
+    last_name       TEXT,
+    email_address   TEXT,
+    phone_number    TEXT,
+    cell_number     TEXT,
+    address1        TEXT,
+    city            TEXT,
+    zip_code        TEXT,
+    state           TEXT,
+    catering_sales_manager TEXT,
+    preferred_store_id INTEGER,
+    preferred_region_store_name TEXT,
+    on_mailing_list INTEGER,
+    status          TEXT,
+    date_added      TEXT,
+    is_deleted      INTEGER DEFAULT 0,
+    company_name    TEXT,
+    marketing_group TEXT
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+    order_id        INTEGER PRIMARY KEY,
+    is_promo        INTEGER,
+    billing_id      INTEGER,
+    billing_name    TEXT,
+    client_id       INTEGER,
+    client_name     TEXT,
+    store_id        INTEGER,
+    region_store_name TEXT,
+    order_date      TEXT,
+    date_reqd       TEXT,
+    delivery_type   TEXT,
+    order_class     TEXT,
+    number_of_guests TEXT,
+    payment_method  TEXT,
+    order_type      TEXT,
+    entered_by      TEXT,
+    confirmed_by    TEXT,
+    confirmed_by_time TEXT,
+    store_accept_time TEXT,
+    subtotal        REAL,
+    discount        REAL,
+    discount_code   TEXT,
+    gratuity        REAL,
+    tax             REAL,
+    tax_exempt      INTEGER,
+    delivery_fee    REAL,
+    total           REAL,
+    status          TEXT,
+    paid            INTEGER,
+    paid_date       TEXT,
+    locked          INTEGER,
+    deleted         INTEGER DEFAULT 0,
+    pos_order_id    TEXT,
+    pos_post_time   TEXT,
+    driver_id       INTEGER,
+    coupon_name     TEXT,
+    discount_coupon_amount REAL,
+    ezcater_order_id TEXT,
+    delivery_partner TEXT,
+    api_vendor_name TEXT,
+    order_note      TEXT,
+    delivery_instruction TEXT,
+    order_source    TEXT,
+    order_last_modified_datetime TEXT,
+    setup_fee       REAL,
+    center_fee      REAL,
+    rental_fee      REAL,
+    additional_gratuity REAL,
+    revenue_source  INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+    order_item_id   INTEGER PRIMARY KEY,
+    order_id        INTEGER,
+    menu_item_id    INTEGER,
+    item_name       TEXT,
+    quantity        REAL,
+    menu_item_price REAL,
+    item_discount   REAL,
+    item_total      REAL,
+    special_instructions TEXT,
+    FOREIGN KEY (order_id) REFERENCES orders(order_id)
+);
+
+CREATE TABLE IF NOT EXISTS items (
+    item_id         INTEGER PRIMARY KEY,
+    item_class      TEXT,
+    item_category   TEXT,
+    item_group      TEXT,
+    item_name       TEXT,
+    department      TEXT,
+    unit            TEXT,
+    price           REAL,
+    taxable         INTEGER,
+    sell_on_web     INTEGER,
+    status          TEXT DEFAULT 'Active'
+);
+
+CREATE TABLE IF NOT EXISTS drivers (
+    driver_id       INTEGER PRIMARY KEY,
+    is_store_driver INTEGER,
+    region_id       INTEGER,
+    first_name      TEXT,
+    last_name       TEXT,
+    phone           TEXT,
+    store_id        INTEGER,
+    is_store_default_driver TEXT,
+    delivery_partner TEXT,
+    status          INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+    payment_id      INTEGER PRIMARY KEY,
+    process_id      INTEGER,
+    order_id        INTEGER,
+    account_id      INTEGER,
+    client_id       INTEGER,
+    amount          REAL,
+    payment_date    TEXT,
+    method          TEXT,
+    check_no        TEXT,
+    locked          INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS refunds (
+    refund_id       INTEGER PRIMARY KEY,
+    process_id      INTEGER,
+    account_id      INTEGER,
+    account_name    TEXT,
+    order_id        INTEGER,
+    amount          REAL,
+    tax_refund      REAL,
+    total           REAL,
+    method          TEXT,
+    refund_date     TEXT,
+    note            TEXT,
+    refund_by       TEXT,
+    check_no        TEXT,
+    locked          INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id);
+CREATE INDEX IF NOT EXISTS idx_orders_date_reqd ON orders(date_reqd);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_delivery_type ON orders(delivery_type);
+CREATE INDEX IF NOT EXISTS idx_orders_entered_by ON orders(entered_by);
+CREATE INDEX IF NOT EXISTS idx_orders_delivery_partner ON orders(delivery_partner);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_refunds_order_id ON refunds(order_id);
+CREATE INDEX IF NOT EXISTS idx_clients_account_id ON clients_and_leads(account_id);
+"""
+
+
+def get_connection(db_path: str = MONKEY_DB_PATH) -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+_initialized = False
+
+def initialize_db(db_path: str = MONKEY_DB_PATH):
+    global _initialized
+    if _initialized:
+        return
+    conn = get_connection(db_path)
+    conn.executescript(_SCHEMA_SQL)
+    conn.close()
+    _initialized = True
+
+
+def db_available(db_path: str = MONKEY_DB_PATH) -> bool:
+    try:
+        if not os.path.exists(db_path):
+            return False
+        conn = get_connection(db_path)
+        row = conn.execute("SELECT COUNT(*) FROM orders").fetchone()
+        conn.close()
+        return row[0] > 0
+    except Exception:
+        return False
+
+
+def get_stats(db_path: str = MONKEY_DB_PATH) -> dict:
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        stats = {}
+        for table in ['orders', 'order_items', 'accounts', 'clients_and_leads',
+                       'items', 'stores', 'drivers', 'payments', 'refunds']:
+            row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            stats[table] = row[0]
+
+        # Date range
+        dr = conn.execute(
+            "SELECT MIN(date_reqd), MAX(date_reqd) FROM orders WHERE deleted = 0"
+        ).fetchone()
+        stats['date_range'] = {'min': dr[0], 'max': dr[1]} if dr else {}
+
+        # DB size
+        stats['db_size_mb'] = round(os.path.getsize(db_path) / 1024 / 1024, 1)
+        return stats
+    finally:
+        conn.close()
+
+
+# ── Report Functions (matching SQL Server SPs) ──────────────────────
+
+
+def rpt_sales_by_channel_by_weekday(
+    start_date: str, end_date: str,
+    store_ids: Optional[List[int]] = None,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: new01_sp_rpt_Monkey_Sales_by_Channel_by_Weekday
+    Catering sales by channel (Online, Store, Voice, CSM, Marketplace) and weekday.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        sql = """
+            SELECT
+                CASE strftime('%w', date_reqd)
+                    WHEN '0' THEN 'Sunday'
+                    WHEN '1' THEN 'Monday'
+                    WHEN '2' THEN 'Tuesday'
+                    WHEN '3' THEN 'Wednesday'
+                    WHEN '4' THEN 'Thursday'
+                    WHEN '5' THEN 'Friday'
+                    WHEN '6' THEN 'Saturday'
+                END AS weekday,
+                CASE
+                    WHEN entered_by LIKE '%Online%' OR order_source LIKE '%online%'
+                        OR api_vendor_name IS NOT NULL THEN 'Online'
+                    WHEN entered_by LIKE '%CSM%' OR entered_by LIKE '%NSC%' THEN 'CSM'
+                    WHEN ezcater_order_id IS NOT NULL AND ezcater_order_id != ''
+                        THEN 'Marketplace'
+                    WHEN entered_by LIKE '%Voice%' THEN 'Voice'
+                    ELSE 'Store'
+                END AS channel,
+                COUNT(*) AS order_count,
+                COALESCE(SUM(subtotal), 0) AS subtotal,
+                COALESCE(SUM(total), 0) AS total
+            FROM orders
+            WHERE date_reqd BETWEEN ? AND ?
+              AND deleted = 0
+              AND status NOT IN ('Cancelled', 'Void')
+        """
+        params = [start_date, end_date]
+        if store_ids:
+            ph = ",".join("?" * len(store_ids))
+            sql += f" AND store_id IN ({ph})"
+            params.extend(store_ids)
+        sql += " GROUP BY weekday, channel ORDER BY weekday, channel"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {"weekday": r[0], "channel": r[1], "orderCount": r[2],
+             "subtotal": round(r[3], 2), "total": round(r[4], 2)}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_delivery_counts_by_partner(
+    start_date: str, end_date: str,
+    store_ids: Optional[List[int]] = None,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: sp_rpt_Delivery_Counts_By_Delivery_Partner
+    Delivery order counts by delivery partner per store per date.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        sql = """
+            SELECT
+                o.store_id,
+                s.store_name,
+                DATE(o.date_reqd) AS business_date,
+                COALESCE(
+                    CASE
+                        WHEN o.delivery_partner LIKE '%DoorDash%' THEN 'DoorDash'
+                        WHEN o.delivery_partner LIKE '%Deliver That%' THEN 'Deliver That'
+                        WHEN o.delivery_partner LIKE '%ezDispatch%' OR o.delivery_partner LIKE '%EZDispatch%'
+                            THEN 'ezDispatch'
+                        ELSE o.delivery_partner
+                    END,
+                    'Store Driver'
+                ) AS partner,
+                COUNT(*) AS order_count
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE o.delivery_type = 'delivery'
+              AND o.date_reqd BETWEEN ? AND ?
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+        """
+        params = [start_date, end_date]
+        if store_ids:
+            ph = ",".join("?" * len(store_ids))
+            sql += f" AND o.store_id IN ({ph})"
+            params.extend(store_ids)
+        sql += " GROUP BY o.store_id, s.store_name, business_date, partner"
+        sql += " ORDER BY o.store_id, business_date, partner"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {"storeId": r[0], "storeName": r[1], "date": r[2],
+             "partner": r[3], "orderCount": r[4]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_catering_by_handoff_mode(
+    start_date: str, end_date: str,
+    store_ids: Optional[List[int]] = None,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: sp_rpt_MSI_Catering_Orders_by_Handoff_Mode
+    Catering orders by pickup vs delivery per store.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        sql = """
+            SELECT
+                o.store_id,
+                s.store_name,
+                o.delivery_type,
+                COUNT(*) AS order_count,
+                COALESCE(SUM(o.subtotal), 0) AS subtotal,
+                COALESCE(SUM(o.total), 0) AS total
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE o.date_reqd BETWEEN ? AND ?
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+        """
+        params = [start_date, end_date]
+        if store_ids:
+            ph = ",".join("?" * len(store_ids))
+            sql += f" AND o.store_id IN ({ph})"
+            params.extend(store_ids)
+        sql += " GROUP BY o.store_id, s.store_name, o.delivery_type"
+        sql += " ORDER BY o.store_id, o.delivery_type"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {"storeId": r[0], "storeName": r[1], "deliveryType": r[2],
+             "orderCount": r[3], "subtotal": round(r[4], 2), "total": round(r[5], 2)}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_client_stats(db_path: str = MONKEY_DB_PATH) -> List[Dict]:
+    """
+    Replaces: sp_rpt_Monkey_Client_Stats
+    All clients with at least one order — shows totals and last order.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("""
+            SELECT
+                c.client_id,
+                c.first_name || ' ' || c.last_name AS client_name,
+                c.email_address,
+                c.company_name,
+                c.preferred_region_store_name,
+                COUNT(o.order_id) AS total_orders,
+                MAX(o.date_reqd) AS last_order_date,
+                s2.store_name AS last_order_store
+            FROM clients_and_leads c
+            JOIN orders o ON o.client_id = c.client_id AND o.deleted = 0
+            LEFT JOIN stores s2 ON o.store_id = s2.store_id
+            WHERE c.is_deleted = 0
+            GROUP BY c.client_id
+            HAVING total_orders >= 1
+            ORDER BY total_orders DESC
+            LIMIT 5000
+        """).fetchall()
+        return [
+            {"clientId": r[0], "clientName": r[1], "email": r[2],
+             "company": r[3], "preferredStore": r[4], "totalOrders": r[5],
+             "lastOrderDate": r[6], "lastOrderStore": r[7]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_top_clients_by_sales(
+    min_total: float = 500.0,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: sp_rpt_Top_1000_Highest_Sales
+    Clients with lifetime sales over threshold.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("""
+            SELECT
+                c.client_id,
+                c.first_name || ' ' || c.last_name AS client_name,
+                c.email_address,
+                c.company_name,
+                COALESCE(SUM(o.subtotal), 0) AS lifetime_subtotal,
+                COALESCE(SUM(o.tax), 0) AS lifetime_tax,
+                COALESCE(SUM(o.gratuity), 0) AS lifetime_tip,
+                COALESCE(SUM(o.discount), 0) AS lifetime_discount,
+                COALESCE(SUM(o.total), 0) AS lifetime_total,
+                COUNT(o.order_id) AS order_count,
+                ROUND(COALESCE(SUM(o.total), 0) / MAX(COUNT(o.order_id), 1), 2) AS avg_order
+            FROM clients_and_leads c
+            JOIN orders o ON o.client_id = c.client_id
+                AND o.deleted = 0
+                AND o.status NOT IN ('Cancelled', 'Void')
+            WHERE c.is_deleted = 0
+            GROUP BY c.client_id
+            HAVING lifetime_total > ?
+            ORDER BY lifetime_total DESC
+            LIMIT 1000
+        """, (min_total,)).fetchall()
+        return [
+            {"clientId": r[0], "clientName": r[1], "email": r[2],
+             "company": r[3], "subtotal": round(r[4], 2), "tax": round(r[5], 2),
+             "tip": round(r[6], 2), "discount": round(r[7], 2),
+             "total": round(r[8], 2), "orderCount": r[9], "avgOrder": r[10]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_discounts_by_user(
+    start_date: str, end_date: str,
+    store_ids: Optional[List[int]] = None,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: sp_rpt_Monkey_Discounts_by_User
+    Discounts applied to orders by entering/editing agent.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        sql = """
+            SELECT
+                o.store_id,
+                s.store_name,
+                DATE(o.date_reqd) AS business_date,
+                o.entered_by,
+                o.order_id,
+                o.client_name,
+                o.discount,
+                o.discount_code,
+                o.subtotal,
+                o.total
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE o.date_reqd BETWEEN ? AND ?
+              AND o.deleted = 0
+              AND o.discount > 0
+        """
+        params = [start_date, end_date]
+        if store_ids:
+            ph = ",".join("?" * len(store_ids))
+            sql += f" AND o.store_id IN ({ph})"
+            params.extend(store_ids)
+        sql += " ORDER BY o.store_id, o.date_reqd, o.entered_by"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {"storeId": r[0], "storeName": r[1], "date": r[2],
+             "enteredBy": r[3], "orderId": r[4], "clientName": r[5],
+             "discount": round(r[6], 2), "discountCode": r[7],
+             "subtotal": round(r[8], 2), "total": round(r[9], 2)}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_refunds_by_user(
+    start_date: str, end_date: str,
+    store_ids: Optional[List[int]] = None,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: sp_rpt_Monkey_Refunds_by_User
+    Refunds by who issued them.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        sql = """
+            SELECT
+                o.store_id,
+                s.store_name,
+                DATE(r.refund_date) AS refund_date,
+                r.refund_by,
+                r.order_id,
+                r.account_name,
+                r.amount,
+                r.tax_refund,
+                r.total,
+                r.method,
+                r.note
+            FROM refunds r
+            JOIN orders o ON r.order_id = o.order_id
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE r.refund_date BETWEEN ? AND ?
+        """
+        params = [start_date, end_date]
+        if store_ids:
+            ph = ",".join("?" * len(store_ids))
+            sql += f" AND o.store_id IN ({ph})"
+            params.extend(store_ids)
+        sql += " ORDER BY o.store_id, r.refund_date, r.refund_by"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {"storeId": r[0], "storeName": r[1], "date": r[2],
+             "refundBy": r[3], "orderId": r[4], "accountName": r[5],
+             "amount": round(r[6] or 0, 2), "taxRefund": round(r[7] or 0, 2),
+             "total": round(r[8] or 0, 2), "method": r[9], "note": r[10]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_catering_over_500(
+    year: int, month: int,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: sp_rpt_Catering_Over_500_Month
+    Clients who spent over $500 in a given month, with YTD totals.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        month_start = f"{year}-{month:02d}-01"
+        if month == 12:
+            month_end = f"{year + 1}-01-01"
+        else:
+            month_end = f"{year}-{month + 1:02d}-01"
+        ytd_start = f"{year}-01-01"
+
+        rows = conn.execute("""
+            SELECT
+                c.client_id,
+                c.first_name || ' ' || c.last_name AS client_name,
+                c.email_address,
+                c.phone_number,
+                c.company_name,
+                c.on_mailing_list,
+                SUM(CASE WHEN o.date_reqd >= ? AND o.date_reqd < ? THEN o.total ELSE 0 END) AS month_total,
+                SUM(CASE WHEN o.date_reqd >= ? THEN o.total ELSE 0 END) AS ytd_total,
+                COUNT(CASE WHEN o.date_reqd >= ? AND o.date_reqd < ? THEN 1 END) AS month_orders,
+                MAX(o.date_reqd) AS last_order_date
+            FROM clients_and_leads c
+            JOIN orders o ON o.client_id = c.client_id
+                AND o.deleted = 0
+                AND o.status NOT IN ('Cancelled', 'Void')
+            WHERE c.is_deleted = 0
+            GROUP BY c.client_id
+            HAVING month_total > 500
+            ORDER BY month_total DESC
+        """, (month_start, month_end, ytd_start, month_start, month_end)).fetchall()
+        return [
+            {"clientId": r[0], "clientName": r[1], "email": r[2],
+             "phone": r[3], "company": r[4], "onMailingList": bool(r[5]),
+             "monthTotal": round(r[6], 2), "ytdTotal": round(r[7], 2),
+             "monthOrders": r[8], "lastOrderDate": r[9]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def rpt_order_notes(
+    start_date: str, end_date: str,
+    store_ids: Optional[List[int]] = None,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Replaces: new01_sp_report_order_notes
+    Orders with notes populated.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        sql = """
+            SELECT
+                o.store_id,
+                s.store_name,
+                DATE(o.date_reqd) AS business_date,
+                o.order_id,
+                o.client_name,
+                o.order_note
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE o.date_reqd BETWEEN ? AND ?
+              AND o.deleted = 0
+              AND o.order_note IS NOT NULL
+              AND TRIM(o.order_note) != ''
+        """
+        params = [start_date, end_date]
+        if store_ids:
+            ph = ",".join("?" * len(store_ids))
+            sql += f" AND o.store_id IN ({ph})"
+            params.extend(store_ids)
+        sql += " ORDER BY o.date_reqd DESC, o.store_id"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {"storeId": r[0], "storeName": r[1], "date": r[2],
+             "orderId": r[3], "clientName": r[4], "orderNote": r[5]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+# ── Alert Functions ─────────────────────────────────────────────────
+
+
+def alert_orders_not_accepted(db_path: str = MONKEY_DB_PATH) -> List[Dict]:
+    """
+    Replaces: new01_sp_alert_OrdersnotAccepted
+    Orders due within 24 hours that haven't been accepted.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("""
+            SELECT
+                o.order_id, o.store_id, s.store_name,
+                o.date_reqd, o.client_name, o.total, o.status
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE o.store_accept_time IS NULL
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+              AND o.date_reqd <= datetime('now', '+24 hours')
+              AND o.date_reqd >= datetime('now', '-1 day')
+            ORDER BY o.date_reqd
+        """).fetchall()
+        return [
+            {"orderId": r[0], "storeId": r[1], "storeName": r[2],
+             "dateRequired": r[3], "clientName": r[4], "total": r[5], "status": r[6]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def alert_orders_not_posted(db_path: str = MONKEY_DB_PATH) -> List[Dict]:
+    """
+    Replaces: new01_sp_alert_OrdersnotPosted
+    Confirmed orders with no POS order ID.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("""
+            SELECT
+                o.order_id, o.store_id, s.store_name,
+                o.date_reqd, o.client_name, o.total,
+                o.confirmed_by, o.status
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE (o.pos_order_id IS NULL OR TRIM(o.pos_order_id) = '')
+              AND o.confirmed_by IS NOT NULL
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+              AND o.date_reqd >= datetime('now', '-30 days')
+            ORDER BY o.date_reqd DESC
+        """).fetchall()
+        return [
+            {"orderId": r[0], "storeId": r[1], "storeName": r[2],
+             "dateRequired": r[3], "clientName": r[4], "total": r[5],
+             "confirmedBy": r[6], "status": r[7]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def alert_unconfirmed_orders(db_path: str = MONKEY_DB_PATH) -> List[Dict]:
+    """
+    Replaces: new01_sp_alert_Unconfirmed_Orders
+    Online orders within last 7 days that remain unconfirmed.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("""
+            SELECT
+                o.order_id, o.store_id, s.store_name,
+                o.date_reqd, o.client_name, o.total, o.order_type
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE o.confirmed_by IS NULL
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+              AND o.order_type = 'Online'
+              AND o.date_reqd >= datetime('now', '-7 days')
+            ORDER BY o.date_reqd
+        """).fetchall()
+        return [
+            {"orderId": r[0], "storeId": r[1], "storeName": r[2],
+             "dateRequired": r[3], "clientName": r[4], "total": r[5],
+             "orderType": r[6]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+# ── CSV Import ──────────────────────────────────────────────────────
+
+# Column mappings for headerless CSVs from SSMS
+# Order must match the SQL Server column ordinal position
+
+STORES_COLUMNS = [
+    'UniqueID', 'store_id', 'region_id', 'region_name', 'store_name', 'store_code',
+    'store_manager', 'store_manager_email', 'phone', 'fax', 'store_email',
+    'address_1', 'address_2', 'city', 'state', 'zip',
+    'delivery_service', 'delivery_fee_taxable', 'gratuity_fee_taxable',
+    'setup_fee_taxable', 'center_fee_taxable',
+    'current_delivery_fee_tax_rate', 'current_gratuity_fee_tax_rate',
+    'current_setup_fee_tax_rate', 'current_center_fee_tax_rate',
+    'add_date', 'rating', 'latitude', 'longitude', 'note',
+    'accepts_online_orders', 'pos_ip', 'pos_ip_verified', 'store_key',
+    'pos_sync_start_date', 'status',
+]
+
+ACCOUNTS_COLUMNS = [
+    'account_id', 'house_account', 'company_name', 'accounts_payable_contact',
+    'email_address', 'phone_number', 'fax_number', 'address_1', 'address_2',
+    'city', 'zip_code', 'state', 'discount_percentage',
+    'discount_percentage_dollar_threshold', 'tax_exempt', 'requires_po',
+    'payment_terms', 'overdue_balance_limit', 'marketing_group', 'status',
+    'is_deleted', 'billing_external_note', 'billing_internal_note',
+    'tax_exempt_number',
+]
+
+DRIVERS_COLUMNS = [
+    'driver_id', 'is_store_driver', 'region_id', 'first_name', 'last_name',
+    'phone', 'employee_number', 'status', 'pos_operator_id',
+    'pos_operator_job_code', 'store_id', 'is_store_default_driver',
+    'delivery_partner',
+]
+
+PAYMENTS_COLUMNS = [
+    'UniqueID', 'payment_id', 'process_id', 'order_id', 'account_id',
+    'client_id', 'amount', 'payment_date', 'method', 'check_no', 'locked',
+]
+
+REFUNDS_COLUMNS = [
+    'UniqueID', 'refund_id', 'process_id', 'account_id', 'account_name',
+    'order_id', 'amount', 'tax_refund', 'total', 'method',
+    'refund_date', 'note', 'refund_by', 'check_no', 'locked',
+]
+
+ITEMS_COLUMNS = [
+    'UniqueID', 'item_id', 'item_class', 'item_category',
+    'item_group_abbreviation', 'item_group', 'item_name', 'department',
+    'unit', 'rounding', 'round_to', 'is_production_item',
+    'serving_description', 'detail_description', 'image_url', 'price',
+    'min_order_qty', 'taxable', 'sell_on_web', 'requires_label',
+    'is_tray', 'is_box', 'is_flat', 'is_phantom', 'status',
+]
+
+
+def _clean_val(val):
+    """Convert NULL strings and empty to None."""
+    if val is None or val == 'NULL' or val == '':
+        return None
+    return val.strip() if isinstance(val, str) else val
+
+
+def _safe_float(val):
+    try:
+        v = _clean_val(val)
+        return float(v) if v is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_int(val):
+    try:
+        v = _clean_val(val)
+        if v is None:
+            return None
+        return int(float(v))
+    except (ValueError, TypeError):
+        return None
+
+
+def import_csv(table: str, csv_path: str, columns: list, db_path: str = MONKEY_DB_PATH):
+    """Import a headerless CSV into the specified table using the column mapping."""
+    import csv as csv_mod
+
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+
+    with open(csv_path, encoding='utf-8-sig') as f:
+        reader = csv_mod.reader(f)
+        rows = []
+        for raw_row in reader:
+            if len(raw_row) < len(columns):
+                continue
+            row_dict = {columns[i]: _clean_val(raw_row[i]) for i in range(len(columns))}
+            rows.append(row_dict)
+
+    # Get the columns that exist in our schema
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    db_cols = {r[1] for r in cursor.fetchall()}
+    insert_cols = [c for c in columns if c in db_cols]
+
+    if not insert_cols:
+        logger.warning("No matching columns for table %s", table)
+        conn.close()
+        return 0
+
+    ph = ",".join("?" * len(insert_cols))
+    col_names = ",".join(insert_cols)
+
+    conn.execute(f"DELETE FROM {table}")
+    count = 0
+    for row_dict in rows:
+        vals = [row_dict.get(c) for c in insert_cols]
+        try:
+            conn.execute(f"INSERT INTO {table} ({col_names}) VALUES ({ph})", vals)
+            count += 1
+        except Exception as e:
+            if count == 0:
+                logger.warning("Insert error on first row of %s: %s", table, e)
+
+    conn.commit()
+    conn.close()
+    logger.info("Imported %d rows into monkey.%s", count, table)
+    return count

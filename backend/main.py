@@ -43,6 +43,7 @@ from aloha_sales_importer import import_aloha_sales_range, import_aloha_sales_la
 import toast_orders_db
 import toast_config_db
 import toast_config_builder
+import monkey_db
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -14587,6 +14588,130 @@ if os.path.isdir(menuboard_path):
             if os.path.isfile(file_path):
                 return _FileResponse(file_path)
         return _FileResponse(os.path.join(menuboard_path, "index.html"))
+
+# ── Monkey Media (Catering) API ─────────────────────────────────────
+
+
+@app.get("/api/monkey/stats")
+async def monkey_stats():
+    """Return summary statistics about the Monkey SQLite database."""
+    if not monkey_db.db_available():
+        return {"available": False}
+    stats = monkey_db.get_stats()
+    stats["available"] = True
+    return stats
+
+
+@app.post("/api/monkey/reports/sales-by-channel")
+async def monkey_sales_by_channel(payload: dict = Body(...)):
+    """Catering sales by channel and weekday."""
+    return monkey_db.rpt_sales_by_channel_by_weekday(
+        payload["startDate"], payload["endDate"],
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/monkey/reports/delivery-by-partner")
+async def monkey_delivery_by_partner(payload: dict = Body(...)):
+    """Delivery order counts by delivery partner per store."""
+    return monkey_db.rpt_delivery_counts_by_partner(
+        payload["startDate"], payload["endDate"],
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/monkey/reports/catering-by-handoff")
+async def monkey_catering_by_handoff(payload: dict = Body(...)):
+    """Catering orders by pickup vs delivery per store."""
+    return monkey_db.rpt_catering_by_handoff_mode(
+        payload["startDate"], payload["endDate"],
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.get("/api/monkey/reports/client-stats")
+async def monkey_client_stats():
+    """All clients with at least one order — totals and last order."""
+    return monkey_db.rpt_client_stats()
+
+
+@app.get("/api/monkey/reports/top-clients")
+async def monkey_top_clients(min_total: float = 500.0):
+    """Clients with lifetime sales over threshold."""
+    return monkey_db.rpt_top_clients_by_sales(min_total=min_total)
+
+
+@app.post("/api/monkey/reports/discounts-by-user")
+async def monkey_discounts_by_user(payload: dict = Body(...)):
+    """Discounts applied to orders by entering/editing agent."""
+    return monkey_db.rpt_discounts_by_user(
+        payload["startDate"], payload["endDate"],
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/monkey/reports/refunds-by-user")
+async def monkey_refunds_by_user(payload: dict = Body(...)):
+    """Refunds by who issued them."""
+    return monkey_db.rpt_refunds_by_user(
+        payload["startDate"], payload["endDate"],
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/monkey/reports/catering-over-500")
+async def monkey_catering_over_500(payload: dict = Body(...)):
+    """Clients who spent over $500 in a given month."""
+    return monkey_db.rpt_catering_over_500(
+        payload["year"], payload["month"],
+    )
+
+
+@app.post("/api/monkey/reports/order-notes")
+async def monkey_order_notes(payload: dict = Body(...)):
+    """Orders with notes populated."""
+    return monkey_db.rpt_order_notes(
+        payload["startDate"], payload["endDate"],
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.get("/api/monkey/alerts/not-accepted")
+async def monkey_alert_not_accepted():
+    """Orders due within 24 hours not yet accepted."""
+    return monkey_db.alert_orders_not_accepted()
+
+
+@app.get("/api/monkey/alerts/not-posted")
+async def monkey_alert_not_posted():
+    """Confirmed orders with no POS order ID."""
+    return monkey_db.alert_orders_not_posted()
+
+
+@app.get("/api/monkey/alerts/unconfirmed")
+async def monkey_alert_unconfirmed():
+    """Online orders within last 7 days that remain unconfirmed."""
+    return monkey_db.alert_unconfirmed_orders()
+
+
+@app.get("/api/monkey/stores")
+async def monkey_stores():
+    """List all Monkey stores."""
+    monkey_db.initialize_db()
+    conn = monkey_db.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT store_id, store_name, store_code, city, state, status "
+            "FROM stores WHERE status = 'Active' ORDER BY store_name"
+        ).fetchall()
+        return [
+            {"storeId": r[0], "storeName": r[1], "storeCode": r[2],
+             "city": r[3], "state": r[4], "status": r[5]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
 
 if os.path.isdir(kiosk_path):
     app.mount("/kiosk", StaticFiles(directory=kiosk_path, html=True), name="kiosk")

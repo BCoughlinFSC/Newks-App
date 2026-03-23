@@ -33,6 +33,7 @@
     { key: 'msi-discrepancy',  label: 'MSI Discrepancy',             href: '/msi-discrepancy.html' },
     { key: 'toast-pricing',    label: 'Toast Pricing Export',         href: '#', action: 'toastPricing' },
     { key: 'olo',              label: 'Digital Orders by Platform',   href: '/olo.html' },
+    { key: 'catering',         label: 'Catering Reports',             href: '/catering.html' },
   ];
 
   // ─── Detect active page ─────────────────────────
@@ -53,6 +54,7 @@
     if (path.endsWith('/daily-flash.html'))         return 'daily-flash';
     if (path.endsWith('/menu-mix-report.html'))     return 'menu-mix';
     if (path.endsWith('/olo.html'))                   return 'olo';
+    if (path.endsWith('/catering.html'))              return 'catering';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';
