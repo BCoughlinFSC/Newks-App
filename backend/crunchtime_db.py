@@ -361,16 +361,44 @@ def rpt_gross_profit_by_item(
         conn.close()
 
 
-def get_available_periods(db_path: str = CRUNCHTIME_DB_PATH) -> List[str]:
-    """Return list of distinct reporting periods/fiscal periods available."""
+def get_available_periods(db_path: str = CRUNCHTIME_DB_PATH) -> List[Dict]:
+    """Return list of distinct reporting periods with friendly labels and date ranges."""
     initialize_db(db_path)
     conn = get_connection(db_path)
     try:
-        rows = conn.execute(
+        # Get periods from cogs_by_product
+        periods = conn.execute(
             "SELECT DISTINCT reporting_period FROM cogs_by_product "
             "ORDER BY reporting_period DESC"
         ).fetchall()
-        return [r[0] for r in rows if r[0]]
+
+        # Get fiscal_week → date mapping from actual_costs
+        week_dates = {}
+        wd_rows = conn.execute(
+            "SELECT fiscal_week, fiscal_week_start FROM actual_costs "
+            "GROUP BY fiscal_week ORDER BY fiscal_week"
+        ).fetchall()
+        for r in wd_rows:
+            week_dates[r[0]] = r[1]
+
+        result = []
+        for (p,) in periods:
+            if not p:
+                continue
+            year = p[:4]
+            week_num = int(p[4:])
+            week_start = week_dates.get(p, '')
+            # Build friendly label: "FY2026 Wk 9 (Feb 23)"
+            label = f"FY{year} Wk {week_num}"
+            if week_start:
+                from datetime import datetime
+                try:
+                    dt = datetime.strptime(week_start, "%Y-%m-%d")
+                    label += f" ({dt.strftime('%b %d')})"
+                except Exception:
+                    pass
+            result.append({"value": p, "label": label, "weekStart": week_start})
+        return result
     finally:
         conn.close()
 

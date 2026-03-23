@@ -444,10 +444,8 @@
         selects.forEach(sel => {
           periods.forEach(p => {
             const opt = document.createElement('option');
-            const val = typeof p === 'string' ? p : (p.id || p.period || p.name || '');
-            const label = typeof p === 'string' ? p : (p.name || p.label || p.period || p.id || '');
-            opt.value = val;
-            opt.textContent = label;
+            opt.value = typeof p === 'string' ? p : (p.value || p.id || p.period || '');
+            opt.textContent = typeof p === 'string' ? p : (p.label || p.value || '');
             sel.appendChild(opt);
           });
         });
