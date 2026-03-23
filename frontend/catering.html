@@ -692,10 +692,10 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Report failed');
 
-        scRows = data.rows || [];
+        scRows = Array.isArray(data) ? data : (Array.isArray(data) ? data : (data.rows || []));
         scCols = [
           { key: 'channel', label: 'Channel', type: 'string' },
-          { key: 'dayOfWeek', label: 'Day', type: 'string' },
+          { key: 'weekday', label: 'Day', type: 'string' },
           { key: 'orderCount', label: 'Orders', type: 'num' },
           { key: 'subtotal', label: 'Subtotal', type: 'money' },
           { key: 'tax', label: 'Tax', type: 'money' },
@@ -704,7 +704,7 @@
         ];
 
         // Compute totals
-        const totals = { channel: 'TOTAL', dayOfWeek: '', orderCount: 0, subtotal: 0, tax: 0, total: 0, avgOrder: 0 };
+        const totals = { channel: 'TOTAL', weekday: '', orderCount: 0, subtotal: 0, tax: 0, total: 0, avgOrder: 0 };
         scRows.forEach(r => { totals.orderCount += (r.orderCount || 0); totals.subtotal += (r.subtotal || 0); totals.tax += (r.tax || 0); totals.total += (r.total || 0); });
         if (totals.orderCount > 0) totals.avgOrder = totals.total / totals.orderCount;
 
@@ -743,7 +743,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Report failed');
 
-        delRows = data.rows || [];
+        delRows = Array.isArray(data) ? data : (data.rows || []);
         delCols = [
           { key: 'partner', label: 'Partner', type: 'string' },
           { key: 'storeName', label: 'Store', type: 'string' },
@@ -792,7 +792,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Report failed');
 
-        hoRows = data.rows || [];
+        hoRows = Array.isArray(data) ? data : (data.rows || []);
         hoCols = [
           { key: 'storeName', label: 'Store', type: 'string' },
           { key: 'handoffMode', label: 'Handoff', type: 'string' },
@@ -833,13 +833,14 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Report failed');
 
-        tcRows = data.rows || data || [];
+        tcRows = Array.isArray(data) ? data : (data.rows || []);
+        tcRows.forEach((r, i) => r.rank = i + 1);
         tcCols = [
           { key: 'rank', label: '#', type: 'num' },
           { key: 'clientName', label: 'Client', type: 'string' },
           { key: 'company', label: 'Company', type: 'string' },
           { key: 'orderCount', label: 'Orders', type: 'num' },
-          { key: 'lifetimeTotal', label: 'Lifetime Total', type: 'money' },
+          { key: 'total', label: 'Lifetime Total', type: 'money' },
           { key: 'avgOrder', label: 'Avg Order', type: 'money' },
           { key: 'lastOrderDate', label: 'Last Order', type: 'string' },
         ];
@@ -885,7 +886,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Report failed');
 
-        discRows = data.rows || [];
+        discRows = Array.isArray(data) ? data : (data.rows || []);
         discCols = [
           { key: 'userName', label: 'User', type: 'string' },
           { key: 'discountType', label: 'Discount Type', type: 'string' },
@@ -933,7 +934,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Report failed');
 
-        refRows = data.rows || [];
+        refRows = Array.isArray(data) ? data : (data.rows || []);
         refCols = [
           { key: 'userName', label: 'User', type: 'string' },
           { key: 'reason', label: 'Reason', type: 'string' },
