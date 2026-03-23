@@ -253,7 +253,7 @@ def sync_table(azure_conn, sqlite_conn, table, config, since=None):
                     )
             else:
                 sqlite_conn.executemany(
-                    f"INSERT INTO {table} ({col_str}) VALUES ({ph})", batch
+                    f"INSERT OR REPLACE INTO {table} ({col_str}) VALUES ({ph})", batch
                 )
             count += len(batch)
             batch = []
@@ -272,7 +272,7 @@ def sync_table(azure_conn, sqlite_conn, table, config, since=None):
                     pass
         else:
             sqlite_conn.executemany(
-                f"INSERT INTO {table} ({col_str}) VALUES ({ph})", batch
+                f"INSERT OR REPLACE INTO {table} ({col_str}) VALUES ({ph})", batch
             )
         count += len(batch)
 
