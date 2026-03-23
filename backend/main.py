@@ -428,6 +428,14 @@ def save_yoy_index(data: Dict) -> None:
         json.dump(data, f, indent=2)
 
 def get_yoy_consolidator() -> SalesConsolidator:
+    # Prefer toast_config.db — no Excel dependency
+    if toast_config_db.db_available():
+        db_maps = toast_config_db.get_toast_to_aloha_maps()
+        if db_maps:
+            logger.info("YoY consolidator: using toast_config.db (%d Toast→Aloha mappings)",
+                        len(db_maps["toast_to_aloha_map"]))
+            return SalesConsolidator.from_db(db_maps)
+    # Fallback to Excel
     if not os.path.exists(MAPPING_FILE):
         raise HTTPException(status_code=500, detail=f"Missing mapping file: {MAPPING_FILE}")
     return SalesConsolidator(MAPPING_FILE)

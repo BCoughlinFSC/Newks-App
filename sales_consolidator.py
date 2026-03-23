@@ -19,23 +19,50 @@ import json
 
 class SalesConsolidator:
     """Consolidates Toast sales to match Aloha structure."""
-    
+
     def __init__(self, mapping_file: str):
         """
         Initialize with mapping table.
-        
+
         Args:
             mapping_file: Path to Excel file with Toast-Aloha mapping
         """
         print(f"Loading mapping table from {mapping_file}...")
         self.mapping_df = pd.read_excel(mapping_file)
-        
+
         # Build quick lookup dictionaries
         self._build_lookup_maps()
-        
+
         print(f"✓ Loaded {len(self.mapping_df)} item mappings")
         print(f"  - {len(self.toast_to_aloha_map)} Toast items with Aloha equivalents")
         print(f"  - {len(self.aloha_consolidation_map)} unique Aloha items")
+
+    @classmethod
+    def from_db(cls, db_maps: dict) -> "SalesConsolidator":
+        """
+        Create a SalesConsolidator from pre-built DB maps (toast_config_db).
+        Skips Excel loading entirely.
+
+        Args:
+            db_maps: dict from toast_config_db.get_toast_to_aloha_maps()
+        """
+        instance = object.__new__(cls)
+        instance.toast_to_aloha_map = db_maps["toast_to_aloha_map"]
+        instance.toast_name_to_aloha_map = db_maps["toast_name_to_aloha_map"]
+        instance.toast_category_map = db_maps["toast_category_map"]
+        instance.aloha_consolidation_map = db_maps["aloha_consolidation_map"]
+        # Build a minimal mapping_df for methods that reference it (compare_yoy)
+        rows = []
+        for guid, aname in instance.toast_to_aloha_map.items():
+            rows.append({
+                "item_guid": guid,
+                "AlohaItemName": aname,
+                "ConsolidatedCat": instance.toast_category_map.get(guid, ""),
+            })
+        instance.mapping_df = pd.DataFrame(rows) if rows else pd.DataFrame(
+            columns=["item_guid", "AlohaItemName", "ConsolidatedCat"]
+        )
+        return instance
     
     def _build_lookup_maps(self):
         """Build lookup maps for fast consolidation."""

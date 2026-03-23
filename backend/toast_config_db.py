@@ -758,3 +758,80 @@ def get_toast_items_with_tags(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, 
     except Exception as exc:
         logger.warning(f"Failed to build toast items with tags: {exc}")
         return {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Toast-to-Aloha lookup maps (replaces SalesConsolidator Excel dependency)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_toast_to_aloha_maps(db_path: str = TOAST_CONFIG_DB_PATH) -> Optional[Dict[str, dict]]:
+    """
+    Build the same lookup maps that SalesConsolidator builds from Excel,
+    but sourced from mli_plu_attribute_map in SQLite.
+
+    Returns dict with keys:
+      - toast_to_aloha_map:      {item_guid → aloha_item_name}
+      - toast_name_to_aloha_map: {normalized_toast_name → aloha_item_name}
+      - toast_category_map:      {item_guid → consolidated_cat}
+      - aloha_consolidation_map: {aloha_item_name → {toast_guids, toast_names, category}}
+
+    Returns None if DB not available or has no Aloha data.
+    """
+    if not os.path.exists(db_path):
+        return None
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute(
+                """SELECT multi_location_id, item_guid, toast_plu,
+                          aloha_plu, toast_item_name, aloha_item_name,
+                          consolidated_cat
+                   FROM mli_plu_attribute_map
+                   WHERE item_guid != ''"""
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        toast_to_aloha: Dict[str, str] = {}
+        toast_name_to_aloha: Dict[str, str] = {}
+        toast_category: Dict[str, str] = {}
+        aloha_consolidation: Dict[str, dict] = {}
+
+        has_aloha = False
+        for mli, guid, tplu, aplu, tname, aname, cat in rows:
+            # Category map — always populated
+            if guid:
+                toast_category[guid] = cat or ""
+
+            # Aloha maps — only if aloha_item_name is present
+            if aname:
+                has_aloha = True
+                toast_to_aloha[guid] = aname
+
+                if tname:
+                    norm = " ".join(str(tname).strip().lower().split())
+                    if norm:
+                        toast_name_to_aloha[norm] = aname
+
+                if aname not in aloha_consolidation:
+                    aloha_consolidation[aname] = {
+                        "toast_guids": [],
+                        "toast_names": [],
+                        "category": cat or "",
+                    }
+                aloha_consolidation[aname]["toast_guids"].append(guid)
+                if tname:
+                    aloha_consolidation[aname]["toast_names"].append(tname)
+
+        if not has_aloha:
+            return None
+
+        return {
+            "toast_to_aloha_map": toast_to_aloha,
+            "toast_name_to_aloha_map": toast_name_to_aloha,
+            "toast_category_map": toast_category,
+            "aloha_consolidation_map": aloha_consolidation,
+        }
+    except Exception as exc:
+        logger.warning(f"Failed to build Toast-to-Aloha maps: {exc}")
+        return None
