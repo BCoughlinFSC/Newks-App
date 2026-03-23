@@ -7789,20 +7789,30 @@ async def build_guest_count_report(
 ) -> dict:
     """Build guest count report: qty sold × Guest Count tag value per item."""
 
-    # ── 1. Fetch tag mapping ──
-    if locations:
-        restaurant_ids = prioritize_menu_tag_restaurants(restaurant_ids, locations)
-    tags_mapping = await get_menu_tags_mapping(client, restaurant_ids[0])
-    logger.info(f"Guest count report: tag mapping has {len(tags_mapping)} items")
-
-    # ── 2. Build GUID → guest count value lookup ──
+    # ── 1. Build GUID → guest count value lookup ──
+    # Prefer toast_config.db (fast, no API call); fall back to live Toast API
     gc_by_guid: Dict[str, Tuple[float, str]] = {}  # guid → (value, tagName)
-    for guid, tags in tags_mapping.items():
-        for tag in tags:
-            val = parse_guest_count_value(tag.get("tagName", ""))
-            if val is not None:
-                gc_by_guid[guid] = (val, tag["tagName"])
-                break
+
+    if toast_config_db.db_available():
+        attr_rows = toast_config_db.get_mapping_table_rows()
+        for row in attr_rows:
+            gc_val = row.get("guest_count_tag", 0)
+            guid = row.get("item_guid", "")
+            if gc_val and guid:
+                gc_by_guid[guid] = (float(gc_val), f"Guest Count {gc_val}")
+        logger.info(f"Guest count report: {len(gc_by_guid)} items from toast_config.db")
+    else:
+        # Fallback: fetch tags from live Toast API
+        if locations:
+            restaurant_ids = prioritize_menu_tag_restaurants(restaurant_ids, locations)
+        tags_mapping = await get_menu_tags_mapping(client, restaurant_ids[0])
+        logger.info(f"Guest count report: tag mapping has {len(tags_mapping)} items")
+        for guid, tags in tags_mapping.items():
+            for tag in tags:
+                val = parse_guest_count_value(tag.get("tagName", ""))
+                if val is not None:
+                    gc_by_guid[guid] = (val, tag["tagName"])
+                    break
     logger.info(f"Guest count report: {len(gc_by_guid)} items have Guest Count tags")
 
     if not gc_by_guid:
