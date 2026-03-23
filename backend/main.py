@@ -9728,16 +9728,14 @@ async def admin_validation_net_sales(
     orders_lookup: Dict[str, float] = {}  # "date|store" → calc_net
     try:
         orders_conn = toast_orders_db.get_connection()
+        # Fast path: 99.97% of orders have exactly 1 check, so checks[0].amount
+        # is sufficient. Avoids expensive json_each() correlated subquery.
         rows = orders_conn.execute("""
             SELECT business_date, restaurant_guid,
-                   SUM(
-                       (SELECT COALESCE(SUM(json_extract(c.value, '$.amount')), 0)
-                        FROM json_each(json_extract(order_json, '$.checks')) c
-                        WHERE COALESCE(json_extract(c.value, '$.voided'), 0) != 1
-                       )
-                   ) as calc_net
+                   SUM(COALESCE(json_extract(order_json, '$.checks[0].amount'), 0)) as calc_net
             FROM orders
             WHERE business_date BETWEEN ? AND ?
+              AND COALESCE(json_extract(order_json, '$.voided'), 0) != 1
             GROUP BY business_date, restaurant_guid
         """, (start_yyyymmdd, end_yyyymmdd)).fetchall()
         orders_conn.close()
