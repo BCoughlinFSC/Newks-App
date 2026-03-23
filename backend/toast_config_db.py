@@ -623,3 +623,138 @@ def get_stats(db_path: str = TOAST_CONFIG_DB_PATH) -> dict:
         }
     except Exception:
         return empty
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Mapping Table helpers (replaces Excel read/write)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_MAPPING_COLUMNS = [
+    "multi_location_id", "item_guid", "toast_plu", "aloha_plu",
+    "toast_item_name", "aloha_item_name", "consolidated_cat",
+    "recipe", "guest_count_tag", "entree_equiv_tag", "lto_tag",
+]
+
+
+def get_mapping_table_rows(db_path: str = TOAST_CONFIG_DB_PATH) -> List[dict]:
+    """
+    Return all mli_plu_attribute_map rows as list of dicts.
+    Drop-in replacement for _load_mapping_table_excel().
+    """
+    if not os.path.exists(db_path):
+        return []
+    try:
+        with get_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM mli_plu_attribute_map ORDER BY toast_item_name"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        logger.warning(f"Failed to read mapping table: {exc}")
+        return []
+
+
+def update_mapping_table_rows(
+    rows: List[dict],
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """
+    Replace all rows in mli_plu_attribute_map with the provided list.
+    Used by PUT /api/mapping-table to save user edits from the UI.
+    Returns the number of rows written.
+    """
+    if not rows:
+        return 0
+    initialize_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("DELETE FROM mli_plu_attribute_map")
+        insert_rows = []
+        for r in rows:
+            insert_rows.append((
+                r.get("multi_location_id", ""),
+                r.get("item_guid", ""),
+                r.get("toast_plu", 0),
+                r.get("aloha_plu", 0),
+                r.get("toast_item_name", ""),
+                r.get("aloha_item_name", ""),
+                r.get("consolidated_cat", ""),
+                r.get("recipe", ""),
+                r.get("guest_count_tag", 0),
+                r.get("entree_equiv_tag", 0),
+                r.get("lto_tag", ""),
+            ))
+        conn.executemany(
+            """INSERT INTO mli_plu_attribute_map (
+                multi_location_id, item_guid, toast_plu, aloha_plu,
+                toast_item_name, aloha_item_name, consolidated_cat,
+                recipe, guest_count_tag, entree_equiv_tag, lto_tag
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            insert_rows,
+        )
+    return len(insert_rows)
+
+
+def get_toast_items_with_tags(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, dict]:
+    """
+    Build the same {normalized_name: item_dict} structure that _poll_all_toast_items()
+    produces from the live Toast API, but using data already in toast_config.db.
+
+    Each item_dict has keys: name, guid, mli, plu, tags (list of tag names).
+    Deduplicates by multi_location_id, picking the first occurrence.
+    """
+    if not os.path.exists(db_path):
+        return {}
+    try:
+        with get_connection(db_path) as conn:
+            # Get all distinct menu items (one per MLI)
+            items = conn.execute("""
+                SELECT DISTINCT
+                    m.multi_location_id,
+                    m.item_guid,
+                    m.item_name,
+                    m.item_plu
+                FROM cfg_menu_items m
+                WHERE m.multi_location_id != ''
+                  AND m.item_name != ''
+            """).fetchall()
+
+            # Get all item→tag mappings joined with tag names
+            tag_rows = conn.execute("""
+                SELECT
+                    mit.multi_location_id,
+                    t.tag_name
+                FROM cfg_map_item_tags mit
+                JOIN cfg_tags t ON mit.store_guid = t.store_guid
+                                AND mit.tag_guid = t.tag_guid
+                WHERE mit.multi_location_id != ''
+                  AND t.tag_name != ''
+            """).fetchall()
+
+        # Build MLI → set of tag names
+        mli_tags: Dict[str, set] = {}
+        for mli, tag_name in tag_rows:
+            mli_tags.setdefault(mli, set()).add(tag_name)
+
+        # Build normalized lookup
+        result: Dict[str, dict] = {}
+        seen_mli: set = set()
+        for mli, guid, name, plu in items:
+            if mli in seen_mli:
+                continue
+            seen_mli.add(mli)
+            norm = name.strip().lower()
+            if not norm:
+                continue
+            tags = sorted(mli_tags.get(mli, set()))
+            result[norm] = {
+                "name": name.strip(),
+                "guid": guid or "",
+                "mli": mli or "",
+                "plu": str(plu) if plu else "",
+                "tags": tags,
+            }
+        return result
+    except Exception as exc:
+        logger.warning(f"Failed to build toast items with tags: {exc}")
+        return {}

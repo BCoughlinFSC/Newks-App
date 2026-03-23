@@ -7093,6 +7093,20 @@ def _load_mapping_table_excel() -> Tuple[str, List[str], List[Dict]]:
 @app.get("/api/mapping-table")
 async def get_mapping_table():
     """Return the Toast–Aloha consolidated mapping table for viewing/editing."""
+    # Prefer SQLite; fall back to Excel if DB not available
+    if toast_config_db.db_available():
+        rows = toast_config_db.get_mapping_table_rows()
+        if rows:
+            columns = list(rows[0].keys()) if rows else toast_config_db._MAPPING_COLUMNS
+            # Remove internal 'id' column from response
+            columns = [c for c in columns if c != "id"]
+            clean_rows = [{k: v for k, v in r.items() if k != "id"} for r in rows]
+            return {
+                "source": "toast_config.db",
+                "columns": columns,
+                "rows": clean_rows,
+            }
+    # Fallback to Excel
     path, columns, rows = _load_mapping_table_excel()
     return {
         "source": path,
@@ -7108,15 +7122,10 @@ class MappingTableUpdate(BaseModel):
 
 @app.put("/api/mapping-table")
 async def update_mapping_table(body: MappingTableUpdate):
-    """Save the mapping table back to Excel and clear cache."""
-    path = MAPPING_FILE
-    if not os.path.exists(path):
-        path = FALLBACK_MAPPING_FILE
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Mapping file not found; cannot save")
+    """Save the mapping table to SQLite (falls back to Excel)."""
     if not body.columns or not body.rows:
         raise HTTPException(status_code=400, detail="columns and rows are required")
-    # Build DataFrame in same column order; fill missing keys with ""
+    # Clean up values
     ordered = []
     for r in body.rows:
         row_dict = {}
@@ -7129,12 +7138,25 @@ async def update_mapping_table(body: MappingTableUpdate):
             else:
                 row_dict[c] = v
         ordered.append(row_dict)
-    df = pd.DataFrame(ordered, columns=body.columns)
-    out_path = _safe_write_excel(df, path)
+
+    # Prefer SQLite; fall back to Excel
+    if toast_config_db.db_available():
+        count = toast_config_db.update_mapping_table_rows(ordered)
+        saved_to = "toast_config.db"
+    else:
+        path = MAPPING_FILE
+        if not os.path.exists(path):
+            path = FALLBACK_MAPPING_FILE
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Mapping file not found; cannot save")
+        df = pd.DataFrame(ordered, columns=body.columns)
+        saved_to = _safe_write_excel(df, path)
+        count = len(body.rows)
+
     # Invalidate consolidated category cache so next read uses new data
     global _consolidated_cat_cache
     _consolidated_cat_cache = {}
-    return {"success": True, "saved_to": out_path, "rows": len(body.rows)}
+    return {"success": True, "saved_to": saved_to, "rows": count}
 
 
 # ------------------
@@ -7315,39 +7337,43 @@ async def audit_toast_vs_mapping():
 @app.post("/api/audit/sync-from-toast")
 async def sync_from_toast():
     """
-    Poll all Toast locations, then sync Toast-side fields into the mapping table.
-    - Matches existing rows by item_guid > MultiLocationId > ToastPLU > normalized name
-    - Updates Toast_Item_Name, item_guid, MultiLocationId, ToastPLU, Tags, ConsolidatedCat
-    - Removes legacy manual tag columns (Recipe, GuestCountTag, etc.)
-    - Returns updated rows, unmapped Toast items (for user to add), and stale rows
-    - Saves updated mapping table to Excel automatically
+    Sync Toast-side fields into the mapping table using toast_config.db.
+    No live API calls — uses menu items + tags already synced to SQLite.
+    - Matches existing rows by item_guid > multi_location_id > toast_plu > normalized name
+    - Updates toast_item_name, item_guid, consolidated_cat, guest_count_tag, entree_equiv_tag
+    - Returns updated rows, unmapped Toast items, and stale rows
+    - Saves updated mapping back to SQLite
+    Falls back to legacy Excel + live API flow if toast_config.db is unavailable.
     """
-    path, columns, mapping_rows = _load_mapping_table_excel()
+    # ── Get Toast items from DB (fast) or fall back to live API (slow) ──
+    if toast_config_db.db_available():
+        toast_items = await asyncio.to_thread(toast_config_db.get_toast_items_with_tags)
+        location_count = toast_config_db.get_stats().get("stores", 0)
+        errors = []
+        using_db = True
+    else:
+        try:
+            toast_items, location_count, errors = await _poll_all_toast_items()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Error fetching Toast menu: {exc}")
+        using_db = False
 
-    try:
-        toast_items, location_count, errors = await _poll_all_toast_items()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error fetching Toast menu: {exc}")
+    # ── Get current mapping rows from DB or Excel ──
+    if using_db:
+        mapping_rows = toast_config_db.get_mapping_table_rows()
+        # Remove internal 'id' key
+        for row in mapping_rows:
+            row.pop("id", None)
+    else:
+        _path, _columns, mapping_rows = _load_mapping_table_excel()
 
-    # Ensure Toast-derived columns exist
-    new_columns = list(columns)
-    for col in ("item_guid", "Tags", "ConsolidatedCat", "GuestCountTag", "EntreEquivTag"):
-        if col not in new_columns:
-            new_columns.append(col)
-            for row in mapping_rows:
-                row[col] = ""
-
-    # Remove legacy manual tag columns (now sourced from Toast Tags)
-    _REMOVED_COLS = {"Recipe", "LTOTag", "Tag", "ReportTag"}
-    new_columns = [c for c in new_columns if c not in _REMOVED_COLS]
-
-    # Build Toast lookup indexes
-    toast_by_guid: Dict[str, Tuple[str, dict]] = {}  # guid → (norm, item)
-    toast_by_mli: Dict[str, Tuple[str, dict]] = {}   # mli → (norm, item)
-    toast_by_plu: Dict[str, Tuple[str, dict]] = {}   # plu → (norm, item)
-    toast_by_norm: Dict[str, dict] = {}                # norm → item
+    # ── Build Toast lookup indexes ──
+    toast_by_guid: Dict[str, Tuple[str, dict]] = {}
+    toast_by_mli: Dict[str, Tuple[str, dict]] = {}
+    toast_by_plu: Dict[str, Tuple[str, dict]] = {}
+    toast_by_norm: Dict[str, dict] = {}
 
     for norm, item in toast_items.items():
         toast_by_norm[norm] = item
@@ -7361,24 +7387,21 @@ async def sync_from_toast():
         if plu:
             toast_by_plu[plu] = (norm, item)
 
-    # Track which Toast items get matched (so we know what's unmapped)
     matched_toast_norms: set = set()
-
     updated = []
     stale = []
 
     for row in mapping_rows:
-        toast_name = (row.get("Toast_Item_Name") or "").strip()
+        toast_name = (row.get("toast_item_name") or row.get("Toast_Item_Name") or "").strip()
         if not toast_name:
-            continue  # skip rows with no Toast item name
+            continue
 
-        # Try to find matching Toast item: guid > mli > plu > name
         matched_item = None
         match_method = ""
 
         row_guid = str(row.get("item_guid") or "").strip()
-        row_mli = str(row.get("MultiLocationId") or "").strip()
-        row_plu = str(row.get("ToastPLU") or "").strip()
+        row_mli = str(row.get("multi_location_id") or row.get("MultiLocationId") or "").strip()
+        row_plu = str(row.get("toast_plu") or row.get("ToastPLU") or "").strip()
         row_norm = _normalize_item_name(toast_name)
 
         if row_guid and row_guid in toast_by_guid:
@@ -7398,7 +7421,6 @@ async def sync_from_toast():
             match_method = "Name"
             matched_toast_norms.add(row_norm)
         else:
-            # Try secondary name variants
             for key in _mapping_lookup_keys(row_norm):
                 if key in toast_by_norm:
                     matched_item = toast_by_norm[key]
@@ -7407,15 +7429,13 @@ async def sync_from_toast():
                     break
 
         if matched_item:
-            # Build change record for the response
             changes = {}
             new_name = matched_item["name"]
             new_guid = matched_item.get("guid", "")
             new_mli = matched_item.get("mli", "")
             new_plu = matched_item.get("plu", "")
-            new_tags = ", ".join(matched_item.get("tags", []))
 
-            # Auto-derive specific tag columns from Toast item tags
+            # Derive tag-based columns
             new_consolidated = ""
             new_guest_count = ""
             new_ee = ""
@@ -7427,52 +7447,56 @@ async def sync_from_toast():
                 elif not new_ee and t.startswith("EE "):
                     new_ee = t
 
-            if row.get("Toast_Item_Name", "") != new_name:
-                changes["Toast_Item_Name"] = {"old": row.get("Toast_Item_Name", ""), "new": new_name}
-            if str(row.get("item_guid", "")) != new_guid:
-                changes["item_guid"] = {"old": str(row.get("item_guid", "")), "new": new_guid}
-            if str(row.get("MultiLocationId", "")) != new_mli:
-                changes["MultiLocationId"] = {"old": str(row.get("MultiLocationId", "")), "new": new_mli}
-            if str(row.get("ToastPLU", "")) != new_plu:
-                changes["ToastPLU"] = {"old": str(row.get("ToastPLU", "")), "new": new_plu}
-            if str(row.get("Tags", "")) != new_tags:
-                changes["Tags"] = {"old": str(row.get("Tags", "")), "new": new_tags}
-            # Only overwrite derived columns if Toast has a value
-            if new_consolidated and str(row.get("ConsolidatedCat", "")) != new_consolidated:
-                changes["ConsolidatedCat"] = {"old": str(row.get("ConsolidatedCat", "")), "new": new_consolidated}
-            if new_guest_count and str(row.get("GuestCountTag", "")) != new_guest_count:
-                changes["GuestCountTag"] = {"old": str(row.get("GuestCountTag", "")), "new": new_guest_count}
-            if new_ee and str(row.get("EntreEquivTag", "")) != new_ee:
-                changes["EntreEquivTag"] = {"old": str(row.get("EntreEquivTag", "")), "new": new_ee}
+            # Detect changes (use DB column names)
+            old_name = row.get("toast_item_name") or row.get("Toast_Item_Name", "")
+            if old_name != new_name:
+                changes["toast_item_name"] = {"old": old_name, "new": new_name}
+            old_guid = str(row.get("item_guid", ""))
+            if old_guid != new_guid:
+                changes["item_guid"] = {"old": old_guid, "new": new_guid}
+            old_mli = str(row.get("multi_location_id") or row.get("MultiLocationId", ""))
+            if old_mli != new_mli:
+                changes["multi_location_id"] = {"old": old_mli, "new": new_mli}
+            old_plu = str(row.get("toast_plu") or row.get("ToastPLU", ""))
+            if old_plu != new_plu:
+                changes["toast_plu"] = {"old": old_plu, "new": new_plu}
+            old_consol = str(row.get("consolidated_cat") or row.get("ConsolidatedCat", ""))
+            if new_consolidated and old_consol != new_consolidated:
+                changes["consolidated_cat"] = {"old": old_consol, "new": new_consolidated}
+            old_gc = str(row.get("guest_count_tag") or row.get("GuestCountTag", ""))
+            if new_guest_count and old_gc != new_guest_count:
+                changes["guest_count_tag"] = {"old": old_gc, "new": new_guest_count}
+            old_ee = str(row.get("entree_equiv_tag") or row.get("EntreEquivTag", ""))
+            if new_ee and old_ee != new_ee:
+                changes["entree_equiv_tag"] = {"old": old_ee, "new": new_ee}
 
-            # Apply updates to the row
-            row["Toast_Item_Name"] = new_name
+            # Apply updates to row (DB column names)
+            row["toast_item_name"] = new_name
             row["item_guid"] = new_guid
-            row["MultiLocationId"] = new_mli
-            row["ToastPLU"] = new_plu
-            row["Tags"] = new_tags
+            row["multi_location_id"] = new_mli
+            row["toast_plu"] = new_plu
             if new_consolidated:
-                row["ConsolidatedCat"] = new_consolidated
+                row["consolidated_cat"] = new_consolidated
             if new_guest_count:
-                row["GuestCountTag"] = new_guest_count
+                row["guest_count_tag"] = new_guest_count
             if new_ee:
-                row["EntreEquivTag"] = new_ee
+                row["entree_equiv_tag"] = new_ee
 
             if changes:
                 updated.append({
                     "Toast_Item_Name": new_name,
                     "matchMethod":     match_method,
                     "changes":         changes,
-                    "AlohaItemName":   row.get("AlohaItemName", ""),
-                    "ConsolidatedCat": row.get("ConsolidatedCat", ""),
+                    "AlohaItemName":   row.get("aloha_item_name") or row.get("AlohaItemName", ""),
+                    "ConsolidatedCat": row.get("consolidated_cat") or row.get("ConsolidatedCat", ""),
                 })
         else:
             stale.append({
                 "Toast_Item_Name":  toast_name,
-                "AlohaItemName":    row.get("AlohaItemName", ""),
-                "ConsolidatedCat":  row.get("ConsolidatedCat", ""),
-                "ToastPLU":         str(row.get("ToastPLU") or ""),
-                "MultiLocationId":  str(row.get("MultiLocationId") or ""),
+                "AlohaItemName":    row.get("aloha_item_name") or row.get("AlohaItemName", ""),
+                "ConsolidatedCat":  row.get("consolidated_cat") or row.get("ConsolidatedCat", ""),
+                "ToastPLU":         str(row.get("toast_plu") or row.get("ToastPLU") or ""),
+                "MultiLocationId":  str(row.get("multi_location_id") or row.get("MultiLocationId") or ""),
             })
 
     # Unmapped: Toast items that didn't match any mapping row
@@ -7481,12 +7505,17 @@ async def sync_from_toast():
         if norm not in matched_toast_norms:
             unmapped.append(item)
 
-    # Save updated mapping table to Excel
-    df = pd.DataFrame(mapping_rows, columns=new_columns)
-    for col in new_columns:
-        if col not in df.columns:
-            df[col] = ""
-    out_path = _safe_write_excel(df, path)
+    # ── Save back ──
+    if using_db:
+        toast_config_db.update_mapping_table_rows(mapping_rows)
+        saved_to = "toast_config.db"
+    else:
+        new_columns = list(_columns)
+        for col in ("item_guid", "Tags", "ConsolidatedCat", "GuestCountTag", "EntreEquivTag"):
+            if col not in new_columns:
+                new_columns.append(col)
+        df = pd.DataFrame(mapping_rows, columns=new_columns)
+        saved_to = _safe_write_excel(df, _path)
 
     # Invalidate consolidated category cache
     global _consolidated_cat_cache
@@ -7496,13 +7525,12 @@ async def sync_from_toast():
         "summary": {
             "toastItemCount":   len(toast_items),
             "locationCount":    location_count,
-            "mappingRowCount":  len([r for r in mapping_rows if (r.get("Toast_Item_Name") or "").strip()]),
+            "mappingRowCount":  len([r for r in mapping_rows if (r.get("toast_item_name") or r.get("Toast_Item_Name") or "").strip()]),
             "updatedCount":     len(updated),
             "unmappedCount":    len(unmapped),
             "staleCount":       len(stale),
             "errors":           errors,
-            "savedTo":          out_path,
-            "columnsAdded":     [c for c in ("item_guid", "Tags") if c not in columns],
+            "savedTo":          saved_to,
         },
         "updated":   sorted(updated,   key=lambda x: x["Toast_Item_Name"].lower()),
         "unmapped":  sorted(unmapped,   key=lambda x: x["name"].lower()),
