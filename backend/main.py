@@ -9670,6 +9670,23 @@ async def admin_backfill_aloha(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+def _parse_ee_value(val) -> float:
+    """Parse entree equiv value — handles both numeric (1.0) and tag strings ('EE 1')."""
+    if val is None or val == "":
+        return 0.0
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        # Parse "EE 1" or "EE 0.5" style strings
+        s = str(val).strip()
+        if s.upper().startswith("EE"):
+            s = s[2:].strip()
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return 0.0
+
+
 # Validation Reports (migrated from sp_rpt_Toast_Net_Sales_Validation
 # and sp_rpt_IT_Menu_Item_Count_Validation)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -9831,7 +9848,7 @@ async def admin_validation_item_counts(
             "toast_item_name": row.get("toast_item_name", ""),
             "aloha_item_name": row.get("aloha_item_name", ""),
             "consolidated_cat": row.get("consolidated_cat", ""),
-            "entree_equiv": float(row.get("entree_equiv_tag", 0) or 0),
+            "entree_equiv": _parse_ee_value(row.get("entree_equiv_tag", 0)),
             "recipe": row.get("recipe", ""),
         }
         if guid:
