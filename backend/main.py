@@ -12394,6 +12394,37 @@ async def run_wpy_report(payload: dict = Body(...)):
     # Optional location filter
     locations = payload.get("locations")  # list of Aloha RestaurantID strings
 
+    # ── Auto-import missing dates from ERA API ──────────────────
+    # Check which CY dates in the WTD range are missing from aloha_sales_db
+    # (WTD is the most time-sensitive; PTD/QTD/YTD benefit automatically)
+    try:
+        existing_dates = set()
+        _conn_chk = aloha_sales_db.get_connection()
+        _rows_chk = _conn_chk.execute(
+            "SELECT DISTINCT business_date FROM aloha_sales_data WHERE business_date BETWEEN ? AND ?",
+            (wtd_start.isoformat(), wtd_end.isoformat()),
+        ).fetchall()
+        _conn_chk.close()
+        existing_dates = {r[0] for r in _rows_chk}
+
+        missing_dates = []
+        d = wtd_start
+        while d <= wtd_end:
+            if d.isoformat() not in existing_dates:
+                missing_dates.append(d)
+            d += timedelta(days=1)
+
+        if missing_dates:
+            logger.info("WPY report: auto-importing %d missing dates: %s",
+                        len(missing_dates), [d.isoformat() for d in missing_dates])
+            for md in missing_dates:
+                try:
+                    await _run_flash_import_for_date(md)
+                except Exception as exc:
+                    logger.warning("WPY auto-import failed for %s: %s", md.isoformat(), exc)
+    except Exception as exc:
+        logger.warning("WPY missing-date check failed: %s", exc)
+
     # Load store metadata for comping/company totals
     store_info = aloha_sales_db.get_store_info()
 
