@@ -26,6 +26,7 @@
     { key: 'wpy',           label: 'Weekly Sales (WPY)',  href: '/wpy.html' },
     { key: 'daily-flash',   label: 'Daily Sales Flash',   href: '/daily-flash.html' },
     { key: 'menu-mix',      label: 'Menu Mix Report',     href: '/menu-mix-report.html' },
+    { key: 'catering',      label: 'Catering Reports',    href: '/catering.html' },
   ];
 
   const ADMIN_LINKS = [
@@ -33,7 +34,6 @@
     { key: 'msi-discrepancy',  label: 'MSI Discrepancy',             href: '/msi-discrepancy.html' },
     { key: 'toast-pricing',    label: 'Toast Pricing Export',         href: '#', action: 'toastPricing' },
     { key: 'olo',              label: 'Digital Orders by Platform',   href: '/olo.html' },
-    { key: 'catering',         label: 'Catering Reports',             href: '/catering.html' },
   ];
 
   // ─── Detect active page ─────────────────────────
