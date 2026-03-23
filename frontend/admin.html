@@ -397,6 +397,9 @@
         </div>
       </div>
 
+      <!-- Flash Sales DB Stats -->
+      <div id="flashSalesStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1rem;"></div>
+
       <!-- Last run status -->
       <div id="flashImportStatus" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem;">
         <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading status&hellip;</div>
@@ -1302,6 +1305,30 @@
     // ──────────────────────────────────────────────────────
     // Flash Sales Import
     // ──────────────────────────────────────────────────────
+
+    async function loadFlashSalesStats() {
+      const el = document.getElementById('flashSalesStats');
+      try {
+        const resp = await fetch('/api/yoy/aloha-sales-stats', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        const card = (label, value, color) =>
+          `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:0.75rem;text-align:center;">
+            <div style="font-size:0.72rem;color:#6B7280;margin-bottom:0.2rem;text-transform:uppercase;">${label}</div>
+            <div style="font-size:1.1rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
+          </div>`;
+        const fmt = n => n != null ? Number(n).toLocaleString() : '—';
+        el.innerHTML =
+          card('Rows', fmt(s.total_rows)) +
+          card('Dates', fmt(s.date_count)) +
+          card('Locations', fmt(s.location_count)) +
+          card('Date Range', s.min_date && s.max_date ? `${s.min_date} — ${s.max_date}` : '—', '#374151') +
+          card('DB Size', `${(s.db_size_mb||0).toFixed(1)} MB`);
+      } catch (e) {
+        el.innerHTML = '';
+      }
+    }
+
     let _flashPollTimer = null;
 
     async function loadFlashImportStatus() {
@@ -1680,6 +1707,7 @@
         await loadAdminUsers();
         loadCacheStats();
         loadFailedImports();
+        loadFlashSalesStats();
         loadFlashImportStatus();
         loadDbHealth();
         loadToastConfigStats();
