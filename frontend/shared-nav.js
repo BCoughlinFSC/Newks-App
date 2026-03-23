@@ -27,6 +27,7 @@
     { key: 'daily-flash',   label: 'Daily Sales Flash',   href: '/daily-flash.html' },
     { key: 'menu-mix',      label: 'Menu Mix Report',     href: '/menu-mix-report.html' },
     { key: 'catering',      label: 'Catering Reports',    href: '/catering.html' },
+    { key: 'food-cost',     label: 'Food Cost (COGS)',    href: '/food-cost.html' },
   ];
 
   const ADMIN_LINKS = [
@@ -55,6 +56,7 @@
     if (path.endsWith('/menu-mix-report.html'))     return 'menu-mix';
     if (path.endsWith('/olo.html'))                   return 'olo';
     if (path.endsWith('/catering.html'))              return 'catering';
+    if (path.endsWith('/food-cost.html'))             return 'food-cost';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';

@@ -44,6 +44,7 @@ import toast_orders_db
 import toast_config_db
 import toast_config_builder
 import monkey_db
+import crunchtime_db
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -14711,6 +14712,84 @@ async def monkey_stores():
         ]
     finally:
         conn.close()
+
+
+# ── CrunchTime (Food Cost / COGS) API ──────────────────────────────
+
+
+@app.get("/api/crunchtime/stats")
+async def crunchtime_stats():
+    """Return summary statistics about the CrunchTime SQLite database."""
+    if not crunchtime_db.db_available():
+        return {"available": False}
+    stats = crunchtime_db.get_stats()
+    stats["available"] = True
+    return stats
+
+
+@app.get("/api/crunchtime/periods")
+async def crunchtime_periods():
+    """List available reporting periods."""
+    return crunchtime_db.get_available_periods()
+
+
+@app.get("/api/crunchtime/categories")
+async def crunchtime_categories():
+    """List available COGS categories."""
+    return crunchtime_db.get_available_categories()
+
+
+@app.get("/api/crunchtime/gl-codes")
+async def crunchtime_gl_codes():
+    """List available GL codes."""
+    return crunchtime_db.get_available_gl_codes()
+
+
+@app.post("/api/crunchtime/reports/actual-costs")
+async def crunchtime_actual_costs(payload: dict = Body(...)):
+    """Actual costs by store and fiscal period."""
+    return crunchtime_db.rpt_actual_costs_by_period(
+        fiscal_period=payload.get("fiscalPeriod"),
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/crunchtime/reports/costs-by-gl")
+async def crunchtime_costs_by_gl(payload: dict = Body(...)):
+    """Actual costs by GL code per store."""
+    return crunchtime_db.rpt_costs_by_gl_code(
+        reporting_period=payload.get("reportingPeriod"),
+        gl_code=payload.get("glCode"),
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/crunchtime/reports/cogs-by-product")
+async def crunchtime_cogs_by_product(payload: dict = Body(...)):
+    """COGS by product — actual vs theoretical."""
+    return crunchtime_db.rpt_cogs_by_product(
+        reporting_period=payload.get("reportingPeriod"),
+        category=payload.get("category"),
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/crunchtime/reports/cogs-summary")
+async def crunchtime_cogs_summary(payload: dict = Body(...)):
+    """COGS summary by category per store."""
+    return crunchtime_db.rpt_cogs_summary_by_category(
+        reporting_period=payload.get("reportingPeriod"),
+        store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/crunchtime/reports/gross-profit")
+async def crunchtime_gross_profit(payload: dict = Body(...)):
+    """Gross profit by menu item."""
+    return crunchtime_db.rpt_gross_profit_by_item(
+        fiscal_week_start=payload.get("fiscalWeekStart"),
+        store_ids=payload.get("storeIds"),
+    )
 
 
 if os.path.isdir(kiosk_path):

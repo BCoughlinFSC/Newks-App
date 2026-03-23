@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Food Cost Reports - Newk's Back Office</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231E3A5F'/%3E%3C/svg%3E" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c; }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p { margin: 0.5rem 0 0 0; color: #fff; opacity: 0.9; font-size: 0.9rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.5); }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .left-nav {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border: 1px solid #e8e0d5;
+      height: fit-content;
+    }
+    .left-nav h3 { margin: 0 0 1rem 0; color: #C41E3A; font-size: 1rem; font-weight: 700; }
+    .content-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border: 1px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+    }
+    .content-card h2 { margin: 0 0 1rem 0; color: #C41E3A; font-size: 1.25rem; font-weight: 700; }
+    .btn {
+      background: #C41E3A;
+      color: white;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #A01A2E; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-secondary { background: #6B7280; color: white; }
+    .btn-secondary:hover { background: #4B5563; }
+    .report-table-wrap { overflow-x: auto; margin-top: 1rem; }
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .report-table th,
+    .report-table td {
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #e8e0d5;
+    }
+    .report-table th {
+      background: #F0F9FF;
+      color: #1E3A5F;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .report-table th:hover { background: #E0F2FE; }
+    .report-table th .sort-icon { opacity: 0.5; margin-left: 0.25rem; font-size: 0.75rem; }
+    .report-table th.sorted-asc .sort-icon::after { content: ' \u25B2'; opacity: 1; }
+    .report-table th.sorted-desc .sort-icon::after { content: ' \u25BC'; opacity: 1; }
+    .report-table tbody tr:nth-child(even) { background: #FAFBFC; }
+    .report-table tbody tr:hover { background: #F0F9FF; }
+    .report-table .num { text-align: right; }
+    .report-table .total-row { font-weight: 700; background: #F0F9FF !important; border-top: 2px solid #C41E3A; }
+    .report-table .negative { color: #DC2626; }
+    .status { padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-top: 0.5rem; }
+    .status.loading { background: #FEF3C7; color: #92400E; }
+    .status.error { background: #FEE2E2; color: #991B1B; }
+    .status.success { background: #D1FAE5; color: #065F46; }
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    .help-text { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+    .date-inputs { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    .date-inputs label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+    .date-inputs input[type="date"] { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+    .date-inputs input[type="text"] { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+    .date-inputs select { padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #d1d5db; font-size: 0.9rem; }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid #e8e0d5;
+      margin-bottom: 1.5rem;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      padding: 0.75rem 1.25rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #6B7280;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      white-space: nowrap;
+      transition: all 0.2s;
+      font-family: inherit;
+      position: relative;
+    }
+    .tab-btn:hover { color: #C41E3A; background: #FFF5F5; }
+    .tab-btn.active { color: #C41E3A; border-bottom-color: #C41E3A; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Stat cards */
+    .stat-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: #F8FAFC;
+      border: 1px solid #e8e0d5;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      text-align: center;
+    }
+    .stat-card .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #C41E3A;
+      margin-bottom: 0.25rem;
+    }
+    .stat-card .stat-label {
+      font-size: 0.8rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    /* DB stats bar */
+    .db-stats-bar {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 0.5rem 0;
+      font-size: 0.82rem;
+      color: #666;
+    }
+    .db-stats-bar strong { color: #1E3A5F; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Food Cost Reports</h1>
+        <p>CrunchTime COGS, actual costs, and variance analysis</p>
+      </div>
+      <a href="/" class="home-btn">&#127968; Home</a>
+    </div>
+  </div>
+
+  <div class="main-layout">
+    <div id="shared-sidebar"></div>
+
+    <main>
+      <!-- DB Stats -->
+      <div class="content-card" id="dbStatsCard">
+        <div class="db-stats-bar" id="dbStatsBar">Loading CrunchTime database stats...</div>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="content-card" style="padding-bottom: 0;">
+        <div class="tab-bar" id="tabBar">
+          <button class="tab-btn active" data-tab="cogs-product">COGS by Product</button>
+          <button class="tab-btn" data-tab="cogs-summary">COGS Summary</button>
+          <button class="tab-btn" data-tab="actual-costs">Actual Costs</button>
+          <button class="tab-btn" data-tab="costs-gl">Costs by GL Code</button>
+          <button class="tab-btn" data-tab="gross-profit">Gross Profit</button>
+        </div>
+      </div>
+
+      <!-- ============ COGS by Product ============ -->
+      <div class="tab-panel active" id="panel-cogs-product">
+        <div class="content-card">
+          <h2>COGS by Product</h2>
+          <p class="help-text">Actual vs theoretical cost by product, with variance. Negative variance = cost overrun.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Period</span>
+              <select id="cp-period"><option value="">All Periods</option></select>
+            </label>
+            <label><span>Category</span>
+              <select id="cp-category"><option value="">All Categories</option></select>
+            </label>
+            <label><span>Store IDs</span>
+              <input type="text" id="cp-store" placeholder="e.g. 101,102" style="width:120px;" />
+            </label>
+            <button class="btn" id="cp-run">Run Report</button>
+            <button class="btn btn-secondary" id="cp-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="cp-status" class="status" style="display:none;"></div>
+          <div id="cp-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="cp-table" style="display:none;">
+              <thead><tr id="cp-thead"></tr></thead>
+              <tbody id="cp-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ COGS Summary ============ -->
+      <div class="tab-panel" id="panel-cogs-summary">
+        <div class="content-card">
+          <h2>COGS Summary</h2>
+          <p class="help-text">Total actual vs theoretical cost rolled up by category per store.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Period</span>
+              <select id="cs-period"><option value="">All Periods</option></select>
+            </label>
+            <label><span>Store IDs</span>
+              <input type="text" id="cs-store" placeholder="e.g. 101,102" style="width:120px;" />
+            </label>
+            <button class="btn" id="cs-run">Run Report</button>
+            <button class="btn btn-secondary" id="cs-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="cs-status" class="status" style="display:none;"></div>
+          <div id="cs-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="cs-table" style="display:none;">
+              <thead><tr id="cs-thead"></tr></thead>
+              <tbody id="cs-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Actual Costs ============ -->
+      <div class="tab-panel" id="panel-actual-costs">
+        <div class="content-card">
+          <h2>Actual Costs</h2>
+          <p class="help-text">Total actual costs by store and fiscal period/week.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Fiscal Period</span>
+              <select id="ac-period"><option value="">All Periods</option></select>
+            </label>
+            <label><span>Store IDs</span>
+              <input type="text" id="ac-store" placeholder="e.g. 101,102" style="width:120px;" />
+            </label>
+            <button class="btn" id="ac-run">Run Report</button>
+            <button class="btn btn-secondary" id="ac-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="ac-status" class="status" style="display:none;"></div>
+          <div id="ac-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="ac-table" style="display:none;">
+              <thead><tr id="ac-thead"></tr></thead>
+              <tbody id="ac-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Costs by GL Code ============ -->
+      <div class="tab-panel" id="panel-costs-gl">
+        <div class="content-card">
+          <h2>Costs by GL Code</h2>
+          <p class="help-text">Cost breakdown by GL account: inventory, purchases, transfers.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Period</span>
+              <select id="gl-period"><option value="">All Periods</option></select>
+            </label>
+            <label><span>GL Code</span>
+              <select id="gl-code"><option value="">All GL Codes</option></select>
+            </label>
+            <label><span>Store IDs</span>
+              <input type="text" id="gl-store" placeholder="e.g. 101,102" style="width:120px;" />
+            </label>
+            <button class="btn" id="gl-run">Run Report</button>
+            <button class="btn btn-secondary" id="gl-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="gl-status" class="status" style="display:none;"></div>
+          <div id="gl-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="gl-table" style="display:none;">
+              <thead><tr id="gl-thead"></tr></thead>
+              <tbody id="gl-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Gross Profit ============ -->
+      <div class="tab-panel" id="panel-gross-profit">
+        <div class="content-card">
+          <h2>Gross Profit</h2>
+          <p class="help-text">Gross profit by menu item, store, and fiscal week.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Fiscal Week Start</span>
+              <input type="date" id="gp-weekstart" />
+            </label>
+            <label><span>Store IDs</span>
+              <input type="text" id="gp-store" placeholder="e.g. 101,102" style="width:120px;" />
+            </label>
+            <button class="btn" id="gp-run">Run Report</button>
+            <button class="btn btn-secondary" id="gp-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="gp-status" class="status" style="display:none;"></div>
+          <div id="gp-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="gp-table" style="display:none;">
+              <thead><tr id="gp-thead"></tr></thead>
+              <tbody id="gp-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    // ─── Auth ──────────────────────────────────────────
+    (function checkAccess() {
+      const token = localStorage.getItem('auth_token');
+      const userStr = localStorage.getItem('user');
+      if (!token || !userStr) { window.location.href = '/'; return; }
+      try {
+        const user = JSON.parse(userStr);
+        if (user.role !== 'admin') { window.location.href = '/'; }
+      } catch (e) { window.location.href = '/'; }
+    })();
+
+    const API = window.location.origin;
+
+    function authHeaders() {
+      const token = localStorage.getItem('auth_token') || '';
+      return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+    }
+
+    // ─── Utilities ─────────────────────────────────────
+    function escapeHtml(s) {
+      if (s == null) return '';
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+    function formatNum(n) { return Number(n || 0).toLocaleString(); }
+    function formatMoney(n) { return '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function formatPct(n) { return Number(n || 0).toFixed(1) + '%'; }
+
+    function showStatus(elId, message, type) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.textContent = message;
+      el.className = 'status ' + (type || '');
+      el.style.display = 'block';
+    }
+    function hideStatus(elId) {
+      const el = document.getElementById(elId);
+      if (el) el.style.display = 'none';
+    }
+
+    // ─── Tab switching ─────────────────────────────────
+    document.getElementById('tabBar').addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab-btn');
+      if (!btn) return;
+      const tabId = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      const panel = document.getElementById('panel-' + tabId);
+      if (panel) panel.classList.add('active');
+    });
+
+    // ─── Parse store IDs from text input ───────────────
+    function parseStoreIds(prefix) {
+      const val = (document.getElementById(prefix + '-store')?.value || '').trim();
+      if (!val) return undefined;
+      return val.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    // ─── DB stats ──────────────────────────────────────
+    async function loadDbStats() {
+      try {
+        const res = await fetch(API + '/api/crunchtime/stats', { headers: authHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        const bar = document.getElementById('dbStatsBar');
+        const parts = [];
+        if (data.totalRows != null) parts.push('<strong>' + formatNum(data.totalRows) + '</strong> rows');
+        if (data.totalStores != null) parts.push('<strong>' + formatNum(data.totalStores) + '</strong> stores');
+        if (data.totalProducts != null) parts.push('<strong>' + formatNum(data.totalProducts) + '</strong> products');
+        if (data.totalCategories != null) parts.push('<strong>' + formatNum(data.totalCategories) + '</strong> categories');
+        if (data.dateRange) parts.push('Date range: <strong>' + escapeHtml(data.dateRange.min || '') + '</strong> to <strong>' + escapeHtml(data.dateRange.max || '') + '</strong>');
+        if (data.lastSync) parts.push('Last sync: <strong>' + escapeHtml(data.lastSync) + '</strong>');
+        // Fallback: render any top-level keys generically
+        if (parts.length === 0) {
+          Object.entries(data).forEach(([k, v]) => {
+            if (typeof v === 'number') parts.push('<strong>' + formatNum(v) + '</strong> ' + escapeHtml(k));
+            else if (typeof v === 'string') parts.push(escapeHtml(k) + ': <strong>' + escapeHtml(v) + '</strong>');
+          });
+        }
+        bar.innerHTML = parts.length ? parts.join(' &nbsp;|&nbsp; ') : 'CrunchTime database connected';
+      } catch (e) {
+        document.getElementById('dbStatsBar').textContent = 'Could not load CrunchTime DB stats';
+      }
+    }
+    loadDbStats();
+
+    // ─── Populate filter dropdowns ─────────────────────
+    async function loadPeriods() {
+      try {
+        const res = await fetch(API + '/api/crunchtime/periods', { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const periods = Array.isArray(data) ? data : (data.periods || []);
+        const selects = document.querySelectorAll('#cp-period, #cs-period, #ac-period, #gl-period');
+        selects.forEach(sel => {
+          periods.forEach(p => {
+            const opt = document.createElement('option');
+            const val = typeof p === 'string' ? p : (p.id || p.period || p.name || '');
+            const label = typeof p === 'string' ? p : (p.name || p.label || p.period || p.id || '');
+            opt.value = val;
+            opt.textContent = label;
+            sel.appendChild(opt);
+          });
+        });
+      } catch (e) { /* periods optional */ }
+    }
+
+    async function loadCategories() {
+      try {
+        const res = await fetch(API + '/api/crunchtime/categories', { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const cats = Array.isArray(data) ? data : (data.categories || []);
+        const sel = document.getElementById('cp-category');
+        cats.forEach(c => {
+          const opt = document.createElement('option');
+          const val = typeof c === 'string' ? c : (c.id || c.category || c.name || '');
+          const label = typeof c === 'string' ? c : (c.name || c.label || c.category || c.id || '');
+          opt.value = val;
+          opt.textContent = label;
+          sel.appendChild(opt);
+        });
+      } catch (e) { /* categories optional */ }
+    }
+
+    async function loadGlCodes() {
+      try {
+        const res = await fetch(API + '/api/crunchtime/gl-codes', { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const codes = Array.isArray(data) ? data : (data.glCodes || []);
+        const sel = document.getElementById('gl-code');
+        codes.forEach(c => {
+          const opt = document.createElement('option');
+          const val = typeof c === 'string' ? c : (c.id || c.code || c.glCode || '');
+          const label = typeof c === 'string' ? c : (c.name || c.label || c.code || c.glCode || c.id || '');
+          opt.value = val;
+          opt.textContent = label;
+          sel.appendChild(opt);
+        });
+      } catch (e) { /* gl codes optional */ }
+    }
+
+    loadPeriods();
+    loadCategories();
+    loadGlCodes();
+
+    // ─── Generic sortable table renderer ───────────────
+    function renderTable(prefix, columns, rows, totalsRow) {
+      const thead = document.getElementById(prefix + '-thead');
+      const tbody = document.getElementById(prefix + '-tbody');
+      const table = document.getElementById(prefix + '-table');
+
+      // Build header
+      thead.innerHTML = columns.map(col =>
+        '<th data-col="' + col.key + '" data-type="' + (col.type || 'string') + '"' +
+        (col.type === 'num' || col.type === 'money' || col.type === 'pct' ? ' class="num"' : '') +
+        '>' + escapeHtml(col.label) + '<span class="sort-icon"></span></th>'
+      ).join('');
+
+      // Build body
+      function buildBody(dataRows) {
+        let html = '';
+        // Totals row first
+        if (totalsRow) {
+          html += '<tr class="total-row">';
+          columns.forEach(col => {
+            const v = totalsRow[col.key];
+            const cls = (col.type === 'num' || col.type === 'money' || col.type === 'pct') ? ' class="num"' : '';
+            let display = '';
+            if (col.type === 'money') display = formatMoney(v);
+            else if (col.type === 'pct') display = formatPct(v);
+            else if (col.type === 'num') display = formatNum(v);
+            else display = escapeHtml(v);
+            html += '<td' + cls + '>' + display + '</td>';
+          });
+          html += '</tr>';
+        }
+        dataRows.forEach(row => {
+          html += '<tr>';
+          columns.forEach(col => {
+            const v = row[col.key];
+            const isNeg = col.variance && Number(v) < 0;
+            let cls = '';
+            if (col.type === 'num' || col.type === 'money' || col.type === 'pct') cls = ' class="num' + (isNeg ? ' negative' : '') + '"';
+            else if (isNeg) cls = ' class="negative"';
+            let display = '';
+            if (col.type === 'money') display = formatMoney(v);
+            else if (col.type === 'pct') display = formatPct(v);
+            else if (col.type === 'num') display = formatNum(v);
+            else display = escapeHtml(v);
+            html += '<td' + cls + '>' + display + '</td>';
+          });
+          html += '</tr>';
+        });
+        return html;
+      }
+
+      tbody.innerHTML = buildBody(rows);
+      table.style.display = 'table';
+
+      // Sorting
+      let sortCol = '', sortDir = 1;
+      thead.querySelectorAll('th').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.col;
+          const type = th.dataset.type || 'string';
+          if (sortCol === col) sortDir = -sortDir; else { sortCol = col; sortDir = 1; }
+          const sorted = [...rows].sort((a, b) => {
+            let va = a[col], vb = b[col];
+            if (type === 'num' || type === 'money' || type === 'pct') {
+              va = Number(va) || 0; vb = Number(vb) || 0;
+              return sortDir * (va - vb);
+            }
+            return sortDir * String(va || '').localeCompare(String(vb || ''));
+          });
+          tbody.innerHTML = buildBody(sorted);
+          thead.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+          th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+        });
+      });
+    }
+
+    // ─── Generic stat cards renderer ───────────────────
+    function renderStats(elId, stats) {
+      const el = document.getElementById(elId);
+      if (!stats || stats.length === 0) { el.style.display = 'none'; return; }
+      el.innerHTML = stats.map(s =>
+        '<div class="stat-card"><div class="stat-value">' + escapeHtml(s.value) + '</div><div class="stat-label">' + escapeHtml(s.label) + '</div></div>'
+      ).join('');
+      el.style.display = 'grid';
+    }
+
+    // ─── CSV export helper ─────────────────────────────
+    function exportCsv(columns, rows, filename) {
+      const headers = columns.map(c => c.label);
+      const csvRows = rows.map(r => columns.map(c => {
+        let v = r[c.key];
+        if (v == null) v = '';
+        return '"' + String(v).replace(/"/g, '""') + '"';
+      }).join(','));
+      const csv = [headers.join(',')].concat(csvRows).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // ════════════════════════════════════════════════════
+    // COGS BY PRODUCT
+    // ════════════════════════════════════════════════════
+    let cpRows = [], cpCols = [];
+    document.getElementById('cp-run').addEventListener('click', async () => {
+      const btn = document.getElementById('cp-run');
+      btn.disabled = true;
+      showStatus('cp-status', 'Loading COGS by product...', 'loading');
+      try {
+        const body = {};
+        const period = document.getElementById('cp-period').value;
+        const category = document.getElementById('cp-category').value;
+        const storeIds = parseStoreIds('cp');
+        if (period) body.reportingPeriod = period;
+        if (category) body.category = category;
+        if (storeIds) body.storeIds = storeIds;
+
+        const res = await fetch(API + '/api/crunchtime/reports/cogs-by-product', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        cpRows = Array.isArray(data) ? data : (data.rows || []);
+        cpCols = [
+          { key: 'locationCode', label: 'Location', type: 'string' },
+          { key: 'reportingPeriod', label: 'Period', type: 'string' },
+          { key: 'category', label: 'Category', type: 'string' },
+          { key: 'subcategory', label: 'Subcategory', type: 'string' },
+          { key: 'productName', label: 'Product', type: 'string' },
+          { key: 'actualConsumption', label: 'Actual Cost', type: 'money' },
+          { key: 'theoretical', label: 'Theoretical', type: 'money' },
+          { key: 'atVariance', label: 'Variance', type: 'money', variance: true },
+          { key: 'purchases', label: 'Purchases', type: 'money' },
+        ];
+
+        const totals = { locationCode: 'TOTAL', reportingPeriod: '', category: '', subcategory: '', productName: '',
+          actualConsumption: 0, theoretical: 0, atVariance: 0, purchases: 0 };
+        cpRows.forEach(r => {
+          totals.actualConsumption += Number(r.actualConsumption) || 0;
+          totals.theoretical += Number(r.theoretical) || 0;
+          totals.atVariance += Number(r.atVariance) || 0;
+          totals.purchases += Number(r.purchases) || 0;
+        });
+
+        renderStats('cp-stats', [
+          { value: formatNum(cpRows.length), label: 'Products' },
+          { value: formatMoney(totals.actualConsumption), label: 'Total Actual' },
+          { value: formatMoney(totals.theoretical), label: 'Total Theoretical' },
+          { value: formatMoney(totals.atVariance), label: 'Total Variance' },
+        ]);
+        renderTable('cp', cpCols, cpRows, totals);
+        document.getElementById('cp-csv').style.display = 'inline-flex';
+        showStatus('cp-status', 'Report complete: ' + formatNum(cpRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('cp-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('cp-csv').addEventListener('click', () => exportCsv(cpCols, cpRows, 'cogs_by_product.csv'));
+
+    // ════════════════════════════════════════════════════
+    // COGS SUMMARY
+    // ════════════════════════════════════════════════════
+    let csRows = [], csCols = [];
+    document.getElementById('cs-run').addEventListener('click', async () => {
+      const btn = document.getElementById('cs-run');
+      btn.disabled = true;
+      showStatus('cs-status', 'Loading COGS summary...', 'loading');
+      try {
+        const body = {};
+        const period = document.getElementById('cs-period').value;
+        const storeIds = parseStoreIds('cs');
+        if (period) body.reportingPeriod = period;
+        if (storeIds) body.storeIds = storeIds;
+
+        const res = await fetch(API + '/api/crunchtime/reports/cogs-summary', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        csRows = Array.isArray(data) ? data : (data.rows || []);
+        csCols = [
+          { key: 'locationCode', label: 'Location', type: 'string' },
+          { key: 'reportingPeriod', label: 'Period', type: 'string' },
+          { key: 'category', label: 'Category', type: 'string' },
+          { key: 'totalActual', label: 'Total Actual', type: 'money' },
+          { key: 'totalTheoretical', label: 'Total Theoretical', type: 'money' },
+          { key: 'totalVariance', label: 'Total Variance', type: 'money', variance: true },
+          { key: 'totalPurchases', label: 'Total Purchases', type: 'money' },
+        ];
+
+        const totals = { locationCode: 'TOTAL', reportingPeriod: '', category: '',
+          totalActual: 0, totalTheoretical: 0, totalVariance: 0, totalPurchases: 0 };
+        csRows.forEach(r => {
+          totals.totalActual += Number(r.totalActual) || 0;
+          totals.totalTheoretical += Number(r.totalTheoretical) || 0;
+          totals.totalVariance += Number(r.totalVariance) || 0;
+          totals.totalPurchases += Number(r.totalPurchases) || 0;
+        });
+
+        renderStats('cs-stats', [
+          { value: formatNum(csRows.length), label: 'Rows' },
+          { value: formatMoney(totals.totalActual), label: 'Total Actual' },
+          { value: formatMoney(totals.totalTheoretical), label: 'Total Theoretical' },
+          { value: formatMoney(totals.totalVariance), label: 'Total Variance' },
+        ]);
+        renderTable('cs', csCols, csRows, totals);
+        document.getElementById('cs-csv').style.display = 'inline-flex';
+        showStatus('cs-status', 'Report complete: ' + formatNum(csRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('cs-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('cs-csv').addEventListener('click', () => exportCsv(csCols, csRows, 'cogs_summary.csv'));
+
+    // ════════════════════════════════════════════════════
+    // ACTUAL COSTS
+    // ════════════════════════════════════════════════════
+    let acRows = [], acCols = [];
+    document.getElementById('ac-run').addEventListener('click', async () => {
+      const btn = document.getElementById('ac-run');
+      btn.disabled = true;
+      showStatus('ac-status', 'Loading actual costs...', 'loading');
+      try {
+        const body = {};
+        const period = document.getElementById('ac-period').value;
+        const storeIds = parseStoreIds('ac');
+        if (period) body.fiscalPeriod = period;
+        if (storeIds) body.storeIds = storeIds;
+
+        const res = await fetch(API + '/api/crunchtime/reports/actual-costs', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        acRows = Array.isArray(data) ? data : (data.rows || []);
+        acCols = [
+          { key: 'storeId', label: 'Store ID', type: 'string' },
+          { key: 'fiscalPeriod', label: 'Fiscal Period', type: 'string' },
+          { key: 'fiscalWeek', label: 'Fiscal Week', type: 'string' },
+          { key: 'fiscalWeekStart', label: 'Week Start', type: 'string' },
+          { key: 'actualCost', label: 'Actual Cost', type: 'money' },
+        ];
+
+        const totals = { storeId: 'TOTAL', fiscalPeriod: '', fiscalWeek: '', fiscalWeekStart: '', actualCost: 0 };
+        acRows.forEach(r => { totals.actualCost += Number(r.actualCost) || 0; });
+
+        renderStats('ac-stats', [
+          { value: formatNum(acRows.length), label: 'Rows' },
+          { value: formatMoney(totals.actualCost), label: 'Total Actual Cost' },
+        ]);
+        renderTable('ac', acCols, acRows, totals);
+        document.getElementById('ac-csv').style.display = 'inline-flex';
+        showStatus('ac-status', 'Report complete: ' + formatNum(acRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('ac-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('ac-csv').addEventListener('click', () => exportCsv(acCols, acRows, 'actual_costs.csv'));
+
+    // ════════════════════════════════════════════════════
+    // COSTS BY GL CODE
+    // ════════════════════════════════════════════════════
+    let glRows = [], glCols = [];
+    document.getElementById('gl-run').addEventListener('click', async () => {
+      const btn = document.getElementById('gl-run');
+      btn.disabled = true;
+      showStatus('gl-status', 'Loading costs by GL code...', 'loading');
+      try {
+        const body = {};
+        const period = document.getElementById('gl-period').value;
+        const glCode = document.getElementById('gl-code').value;
+        const storeIds = parseStoreIds('gl');
+        if (period) body.reportingPeriod = period;
+        if (glCode) body.glCode = glCode;
+        if (storeIds) body.storeIds = storeIds;
+
+        const res = await fetch(API + '/api/crunchtime/reports/costs-by-gl', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        glRows = Array.isArray(data) ? data : (data.rows || []);
+        glCols = [
+          { key: 'storeId', label: 'Store ID', type: 'string' },
+          { key: 'reportingPeriod', label: 'Period', type: 'string' },
+          { key: 'fiscalWeekStart', label: 'Week Start', type: 'string' },
+          { key: 'glCode', label: 'GL Code', type: 'string' },
+          { key: 'beginningInv', label: 'Beginning Inv', type: 'money' },
+          { key: 'purchases', label: 'Purchases', type: 'money' },
+          { key: 'incomingTransfer', label: 'In Transfer', type: 'money' },
+          { key: 'outgoingTransfer', label: 'Out Transfer', type: 'money' },
+          { key: 'endingInv', label: 'Ending Inv', type: 'money' },
+          { key: 'actualCost', label: 'Actual Cost', type: 'money' },
+        ];
+
+        const totals = { storeId: 'TOTAL', reportingPeriod: '', fiscalWeekStart: '', glCode: '',
+          beginningInv: 0, purchases: 0, incomingTransfer: 0, outgoingTransfer: 0, endingInv: 0, actualCost: 0 };
+        glRows.forEach(r => {
+          totals.beginningInv += Number(r.beginningInv) || 0;
+          totals.purchases += Number(r.purchases) || 0;
+          totals.incomingTransfer += Number(r.incomingTransfer) || 0;
+          totals.outgoingTransfer += Number(r.outgoingTransfer) || 0;
+          totals.endingInv += Number(r.endingInv) || 0;
+          totals.actualCost += Number(r.actualCost) || 0;
+        });
+
+        renderStats('gl-stats', [
+          { value: formatNum(glRows.length), label: 'Rows' },
+          { value: formatMoney(totals.purchases), label: 'Total Purchases' },
+          { value: formatMoney(totals.actualCost), label: 'Total Actual Cost' },
+        ]);
+        renderTable('gl', glCols, glRows, totals);
+        document.getElementById('gl-csv').style.display = 'inline-flex';
+        showStatus('gl-status', 'Report complete: ' + formatNum(glRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('gl-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('gl-csv').addEventListener('click', () => exportCsv(glCols, glRows, 'costs_by_gl.csv'));
+
+    // ════════════════════════════════════════════════════
+    // GROSS PROFIT
+    // ════════════════════════════════════════════════════
+    let gpRows = [], gpCols = [];
+    document.getElementById('gp-run').addEventListener('click', async () => {
+      const btn = document.getElementById('gp-run');
+      btn.disabled = true;
+      showStatus('gp-status', 'Loading gross profit...', 'loading');
+      try {
+        const body = {};
+        const weekStart = document.getElementById('gp-weekstart').value;
+        const storeIds = parseStoreIds('gp');
+        if (weekStart) body.fiscalWeekStart = weekStart;
+        if (storeIds) body.storeIds = storeIds;
+
+        const res = await fetch(API + '/api/crunchtime/reports/gross-profit', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+
+        gpRows = Array.isArray(data) ? data : (data.rows || []);
+        gpCols = [
+          { key: 'storeId', label: 'Store ID', type: 'string' },
+          { key: 'fiscalWeek', label: 'Fiscal Week', type: 'string' },
+          { key: 'fiscalWeekStart', label: 'Week Start', type: 'string' },
+          { key: 'dateOfBusiness', label: 'Date', type: 'string' },
+          { key: 'itemId', label: 'Item ID', type: 'string' },
+          { key: 'grossProfit', label: 'Gross Profit', type: 'money', variance: true },
+        ];
+
+        const totals = { storeId: 'TOTAL', fiscalWeek: '', fiscalWeekStart: '', dateOfBusiness: '', itemId: '', grossProfit: 0 };
+        gpRows.forEach(r => { totals.grossProfit += Number(r.grossProfit) || 0; });
+
+        renderStats('gp-stats', [
+          { value: formatNum(gpRows.length), label: 'Rows' },
+          { value: formatMoney(totals.grossProfit), label: 'Total Gross Profit' },
+        ]);
+        renderTable('gp', gpCols, gpRows, totals);
+        document.getElementById('gp-csv').style.display = 'inline-flex';
+        showStatus('gp-status', 'Report complete: ' + formatNum(gpRows.length) + ' rows', 'success');
+      } catch (e) {
+        showStatus('gp-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    });
+    document.getElementById('gp-csv').addEventListener('click', () => exportCsv(gpCols, gpRows, 'gross_profit.csv'));
+  </script>
+  <script src="/shared-nav.js"></script>
+</body>
+</html>

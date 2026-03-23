@@ -1439,12 +1439,13 @@
     async function loadDbHealth() {
       const el = document.getElementById('dbHealthGrid');
       try {
-        const [alohaResp, salesResp, ordersResp, configResp, monkeyResp] = await Promise.allSettled([
+        const [alohaResp, salesResp, ordersResp, configResp, monkeyResp, ctResp] = await Promise.allSettled([
           fetch('/api/yoy/aloha-stats', { headers: getAuthHeaders() }),
           fetch('/api/yoy/aloha-sales-stats', { headers: getAuthHeaders() }),
           fetch('/api/admin/orders-cache/stats', { headers: getAuthHeaders() }),
           fetch('/api/admin/toast-config/stats', { headers: getAuthHeaders() }),
           fetch('/api/monkey/stats', { headers: getAuthHeaders() }),
+          fetch('/api/crunchtime/stats', { headers: getAuthHeaders() }),
         ]);
 
         const parse = async (r) => r.status === 'fulfilled' && r.value.ok ? await r.value.json() : null;
@@ -1453,6 +1454,7 @@
         const orders = await parse(ordersResp);
         const config = await parse(configResp);
         const monkey = await parse(monkeyResp);
+        const ct = await parse(ctResp);
 
         const dbCard = (title, color, size, stats) => {
           const statsHtml = stats.map(s =>
@@ -1530,6 +1532,18 @@
           ]);
         } else {
           html += dbCard('monkey.db', '#D97706', '—', [['Status', 'Not imported yet', '#B45309']]);
+        }
+
+        // CrunchTime (Food Cost)
+        if (ct && ct.available) {
+          html += dbCard('crunchtime.db', '#DC2626', `${(ct.db_size_mb||0).toFixed(0)} MB`, [
+            ['Actual Costs', fmt(ct.actual_costs)],
+            ['Costs by GL', fmt(ct.actual_costs_by_gl)],
+            ['COGS Products', fmt(ct.cogs_by_product)],
+            ['Gross Profit', fmt(ct.gross_profit_by_item)],
+          ]);
+        } else {
+          html += dbCard('crunchtime.db', '#DC2626', '—', [['Status', 'Not imported yet', '#B45309']]);
         }
 
         el.innerHTML = html;
