@@ -9727,18 +9727,24 @@ async def admin_validation_net_sales(
 
     orders_lookup: Dict[str, float] = {}  # "date|store" → calc_net
     try:
-        orders_conn = toast_orders_db.get_connection()
-        # Fast path: 99.97% of orders have exactly 1 check, so checks[0].amount
-        # is sufficient. Avoids expensive json_each() correlated subquery.
-        rows = orders_conn.execute("""
-            SELECT business_date, restaurant_guid,
-                   SUM(COALESCE(json_extract(order_json, '$.checks[0].amount'), 0)) as calc_net
-            FROM orders
-            WHERE business_date BETWEEN ? AND ?
-              AND COALESCE(json_extract(order_json, '$.voided'), 0) != 1
-            GROUP BY business_date, restaurant_guid
-        """, (start_yyyymmdd, end_yyyymmdd)).fetchall()
-        orders_conn.close()
+        def _query_orders_net(start_ymd: str, end_ymd: str) -> list:
+            conn = toast_orders_db.get_connection()
+            conn.execute("PRAGMA cache_size=-64000")  # 64 MB cache
+            result = conn.execute("""
+                SELECT business_date, restaurant_guid,
+                       SUM(COALESCE(json_extract(order_json, '$.checks[0].amount'), 0)) as calc_net
+                FROM orders
+                WHERE business_date BETWEEN ? AND ?
+                  AND COALESCE(json_extract(order_json, '$.voided'), 0) != 1
+                GROUP BY business_date, restaurant_guid
+            """, (start_ymd, end_ymd)).fetchall()
+            conn.close()
+            return result
+
+        rows = await asyncio.wait_for(
+            asyncio.to_thread(_query_orders_net, start_yyyymmdd, end_yyyymmdd),
+            timeout=30.0,
+        )
 
         for bdate, guid, calc_net in rows:
             store_num = str(loc_mapping.get(guid, ""))
@@ -9747,8 +9753,12 @@ async def admin_validation_net_sales(
                 formatted_date = f"{bdate[:4]}-{bdate[4:6]}-{bdate[6:]}"
                 key = f"{formatted_date}|{store_num}"
                 orders_lookup[key] = round(float(calc_net or 0), 2)
+    except asyncio.TimeoutError:
+        logger.warning("Validation: orders query timed out after 30s")
     except Exception as exc:
         logger.warning(f"Validation: orders query failed: {exc}")
+
+    orders_available = len(orders_lookup) > 0
 
     # 3. Join and compare
     all_keys = set(era_lookup.keys()) | set(orders_lookup.keys())
@@ -9800,6 +9810,7 @@ async def admin_validation_net_sales(
             "stores_checked": stores_checked,
             "discrepancies": discrepancies,
             "threshold": THRESHOLD,
+            "orders_available": orders_available,
         },
     }
 
