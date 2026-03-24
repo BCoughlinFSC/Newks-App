@@ -13235,6 +13235,13 @@ async def run_daily_flash_report(payload: dict = Body(...)):
     # Compute Aloha location IDs for the selected restaurants
     aloha_loc_ids = [guid_to_loc[rid] for rid in restaurant_ids if rid in guid_to_loc]
 
+    # Also include non-Toast stores from FBC mapping (e.g. Lubbock still on Aloha POS)
+    fbc_mapping = _load_fbc_mapping()
+    for loc_id in fbc_mapping.keys():
+        if loc_id in store_info and loc_id not in aloha_loc_ids:
+            aloha_loc_ids.append(loc_id)
+            logger.info("Added non-Toast store %s to aloha_loc_ids for flash query", loc_id)
+
     # For each unique date range: try Aloha sales DB first (has correct Newk's net sales
     # with service charges subtracted + GNG data), fall back to Toast ERA API
     unique_ranges = {}
