@@ -9825,6 +9825,38 @@ async def admin_toast_config_sync(
     return result
 
 
+@app.post("/api/admin/upload-db")
+async def admin_upload_db(
+    db_name: str = Query(..., description="Target DB: aloha_sales, crunchtime, punchh, monkey"),
+    file: UploadFile = File(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Upload a SQLite DB file to replace an existing database on the server."""
+    ALLOWED_DBS = {
+        "aloha_sales": os.path.join(os.path.dirname(__file__), "data", "aloha", "aloha_sales.db"),
+        "crunchtime": os.path.join(os.path.dirname(__file__), "data", "crunchtime.db"),
+        "punchh": os.path.join(os.path.dirname(__file__), "data", "punchh.db"),
+        "monkey": os.path.join(os.path.dirname(__file__), "data", "monkey.db"),
+    }
+    if db_name not in ALLOWED_DBS:
+        raise HTTPException(400, f"Invalid db_name. Allowed: {list(ALLOWED_DBS.keys())}")
+
+    target_path = ALLOWED_DBS[db_name]
+    content = await file.read()
+
+    # Basic validation: SQLite files start with "SQLite format 3"
+    if not content[:16].startswith(b"SQLite format 3"):
+        raise HTTPException(400, "File does not appear to be a valid SQLite database")
+
+    # Write to disk
+    with open(target_path, "wb") as f:
+        f.write(content)
+
+    size_mb = len(content) / (1024 * 1024)
+    logger.info("Admin uploaded %s DB (%.1f MB) by %s", db_name, size_mb, admin_user.email)
+    return {"status": "ok", "db_name": db_name, "size_mb": round(size_mb, 1), "path": target_path}
+
+
 @app.post("/api/admin/toast-config/backfill-aloha")
 async def admin_backfill_aloha(
     payload: dict = Body(...),
