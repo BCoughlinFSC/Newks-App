@@ -12847,12 +12847,32 @@ def _aggregate_flash_by_location(
     return result
 
 def _load_fbc_mapping() -> dict:
-    """Load the FBC (Franchise Business Consultant) location mapping."""
+    """Load the FBC (Franchise Business Consultant) location mapping.
+    Returns TWO dicts: {loc_id: fbc_group} and {restaurant_name: fbc_group}.
+    The name-based mapping is resolved to loc_id using store_info.
+    """
     fbc_path = os.path.join(os.path.dirname(__file__), "data", "fbc_location_mapping.json")
-    if os.path.exists(fbc_path):
-        with open(fbc_path) as f:
-            return json.load(f)
-    return {}
+    if not os.path.exists(fbc_path):
+        return {}
+    with open(fbc_path) as f:
+        name_mapping = json.load(f)  # {restaurant_name: fbc_group}
+
+    # Resolve restaurant names to Aloha location IDs
+    si = aloha_sales_db.get_store_info()
+    name_to_loc = {}
+    for loc_id, info in si.items():
+        name_to_loc[info.get("restaurant_name", "")] = loc_id
+
+    loc_mapping = {}
+    for store_name, fbc_group in name_mapping.items():
+        loc_id = name_to_loc.get(store_name)
+        if loc_id:
+            loc_mapping[loc_id] = fbc_group
+        else:
+            # Keep name-based entry for stores not in store_info
+            loc_mapping[store_name] = fbc_group
+
+    return loc_mapping
 
 
 def _build_flash_period_from_api(
@@ -12873,6 +12893,19 @@ def _build_flash_period_from_api(
     _COMPANY_ENTITY = "Newco Dining LLC"
     if fbc_mapping is None:
         fbc_mapping = {}
+
+    # Ensure ALL stores in fbc_mapping appear, even if they have no CY/PY data
+    # (e.g. Lubbock TX which is still on Aloha POS and may not have data for every date)
+    fbc_name_to_loc = {}  # reverse: restaurant_name -> loc_id
+    for loc_id, info in store_info.items():
+        name = info.get("restaurant_name", "")
+        if name:
+            fbc_name_to_loc[name] = loc_id
+    for store_name, fbc_group in fbc_mapping.items():
+        loc_id = fbc_name_to_loc.get(store_name)
+        if loc_id and loc_id not in all_locs:
+            all_locs.append(loc_id)
+    all_locs = sorted(set(all_locs))
 
     all_channel_keys = _FLASH_CHANNEL_KEYS + ["POS2"]
     channels = {}
@@ -12902,6 +12935,10 @@ def _build_flash_period_from_api(
             is_comping = str(comping_flag).strip().upper() == "Y"
             is_company = company == _COMPANY_ENTITY
 
+            # Flag stores not on Toast (no GUID in location mapping)
+            guid_mapped = any(v == loc for v in _get_flash_loc_mapping().values())
+            not_on_toast = not guid_mapped and loc in store_info
+
             loc_rows.append({
                 "location": loc,
                 "restaurantName": loc_name,
@@ -12913,6 +12950,7 @@ def _build_flash_period_from_api(
                 "priorYR": round(prior_val, 2),
                 "variance": round(variance, 2),
                 "compPct": comp_pct,
+                "notOnToast": not_on_toast,
             })
             total_cur += cur_val; total_prior += prior_val
             if is_comping:
