@@ -5326,23 +5326,26 @@ async def _compute_sc_and_gng(
     client: httpx.AsyncClient,
     restaurant_guid: str,
     business_date_yyyymmdd: str,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, Dict[str, float]]:
     """
     Walk orders for one restaurant+day and compute:
       1. Total restaurant-destination service charges (to subtract from net sales)
       2. Total GNG (Grab N Go) item sales (salesCategory GUID match)
+      3. SC broken down by dining option (to subtract from the correct channel)
 
-    Returns (service_charge_total, gng_sales_total).
-    Reuses the existing orders cache / fetch infrastructure.
+    Returns (service_charge_total, gng_sales_total, sc_by_dining_option).
+    sc_by_dining_option: {"Catering": 1390.00, "Delivery": 30.00, ...}
     """
     orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
 
     total_sc = 0.0
     total_gng = 0.0
+    sc_by_dining_opt: Dict[str, float] = {}
 
     for order in orders:
         if order.get("voided"):
             continue
+        # Get the dining option for this order
         for check in order.get("checks", []):
             if check.get("voided"):
                 continue
@@ -5354,6 +5357,17 @@ async def _compute_sc_and_gng(
                 destination = applied_sc.get("destination") or "RESTAURANT"
                 if destination == "RESTAURANT":
                     total_sc += charge_amount
+                    # Map SC to dining option channel based on SC name
+                    sc_name = str(applied_sc.get("name", "") or "").strip().upper()
+                    if sc_name.startswith("CAT") or "CATERING" in sc_name or "EZCATER" in sc_name:
+                        sc_channel = "Catering"
+                    elif "DELIVERY" in sc_name or "DISPATCH" in sc_name:
+                        sc_channel = "Delivery"
+                    elif "TOGO" in sc_name or "TO GO" in sc_name or "CURBSIDE" in sc_name:
+                        sc_channel = "ToGo"
+                    else:
+                        sc_channel = "Catering"  # Default: most SC are catering-related
+                    sc_by_dining_opt[sc_channel] = sc_by_dining_opt.get(sc_channel, 0) + charge_amount
             # GNG from selections
             for sel in check.get("selections", []):
                 if sel.get("voided"):
@@ -5367,7 +5381,7 @@ async def _compute_sc_and_gng(
     cache_key = f"{restaurant_guid}|{business_date_yyyymmdd}"
     _sc_daily_cache[cache_key] = total_sc
 
-    return total_sc, total_gng
+    return total_sc, total_gng, sc_by_dining_opt
 
 
 async def nightly_flash_import_job():
@@ -5448,13 +5462,26 @@ async def nightly_flash_import_job():
 
                 if guid:
                     try:
-                        sc_amount, gng_amount = await _compute_sc_and_gng(
+                        sc_amount, gng_amount, sc_by_dopt = await _compute_sc_and_gng(
                             client, guid, yesterday_yyyymmdd
                         )
+                        _SC_CHANNEL_TO_DB_COL = {
+                            "Catering": "catering_net_sales",
+                            "Delivery": "delivery_net_sales",
+                            "ToGo": "togo_net_sales",
+                            "OLO": "olo_net_sales",
+                            "DineIn": "dinein_net_sales",
+                            "CallIn": "callin_net_sales",
+                        }
                         if sc_amount > 0:
                             data["net_sales"] -= sc_amount
                             sc_total += sc_amount
                             sc_count += 1
+                            # Subtract SC from the specific channel it belongs to
+                            for sc_channel, sc_val in sc_by_dopt.items():
+                                db_col = _SC_CHANNEL_TO_DB_COL.get(sc_channel)
+                                if db_col and db_col in data:
+                                    data[db_col] -= sc_val
                         if gng_amount > 0:
                             data["gng_net_sales"] = gng_amount
                             gng_total += gng_amount
@@ -10300,14 +10327,27 @@ async def _run_flash_import_for_date(target_date: date):
 
                 if guid:
                     try:
-                        sc_amount, gng_amount = await _compute_sc_and_gng(
+                        sc_amount, gng_amount, sc_by_dopt = await _compute_sc_and_gng(
                             client, guid, target_yyyymmdd
                         )
                         # Toast ERA netSalesAmount INCLUDES restaurant-destination
                         # service charges (delivery/catering fees).  Newk's pays these
                         # out to providers, so they must be subtracted for Newk's Net Sales.
+                        _SC_CHANNEL_TO_DB_COL = {
+                            "Catering": "catering_net_sales",
+                            "Delivery": "delivery_net_sales",
+                            "ToGo": "togo_net_sales",
+                            "OLO": "olo_net_sales",
+                            "DineIn": "dinein_net_sales",
+                            "CallIn": "callin_net_sales",
+                        }
                         if sc_amount > 0:
                             data["net_sales"] -= sc_amount
+                            # Subtract SC from the specific channel it belongs to
+                            for sc_channel, sc_val in sc_by_dopt.items():
+                                db_col = _SC_CHANNEL_TO_DB_COL.get(sc_channel)
+                                if db_col and db_col in data:
+                                    data[db_col] -= sc_val
                         if gng_amount > 0:
                             data["gng_net_sales"] = gng_amount
                         await asyncio.sleep(0.3)
