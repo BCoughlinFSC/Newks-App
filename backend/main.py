@@ -5162,6 +5162,111 @@ _scheduler.add_job(nightly_orders_cache_job, CronTrigger(hour=3, minute=0),
 
 
 # ------------------
+# Nightly Historical Orders Backfill — fills in older dates from Toast Orders API
+# Runs 3:15 AM–8:00 AM daily, picks up where it left off, processes ~100-150 days per night
+# ------------------
+_BACKFILL_TARGET_START = "2024-01-01"  # How far back to go
+_BACKFILL_CUTOFF_HOUR = 8  # Stop at 8:00 AM to avoid daytime API load
+_backfill_status: Dict[str, Any] = {}
+
+async def nightly_historical_backfill():
+    """
+    Backfill orders.db with historical data, working backwards from the earliest
+    cached date. Runs until 8 AM, then stops and resumes the next night.
+    """
+    from datetime import datetime as dt
+    global _backfill_status
+
+    target_start = date.fromisoformat(_BACKFILL_TARGET_START)
+
+    # Find earliest date currently in orders.db
+    stats = toast_orders_db.get_stats()
+    min_cached = stats.get("min_date", "")
+    if min_cached:
+        # min_date is YYYYMMDD format
+        earliest_cached = date(int(min_cached[:4]), int(min_cached[4:6]), int(min_cached[6:8]))
+    else:
+        earliest_cached = date.today() - timedelta(days=1)
+
+    # Work backwards from day before earliest cached
+    backfill_end = earliest_cached - timedelta(days=1)
+    if backfill_end < target_start:
+        logger.info("Historical backfill complete — already have data back to %s", target_start)
+        _backfill_status = {"status": "complete", "earliest": target_start.isoformat()}
+        return
+
+    days_remaining = (backfill_end - target_start).days + 1
+    logger.info("Historical backfill starting: %s to %s (%d days remaining)",
+                target_start, backfill_end, days_remaining)
+
+    _backfill_status = {
+        "status": "running",
+        "target_start": target_start.isoformat(),
+        "current_end": backfill_end.isoformat(),
+        "days_remaining": days_remaining,
+        "days_done_tonight": 0,
+        "started_at": dt.now().isoformat(),
+    }
+
+    days_done = 0
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            locations = await get_all_active_locations(client)
+            guids = [loc.restaurantGuid for loc in locations]
+
+            # Process one day at a time, working backwards
+            current_date = backfill_end
+            while current_date >= target_start:
+                # Check if we should stop (8 AM cutoff)
+                if dt.now().hour >= _BACKFILL_CUTOFF_HOUR:
+                    logger.info("Historical backfill pausing at 8 AM — done %d days tonight, will resume tomorrow. Next date: %s",
+                                days_done, current_date)
+                    _backfill_status.update({
+                        "status": "paused",
+                        "days_done_tonight": days_done,
+                        "next_date": current_date.isoformat(),
+                    })
+                    return
+
+                bdate = current_date.strftime("%Y%m%d")
+                day_success = 0
+                day_fail = 0
+
+                for rguid in guids:
+                    if toast_orders_db.is_date_cached(rguid, bdate):
+                        continue
+                    try:
+                        toast_orders_db.mark_import_started(rguid, bdate)
+                        orders = await _fetch_orders_from_toast_api(client, rguid, bdate)
+                        toast_orders_db.store_orders(rguid, bdate, orders)
+                        day_success += 1
+                        await asyncio.sleep(0.3)
+                    except Exception as exc:
+                        toast_orders_db.mark_import_failed(rguid, bdate, str(exc))
+                        day_fail += 1
+
+                days_done += 1
+                if days_done % 5 == 0:
+                    logger.info("Historical backfill progress: %d days done, current date: %s", days_done, current_date)
+                _backfill_status["days_done_tonight"] = days_done
+                _backfill_status["current_date"] = current_date.isoformat()
+
+                current_date -= timedelta(days=1)
+
+    except Exception as exc:
+        logger.error("Historical backfill error: %s", exc)
+        _backfill_status.update({"status": "error", "error": str(exc)})
+        return
+
+    logger.info("Historical backfill COMPLETE — all %d days processed back to %s", days_done, target_start)
+    _backfill_status.update({"status": "complete", "days_done_tonight": days_done})
+
+
+_scheduler.add_job(nightly_historical_backfill, CronTrigger(hour=3, minute=15),
+                   id="nightly_historical_backfill", replace_existing=True)
+
+
+# ------------------
 # Nightly Flash Sales Import — Toast ERA API → aloha_sales_db
 # Replaces Don Wilson's SQL Server ETL pipeline entirely.
 # ------------------
@@ -9481,6 +9586,19 @@ async def admin_orders_cache_stats(admin_user: User = Depends(get_current_admin_
         ],
     }
     return stats
+
+
+@app.get("/api/admin/orders-cache/historical-backfill-status")
+async def admin_historical_backfill_status(admin_user: User = Depends(get_current_admin_user)):
+    """Get the current status of the nightly historical backfill job."""
+    return _backfill_status or {"status": "not_started"}
+
+
+@app.post("/api/admin/orders-cache/start-historical-backfill")
+async def admin_start_historical_backfill(admin_user: User = Depends(get_current_admin_user)):
+    """Manually trigger the historical backfill job (runs until 8 AM cutoff)."""
+    asyncio.create_task(nightly_historical_backfill())
+    return {"status": "started", "message": "Historical backfill started. Will run until 8 AM."}
 
 
 @app.get("/api/admin/orders-cache/failed")
