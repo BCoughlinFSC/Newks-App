@@ -9857,6 +9857,48 @@ async def admin_upload_db(
     return {"status": "ok", "db_name": db_name, "size_mb": round(size_mb, 1), "path": target_path}
 
 
+@app.post("/api/admin/aloha-sales/push-rows")
+async def admin_push_aloha_sales_rows(
+    payload: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Push individual aloha_sales_db rows (for non-Toast stores like Lubbock).
+    Payload: {"rows": [{"business_date": "2026-03-23", "location": "1188", "restaurant_name": "Lubbock TX (Broadway)", "net_sales": 1109.85, ...}]}
+    """
+    rows = payload.get("rows", [])
+    if not rows:
+        raise HTTPException(400, "No rows provided")
+
+    import pandas as pd
+    inserted = 0
+    for row in rows:
+        bdate = row.get("business_date")
+        if not bdate:
+            continue
+        df = pd.DataFrame([{
+            "RestaurantID": row.get("location", ""),
+            "RestaurantName": row.get("restaurant_name", ""),
+            "NetSales": float(row.get("net_sales", 0)),
+            "OLONetSales": float(row.get("olo_net_sales", 0)),
+            "DeliveryNetSales": float(row.get("delivery_net_sales", 0)),
+            "CateringNetSales": float(row.get("catering_net_sales", 0)),
+            "GNGNetSales": float(row.get("gng_net_sales", 0)),
+            "ToGoNetSales": float(row.get("togo_net_sales", 0)),
+            "CurbsideNetSales": float(row.get("curbside_net_sales", 0)),
+            "CurbsideOLONetSales": float(row.get("curbside_olo_net_sales", 0)),
+            "DineInNetSales": float(row.get("dinein_net_sales", 0)),
+            "CallInNetSales": float(row.get("callin_net_sales", 0)),
+            "OLOCallInNetSales": float(row.get("olo_callin_net_sales", 0)),
+            "CheckCount": float(row.get("check_count", 0)),
+            "ChecksMinusCatering": float(row.get("checks_minus_catering", 0)),
+        }])
+        n = aloha_sales_db.upsert_date(df, bdate)
+        inserted += n
+
+    logger.info("Admin pushed %d aloha_sales rows by %s", inserted, admin_user.email)
+    return {"status": "ok", "rows_upserted": inserted}
+
+
 @app.post("/api/admin/toast-config/backfill-aloha")
 async def admin_backfill_aloha(
     payload: dict = Body(...),
