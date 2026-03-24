@@ -7160,7 +7160,11 @@ async def get_available_pages():
     return AVAILABLE_PAGES
 
 @app.get("/locations", response_model=List[Location])
-async def list_locations(optional_user: Optional[User] = Depends(get_optional_user), includeTest: bool = False, includeInactive: bool = False):
+async def list_locations(optional_user: Optional[User] = Depends(get_optional_user), includeTest: bool = False, includeInactive: bool = False, refresh: bool = False):
+    if refresh:
+        # Clear the location cache to force a fresh pull from Toast API
+        _locations_cache.clear()
+        logger.info("Location cache cleared by refresh=true request")
     async with httpx.AsyncClient(timeout=30.0) as client:
         all_locs = await get_all_active_locations(client, include_test=includeTest, include_inactive=includeInactive)
     # Filter to assigned restaurants for authenticated non-admin users who have an assignment.
