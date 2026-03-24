@@ -14500,7 +14500,7 @@ async def generate_menu_mix_report(req: MenuMixRequest):
                 aloha_name = str(mrow.get("aloha_item_name", "") or "").strip()
                 cons_cat = str(mrow.get("consolidated_cat", "") or "").strip()
                 recipe_tag = str(mrow.get("recipe", "") or "").strip()
-                ee_val = float(mrow.get("entree_equiv_tag", 0) or 0)
+                ee_val = _parse_ee_value(mrow.get("entree_equiv_tag", 0))
                 ee_tag = f"EE {ee_val}" if ee_val else ""
                 mli = str(mrow.get("multi_location_id", "") or "").strip()
                 guid = str(mrow.get("item_guid", "") or "").strip()
