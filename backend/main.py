@@ -10097,10 +10097,11 @@ async def _run_flash_import_for_date(target_date: date):
                         sc_amount, gng_amount = await _compute_sc_and_gng(
                             client, guid, target_yyyymmdd
                         )
-                        # NOTE: Do NOT subtract sc_amount from net_sales.
-                        # Toast ERA netSalesAmount already excludes service charges.
-                        # Subtracting again was causing a double-deduction that made
-                        # our totals ~$85K lower than the Report Server.
+                        # Toast ERA netSalesAmount INCLUDES restaurant-destination
+                        # service charges (delivery/catering fees).  Newk's pays these
+                        # out to providers, so they must be subtracted for Newk's Net Sales.
+                        if sc_amount > 0:
+                            data["net_sales"] -= sc_amount
                         if gng_amount > 0:
                             data["gng_net_sales"] = gng_amount
                         await asyncio.sleep(0.3)
