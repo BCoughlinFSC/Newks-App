@@ -12220,12 +12220,16 @@ def _build_wpy_period(
     prior_start: str, prior_end: str,
     locations: Optional[List[str]] = None,
     store_info: Optional[dict] = None,
+    fbc_mapping: dict = None,
 ) -> dict:
     """
     Build one period (WTD/PTD/QTD/YTD) of the WPY report.
 
     store_info: dict keyed by location from aloha_sales_db.get_store_info()
+    fbc_mapping: {loc_id: "FBC - Name" or "Company - Name"}
     """
+    if fbc_mapping is None:
+        fbc_mapping = {}
     cur_df = aloha_sales_db.query_date_range(current_start, current_end, locations=locations)
     prior_df = aloha_sales_db.query_date_range(prior_start, prior_end, locations=locations)
 
@@ -12282,6 +12286,7 @@ def _build_wpy_period(
                 "location": loc,
                 "restaurantName": loc_name,
                 "company": loc_info.get("company", ""),
+                "fbcGroup": fbc_mapping.get(loc, loc_info.get("company", "") or "Unassigned"),
                 "comping": loc_info.get("comping", ""),
                 "openDate": loc_info.get("open_date", ""),
                 "currentYR": round(cur_val, 2),
@@ -12494,6 +12499,9 @@ async def run_wpy_report(payload: dict = Body(...)):
     # Load store metadata for comping/company totals
     store_info = aloha_sales_db.get_store_info()
 
+    # Load FBC grouping
+    fbc_mapping = _load_fbc_mapping()
+
     # Build each period
     result = {
         "reportDate": report_date_str,
@@ -12501,13 +12509,14 @@ async def run_wpy_report(payload: dict = Body(...)):
         "fiscalPeriod": fp,
         "fiscalWeek": fw,
         "periods": {
-            "WTD": _build_wpy_period(wtd_start.isoformat(), wtd_end.isoformat(), wtd_ly[0], wtd_ly[1], locations, store_info),
-            "PTD": _build_wpy_period(ptd_start.isoformat(), ptd_end.isoformat(), ptd_ly[0], ptd_ly[1], locations, store_info),
-            "QTD": _build_wpy_period(qtd_start.isoformat(), qtd_end.isoformat(), qtd_ly[0], qtd_ly[1], locations, store_info),
-            "YTD": _build_wpy_period(ytd_start.isoformat(), ytd_end.isoformat(), ytd_ly[0], ytd_ly[1], locations, store_info),
+            "WTD": _build_wpy_period(wtd_start.isoformat(), wtd_end.isoformat(), wtd_ly[0], wtd_ly[1], locations, store_info, fbc_mapping),
+            "PTD": _build_wpy_period(ptd_start.isoformat(), ptd_end.isoformat(), ptd_ly[0], ptd_ly[1], locations, store_info, fbc_mapping),
+            "QTD": _build_wpy_period(qtd_start.isoformat(), qtd_end.isoformat(), qtd_ly[0], qtd_ly[1], locations, store_info, fbc_mapping),
+            "YTD": _build_wpy_period(ytd_start.isoformat(), ytd_end.isoformat(), ytd_ly[0], ytd_ly[1], locations, store_info, fbc_mapping),
         },
         "channelOrder": list(_WPY_CHANNELS.keys()),
         "channelLabels": {k: v["label"] for k, v in _WPY_CHANNELS.items()},
+        "fbcGroups": sorted(set(fbc_mapping.values())) if fbc_mapping else [],
     }
     return result
 
@@ -12636,20 +12645,33 @@ def _aggregate_flash_by_location(
 
     return result
 
+def _load_fbc_mapping() -> dict:
+    """Load the FBC (Franchise Business Consultant) location mapping."""
+    fbc_path = os.path.join(DATA_DIR, "fbc_location_mapping.json")
+    if os.path.exists(fbc_path):
+        with open(fbc_path) as f:
+            return json.load(f)
+    return {}
+
+
 def _build_flash_period_from_api(
     cur_by_loc: dict,
     prior_by_loc: dict,
     current_start: str, current_end: str,
     prior_start: str, prior_end: str,
     store_info: dict,
+    fbc_mapping: dict = None,
 ) -> dict:
     """
     Build one period of the Daily Flash report from pre-aggregated API data.
     cur_by_loc / prior_by_loc: {loc_id: {channel_key: value, ...}}
     store_info: {loc_id: {restaurant_name, company, comping, open_date, ...}}
+    fbc_mapping: {loc_id: "FBC - Name" or "Company - Name"}
     """
     all_locs = sorted(set(list(cur_by_loc.keys()) + list(prior_by_loc.keys())))
     _COMPANY_ENTITY = "Newco Dining LLC"
+    if fbc_mapping is None:
+        fbc_mapping = {}
 
     all_channel_keys = _FLASH_CHANNEL_KEYS + ["POS2"]
     channels = {}
@@ -12683,6 +12705,7 @@ def _build_flash_period_from_api(
                 "location": loc,
                 "restaurantName": loc_name,
                 "company": company,
+                "fbcGroup": fbc_mapping.get(loc, company or "Unassigned"),
                 "comping": "Y" if is_comping else "N",
                 "openDate": str(open_date) if open_date else "",
                 "currentYR": round(cur_val, 2),
@@ -12974,12 +12997,15 @@ async def run_daily_flash_report(payload: dict = Body(...)):
             unique_ranges[(s, e)] = _aggregate_flash_by_location(raw, guid_to_loc)
             range_source[(s, e)] = "toast_api"
 
+    # Load FBC grouping
+    fbc_mapping = _load_fbc_mapping()
+
     # Build periods from cached data
     periods = {}
     for pname, (cs, ce, ps, pe) in periods_config.items():
         periods[pname] = _build_flash_period_from_api(
             unique_ranges[(cs, ce)], unique_ranges[(ps, pe)],
-            cs, ce, ps, pe, store_info,
+            cs, ce, ps, pe, store_info, fbc_mapping,
         )
         periods[pname]["dataSource"] = {
             "cy": range_source.get((cs, ce), "toast_api"),
@@ -12987,6 +13013,9 @@ async def run_daily_flash_report(payload: dict = Body(...)):
         }
 
     _flash_channel_order = _FLASH_CHANNEL_KEYS + ["CheckAverage", "POS2"]
+
+    # Collect unique FBC groups from all locations
+    fbc_groups = sorted(set(fbc_mapping.values())) if fbc_mapping else []
 
     return {
         "reportDate": report_date_str,
@@ -12996,6 +13025,7 @@ async def run_daily_flash_report(payload: dict = Body(...)):
         "periods": periods,
         "channelOrder": _flash_channel_order,
         "channelLabels": _FLASH_CHANNEL_LABELS,
+        "fbcGroups": fbc_groups,
     }
 
 

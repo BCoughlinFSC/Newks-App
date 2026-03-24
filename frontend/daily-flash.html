@@ -417,11 +417,11 @@
       const firstPeriod = PERIODS.find(p => reportData.periods[p]?.channels[ch]?.locations?.length);
       const locations = firstPeriod ? reportData.periods[firstPeriod].channels[ch].locations : [];
 
-      // Group by company
+      // Group by FBC (Franchise Business Consultant) — falls back to company/entity
       const companyGroups = {};
       const companyOrder = [];
       for (const loc of locations) {
-        const co = loc.company || 'Unknown';
+        const co = loc.fbcGroup || loc.company || 'Unknown';
         if (!companyGroups[co]) { companyGroups[co] = []; companyOrder.push(co); }
         companyGroups[co].push(loc);
       }
@@ -450,7 +450,7 @@
       for (const co of companyOrder) {
         const coLocs = companyGroups[co];
         // Company header row
-        html += `<tr class="company-group-row"><td class="sticky sticky-0"></td><td class="left sticky sticky-1">Company - ${esc(co)}</td>`;
+        html += `<tr class="company-group-row"><td class="sticky sticky-0"></td><td class="left sticky sticky-1">${esc(co)}</td>`;
         // Compute company totals for this group
         for (const pKey of PERIODS) {
           const pCh = reportData.periods[pKey]?.channels[ch];
@@ -765,7 +765,7 @@
         const companyGroups = {};
         const companyOrder = [];
         for (const loc of locations) {
-          const co = loc.company || 'Unknown';
+          const co = loc.fbcGroup || loc.company || 'Unknown';
           if (!companyGroups[co]) { companyGroups[co] = []; companyOrder.push(co); }
           companyGroups[co].push(loc);
         }
@@ -773,7 +773,7 @@
         for (const co of companyOrder) {
           const coLocs = companyGroups[co];
           // Company header with Total Restaurants
-          const coRow = [{ v: labels[ch] || ch, s: S.companyHeader }, { v: `Company - ${co}`, s: S.companyHeader }, { v: '', s: S.companyHeader }, { v: 'Total Restaurants', s: S.companyHeader }];
+          const coRow = [{ v: labels[ch] || ch, s: S.companyHeader }, { v: co, s: S.companyHeader }, { v: '', s: S.companyHeader }, { v: 'Total Restaurants', s: S.companyHeader }];
           for (const pKey of PERIODS) {
             const pCh = reportData.periods[pKey]?.channels[ch];
             const ct = computeGroupTotals(pCh, coLocs.map(l => l.location), ch, isAvgCh(ch));
