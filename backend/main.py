@@ -5383,9 +5383,10 @@ async def nightly_flash_import_job():
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            # 1. Get all active restaurants
+            # 1. Get all active restaurants (+ any mapped GUIDs not yet in API)
             locations = await get_all_active_locations(client)
             restaurant_ids = [loc.restaurantGuid for loc in locations]
+            restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
             guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
 
             # 2. Load GUID → Aloha location mapping
@@ -10162,6 +10163,7 @@ async def _run_flash_import_for_date(target_date: date):
         async with httpx.AsyncClient(timeout=120.0) as client:
             locations = await get_all_active_locations(client)
             restaurant_ids = [loc.restaurantGuid for loc in locations]
+            restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
             guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
             guid_to_loc = _get_flash_loc_mapping()
 
@@ -12950,6 +12952,25 @@ def _get_flash_loc_mapping() -> dict:
     return {}
 
 
+def _ensure_all_mapped_guids(restaurant_ids: List[str]) -> List[str]:
+    """
+    Ensure restaurant_ids includes ALL GUIDs from aloha_location_mapping.json,
+    even if they aren't returned by get_all_active_locations() yet (e.g. new stores
+    not yet propagated to the Toast Restaurant Management API but already in ERA).
+    """
+    mapping = _get_flash_loc_mapping()
+    id_set = set(restaurant_ids)
+    added = []
+    for guid in mapping.keys():
+        if guid not in id_set:
+            restaurant_ids.append(guid)
+            added.append(guid)
+    if added:
+        logger.info("Added %d mapped GUIDs not in active locations: %s",
+                     len(added), [f"{g[:8]}..." for g in added])
+    return restaurant_ids
+
+
 def _aggregate_flash_from_aloha(start_date: str, end_date: str, locations: Optional[List[str]] = None) -> dict:
     """
     Query aloha_sales_db for the given date range and return data in the same
@@ -13068,6 +13089,7 @@ async def run_daily_flash_report(payload: dict = Body(...)):
         all_locations = await get_all_active_locations(client)
     guid_to_loc = _get_flash_loc_mapping()
     restaurant_ids = [loc.restaurantGuid for loc in all_locations]
+    restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
 
     # Filter locations if requested (by Aloha ID)
     requested_locs = payload.get("locations")
