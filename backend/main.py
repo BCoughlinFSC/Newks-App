@@ -12647,7 +12647,7 @@ def _aggregate_flash_by_location(
 
 def _load_fbc_mapping() -> dict:
     """Load the FBC (Franchise Business Consultant) location mapping."""
-    fbc_path = os.path.join(DATA_DIR, "fbc_location_mapping.json")
+    fbc_path = os.path.join(os.path.dirname(__file__), "data", "fbc_location_mapping.json")
     if os.path.exists(fbc_path):
         with open(fbc_path) as f:
             return json.load(f)
