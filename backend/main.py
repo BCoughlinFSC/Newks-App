@@ -12896,15 +12896,12 @@ def _build_flash_period_from_api(
 
     # Ensure ALL stores in fbc_mapping appear, even if they have no CY/PY data
     # (e.g. Lubbock TX which is still on Aloha POS and may not have data for every date)
-    fbc_name_to_loc = {}  # reverse: restaurant_name -> loc_id
-    for loc_id, info in store_info.items():
-        name = info.get("restaurant_name", "")
-        if name:
-            fbc_name_to_loc[name] = loc_id
-    for store_name, fbc_group in fbc_mapping.items():
-        loc_id = fbc_name_to_loc.get(store_name)
-        if loc_id and loc_id not in all_locs:
+    # fbc_mapping keys are loc_ids like "1188"
+    for loc_id in fbc_mapping.keys():
+        if loc_id in store_info and loc_id not in all_locs:
             all_locs.append(loc_id)
+            logger.info("Added missing FBC store %s (%s) to flash report",
+                         loc_id, store_info[loc_id].get("restaurant_name", ""))
     all_locs = sorted(set(all_locs))
 
     all_channel_keys = _FLASH_CHANNEL_KEYS + ["POS2"]
