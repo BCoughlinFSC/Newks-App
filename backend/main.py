@@ -13242,14 +13242,27 @@ async def run_daily_flash_report(payload: dict = Body(...)):
             aloha_loc_ids.append(loc_id)
             logger.info("Added non-Toast store %s to aloha_loc_ids for flash query", loc_id)
 
-    # For each unique date range: try Aloha sales DB first (has correct Newk's net sales
-    # with service charges subtracted + GNG data), fall back to Toast ERA API
+    # For each unique date range: get data from Aloha sales DB (has correct Newk's net sales
+    # with service charges subtracted + GNG data), then fill in any missing stores from ERA API
     unique_ranges = {}
     range_source = {}
     for (s, e) in all_ranges:
-        aloha_data = _aggregate_flash_from_aloha(s, e, locations=aloha_loc_ids if aloha_loc_ids else None)
+        # Get ALL available data from aloha_sales_db (no location filter — includes non-Toast stores)
+        aloha_data = _aggregate_flash_from_aloha(s, e, locations=None)
         if aloha_data:
             logger.info("Flash data from Aloha DB: %s to %s (%d locations)", s, e, len(aloha_data))
+            # Check if we're missing any Toast stores that aren't in aloha_data
+            missing_guids = [rid for rid in restaurant_ids if rid in guid_to_loc and guid_to_loc[rid] not in aloha_data]
+            if missing_guids:
+                logger.info("Flash: %d Toast stores missing from Aloha DB, fetching from ERA API", len(missing_guids))
+                raw = await _fetch_flash_era_data(
+                    date.fromisoformat(s), date.fromisoformat(e), missing_guids
+                )
+                era_data = _aggregate_flash_by_location(raw, guid_to_loc)
+                # Merge ERA data into aloha_data (aloha takes priority)
+                for loc_id, channels in era_data.items():
+                    if loc_id not in aloha_data:
+                        aloha_data[loc_id] = channels
             unique_ranges[(s, e)] = aloha_data
             range_source[(s, e)] = "aloha_db"
         else:
