@@ -9870,33 +9870,41 @@ async def admin_push_aloha_sales_rows(
         raise HTTPException(400, "No rows provided")
 
     import pandas as pd
-    inserted = 0
+    from collections import defaultdict
+
+    # Group rows by business_date so upsert_date gets ALL rows for each date at once
+    # (upsert_date DELETEs all rows for a date before inserting)
+    by_date = defaultdict(list)
     for row in rows:
         bdate = row.get("business_date")
         if not bdate:
             continue
-        df = pd.DataFrame([{
+        by_date[bdate].append({
             "RestaurantID": row.get("location", ""),
             "RestaurantName": row.get("restaurant_name", ""),
-            "NetSales": float(row.get("net_sales", 0)),
-            "OLONetSales": float(row.get("olo_net_sales", 0)),
-            "DeliveryNetSales": float(row.get("delivery_net_sales", 0)),
-            "CateringNetSales": float(row.get("catering_net_sales", 0)),
-            "GNGNetSales": float(row.get("gng_net_sales", 0)),
-            "ToGoNetSales": float(row.get("togo_net_sales", 0)),
-            "CurbsideNetSales": float(row.get("curbside_net_sales", 0)),
-            "CurbsideOLONetSales": float(row.get("curbside_olo_net_sales", 0)),
-            "DineInNetSales": float(row.get("dinein_net_sales", 0)),
-            "CallInNetSales": float(row.get("callin_net_sales", 0)),
-            "OLOCallInNetSales": float(row.get("olo_callin_net_sales", 0)),
-            "CheckCount": float(row.get("check_count", 0)),
-            "ChecksMinusCatering": float(row.get("checks_minus_catering", 0)),
-        }])
+            "NetSales": float(row.get("net_sales", 0) or 0),
+            "OLONetSales": float(row.get("olo_net_sales", 0) or 0),
+            "DeliveryNetSales": float(row.get("delivery_net_sales", 0) or 0),
+            "CateringNetSales": float(row.get("catering_net_sales", 0) or 0),
+            "GNGNetSales": float(row.get("gng_net_sales", 0) or 0),
+            "ToGoNetSales": float(row.get("togo_net_sales", 0) or 0),
+            "CurbsideNetSales": float(row.get("curbside_net_sales", 0) or 0),
+            "CurbsideOLONetSales": float(row.get("curbside_olo_net_sales", 0) or 0),
+            "DineInNetSales": float(row.get("dinein_net_sales", 0) or 0),
+            "CallInNetSales": float(row.get("callin_net_sales", 0) or 0),
+            "OLOCallInNetSales": float(row.get("olo_callin_net_sales", 0) or 0),
+            "CheckCount": float(row.get("check_count", 0) or 0),
+            "ChecksMinusCatering": float(row.get("checks_minus_catering", 0) or 0),
+        })
+
+    inserted = 0
+    for bdate, date_rows in sorted(by_date.items()):
+        df = pd.DataFrame(date_rows)
         n = aloha_sales_db.upsert_date(df, bdate)
         inserted += n
 
-    logger.info("Admin pushed %d aloha_sales rows by %s", inserted, admin_user.email)
-    return {"status": "ok", "rows_upserted": inserted}
+    logger.info("Admin pushed %d aloha_sales rows (%d dates) by %s", inserted, len(by_date), admin_user.email)
+    return {"status": "ok", "rows_upserted": inserted, "dates": len(by_date)}
 
 
 @app.post("/api/admin/toast-config/backfill-aloha")
