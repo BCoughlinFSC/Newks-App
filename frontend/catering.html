@@ -1064,20 +1064,48 @@
       const thead = document.getElementById(prefix + '-thead');
       const tbody = document.getElementById(prefix + '-tbody');
       const table = document.getElementById(prefix + '-table');
+      let sortCol = null, sortDir = 1;
+
+      function renderBody(data) {
+        tbody.innerHTML = data.map(row => {
+          return '<tr>' + columns.map(col => {
+            const v = row[col.key];
+            const cls = (col.type === 'num' || col.type === 'money') ? ' class="num"' : '';
+            let display = '';
+            if (col.type === 'money') display = formatMoney(v);
+            else if (col.type === 'num') display = formatNum(v);
+            else display = escapeHtml(v);
+            return '<td' + cls + '>' + display + '</td>';
+          }).join('') + '</tr>';
+        }).join('');
+      }
+
       thead.innerHTML = columns.map(col =>
-        '<th' + ((col.type === 'num' || col.type === 'money') ? ' class="num"' : '') + '>' + escapeHtml(col.label) + '</th>'
+        '<th data-col="' + col.key + '" data-type="' + col.type + '"' +
+        ((col.type === 'num' || col.type === 'money') ? ' class="num"' : '') +
+        '>' + escapeHtml(col.label) + '<span class="sort-icon"></span></th>'
       ).join('');
-      tbody.innerHTML = rows.map(row => {
-        return '<tr>' + columns.map(col => {
-          const v = row[col.key];
-          const cls = (col.type === 'num' || col.type === 'money') ? ' class="num"' : '';
-          let display = '';
-          if (col.type === 'money') display = formatMoney(v);
-          else if (col.type === 'num') display = formatNum(v);
-          else display = escapeHtml(v);
-          return '<td' + cls + '>' + display + '</td>';
-        }).join('') + '</tr>';
-      }).join('');
+
+      thead.querySelectorAll('th').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.col;
+          const type = th.dataset.type || 'string';
+          if (sortCol === col) sortDir = -sortDir; else { sortCol = col; sortDir = 1; }
+          const sorted = [...rows].sort((a, b) => {
+            let va = a[col], vb = b[col];
+            if (type === 'num' || type === 'money') {
+              va = Number(va) || 0; vb = Number(vb) || 0;
+              return sortDir * (va - vb);
+            }
+            return sortDir * String(va || '').localeCompare(String(vb || ''));
+          });
+          renderBody(sorted);
+          thead.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+          th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+        });
+      });
+
+      renderBody(rows);
       table.style.display = 'table';
     }
 
