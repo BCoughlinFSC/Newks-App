@@ -11991,8 +11991,8 @@ async def get_report_types():
             },
             {
                 "id": "tip_pool",
-                "name": "Tip Pool Report",
-                "description": "Weekly tip pool: total tips \u00f7 total hours = per-employee share",
+                "name": "Payroll Report",
+                "description": "Weekly payroll: total tips \u00f7 total hours = per-employee share",
                 "groupByOptions": []
             }
         ],
@@ -13854,12 +13854,16 @@ async def _fetch_employee_hours(
 
     results = []
     for emp_guid, data in by_employee.items():
-        total_h = round(data["regularHours"] + data["overtimeHours"], 2)
+        reg = round(data["regularHours"], 2)
+        ot = round(data["overtimeHours"], 2)
+        total_h = round(reg + ot, 2)
         if total_h > 0:
             results.append({
                 "employeeId": data.get("employeeId", ""),
                 "employeeName": data["employeeName"],
                 "jobTitle": data["jobTitle"],
+                "regularHours": reg,
+                "overtimeHours": ot,
                 "hoursWorked": total_h,
             })
     return results
@@ -13922,6 +13926,8 @@ async def build_tip_pool_report(
 
     # Calculate totals
     grand_total_hours = sum(e["hoursWorked"] for e in all_employees)
+    grand_total_regular = sum(e["regularHours"] for e in all_employees)
+    grand_total_overtime = sum(e["overtimeHours"] for e in all_employees)
     hourly_rate = round(grand_total_tips / grand_total_hours, 4) if grand_total_hours > 0 else 0.0
 
     # Calculate each employee's tip share
@@ -13946,6 +13952,8 @@ async def build_tip_pool_report(
         "tipPoolTable": all_employees,
         "tipPoolTotals": {
             "hoursWorked": round(grand_total_hours, 2),
+            "regularHours": round(grand_total_regular, 2),
+            "overtimeHours": round(grand_total_overtime, 2),
             "tipShare": round(grand_total_tips, 2),
         },
         "tipPoolByLocation": per_location,

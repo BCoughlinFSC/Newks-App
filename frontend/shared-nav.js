@@ -19,7 +19,7 @@
     { key: 'menu',          label: 'Menu Performance',  href: '/legacy.html?report=menu' },
     { key: 'guest_count',   label: 'Guest Count',       href: '/legacy.html?report=guest_count' },
     { key: 'royalty',       label: 'Royalty Report',     href: '/legacy.html?report=royalty' },
-    { key: 'tip_pool',      label: 'Tip Pool',            href: '/legacy.html?report=tip_pool' },
+    { key: 'tip_pool',      label: 'Payroll Report',      href: '/legacy.html?report=tip_pool' },
     { key: 'pick3',         label: 'Pick 3',             href: '/pick3.html' },
     { key: 'pick2',         label: 'Pick 2',             href: '/pick2.html' },
     { key: 'full-pairings', label: 'Full Pairings',      href: '/full-pairings.html' },
