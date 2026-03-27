@@ -9995,11 +9995,12 @@ async def admin_push_aloha_sales_rows(
     inserted = 0
     for bdate, date_rows in sorted(by_date.items()):
         df = pd.DataFrame(date_rows)
-        n = aloha_sales_db.upsert_date(df, bdate)
+        # Use upsert_rows (not upsert_date) to avoid deleting other locations
+        n = aloha_sales_db.upsert_rows(df, bdate)
         inserted += n
 
     logger.info("Admin pushed %d aloha_sales rows (%d dates) by %s", inserted, len(by_date), admin_user.email)
-    return {"status": "ok", "rows_upserted": inserted, "dates": len(by_date)}
+    return {"status": "ok", "rows_upserted": inserted, "dates_updated": len(by_date)}
 
 
 @app.post("/api/admin/toast-config/backfill-aloha")

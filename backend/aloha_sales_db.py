@@ -212,6 +212,57 @@ def upsert_date(
     return len(records)
 
 
+def upsert_rows(
+    df: pd.DataFrame,
+    business_date: str,
+    db_path: str = ALOHA_SALES_DB_PATH,
+) -> int:
+    """
+    Insert or replace individual rows for specific locations on a date,
+    WITHOUT deleting other locations' data for that date.
+    Uses INSERT OR REPLACE on the unique index (business_date, location).
+    """
+    initialize_db(db_path)
+
+    records: List[tuple] = []
+    for _, row in df.iterrows():
+        location = str(row.get("RestaurantID", "") or "").strip()
+        if not location:
+            continue
+        records.append((
+            business_date,
+            location,
+            str(row.get("RestaurantName", "") or "").strip(),
+            float(row.get("NetSales", 0) or 0),
+            float(row.get("OLONetSales", 0) or 0),
+            float(row.get("DeliveryNetSales", 0) or 0),
+            float(row.get("CateringNetSales", 0) or 0),
+            float(row.get("GNGNetSales", 0) or 0),
+            float(row.get("ToGoNetSales", 0) or 0),
+            float(row.get("CurbSideNetSales", row.get("CurbsideNetSales", 0)) or 0),
+            float(row.get("CurbSideOLONetSales", row.get("CurbsideOLONetSales", 0)) or 0),
+            float(row.get("DineInNetSales", 0) or 0),
+            float(row.get("CallInNetSales", 0) or 0),
+            float(row.get("OLOCallInNetSales", 0) or 0),
+            float(row.get("CheckCount", 0) or 0),
+            float(row.get("ChecksMinusCatering", 0) or 0),
+        ))
+
+    with get_connection(db_path) as conn:
+        if records:
+            conn.executemany(
+                "INSERT OR REPLACE INTO aloha_sales_data"
+                "(business_date, location, restaurant_name,"
+                " net_sales, olo_net_sales, delivery_net_sales, catering_net_sales,"
+                " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
+                " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
+                " check_count, checks_minus_catering)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                records,
+            )
+    return len(records)
+
+
 def delete_date(business_date: str, db_path: str = ALOHA_SALES_DB_PATH) -> int:
     """Delete all rows for the given business_date. Returns rows deleted."""
     if not db_available(db_path):

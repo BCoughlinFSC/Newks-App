@@ -477,6 +477,58 @@
           <div id="flashBackfillMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;"></div>
         </div>
       </div>
+
+      <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
+
+      <!-- ─── Lubbock (Aloha POS) Upload ──────────────────────── -->
+      <div>
+        <div class="section-header">
+          <div>
+            <h2>Lubbock TX (Aloha POS)</h2>
+            <div class="user-count">Lubbock is still on Aloha &mdash; upload daily sales CSV from SSMS</div>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
+          <details style="margin-bottom:1rem;">
+            <summary style="cursor:pointer;font-weight:700;color:#1E3A5F;font-size:0.95rem;">SSMS Query Instructions</summary>
+            <div style="margin-top:0.75rem;background:#F8FAFC;border:1px solid #E5E7EB;border-radius:8px;padding:1rem;">
+              <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#374151;">1. Open SSMS and connect to the Aloha SQL Server</p>
+              <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#374151;">2. Run the query below (change the dates as needed)</p>
+              <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#374151;">3. Right-click results &rarr; Save Results As &rarr; CSV</p>
+              <p style="margin:0 0 0.75rem;font-size:0.85rem;color:#374151;">4. Upload the CSV below</p>
+              <pre style="background:#1E293B;color:#E2E8F0;padding:1rem;border-radius:6px;font-size:0.78rem;overflow-x:auto;white-space:pre;margin:0;">SELECT
+    CONVERT(VARCHAR(10), DateOfBusiness, 120)  AS business_date,
+    '1188'                                      AS location,
+    'Lubbock TX'                                AS restaurant_name,
+    ISNULL(SUM(NetSales), 0)                   AS net_sales,
+    ISNULL(SUM(OLONetSales), 0)                AS olo_net_sales,
+    ISNULL(SUM(DeliveryNetSales), 0)           AS delivery_net_sales,
+    ISNULL(SUM(CateringNetSales), 0)           AS catering_net_sales,
+    ISNULL(SUM(GNGNetSales), 0)                AS gng_net_sales,
+    ISNULL(SUM(ToGoNetSales), 0)               AS togo_net_sales,
+    ISNULL(SUM(CurbSideNetSales), 0)           AS curbside_net_sales,
+    0                                           AS curbside_olo_net_sales,
+    ISNULL(SUM(DineInNetSales), 0)             AS dinein_net_sales,
+    ISNULL(SUM(CallInNetSales), 0)             AS callin_net_sales,
+    0                                           AS olo_callin_net_sales,
+    ISNULL(SUM(CheckCount), 0)                 AS check_count,
+    ISNULL(SUM(CheckCount), 0)                 AS checks_minus_catering
+FROM dbo.tbl_SalesDataByDayPart
+WHERE DateOfBusiness BETWEEN '<strong>2026-03-01</strong>' AND '<strong>2026-03-26</strong>'
+  AND RestaurantID = '1188'
+GROUP BY DateOfBusiness
+ORDER BY DateOfBusiness</pre>
+            </div>
+          </details>
+
+          <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+            <input type="file" id="lubbockFile" accept=".csv" style="flex:1;min-width:200px;" />
+            <button class="btn-primary" id="lubbockUploadBtn" style="background:#7C3AED;">Upload Lubbock CSV</button>
+          </div>
+          <div id="lubbockUploadStatus" style="margin-top:0.75rem;font-size:0.85rem;display:none;"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ════════════════════════════════════════════════════ -->
@@ -1597,6 +1649,79 @@
     }
 
     // ──────────────────────────────────────────────────────
+    // Lubbock (Aloha POS) CSV Upload
+    // ──────────────────────────────────────────────────────
+
+    async function uploadLubbockCSV() {
+      const fileInput = document.getElementById('lubbockFile');
+      const statusEl = document.getElementById('lubbockUploadStatus');
+
+      if (!fileInput.files.length) {
+        statusEl.style.display = 'block';
+        statusEl.innerHTML = '<span style="color:#B45309;">Please select a CSV file first.</span>';
+        return;
+      }
+
+      statusEl.style.display = 'block';
+      statusEl.innerHTML = '<span style="color:#6B7280;">Parsing and uploading...</span>';
+
+      try {
+        const text = await fileInput.files[0].text();
+        const lines = text.trim().split('\n').filter(l => l.trim());
+        const COLS = [
+          'business_date', 'location', 'restaurant_name',
+          'net_sales', 'olo_net_sales', 'delivery_net_sales',
+          'catering_net_sales', 'gng_net_sales', 'togo_net_sales',
+          'curbside_net_sales', 'curbside_olo_net_sales', 'dinein_net_sales',
+          'callin_net_sales', 'olo_callin_net_sales', 'check_count',
+          'checks_minus_catering',
+        ];
+
+        const rows = [];
+        for (const line of lines) {
+          // Simple CSV parse (no quoted fields expected)
+          const parts = line.split(',').map(s => s.trim());
+          if (parts.length < 15 || !parts[0].startsWith('20')) continue;
+          const row = {};
+          for (let i = 0; i < COLS.length; i++) {
+            if (i < 3) row[COLS[i]] = parts[i] || '';
+            else row[COLS[i]] = parseFloat(parts[i]) || 0;
+          }
+          if (parts.length <= 15) row.checks_minus_catering = row.check_count;
+          rows.push(row);
+        }
+
+        if (rows.length === 0) {
+          statusEl.innerHTML = '<span style="color:#DC2626;">No valid data rows found in CSV. Expected format: date,location,name,net_sales,...</span>';
+          return;
+        }
+
+        const total = rows.reduce((s, r) => s + r.net_sales, 0);
+        statusEl.innerHTML = `<span style="color:#6B7280;">Uploading ${rows.length} rows ($${total.toLocaleString(undefined,{minimumFractionDigits:2})}) for ${rows[0].business_date} to ${rows[rows.length-1].business_date}...</span>`;
+
+        const resp = await fetch('/api/admin/aloha-sales/push-rows', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ rows }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        statusEl.innerHTML = `<span style="color:#059669;font-weight:600;">Success! Uploaded ${rows.length} rows for Lubbock TX (${rows[0].business_date} to ${rows[rows.length-1].business_date}). ${data.dates_updated || ''} dates updated.</span>`;
+        fileInput.value = '';
+
+        // Refresh flash sales stats
+        if (_tabLoaded['imports']) loadFlashSalesStats();
+      } catch (err) {
+        statusEl.innerHTML = `<span style="color:#DC2626;">Upload failed: ${escHtml(err.message)}</span>`;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
     // Database Health
     // ──────────────────────────────────────────────────────
 
@@ -2000,6 +2125,7 @@
       // Flash import buttons
       document.getElementById('runFlashImportBtn').addEventListener('click', runFlashImport);
       document.getElementById('flashBackfillBtn').addEventListener('click', startFlashBackfill);
+      document.getElementById('lubbockUploadBtn').addEventListener('click', uploadLubbockCSV);
 
       // Database health + toast config buttons
       document.getElementById('refreshDbHealthBtn').addEventListener('click', loadDbHealth);
