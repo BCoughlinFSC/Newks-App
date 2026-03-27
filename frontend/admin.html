@@ -60,6 +60,38 @@
     .header-user-name { font-weight: 600; }
     .header-user-role { opacity: 0.75; font-size: 0.78rem; text-transform: capitalize; }
 
+    /* ─── Tab bar ────────────────────────────────────── */
+    .admin-tabs {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 2rem;
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid #E5E7EB;
+      background: #fff;
+      overflow-x: auto;
+    }
+    .admin-tab {
+      padding: 0.75rem 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #6B7280;
+      cursor: pointer;
+      border: none;
+      background: none;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .admin-tab:hover { color: #1E3A5F; }
+    .admin-tab.active {
+      color: #C41E3A;
+      border-bottom-color: #C41E3A;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
     /* ─── Status toast ───────────────────────────────── */
     .status-bar {
       max-width: 1100px;
@@ -318,6 +350,16 @@
     </div>
   </header>
 
+  <!-- ─── Tab Bar ────────────────────────────────────────── -->
+  <nav class="admin-tabs" id="adminTabs">
+    <button class="admin-tab active" data-tab="users">Users</button>
+    <button class="admin-tab" data-tab="imports">Data Imports</button>
+    <button class="admin-tab" data-tab="crunchtime">CrunchTime</button>
+    <button class="admin-tab" data-tab="dbhealth">Database Health</button>
+    <button class="admin-tab" data-tab="toastconfig">Toast Config</button>
+    <button class="admin-tab" data-tab="validation">Validation</button>
+  </nav>
+
   <!-- ─── Status toast ─────────────────────────────────── -->
   <div class="status-bar">
     <div id="adminStatus" class="status"></div>
@@ -325,106 +367,145 @@
 
   <!-- ─── Main content ─────────────────────────────────── -->
   <main class="admin-content">
-    <div class="section-header">
+
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- TAB: Users                                          -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="tab-panel active" id="tab-users">
+      <div class="section-header">
+        <div>
+          <h2>Users</h2>
+          <div class="user-count" id="userCount"></div>
+        </div>
+        <button class="btn-primary" id="createUserBtn">+ Invite New User</button>
+      </div>
+      <div class="table-wrapper">
+        <div id="usersList">
+          <div class="state-msg">
+            <div class="icon">&#9203;</div>
+            Loading users&hellip;
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- TAB: Data Imports (Orders Cache + Flash Import)     -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="tab-panel" id="tab-imports">
+
+      <!-- ─── Orders Cache Section ──────────────────────── -->
       <div>
-        <h2>Users</h2>
-        <div class="user-count" id="userCount"></div>
+        <div class="section-header">
+          <div>
+            <h2>Orders Cache</h2>
+            <div class="user-count" id="cacheSubtitle">Local SQLite cache of Toast Orders API data</div>
+          </div>
+          <div style="display:flex;gap:0.5rem;">
+            <button class="btn-primary" id="runNightlyBtn" style="background:#1E3A5F;">Run Nightly Job</button>
+            <button class="btn-primary" id="retryFailedBtn" style="background:#B45309;">Retry Failed</button>
+          </div>
+        </div>
+
+        <!-- Stats cards -->
+        <div id="cacheStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem;">
+          <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading cache stats&hellip;</div>
+        </div>
+
+        <!-- Backfill form -->
+        <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+          <h3 style="margin:0 0 0.75rem;color:#1E3A5F;font-size:1rem;">Backfill Orders</h3>
+          <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+              <input type="date" id="backfillStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+              <input type="date" id="backfillEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.85rem;color:#374151;padding-bottom:0.1rem;">
+              <input type="checkbox" id="backfillOverwrite" /> Overwrite
+            </label>
+            <button class="btn-primary" id="backfillBtn">Start Backfill</button>
+          </div>
+        </div>
+
+        <!-- Failed imports table -->
+        <div id="failedImports"></div>
+
+        <!-- Scheduler info -->
+        <div id="schedulerInfo" style="margin-top:1rem;font-size:0.82rem;color:#6B7280;"></div>
       </div>
-      <button class="btn-primary" id="createUserBtn">+ Invite New User</button>
-    </div>
-    <div class="table-wrapper">
-      <div id="usersList">
-        <div class="state-msg">
-          <div class="icon">&#9203;</div>
-          Loading users&hellip;
+
+      <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
+
+      <!-- ─── Flash Sales Import Section ──────────────────────── -->
+      <div>
+        <div class="section-header">
+          <div>
+            <h2>Flash Sales Import</h2>
+            <div class="user-count">Toast ERA API &rarr; aloha_sales_db (replaces SQL Server ETL) &mdash; Runs nightly at 4 AM with auto gap-fill</div>
+          </div>
+          <div style="display:flex;gap:0.5rem;">
+            <button class="btn-primary" id="runFlashImportBtn" style="background:#1E3A5F;">Run Yesterday</button>
+          </div>
+        </div>
+
+        <!-- Flash Sales DB Stats -->
+        <div id="flashSalesStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1rem;"></div>
+
+        <!-- Last run status -->
+        <div id="flashImportStatus" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem;">
+          <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading status&hellip;</div>
+        </div>
+
+        <!-- Backfill form -->
+        <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+          <h3 style="margin:0 0 0.75rem;color:#1E3A5F;font-size:1rem;">Backfill Flash Sales</h3>
+          <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+              <input type="date" id="flashBackfillStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+              <input type="date" id="flashBackfillEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <button class="btn-primary" id="flashBackfillBtn">Start Backfill</button>
+          </div>
+          <div id="flashBackfillMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;"></div>
         </div>
       </div>
     </div>
 
-    <!-- ─── Orders Cache Section ──────────────────────── -->
-    <div style="margin-top:2.5rem;">
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- TAB: CrunchTime                                     -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="tab-panel" id="tab-crunchtime">
       <div class="section-header">
         <div>
-          <h2>Orders Cache</h2>
-          <div class="user-count" id="cacheSubtitle">Local SQLite cache of Toast Orders API data</div>
-        </div>
-        <div style="display:flex;gap:0.5rem;">
-          <button class="btn-primary" id="runNightlyBtn" style="background:#1E3A5F;">Run Nightly Job</button>
-          <button class="btn-primary" id="retryFailedBtn" style="background:#B45309;">Retry Failed</button>
+          <h2>CrunchTime / Sigma Import</h2>
+          <div class="user-count">Upload weekly Sigma (BizIQ) Excel export to update food cost data</div>
         </div>
       </div>
 
-      <!-- Stats cards -->
-      <div id="cacheStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem;">
-        <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading cache stats&hellip;</div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+          <input type="file" id="sigmaFile" accept=".xlsx,.xls" style="flex:1;min-width:200px;" />
+          <button onclick="uploadSigmaFile()" class="btn" style="background:#DC2626;color:#fff;">Upload &amp; Import</button>
+        </div>
+        <div id="sigmaUploadStatus" style="margin-top:0.75rem;display:none;"></div>
       </div>
 
-      <!-- Backfill form -->
-      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
-        <h3 style="margin:0 0 0.75rem;color:#1E3A5F;font-size:1rem;">Backfill Orders</h3>
-        <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
-          <div>
-            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
-            <input type="date" id="backfillStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
-          </div>
-          <div>
-            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
-            <input type="date" id="backfillEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
-          </div>
-          <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.85rem;color:#374151;padding-bottom:0.1rem;">
-            <input type="checkbox" id="backfillOverwrite" /> Overwrite
-          </label>
-          <button class="btn-primary" id="backfillBtn">Start Backfill</button>
-        </div>
-      </div>
-
-      <!-- Failed imports table -->
-      <div id="failedImports"></div>
-
-      <!-- Scheduler info -->
-      <div id="schedulerInfo" style="margin-top:1rem;font-size:0.82rem;color:#6B7280;"></div>
-    </div>
-
-    <!-- ─── Flash Sales Import Section ──────────────────────── -->
-    <div style="margin-top:2.5rem;">
-      <div class="section-header">
-        <div>
-          <h2>Flash Sales Import</h2>
-          <div class="user-count">Toast ERA API &rarr; aloha_sales_db (replaces SQL Server ETL)</div>
-        </div>
-        <div style="display:flex;gap:0.5rem;">
-          <button class="btn-primary" id="runFlashImportBtn" style="background:#1E3A5F;">Run Yesterday</button>
-        </div>
-      </div>
-
-      <!-- Flash Sales DB Stats -->
-      <div id="flashSalesStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1rem;"></div>
-
-      <!-- Last run status -->
-      <div id="flashImportStatus" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem;">
-        <div class="state-msg" style="grid-column:1/-1;"><div class="icon">&#9203;</div>Loading status&hellip;</div>
-      </div>
-
-      <!-- Backfill form -->
-      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
-        <h3 style="margin:0 0 0.75rem;color:#1E3A5F;font-size:1rem;">Backfill Flash Sales</h3>
-        <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
-          <div>
-            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
-            <input type="date" id="flashBackfillStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
-          </div>
-          <div>
-            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
-            <input type="date" id="flashBackfillEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
-          </div>
-          <button class="btn-primary" id="flashBackfillBtn">Start Backfill</button>
-        </div>
-        <div id="flashBackfillMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;"></div>
+      <div id="sigmaUploadResult" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;">
       </div>
     </div>
 
-    <!-- ─── Database Health Section ──────────────────────── -->
-    <div style="margin-top:2.5rem;">
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- TAB: Database Health                                -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="tab-panel" id="tab-dbhealth">
       <div class="section-header">
         <div>
           <h2>Database Health</h2>
@@ -438,8 +519,10 @@
       </div>
     </div>
 
-    <!-- ─── Toast Config Sync Section ──────────────────────── -->
-    <div style="margin-top:2.5rem;">
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- TAB: Toast Config                                   -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="tab-panel" id="tab-toastconfig">
       <div class="section-header">
         <div>
           <h2>Toast Menu Config</h2>
@@ -461,33 +544,14 @@
       </div>
     </div>
 
-    <!-- ─── CrunchTime / Sigma Upload ──────────────────────── -->
-    <div class="section-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
-        <div>
-          <h2>CrunchTime / Sigma Import</h2>
-          <div class="user-count">Upload weekly Sigma (BizIQ) Excel export to update food cost data</div>
-        </div>
-      </div>
-
-      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
-        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
-          <input type="file" id="sigmaFile" accept=".xlsx,.xls" style="flex:1;min-width:200px;" />
-          <button onclick="uploadSigmaFile()" class="btn" style="background:#DC2626;color:#fff;">Upload &amp; Import</button>
-        </div>
-        <div id="sigmaUploadStatus" style="margin-top:0.75rem;display:none;"></div>
-      </div>
-
-      <div id="sigmaUploadResult" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;">
-      </div>
-    </div>
-
-    <!-- ─── Validation Reports ───────────────────────────── -->
-    <div class="section-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- TAB: Validation                                     -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="tab-panel" id="tab-validation">
+      <div class="section-header">
         <div>
           <h2>Validation Reports</h2>
-          <p class="text-muted">Compare ERA net sales vs order-level data, and CY vs LY item counts</p>
+          <div class="user-count">Compare ERA net sales vs order-level data, and CY vs LY item counts</div>
         </div>
       </div>
 
@@ -535,6 +599,7 @@
         <div id="valItemResult" style="margin-top:1rem;"></div>
       </div>
     </div>
+
   </main>
 
   <!-- ─── Auth Modal ───────────────────────────────────── -->
@@ -656,7 +721,56 @@
   <script>
     let authToken = null;
     let currentUser = null;
-    let _availablePages = {}; // fetched from /api/available-pages
+    let _availablePages = {};
+
+    // Track which tabs have been loaded (lazy loading)
+    const _tabLoaded = {};
+
+    // ──────────────────────────────────────────────────────
+    // Tab Navigation
+    // ──────────────────────────────────────────────────────
+    function switchTab(tabId) {
+      // Update tab buttons
+      document.querySelectorAll('.admin-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabId);
+      });
+      // Update tab panels
+      document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.id === `tab-${tabId}`);
+      });
+      // Save to localStorage
+      localStorage.setItem('admin_active_tab', tabId);
+      // Lazy load data for this tab
+      loadTabData(tabId);
+    }
+
+    function loadTabData(tabId) {
+      if (_tabLoaded[tabId]) return;
+      _tabLoaded[tabId] = true;
+      switch (tabId) {
+        case 'users':
+          loadAdminUsers();
+          break;
+        case 'imports':
+          loadCacheStats();
+          loadFailedImports();
+          loadFlashSalesStats();
+          loadFlashImportStatus();
+          break;
+        case 'crunchtime':
+          // Nothing to preload — user uploads manually
+          break;
+        case 'dbhealth':
+          loadDbHealth();
+          break;
+        case 'toastconfig':
+          loadToastConfigStats();
+          break;
+        case 'validation':
+          // Nothing to preload — user triggers manually
+          break;
+      }
+    }
 
     // ──────────────────────────────────────────────────────
     // Helpers
@@ -776,7 +890,9 @@
         document.getElementById('authModal').classList.add('hidden');
         updateHeaderUser();
         showStatus('success', `Welcome, ${currentUser.name}!`);
-        await loadAdminUsers();
+        // Load the active tab data
+        const activeTab = localStorage.getItem('admin_active_tab') || 'users';
+        switchTab(activeTab);
       } catch (err) {
         showStatus('error', `Login failed: ${err.message}`);
       } finally {
@@ -1025,7 +1141,6 @@
         return;
       }
 
-      // Collect selected pages
       const allowedPages = Array.from(
         document.querySelectorAll('#createUserPagesGrid .page-cb:checked')
       ).map(cb => cb.value);
@@ -1055,7 +1170,7 @@
     }
 
     // ──────────────────────────────────────────────────────
-    // Assign Pages (admin sets per-user report access)
+    // Assign Pages
     // ──────────────────────────────────────────────────────
     let _assignPagesTargetUserId = null;
 
@@ -1119,7 +1234,7 @@
     }
 
     // ──────────────────────────────────────────────────────
-    // Assign Restaurants (admin sets per-user location access)
+    // Assign Restaurants
     // ──────────────────────────────────────────────────────
     let _assignTargetUserId = null;
     let _assignAllLocs = [];
@@ -1232,7 +1347,6 @@
           card('DB Size', `${(s.db_size_mb||0).toFixed(1)} MB`, '#6B7280') +
           card('Failed', s.failed_count||0, s.failed_count > 0 ? '#DC2626' : '#059669');
 
-        // Scheduler info
         const infoEl = document.getElementById('schedulerInfo');
         let info = '';
         if (s.scheduler?.last_run) {
@@ -1282,11 +1396,11 @@
           method: 'POST', headers: getAuthHeaders()
         });
         if (resp.ok) {
-          showStatus('Nightly job started. Check back in a few minutes.', 'success');
+          showStatus('success', 'Nightly job started. Check back in a few minutes.');
         } else {
-          showStatus('Failed to start nightly job', 'error');
+          showStatus('error', 'Failed to start nightly job');
         }
-      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+      } catch (err) { showStatus('error', 'Error: ' + err.message); }
     }
 
     async function retryFailed() {
@@ -1297,18 +1411,18 @@
         });
         if (resp.ok) {
           const data = await resp.json();
-          showStatus(`Retrying ${data.count} failed imports in background.`, 'success');
+          showStatus('success', `Retrying ${data.count} failed imports in background.`);
         } else {
-          showStatus('Failed to start retry', 'error');
+          showStatus('error', 'Failed to start retry');
         }
-      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+      } catch (err) { showStatus('error', 'Error: ' + err.message); }
     }
 
     async function startBackfill() {
       const startDate = document.getElementById('backfillStart').value;
       const endDate = document.getElementById('backfillEnd').value;
       const overwrite = document.getElementById('backfillOverwrite').checked;
-      if (!startDate || !endDate) { showStatus('Please select start and end dates', 'error'); return; }
+      if (!startDate || !endDate) { showStatus('error', 'Please select start and end dates'); return; }
       if (!confirm(`Backfill orders from ${startDate} to ${endDate}${overwrite ? ' (OVERWRITE)' : ''}?`)) return;
       try {
         const params = new URLSearchParams({ start_date: startDate, end_date: endDate, overwrite });
@@ -1316,11 +1430,11 @@
           method: 'POST', headers: getAuthHeaders()
         });
         if (resp.ok) {
-          showStatus(`Backfill started: ${startDate} to ${endDate}. This runs in the background.`, 'success');
+          showStatus('success', `Backfill started: ${startDate} to ${endDate}. This runs in the background.`);
         } else {
-          showStatus('Failed to start backfill', 'error');
+          showStatus('error', 'Failed to start backfill');
         }
-      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+      } catch (err) { showStatus('error', 'Error: ' + err.message); }
     }
 
     // ──────────────────────────────────────────────────────
@@ -1338,12 +1452,12 @@
             <div style="font-size:0.72rem;color:#6B7280;margin-bottom:0.2rem;text-transform:uppercase;">${label}</div>
             <div style="font-size:1.1rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
           </div>`;
-        const fmt = n => n != null ? Number(n).toLocaleString() : '—';
+        const fmt = n => n != null ? Number(n).toLocaleString() : '\u2014';
         el.innerHTML =
           card('Rows', fmt(s.total_rows)) +
           card('Dates', fmt(s.date_count)) +
           card('Locations', fmt(s.location_count)) +
-          card('Date Range', s.min_date && s.max_date ? `${s.min_date} — ${s.max_date}` : '—', '#374151') +
+          card('Date Range', s.min_date && s.max_date ? `${s.min_date} — ${s.max_date}` : '\u2014', '#374151') +
           card('DB Size', `${(s.db_size_mb||0).toFixed(1)} MB`);
       } catch (e) {
         el.innerHTML = '';
@@ -1367,7 +1481,6 @@
         const p = s.progress;
         let html = '';
 
-        // Show progress banner if running
         if (p && p.running) {
           const pct = p.total_days > 0 ? Math.round((p.completed_days / p.total_days) * 100) : 0;
           const failCount = (p.failed_dates || []).length;
@@ -1387,15 +1500,12 @@
               ${failCount > 0 ? ` &mdash; <span style="color:#DC2626;">${failCount} failed</span>` : ''}
             </div>
           </div>`;
-          // Disable buttons while running
           document.getElementById('runFlashImportBtn').disabled = true;
           document.getElementById('flashBackfillBtn').disabled = true;
-          // Auto-refresh while running
           if (!_flashPollTimer) {
             _flashPollTimer = setInterval(loadFlashImportStatus, 3000);
           }
         } else {
-          // Stop polling when done, re-enable buttons
           if (_flashPollTimer) {
             clearInterval(_flashPollTimer);
             _flashPollTimer = null;
@@ -1403,7 +1513,6 @@
           document.getElementById('runFlashImportBtn').disabled = false;
           document.getElementById('flashBackfillBtn').disabled = false;
 
-          // Show completion banner if just finished
           if (p && !p.running && p.completed_at) {
             const failCount = (p.failed_dates || []).length;
             html += `<div style="grid-column:1/-1;background:${failCount > 0 ? '#FEF2F2' : '#F0FDF4'};border:1px solid ${failCount > 0 ? '#FCA5A5' : '#86EFAC'};border-radius:10px;padding:1rem;margin-bottom:0.5rem;">
@@ -1419,17 +1528,16 @@
           }
         }
 
-        // Last completed import cards
         if (s.status === 'never_run' && !p) {
           html += `<div style="grid-column:1/-1;color:#6B7280;font-size:0.85rem;">No flash import has run yet.</div>`;
         } else if (s.status && s.status !== 'never_run') {
           html +=
             card('Last Status', s.status === 'success' ? 'OK' : 'Failed', s.status === 'success' ? '#059669' : '#DC2626') +
-            card('Last Date', s.business_date || '—', '#374151') +
+            card('Last Date', s.business_date || '\u2014', '#374151') +
             card('Locations', s.locations || 0, '#1E3A5F') +
             card('Rows', s.rows_inserted || 0, '#1E3A5F') +
             card('GNG Total', '$' + (s.gng_total || 0).toLocaleString(undefined, {minimumFractionDigits:2}), '#7C3AED') +
-            card('Completed', s.completed_at ? new Date(s.completed_at).toLocaleString() : '—', '#6B7280');
+            card('Completed', s.completed_at ? new Date(s.completed_at).toLocaleString() : '\u2014', '#6B7280');
         }
         el.innerHTML = html;
       } catch (err) {
@@ -1446,18 +1554,18 @@
           body: JSON.stringify({})
         });
         if (resp.ok) {
-          showStatus('Flash import started for yesterday.', 'success');
-          loadFlashImportStatus();  // Immediately refresh to show progress
+          showStatus('success', 'Flash import started for yesterday.');
+          loadFlashImportStatus();
         } else {
-          showStatus('Failed to start flash import', 'error');
+          showStatus('error', 'Failed to start flash import');
         }
-      } catch (err) { showStatus('Error: ' + err.message, 'error'); }
+      } catch (err) { showStatus('error', 'Error: ' + err.message); }
     }
 
     async function startFlashBackfill() {
       const startDate = document.getElementById('flashBackfillStart').value;
       const endDate = document.getElementById('flashBackfillEnd').value;
-      if (!startDate || !endDate) { showStatus('Please select start and end dates', 'error'); return; }
+      if (!startDate || !endDate) { showStatus('error', 'Please select start and end dates'); return; }
       if (!confirm(`Backfill flash sales from ${startDate} to ${endDate}? This may take a while for large ranges.`)) return;
       const msgEl = document.getElementById('flashBackfillMsg');
       try {
@@ -1469,7 +1577,7 @@
           const data = await resp.json();
           msgEl.textContent = `Backfill started: ${data.range} (${data.total_days} days). Watch progress above.`;
           msgEl.style.color = '#059669';
-          loadFlashImportStatus();  // Immediately refresh to show progress bar
+          loadFlashImportStatus();
         } else {
           msgEl.textContent = 'Failed to start backfill';
           msgEl.style.color = '#DC2626';
@@ -1520,19 +1628,19 @@
           </div>`;
         };
 
-        const fmt = n => n != null ? Number(n).toLocaleString() : '—';
+        const fmt = n => n != null ? Number(n).toLocaleString() : '\u2014';
         let html = '';
 
         // Aloha (YoY Menu Items)
         if (aloha) {
-          html += dbCard('aloha.db', '#7C3AED', `${(aloha.db_size_mb||0).toFixed(0)} MB`, [
+          html += dbCard('aloha.db (YoY Menu Data)', '#7C3AED', `${(aloha.db_size_mb||0).toFixed(0)} MB`, [
             ['Rows', fmt(aloha.total_rows)],
             ['Dates', fmt(aloha.date_count)],
             ['Locations', fmt(aloha.location_count)],
-            ['Range', aloha.min_date && aloha.max_date ? `${aloha.min_date} to ${aloha.max_date}` : '—', '#374151'],
+            ['Range', aloha.min_date && aloha.max_date ? `${aloha.min_date} to ${aloha.max_date}` : '\u2014', '#374151'],
           ]);
         } else {
-          html += dbCard('aloha.db', '#7C3AED', '—', [['Status', 'Not available', '#DC2626']]);
+          html += dbCard('aloha.db (YoY Menu Data)', '#7C3AED', '\u2014', [['Status', 'Not imported \u2014 menu YoY data only needed if running menu reports', '#B45309']]);
         }
 
         // Aloha Sales
@@ -1540,10 +1648,10 @@
           html += dbCard('aloha_sales.db', '#2563EB', `${(sales.db_size_mb||0).toFixed(1)} MB`, [
             ['Rows', fmt(sales.total_rows)],
             ['Locations', fmt(sales.location_count)],
-            ['Range', sales.min_date && sales.max_date ? `${sales.min_date} to ${sales.max_date}` : '—', '#374151'],
+            ['Range', sales.min_date && sales.max_date ? `${sales.min_date} to ${sales.max_date}` : '\u2014', '#374151'],
           ]);
         } else {
-          html += dbCard('aloha_sales.db', '#2563EB', '—', [['Status', 'Not available', '#DC2626']]);
+          html += dbCard('aloha_sales.db', '#2563EB', '\u2014', [['Status', 'Not available', '#DC2626']]);
         }
 
         // Orders Cache
@@ -1555,7 +1663,7 @@
             ['Failed', fmt(orders.failed_count), orders.failed_count > 0 ? '#DC2626' : '#059669'],
           ]);
         } else {
-          html += dbCard('orders.db', '#0891B2', '—', [['Status', 'Not available', '#DC2626']]);
+          html += dbCard('orders.db', '#0891B2', '\u2014', [['Status', 'Not available', '#DC2626']]);
         }
 
         // Toast Config
@@ -1567,7 +1675,7 @@
             ['Stores', fmt(config.stores)],
           ]);
         } else {
-          html += dbCard('toast_config.db', '#059669', '—', [['Status', 'Not synced yet', '#B45309']]);
+          html += dbCard('toast_config.db', '#059669', '\u2014', [['Status', 'Not synced yet', '#B45309']]);
         }
 
         // Monkey (Catering)
@@ -1579,7 +1687,7 @@
             ['Stores', fmt(monkey.stores)],
           ]);
         } else {
-          html += dbCard('monkey.db', '#D97706', '—', [['Status', 'Not imported yet', '#B45309']]);
+          html += dbCard('monkey.db', '#D97706', '\u2014', [['Status', 'Not imported yet', '#B45309']]);
         }
 
         // CrunchTime (Food Cost)
@@ -1591,7 +1699,7 @@
             ['Gross Profit', fmt(ct.gross_profit_by_item)],
           ]);
         } else {
-          html += dbCard('crunchtime.db', '#DC2626', '—', [['Status', 'Not imported yet', '#B45309']]);
+          html += dbCard('crunchtime.db', '#DC2626', '\u2014', [['Status', 'Not imported yet', '#B45309']]);
         }
 
         el.innerHTML = html;
@@ -1664,76 +1772,18 @@
         html += `</div>`;
 
         resultEl.innerHTML = html;
-        showStatus(`${label} completed successfully`, 'success');
+        showStatus('success', `${label} completed successfully`);
         loadToastConfigStats();
-        loadDbHealth();
+        // Refresh DB health if that tab has been loaded
+        if (_tabLoaded['dbhealth']) loadDbHealth();
       } catch (err) {
         resultEl.innerHTML = `<div style="color:#991B1B;font-size:0.85rem;">Error: ${escHtml(err.message)}</div>`;
-        showStatus(`${label} failed: ${err.message}`, 'error');
+        showStatus('error', `${label} failed: ${err.message}`);
       } finally {
         btn.disabled = false;
         btn.textContent = orig;
       }
     }
-
-    // ──────────────────────────────────────────────────────
-    // Init
-    // ──────────────────────────────────────────────────────
-    document.addEventListener('DOMContentLoaded', async () => {
-      // Wire up event listeners
-      document.getElementById('authForm').addEventListener('submit', handleAuth);
-      document.getElementById('logoutBtn').addEventListener('click', logout);
-      document.getElementById('createUserBtn').addEventListener('click', async () => {
-        renderPagesCheckboxes('createUserPagesGrid', []);
-        document.getElementById('createUserModal').classList.remove('hidden');
-      });
-      document.getElementById('closeCreateUserModal').addEventListener('click', () => {
-        document.getElementById('createUserModal').classList.add('hidden');
-      });
-      document.getElementById('cancelCreateUserBtn').addEventListener('click', () => {
-        document.getElementById('createUserModal').classList.add('hidden');
-      });
-      document.getElementById('createUserForm').addEventListener('submit', createUser);
-
-      // Assign pages modal
-      document.getElementById('closeAssignPagesModal').addEventListener('click', closeAssignPagesModal);
-      document.getElementById('cancelAssignPagesBtn').addEventListener('click', closeAssignPagesModal);
-      document.getElementById('saveAssignPagesBtn').addEventListener('click', saveAssignedPages);
-      document.getElementById('selectAllAssignPages').addEventListener('change', toggleAllAssignPages);
-
-      // Assign restaurants modal
-      document.getElementById('closeAssignRestaurantsModal').addEventListener('click', closeAssignRestaurantsModal);
-      document.getElementById('cancelAssignRestaurantsBtn').addEventListener('click', closeAssignRestaurantsModal);
-      document.getElementById('saveAssignRestaurantsBtn').addEventListener('click', saveAssignedRestaurants);
-      document.getElementById('selectAllAssignRestaurants').addEventListener('change', toggleAllAssignRestaurants);
-
-      // Orders cache buttons
-      document.getElementById('runNightlyBtn').addEventListener('click', runNightlyJob);
-      document.getElementById('retryFailedBtn').addEventListener('click', retryFailed);
-      document.getElementById('backfillBtn').addEventListener('click', startBackfill);
-
-      // Flash import buttons
-      document.getElementById('runFlashImportBtn').addEventListener('click', runFlashImport);
-      document.getElementById('flashBackfillBtn').addEventListener('click', startFlashBackfill);
-
-      // Database health + toast config buttons
-      document.getElementById('refreshDbHealthBtn').addEventListener('click', loadDbHealth);
-      document.getElementById('syncAllConfigBtn').addEventListener('click', () => syncToastConfig('all'));
-      document.getElementById('rebuildAttrMapBtn').addEventListener('click', () => syncToastConfig('attribute-map'));
-
-      // Auth gate
-      const isAuth = await checkAuth();
-      if (isAuth) {
-        await loadAvailablePages();
-        await loadAdminUsers();
-        loadCacheStats();
-        loadFailedImports();
-        loadFlashSalesStats();
-        loadFlashImportStatus();
-        loadDbHealth();
-        loadToastConfigStats();
-      }
-    });
 
     // ──────────────────────────────────────────────────────
     // CrunchTime / Sigma Upload
@@ -1788,8 +1838,7 @@
         resultEl.innerHTML = html;
         resultEl.style.display = 'block';
 
-        // Refresh DB health
-        loadDbHealth();
+        if (_tabLoaded['dbhealth']) loadDbHealth();
       } catch (e) {
         statusEl.innerHTML = `<span style="color:#DC2626;">Upload failed: ${e.message}</span>`;
       }
@@ -1825,7 +1874,6 @@
         </div>`;
 
         if (data.rows.length) {
-          // Only show rows with discrepancies > threshold
           const flagged = data.rows.filter(r => Math.abs(r.difference) > s.threshold);
           if (flagged.length) {
             html += `<p style="font-size:0.85rem;color:#6B7280;margin-bottom:0.5rem;">${flagged.length} rows with discrepancy > $${s.threshold} (sorted by largest)</p>`;
@@ -1897,6 +1945,66 @@
         el.innerHTML = `<p style="color:#EF4444;">Error: ${err.message}</p>`;
       }
     }
+
+    // ──────────────────────────────────────────────────────
+    // Init
+    // ──────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Wire up tab clicks
+      document.querySelectorAll('.admin-tab').forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+      });
+
+      // Wire up event listeners
+      document.getElementById('authForm').addEventListener('submit', handleAuth);
+      document.getElementById('logoutBtn').addEventListener('click', logout);
+      document.getElementById('createUserBtn').addEventListener('click', async () => {
+        renderPagesCheckboxes('createUserPagesGrid', []);
+        document.getElementById('createUserModal').classList.remove('hidden');
+      });
+      document.getElementById('closeCreateUserModal').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.add('hidden');
+      });
+      document.getElementById('cancelCreateUserBtn').addEventListener('click', () => {
+        document.getElementById('createUserModal').classList.add('hidden');
+      });
+      document.getElementById('createUserForm').addEventListener('submit', createUser);
+
+      // Assign pages modal
+      document.getElementById('closeAssignPagesModal').addEventListener('click', closeAssignPagesModal);
+      document.getElementById('cancelAssignPagesBtn').addEventListener('click', closeAssignPagesModal);
+      document.getElementById('saveAssignPagesBtn').addEventListener('click', saveAssignedPages);
+      document.getElementById('selectAllAssignPages').addEventListener('change', toggleAllAssignPages);
+
+      // Assign restaurants modal
+      document.getElementById('closeAssignRestaurantsModal').addEventListener('click', closeAssignRestaurantsModal);
+      document.getElementById('cancelAssignRestaurantsBtn').addEventListener('click', closeAssignRestaurantsModal);
+      document.getElementById('saveAssignRestaurantsBtn').addEventListener('click', saveAssignedRestaurants);
+      document.getElementById('selectAllAssignRestaurants').addEventListener('change', toggleAllAssignRestaurants);
+
+      // Orders cache buttons
+      document.getElementById('runNightlyBtn').addEventListener('click', runNightlyJob);
+      document.getElementById('retryFailedBtn').addEventListener('click', retryFailed);
+      document.getElementById('backfillBtn').addEventListener('click', startBackfill);
+
+      // Flash import buttons
+      document.getElementById('runFlashImportBtn').addEventListener('click', runFlashImport);
+      document.getElementById('flashBackfillBtn').addEventListener('click', startFlashBackfill);
+
+      // Database health + toast config buttons
+      document.getElementById('refreshDbHealthBtn').addEventListener('click', loadDbHealth);
+      document.getElementById('syncAllConfigBtn').addEventListener('click', () => syncToastConfig('all'));
+      document.getElementById('rebuildAttrMapBtn').addEventListener('click', () => syncToastConfig('attribute-map'));
+
+      // Auth gate
+      const isAuth = await checkAuth();
+      if (isAuth) {
+        await loadAvailablePages();
+        // Restore last active tab or default to users
+        const savedTab = localStorage.getItem('admin_active_tab') || 'users';
+        switchTab(savedTab);
+      }
+    });
   </script>
 </body>
 </html>

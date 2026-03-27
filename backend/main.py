@@ -5536,6 +5536,44 @@ async def nightly_flash_import_job():
             "status": "success",
         })
 
+        # ── Auto-backfill: check last 14 days for missing/partial data ──
+        try:
+            backfilled = 0
+            max_backfill = 7  # Cap per nightly run to avoid overloading
+            check_start = date.today() - timedelta(days=14)
+            check_end = date.today() - timedelta(days=2)  # Skip yesterday (just imported)
+            conn_check = aloha_sales_db.get_connection()
+            try:
+                gap_rows = conn_check.execute(
+                    "SELECT business_date, COUNT(*) as cnt "
+                    "FROM aloha_sales_data "
+                    "WHERE business_date BETWEEN ? AND ? "
+                    "GROUP BY business_date",
+                    (check_start.isoformat(), check_end.isoformat())
+                ).fetchall()
+            finally:
+                conn_check.close()
+
+            existing = {row[0]: row[1] for row in gap_rows}
+            d = check_start
+            while d <= check_end and backfilled < max_backfill:
+                d_str = d.isoformat()
+                row_count = existing.get(d_str, 0)
+                if row_count < 80:
+                    logger.info("Flash auto-backfill: %s has %d rows (< 80), re-importing", d_str, row_count)
+                    try:
+                        await _run_flash_import_for_date(d)
+                        backfilled += 1
+                    except Exception as bf_exc:
+                        logger.warning("Flash auto-backfill failed for %s: %s", d_str, bf_exc)
+                d += timedelta(days=1)
+
+            if backfilled > 0:
+                logger.info("Flash auto-backfill: filled %d gap dates", backfilled)
+                _nightly_flash_last_result["auto_backfilled"] = backfilled
+        except Exception as gap_exc:
+            logger.warning("Flash auto-backfill gap check failed: %s", gap_exc)
+
     except Exception as exc:
         logger.error("Nightly flash import failed: %s", exc, exc_info=True)
         _nightly_flash_last_result.update({
