@@ -5155,6 +5155,36 @@ async def nightly_orders_cache_job():
     logger.info("Nightly orders cache completed: %d success, %d failed, %d skipped",
                 success_count, fail_count, skipped_count)
 
+    # ── Auto-retry previously failed imports ──
+    try:
+        failed_imports = toast_orders_db.get_failed_imports()
+        if failed_imports:
+            retry_count = 0
+            retry_success = 0
+            max_retries = 50  # Cap per nightly run
+            logger.info("Nightly orders cache: retrying %d previously failed imports (max %d)",
+                        len(failed_imports), max_retries)
+            async with httpx.AsyncClient(timeout=120.0) as retry_client:
+                for fi in failed_imports[:max_retries]:
+                    rguid = fi.get("restaurant_guid", "")
+                    bdate = fi.get("business_date", "")
+                    if not rguid or not bdate:
+                        continue
+                    retry_count += 1
+                    try:
+                        orders = await _fetch_orders_from_toast_api(retry_client, rguid, bdate)
+                        toast_orders_db.store_orders(rguid, bdate, orders)
+                        retry_success += 1
+                        await asyncio.sleep(0.5)
+                    except Exception as retry_exc:
+                        logger.debug("Retry still failing for %s|%s: %s", rguid[:8], bdate, retry_exc)
+            if retry_count > 0:
+                logger.info("Nightly auto-retry: %d/%d succeeded", retry_success, retry_count)
+                _nightly_job_last_result["retried"] = retry_count
+                _nightly_job_last_result["retry_success"] = retry_success
+    except Exception as retry_exc:
+        logger.warning("Nightly auto-retry failed: %s", retry_exc)
+
 
 # Schedule: run at 3:00 AM daily (after Toast closeout typically settles)
 _scheduler.add_job(nightly_orders_cache_job, CronTrigger(hour=3, minute=0),
@@ -12183,13 +12213,24 @@ async def get_available_aloha_dates():
 @app.get("/api/yoy/aloha-stats")
 async def get_aloha_stats():
     """Return summary statistics about the Aloha SQLite database."""
-    stats = await asyncio.to_thread(aloha_db.get_stats)
+    # aloha.db can be 7+ GB — use a fast check instead of full table scan
+    available = await asyncio.to_thread(aloha_db.db_available)
+    if not available:
+        return {"db_available": False}
+    try:
+        stats = await asyncio.wait_for(asyncio.to_thread(aloha_db.get_stats), timeout=10.0)
+    except asyncio.TimeoutError:
+        # Full table scan timed out — return what we can
+        import os as _os
+        db_path = aloha_db.ALOHA_DB_PATH
+        size_mb = _os.path.getsize(db_path) / (1024 * 1024) if _os.path.exists(db_path) else 0
+        stats = {"total_rows": "large", "db_size_mb": round(size_mb, 2)}
     index = load_yoy_index()
     csv_count = len(index.get("files", {}))
     return {
         **stats,
         "csv_file_count": csv_count,
-        "db_available": aloha_db.db_available(),
+        "db_available": True,
     }
 
 
@@ -12429,8 +12470,34 @@ async def get_aloha_sales_dates():
 
 @app.get("/api/yoy/aloha-sales-stats")
 async def get_aloha_sales_stats():
-    """Return summary statistics about the Aloha sales database."""
-    return aloha_sales_db.get_stats()
+    """Return summary statistics about the Aloha sales database, split by source."""
+    stats = aloha_sales_db.get_stats()
+    # Add split: Aloha historical vs Toast flash-imported
+    # Toast went live ~Sept 2025; flash import started writing CY data from that point
+    try:
+        conn = aloha_sales_db.get_connection()
+        try:
+            # Dates with flash-imported data (96 locations = Toast)
+            # vs Aloha historical (fewer locations or pre-2025-09)
+            toast_range = conn.execute(
+                "SELECT MIN(business_date), MAX(business_date), COUNT(DISTINCT business_date) "
+                "FROM aloha_sales_data WHERE business_date >= '2025-09-01'"
+            ).fetchone()
+            aloha_range = conn.execute(
+                "SELECT MIN(business_date), MAX(business_date), COUNT(DISTINCT business_date) "
+                "FROM aloha_sales_data WHERE business_date < '2025-09-01'"
+            ).fetchone()
+        finally:
+            conn.close()
+        stats["toast_min_date"] = toast_range[0]
+        stats["toast_max_date"] = toast_range[1]
+        stats["toast_date_count"] = toast_range[2] or 0
+        stats["aloha_min_date"] = aloha_range[0]
+        stats["aloha_max_date"] = aloha_range[1]
+        stats["aloha_date_count"] = aloha_range[2] or 0
+    except Exception:
+        pass
+    return stats
 
 
 @app.get("/api/yoy/fiscal-calendar-stats")

@@ -1453,12 +1453,20 @@
             <div style="font-size:1.1rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
           </div>`;
         const fmt = n => n != null ? Number(n).toLocaleString() : '\u2014';
+        const toastRange = s.toast_min_date && s.toast_max_date
+          ? `${s.toast_min_date} \u2014 ${s.toast_max_date}`
+          : '\u2014';
+        const alohaRange = s.aloha_min_date && s.aloha_max_date
+          ? `${s.aloha_min_date} \u2014 ${s.aloha_max_date}`
+          : '\u2014';
         el.innerHTML =
-          card('Rows', fmt(s.total_rows)) +
-          card('Dates', fmt(s.date_count)) +
+          card('Total Rows', fmt(s.total_rows)) +
           card('Locations', fmt(s.location_count)) +
-          card('Date Range', s.min_date && s.max_date ? `${s.min_date} — ${s.max_date}` : '\u2014', '#374151') +
-          card('DB Size', `${(s.db_size_mb||0).toFixed(1)} MB`);
+          card('DB Size', `${(s.db_size_mb||0).toFixed(1)} MB`) +
+          card('Toast Flash Dates', `${s.toast_date_count || 0}`, '#2563EB') +
+          card('Toast Range', toastRange, '#2563EB') +
+          card('Aloha PY Dates', `${s.aloha_date_count || 0}`, '#7C3AED') +
+          card('Aloha Range', alohaRange, '#7C3AED');
       } catch (e) {
         el.innerHTML = '';
       }
@@ -1632,12 +1640,14 @@
         let html = '';
 
         // Aloha (YoY Menu Items)
-        if (aloha) {
-          html += dbCard('aloha.db (YoY Menu Data)', '#7C3AED', `${(aloha.db_size_mb||0).toFixed(0)} MB`, [
-            ['Rows', fmt(aloha.total_rows)],
+        if (aloha && aloha.db_available) {
+          const sizeStr = `${(aloha.db_size_mb||0) >= 1024 ? ((aloha.db_size_mb/1024).toFixed(1) + ' GB') : ((aloha.db_size_mb||0).toFixed(0) + ' MB')}`;
+          const rowsStr = aloha.total_rows === 'large' ? 'Large DB' : fmt(aloha.total_rows);
+          html += dbCard('aloha.db (YoY Menu Data)', '#7C3AED', sizeStr, [
+            ['Rows', rowsStr],
             ['Dates', fmt(aloha.date_count)],
             ['Locations', fmt(aloha.location_count)],
-            ['Range', aloha.min_date && aloha.max_date ? `${aloha.min_date} to ${aloha.max_date}` : '\u2014', '#374151'],
+            ['CSVs', fmt(aloha.csv_file_count)],
           ]);
         } else {
           html += dbCard('aloha.db (YoY Menu Data)', '#7C3AED', '\u2014', [['Status', 'Not imported \u2014 menu YoY data only needed if running menu reports', '#B45309']]);
