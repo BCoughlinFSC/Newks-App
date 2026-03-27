@@ -1702,7 +1702,7 @@ async def request_toast_report(
         body["groupBy"] = group_by
     
     # Choose endpoint
-    endpoint_base = "metrics" if report_type in ("metrics", "sales_summary") else "menu"
+    endpoint_base = "metrics" if report_type in ("metrics", "sales_summary", "royalty") else "menu"
 
     if time_range and time_range in ["day", "week", "month", "year"]:
         url = f"{TOAST_API_BASE_URL}/{endpoint_base}/{time_range}"
@@ -1757,7 +1757,7 @@ async def fetch_toast_report(
     max_attempts: int = 60,
     delay_seconds: float = 1.0,
 ) -> list:
-    endpoint_base = "metrics" if report_type in ("metrics", "sales_summary") else "menu"
+    endpoint_base = "metrics" if report_type in ("metrics", "sales_summary", "royalty") else "menu"
     url = f"{TOAST_API_BASE_URL}/{endpoint_base}/{report_guid}"
     params = {"fetchRestaurantNames": "true"}
     
