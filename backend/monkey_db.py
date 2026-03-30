@@ -799,6 +799,84 @@ def alert_unconfirmed_orders(db_path: str = MONKEY_DB_PATH) -> List[Dict]:
         conn.close()
 
 
+def lock_the_day_summary(biz_date: str, store_id: int | None = None,
+                         db_path: str = MONKEY_DB_PATH) -> dict:
+    """
+    Single-date view of orders that block accounting from locking the day.
+    Returns summary counts and blocker detail rows for the given date.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        store_clause = "AND o.store_id = ?" if store_id else ""
+        params: list = [biz_date]
+        if store_id:
+            params.append(store_id)
+
+        rows = conn.execute(f"""
+            SELECT
+                o.order_id,
+                COALESCE(s.store_name, '')                     AS store_name,
+                COALESCE(o.client_name, '')                    AS client_name,
+                COALESCE(o.total, 0)                           AS total,
+                o.order_type,
+                o.confirmed_by,
+                o.store_accept_time,
+                o.pos_order_id,
+                o.status
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+              AND DATE(o.date_reqd) = DATE(?)
+              {store_clause}
+            ORDER BY o.order_id
+        """, params).fetchall()
+
+        result = {
+            "date": biz_date,
+            "totalOrders": 0,
+            "unconfirmed": 0,
+            "notAccepted": 0,
+            "notPosted": 0,
+            "blockers": [],
+        }
+
+        for r in rows:
+            order_id, store_name, client_name, total, \
+                order_type, confirmed_by, store_accept_time, pos_order_id, status = r
+
+            result["totalOrders"] += 1
+
+            issues = []
+            if confirmed_by is None and (order_type or "").lower() == "online":
+                issues.append("Unconfirmed")
+                result["unconfirmed"] += 1
+            if store_accept_time is None:
+                issues.append("Not Accepted")
+                result["notAccepted"] += 1
+            if confirmed_by is not None and (pos_order_id is None or (pos_order_id or "").strip() == ""):
+                issues.append("Not Posted")
+                result["notPosted"] += 1
+
+            if issues:
+                result["blockers"].append({
+                    "orderId": order_id,
+                    "storeName": store_name,
+                    "clientName": client_name,
+                    "total": total,
+                    "issue": ", ".join(issues),
+                })
+
+        result["ready"] = (result["unconfirmed"] == 0
+                           and result["notAccepted"] == 0
+                           and result["notPosted"] == 0)
+
+        return result
+    finally:
+        conn.close()
+
+
 # ── CSV Import ──────────────────────────────────────────────────────
 
 # Column mappings for headerless CSVs from SSMS

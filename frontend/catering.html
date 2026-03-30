@@ -199,6 +199,25 @@
       margin-left: 0.5rem;
     }
     .alert-count-label.zero { background: #D1FAE5; color: #065F46; }
+
+    /* Lock the Day */
+    .ltd-date-row {
+      display: flex; align-items: center; gap: 1rem;
+      padding: 0.75rem 1rem; border-radius: 8px;
+      background: #fff; border: 1px solid #e5e7eb;
+      margin-bottom: 0.5rem; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .ltd-date-row:hover { background: #F9FAFB; }
+    .ltd-date-row.expanded { border-color: #C41E3A; background: #FFF5F5; }
+    .ltd-indicator {
+      width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+    }
+    .ltd-indicator.ready { background: #22C55E; }
+    .ltd-indicator.blocked { background: #EF4444; }
+    .ltd-date-label { font-weight: 700; color: #1E3A5F; min-width: 200px; }
+    .ltd-summary { font-size: 0.85rem; color: #666; flex: 1; }
+    .ltd-order-count { font-size: 0.85rem; color: #999; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -230,6 +249,7 @@
           <button class="tab-btn" data-tab="top-clients">Top Clients</button>
           <button class="tab-btn" data-tab="discounts">Discounts</button>
           <button class="tab-btn" data-tab="refunds">Refunds</button>
+          <button class="tab-btn" data-tab="lock-the-day">Lock the Day</button>
           <button class="tab-btn" data-tab="alerts">Alerts<span class="badge" id="alertsBadge" style="display:none;">0</span></button>
         </div>
       </div>
@@ -382,6 +402,27 @@
         </div>
       </div>
 
+      <!-- ============ Lock the Day ============ -->
+      <div class="tab-panel" id="panel-lock-the-day">
+        <div class="content-card">
+          <h2>Lock the Day</h2>
+          <p class="help-text">Date-by-date view of orders blocking accounting from locking the day.</p>
+          <div class="toolbar">
+            <label><span>Date</span>
+              <input type="date" id="ltd-date" />
+            </label>
+            <label><span>Store</span>
+              <select id="ltd-store"><option value="">All Stores</option></select>
+            </label>
+            <button class="btn" id="ltd-run">Go</button>
+            <button class="btn btn-secondary" id="ltd-sync" style="margin-left:auto;">Sync from Monkey Media</button>
+            <span id="ltd-sync-status" style="font-size:0.82rem;color:#666;"></span>
+          </div>
+          <div id="ltd-status" class="status" style="display:none;"></div>
+          <div id="ltd-container"></div>
+        </div>
+      </div>
+
       <!-- ============ Alerts ============ -->
       <div class="tab-panel" id="panel-alerts">
         <div class="content-card">
@@ -497,6 +538,7 @@
       if (panel) panel.classList.add('active');
       // Auto-load alerts when switching to alerts tab
       if (tabId === 'alerts' && !alertsLoaded) loadAlerts();
+      if (tabId === 'lock-the-day' && !ltdLoaded) loadLockTheDay(); // auto-load with today's date
     });
 
     // ─── Store dropdown ────────────────────────────────
@@ -505,7 +547,7 @@
         const res = await fetch(API + '/api/monkey/stores', { headers: authHeaders() });
         if (!res.ok) return;
         const stores = await res.json();
-        const selects = document.querySelectorAll('#sc-store, #del-store, #ho-store, #disc-store, #ref-store');
+        const selects = document.querySelectorAll('#sc-store, #del-store, #ho-store, #disc-store, #ref-store, #ltd-store');
         selects.forEach(sel => {
           (stores || []).forEach(s => {
             const opt = document.createElement('option');
@@ -1112,6 +1154,119 @@
     document.getElementById('alerts-refresh').addEventListener('click', () => {
       alertsLoaded = false;
       loadAlerts();
+    });
+
+    // ─── Lock the Day ──────────────────────────────────
+    let ltdLoaded = false;
+
+    // Default the date picker to today
+    document.getElementById('ltd-date').value = new Date().toISOString().slice(0, 10);
+
+    async function loadLockTheDay() {
+      const container = document.getElementById('ltd-container');
+      const dateVal = document.getElementById('ltd-date').value;
+      if (!dateVal) { showStatus('ltd-status', 'Select a date.', 'error'); return; }
+      showStatus('ltd-status', 'Loading...', 'loading');
+      const storeVal = document.getElementById('ltd-store').value;
+      let url = API + '/api/monkey/lock-the-day?date=' + dateVal;
+      if (storeVal) url += '&storeId=' + encodeURIComponent(storeVal);
+
+      try {
+        const res = await fetch(url, { headers: authHeaders() });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || 'Failed');
+
+        const dt = new Date(d.date + 'T00:00:00');
+        const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        const dateStr = dayNames[dt.getDay()] + '  ' + dt.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+        // Status summary
+        const parts = [];
+        if (d.unconfirmed > 0) parts.push(d.unconfirmed + ' unconfirmed');
+        if (d.notAccepted > 0) parts.push(d.notAccepted + ' not accepted');
+        if (d.notPosted > 0) parts.push(d.notPosted + ' not posted');
+
+        let html = '<div class="ltd-date-row' + (d.ready ? '' : ' expanded') + '">'
+          + '<span class="ltd-indicator ' + (d.ready ? 'ready' : 'blocked') + '"></span>'
+          + '<span class="ltd-date-label">' + escapeHtml(dateStr) + '</span>'
+          + '<span class="ltd-summary">' + escapeHtml(d.ready ? 'Ready to lock' : parts.join(', ')) + '</span>'
+          + '<span class="ltd-order-count">' + d.totalOrders + ' order' + (d.totalOrders !== 1 ? 's' : '') + '</span>'
+          + '</div>';
+
+        if (d.blockers.length > 0) {
+          html += '<div class="report-table-wrap" style="margin-top:0.5rem;"><table class="report-table"><thead><tr>'
+            + '<th>Order ID</th><th>Store</th><th>Client</th><th class="num">Total</th><th>Issue</th>'
+            + '</tr></thead><tbody>'
+            + d.blockers.map(b =>
+                '<tr><td>' + escapeHtml(b.orderId) + '</td>'
+                + '<td>' + escapeHtml(b.storeName) + '</td>'
+                + '<td>' + escapeHtml(b.clientName) + '</td>'
+                + '<td class="num">' + formatMoney(b.total) + '</td>'
+                + '<td>' + escapeHtml(b.issue) + '</td></tr>'
+              ).join('')
+            + '</tbody></table></div>';
+        } else if (d.totalOrders === 0) {
+          html += '<p style="color:#666;padding:0.5rem 0;">No orders found for this date.</p>';
+        }
+
+        container.innerHTML = html;
+        showStatus('ltd-status', d.totalOrders + ' order' + (d.totalOrders !== 1 ? 's' : '') + ' — ' + d.blockers.length + ' blocker' + (d.blockers.length !== 1 ? 's' : ''), 'success');
+        ltdLoaded = true;
+      } catch (e) {
+        showStatus('ltd-status', 'Error: ' + e.message, 'error');
+      }
+    }
+
+    document.getElementById('ltd-run').addEventListener('click', () => {
+      ltdLoaded = false;
+      loadLockTheDay();
+    });
+
+    // Sync from Monkey Media
+    document.getElementById('ltd-sync').addEventListener('click', async () => {
+      const btn = document.getElementById('ltd-sync');
+      const statusEl = document.getElementById('ltd-sync-status');
+      btn.disabled = true;
+      statusEl.textContent = 'Syncing...';
+      statusEl.style.color = '#92400E';
+      try {
+        const res = await fetch(API + '/api/monkey/sync', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ days: 3 }),
+        });
+        if (!res.ok) throw new Error('Sync request failed');
+        // Poll for completion
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          try {
+            const sr = await fetch(API + '/api/monkey/sync/status', { headers: authHeaders() });
+            const st = await sr.json();
+            if (st.status === 'success') {
+              clearInterval(poll);
+              statusEl.textContent = 'Synced ' + (st.rows || 0) + ' rows in ' + (st.elapsed || 0) + 's';
+              statusEl.style.color = '#065F46';
+              btn.disabled = false;
+              // Auto-reload the current view
+              ltdLoaded = false;
+              loadLockTheDay();
+            } else if (st.status === 'failed') {
+              clearInterval(poll);
+              statusEl.textContent = 'Sync failed: ' + (st.error || 'unknown');
+              statusEl.style.color = '#991B1B';
+              btn.disabled = false;
+            } else if (attempts > 60) {
+              clearInterval(poll);
+              statusEl.textContent = 'Sync timed out — check server logs';
+              statusEl.style.color = '#991B1B';
+              btn.disabled = false;
+            }
+          } catch (e) { /* keep polling */ }
+        }, 3000);
+      } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#991B1B';
+        btn.disabled = false;
+      }
     });
 
     // Load alert counts on page load (for badge)

@@ -5619,13 +5619,79 @@ _scheduler.add_job(nightly_flash_import_job, CronTrigger(hour=4, minute=0),
                    id="nightly_flash_import", replace_existing=True)
 
 
+# ------------------
+# Nightly Monkey Media sync
+# ------------------
+
+_nightly_monkey_last_result: Dict[str, Any] = {}
+
+
+async def nightly_monkey_sync_job():
+    """Incremental sync of Monkey Media orders from Azure SQL (last 3 days)."""
+    logger.info("Nightly Monkey sync started")
+    try:
+        result = await asyncio.to_thread(_run_monkey_sync, days=3)
+        _nightly_monkey_last_result.update({
+            "status": "success",
+            "rows": result.get("rows", 0),
+            "elapsed": result.get("elapsed", 0),
+            "ran_at": datetime.now().isoformat(),
+        })
+        logger.info("Nightly Monkey sync complete: %d rows in %.1fs",
+                     result.get("rows", 0), result.get("elapsed", 0))
+    except Exception as exc:
+        logger.error("Nightly Monkey sync failed: %s", exc, exc_info=True)
+        _nightly_monkey_last_result.update({
+            "status": "failed",
+            "error": str(exc),
+            "ran_at": datetime.now().isoformat(),
+        })
+
+
+def _run_monkey_sync(days: int | None = None, tables: list | None = None):
+    """Run sync_monkey in the current process (blocking). Called via asyncio.to_thread."""
+    import sync_monkey as sm
+    from datetime import timedelta
+
+    monkey_db.initialize_db()
+    t0 = time.time()
+    azure_conn = sm.get_azure_connection()
+    sqlite_conn = monkey_db.get_connection()
+
+    since = None
+    if days:
+        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    tables_to_sync = tables or list(sm.TABLES.keys())
+    total_rows = 0
+    try:
+        for table in tables_to_sync:
+            config = sm.TABLES[table]
+            table_since = since if "date_col" in config else None
+            if since and table_since is None:
+                continue  # Skip non-date tables for incremental sync
+            rows = sm.sync_table(azure_conn, sqlite_conn, table, config, since=table_since)
+            total_rows += rows
+    finally:
+        azure_conn.close()
+        sqlite_conn.close()
+
+    return {"rows": total_rows, "elapsed": round(time.time() - t0, 1)}
+
+
+# Schedule: run at 4:30 AM daily (after flash import)
+_scheduler.add_job(nightly_monkey_sync_job, CronTrigger(hour=4, minute=30),
+                   id="nightly_monkey_sync", replace_existing=True)
+
+
 @app.on_event("startup")
 async def _on_startup():
     toast_orders_db.initialize_db()
     aloha_sales_db.initialize_db()
     toast_config_db.initialize_db()
+    monkey_db.initialize_db()
     _scheduler.start()
-    logger.info("APScheduler started — nightly jobs scheduled (orders@3AM, flash import@4AM)")
+    logger.info("APScheduler started — nightly jobs scheduled (orders@3AM, flash@4AM, monkey@4:30AM)")
 
 
 @app.on_event("shutdown")
@@ -15194,6 +15260,44 @@ async def monkey_order_notes(payload: dict = Body(...)):
         payload["startDate"], payload["endDate"],
         store_ids=payload.get("storeIds"),
     )
+
+
+@app.get("/api/monkey/lock-the-day")
+async def monkey_lock_the_day(date: str, storeId: int | None = None):
+    """Single-date view of orders blocking accounting lock."""
+    return monkey_db.lock_the_day_summary(biz_date=date, store_id=storeId)
+
+
+@app.post("/api/monkey/sync")
+async def monkey_sync_now(payload: dict = Body(default={})):
+    """Manually trigger Monkey Media sync (incremental, last 3 days by default)."""
+    days = payload.get("days", 3)
+
+    async def _run():
+        try:
+            result = await asyncio.to_thread(_run_monkey_sync, days=days)
+            _nightly_monkey_last_result.update({
+                "status": "success",
+                "rows": result.get("rows", 0),
+                "elapsed": result.get("elapsed", 0),
+                "ran_at": datetime.now().isoformat(),
+            })
+        except Exception as exc:
+            logger.error("Manual Monkey sync failed: %s", exc, exc_info=True)
+            _nightly_monkey_last_result.update({
+                "status": "failed",
+                "error": str(exc),
+                "ran_at": datetime.now().isoformat(),
+            })
+
+    asyncio.create_task(_run())
+    return {"status": "started", "days": days}
+
+
+@app.get("/api/monkey/sync/status")
+async def monkey_sync_status():
+    """Return the last Monkey sync result."""
+    return _nightly_monkey_last_result if _nightly_monkey_last_result else {"status": "never_run"}
 
 
 @app.get("/api/monkey/alerts/not-accepted")
