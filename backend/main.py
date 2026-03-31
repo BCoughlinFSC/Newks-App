@@ -15291,7 +15291,7 @@ async def monkey_lock_the_day_notify(payload: dict = Body(...)):
 
     gmail_user = os.getenv("GMAIL_ADDRESS")
     gmail_pass = os.getenv("GMAIL_APP_PASSWORD")
-    cc_address = "lpearson@newks.com"
+    cc_addresses = ["lpearson@newks.com", "itdepartment@newks.com"]
 
     if not gmail_user or not gmail_pass:
         raise HTTPException(status_code=500, detail="GMAIL_ADDRESS / GMAIL_APP_PASSWORD not configured in .env")
@@ -15353,11 +15353,11 @@ async def monkey_lock_the_day_notify(payload: dict = Body(...)):
             msg = MIMEMultipart()
             msg["From"] = gmail_user
             msg["To"] = ", ".join(to_addrs)
-            msg["Cc"] = cc_address
+            msg["Cc"] = ", ".join(cc_addresses)
             msg["Subject"] = f"Monkey Media — Unposted Order{'s' if len(orders) > 1 else ''} for {store_name} ({biz_date})"
             msg.attach(MIMEText(body, "plain"))
 
-            all_recipients = to_addrs + [cc_address]
+            all_recipients = to_addrs + cc_addresses
             server.sendmail(gmail_user, all_recipients, msg.as_string())
             sent += 1
             logger.info("Sent unposted-order reminder to %s for %s (%d orders)",
