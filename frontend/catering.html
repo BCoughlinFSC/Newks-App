@@ -1158,6 +1158,7 @@
 
     // ─── Lock the Day ──────────────────────────────────
     let ltdLoaded = false;
+    let ltdLastData = null;  // store last response for email feature
 
     // Default the date picker to today
     document.getElementById('ltd-date').value = new Date().toISOString().slice(0, 10);
@@ -1175,6 +1176,7 @@
         const res = await fetch(url, { headers: authHeaders() });
         const d = await res.json();
         if (!res.ok) throw new Error(d.detail || 'Failed');
+        ltdLastData = d;
 
         const dt = new Date(d.date + 'T00:00:00');
         const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -1193,18 +1195,27 @@
           + '<span class="ltd-order-count">' + d.totalOrders + ' order' + (d.totalOrders !== 1 ? 's' : '') + '</span>'
           + '</div>';
 
+        const hasUnposted = d.blockers.some(b => b.issue.includes('Not Posted'));
+
         if (d.blockers.length > 0) {
           html += '<div class="report-table-wrap" style="margin-top:0.5rem;"><table class="report-table"><thead><tr>'
             + '<th>Order ID</th><th>Store</th><th>Client</th><th class="num">Total</th><th>Issue</th>'
             + '</tr></thead><tbody>'
             + d.blockers.map(b =>
-                '<tr><td>' + escapeHtml(b.orderId) + '</td>'
+                '<tr><td>' + escapeHtml(String(b.orderId)) + '</td>'
                 + '<td>' + escapeHtml(b.storeName) + '</td>'
                 + '<td>' + escapeHtml(b.clientName) + '</td>'
                 + '<td class="num">' + formatMoney(b.total) + '</td>'
                 + '<td>' + escapeHtml(b.issue) + '</td></tr>'
               ).join('')
             + '</tbody></table></div>';
+
+          if (hasUnposted) {
+            html += '<div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.75rem;">'
+              + '<button class="btn" id="ltd-send-reminders" style="background:#92400E;">Send Unposted Reminders</button>'
+              + '<span id="ltd-email-status" style="font-size:0.82rem;color:#666;"></span>'
+              + '</div>';
+          }
         } else if (d.totalOrders === 0) {
           html += '<p style="color:#666;padding:0.5rem 0;">No orders found for this date.</p>';
         }
@@ -1212,6 +1223,38 @@
         container.innerHTML = html;
         showStatus('ltd-status', d.totalOrders + ' order' + (d.totalOrders !== 1 ? 's' : '') + ' — ' + d.blockers.length + ' blocker' + (d.blockers.length !== 1 ? 's' : ''), 'success');
         ltdLoaded = true;
+
+        // Wire up Send Reminders button (dynamically created)
+        const sendBtn = document.getElementById('ltd-send-reminders');
+        if (sendBtn) {
+          sendBtn.addEventListener('click', async () => {
+            if (!ltdLastData) return;
+            const emailStatus = document.getElementById('ltd-email-status');
+            sendBtn.disabled = true;
+            emailStatus.textContent = 'Sending...';
+            emailStatus.style.color = '#92400E';
+            try {
+              const r = await fetch(API + '/api/monkey/lock-the-day/notify', {
+                method: 'POST',
+                headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: ltdLastData.date, blockers: ltdLastData.blockers }),
+              });
+              const result = await r.json();
+              if (!r.ok) throw new Error(result.detail || 'Send failed');
+              let msg = 'Sent ' + result.sent + ' reminder' + (result.sent !== 1 ? 's' : '');
+              if (result.errors && result.errors.length > 0) {
+                msg += ' (' + result.errors.join('; ') + ')';
+              }
+              emailStatus.textContent = msg;
+              emailStatus.style.color = '#065F46';
+            } catch (e) {
+              emailStatus.textContent = 'Error: ' + e.message;
+              emailStatus.style.color = '#991B1B';
+            } finally {
+              sendBtn.disabled = false;
+            }
+          });
+        }
       } catch (e) {
         showStatus('ltd-status', 'Error: ' + e.message, 'error');
       }

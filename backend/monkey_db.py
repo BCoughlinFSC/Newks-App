@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS stores (
     store_manager   TEXT,
     store_manager_email TEXT,
     phone           TEXT,
+    fax             TEXT,
+    store_email     TEXT,
+    address_1       TEXT,
+    address_2       TEXT,
     city            TEXT,
     state           TEXT,
     zip             TEXT,
@@ -233,8 +237,22 @@ def initialize_db(db_path: str = MONKEY_DB_PATH):
         return
     conn = get_connection(db_path)
     conn.executescript(_SCHEMA_SQL)
+    # Migrate: add columns that may be missing from older schema
+    _migrate_add_columns(conn, "stores", {
+        "fax": "TEXT", "store_email": "TEXT",
+        "address_1": "TEXT", "address_2": "TEXT",
+    })
     conn.close()
     _initialized = True
+
+
+def _migrate_add_columns(conn, table: str, columns: dict):
+    """Add missing columns to an existing table (idempotent)."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for col, col_type in columns.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+            logger.info("Added column %s.%s", table, col)
 
 
 def db_available(db_path: str = MONKEY_DB_PATH) -> bool:
@@ -823,7 +841,10 @@ def lock_the_day_summary(biz_date: str, store_id: int | None = None,
                 o.confirmed_by,
                 o.store_accept_time,
                 o.pos_order_id,
-                o.status
+                o.status,
+                o.store_id,
+                COALESCE(s.store_email, '')                    AS store_email,
+                COALESCE(s.store_manager_email, '')            AS store_manager_email
             FROM orders o
             LEFT JOIN stores s ON o.store_id = s.store_id
             WHERE o.deleted = 0
@@ -844,7 +865,8 @@ def lock_the_day_summary(biz_date: str, store_id: int | None = None,
 
         for r in rows:
             order_id, store_name, client_name, total, \
-                order_type, confirmed_by, store_accept_time, pos_order_id, status = r
+                order_type, confirmed_by, store_accept_time, pos_order_id, status, \
+                store_id_val, store_email, store_mgr_email = r
 
             result["totalOrders"] += 1
 
@@ -862,10 +884,13 @@ def lock_the_day_summary(biz_date: str, store_id: int | None = None,
             if issues:
                 result["blockers"].append({
                     "orderId": order_id,
+                    "storeId": store_id_val,
                     "storeName": store_name,
                     "clientName": client_name,
                     "total": total,
                     "issue": ", ".join(issues),
+                    "storeEmail": store_email,
+                    "storeManagerEmail": store_mgr_email,
                 })
 
         result["ready"] = (result["unconfirmed"] == 0
