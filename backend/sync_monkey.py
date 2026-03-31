@@ -177,12 +177,16 @@ def sync_table(azure_conn, sqlite_conn, table, config, since=None):
     query = config["query"]
 
     # Apply date filter for incremental sync
+    # pymssql uses %s placeholders; pyodbc uses ?
+    is_pymssql = HAS_PYMSSQL and type(azure_conn).__module__.startswith("pymssql")
+    ph_marker = "%s" if is_pymssql else "?"
+
     if since and "date_col" in config:
         date_col = config["date_col"]
-        query += f" WHERE {date_col} >= ?"
+        query += f" WHERE {date_col} >= {ph_marker}"
         logger.info("Syncing %s (since %s)...", table, since)
         azure_cursor = azure_conn.cursor()
-        azure_cursor.execute(query, since)
+        azure_cursor.execute(query, (since,))
     else:
         logger.info("Syncing %s (full)...", table)
         azure_cursor = azure_conn.cursor()
