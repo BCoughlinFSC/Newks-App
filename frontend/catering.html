@@ -1199,15 +1199,18 @@
 
         if (d.blockers.length > 0) {
           html += '<div class="report-table-wrap" style="margin-top:0.5rem;"><table class="report-table"><thead><tr>'
-            + '<th>Order ID</th><th>Store</th><th>Client</th><th class="num">Total</th><th>Issue</th>'
+            + '<th>Order ID</th><th>Store</th><th>Client</th><th>Ordered</th><th>Required</th><th class="num">Total</th><th>Issue</th>'
             + '</tr></thead><tbody>'
-            + d.blockers.map(b =>
-                '<tr><td>' + escapeHtml(String(b.orderId)) + '</td>'
+            + d.blockers.map(b => {
+                const fmtDate = (s) => { if (!s) return ''; const d = new Date(s + (s.length === 10 ? 'T00:00:00' : '')); return isNaN(d) ? s : d.toLocaleDateString('en-US', {month:'2-digit',day:'2-digit',year:'numeric'}); };
+                return '<tr><td>' + escapeHtml(String(b.orderId)) + '</td>'
                 + '<td>' + escapeHtml(b.storeName) + '</td>'
                 + '<td>' + escapeHtml(b.clientName) + '</td>'
+                + '<td>' + escapeHtml(fmtDate(b.orderDate)) + '</td>'
+                + '<td>' + escapeHtml(fmtDate(b.dateRequired)) + '</td>'
                 + '<td class="num">' + formatMoney(b.total) + '</td>'
-                + '<td>' + escapeHtml(b.issue) + '</td></tr>'
-              ).join('')
+                + '<td>' + escapeHtml(b.issue) + '</td></tr>';
+              }).join('')
             + '</tbody></table></div>';
 
           if (hasUnposted) {

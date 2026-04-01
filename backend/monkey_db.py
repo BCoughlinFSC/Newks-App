@@ -844,7 +844,9 @@ def lock_the_day_summary(biz_date: str, store_id: int | None = None,
                 o.status,
                 o.store_id,
                 COALESCE(s.store_email, '')                    AS store_email,
-                COALESCE(s.store_manager_email, '')            AS store_manager_email
+                COALESCE(s.store_manager_email, '')            AS store_manager_email,
+                o.order_date,
+                o.date_reqd
             FROM orders o
             LEFT JOIN stores s ON o.store_id = s.store_id
             WHERE o.deleted = 0
@@ -866,7 +868,8 @@ def lock_the_day_summary(biz_date: str, store_id: int | None = None,
         for r in rows:
             order_id, store_name, client_name, total, \
                 order_type, confirmed_by, store_accept_time, pos_order_id, status, \
-                store_id_val, store_email, store_mgr_email = r
+                store_id_val, store_email, store_mgr_email, \
+                order_date, date_reqd = r
 
             result["totalOrders"] += 1
 
@@ -891,6 +894,8 @@ def lock_the_day_summary(biz_date: str, store_id: int | None = None,
                     "issue": ", ".join(issues),
                     "storeEmail": store_email,
                     "storeManagerEmail": store_mgr_email,
+                    "orderDate": order_date,
+                    "dateRequired": date_reqd,
                 })
 
         result["ready"] = (result["unconfirmed"] == 0

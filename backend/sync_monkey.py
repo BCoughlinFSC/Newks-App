@@ -156,6 +156,7 @@ TABLES = {
         "query": "SELECT * FROM msr.orders",
         "pk": "order_id",
         "date_col": "order_last_modified_datetime",
+        "extra_date_cols": ["date_reqd"],
     },
     "order_items": {
         "query": "SELECT * FROM msr.order_items",

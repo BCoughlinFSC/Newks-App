@@ -5672,6 +5672,54 @@ def _run_monkey_sync(days: int | None = None, tables: list | None = None):
                 continue  # Skip non-date tables for incremental sync
             rows = sm.sync_table(azure_conn, sqlite_conn, table, config, since=table_since)
             total_rows += rows
+
+            # Second pass: also sync orders by date_reqd so catering orders
+            # placed long ago but with upcoming required dates are captured
+            if table == "orders" and since and "extra_date_cols" in config:
+                reqd_since = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                reqd_until = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+                reqd_config = {
+                    "query": f"SELECT * FROM msr.orders WHERE date_reqd >= ? AND date_reqd <= ?",
+                    "pk": "order_id",
+                }
+                # Use a custom sync call — sync_table with since=None does INSERT OR REPLACE
+                is_pymssql = sm.HAS_PYMSSQL and type(azure_conn).__module__.startswith("pymssql")
+                ph = "%s" if is_pymssql else "?"
+                reqd_config["query"] = f"SELECT * FROM msr.orders WHERE date_reqd >= {ph} AND date_reqd <= {ph}"
+                azure_cursor = azure_conn.cursor()
+                azure_cursor.execute(reqd_config["query"], (reqd_since, reqd_until))
+                azure_cols = [desc[0] for desc in azure_cursor.description]
+                sqlite_cols = sm.get_sqlite_columns(sqlite_conn, "orders")
+                col_map = []
+                sqlite_col_lower = {s.lower(): s for s in sqlite_cols}
+                for ac in azure_cols:
+                    sc = ac.lower().replace(" ", "_")
+                    if sc in sqlite_col_lower:
+                        col_map.append((ac, sqlite_col_lower[sc]))
+                if col_map:
+                    azure_indices = [azure_cols.index(ac) for ac, _ in col_map]
+                    sqlite_names = [sc for _, sc in col_map]
+                    ph_vals = ",".join("?" * len(sqlite_names))
+                    col_str = ",".join(sqlite_names)
+                    extra_rows = 0
+                    for row in azure_cursor:
+                        vals = []
+                        for idx in azure_indices:
+                            v = row[idx]
+                            if isinstance(v, datetime):
+                                v = v.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                            elif v is not None and not isinstance(v, (int, float, str)):
+                                v = str(v)
+                            vals.append(v)
+                        sqlite_conn.execute(
+                            f"INSERT OR REPLACE INTO orders ({col_str}) VALUES ({ph_vals})", vals
+                        )
+                        extra_rows += 1
+                    sqlite_conn.commit()
+                    if extra_rows:
+                        logger.info("  orders (by date_reqd %s..%s): %d extra rows upserted",
+                                    reqd_since, reqd_until, extra_rows)
+                    total_rows += extra_rows
     finally:
         azure_conn.close()
         sqlite_conn.close()
