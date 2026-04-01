@@ -71,3 +71,7 @@ backend/data/
 *.xls
 response.txt
 
+# Exception: price tier mapping needed by Toast Pricing Export
+!Toast Price Tiers Mapping .xlsx
+!backend/price_tier_mapping.csv
+
