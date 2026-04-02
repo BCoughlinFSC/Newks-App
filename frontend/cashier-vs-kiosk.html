@@ -183,17 +183,24 @@
       document.getElementById('excelBtn').disabled = true;
 
       try {
-        showStatus('Fetching data from Toast ERA API + Orders DB...', 'info');
+        showStatus('Fetching data from Toast ERA API + Orders DB... (this may take a minute)', 'info');
         const resp = await fetch(API_BASE + '/api/cashier-vs-kiosk', {
           method: 'POST',
           headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({ week_end_date: wed }),
         });
+        const text = await resp.text();
         if (!resp.ok) {
-          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-          throw new Error(err.detail || resp.statusText);
+          let detail = resp.status + ' ' + resp.statusText;
+          try { detail = JSON.parse(text).detail || detail; } catch {}
+          throw new Error(detail);
         }
-        lastData = await resp.json();
+        if (!text) throw new Error('Empty response from server — possible timeout');
+        try {
+          lastData = JSON.parse(text);
+        } catch (parseErr) {
+          throw new Error('Invalid JSON response (length=' + text.length + '): ' + text.substring(0, 200));
+        }
         renderReport(lastData);
         document.getElementById('excelBtn').disabled = false;
         clearStatus();

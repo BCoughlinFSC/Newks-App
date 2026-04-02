@@ -15442,7 +15442,13 @@ async def cashier_vs_kiosk_report(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="week_end_date must be YYYY-MM-DD")
 
     location_filter = payload.get("locations") or None
-    return await _build_cashier_vs_kiosk_data(week_end, location_filter)
+    try:
+        return await _build_cashier_vs_kiosk_data(week_end, location_filter)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Cashier vs Kiosk report failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}")
 
 
 @app.get("/api/cashier-vs-kiosk/excel")
