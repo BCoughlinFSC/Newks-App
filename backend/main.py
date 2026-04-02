@@ -15352,11 +15352,28 @@ async def _build_cashier_vs_kiosk_data(
         store_data[guid][date_key][channel]["checkCount"] += checks
         store_data[guid][date_key][channel]["netSales"] += net
 
-    # Fetch dining option configs for all restaurants that have ERA data
+    # Fetch dining option configs for all restaurants that have ERA data (parallel)
     dining_option_maps: Dict[str, Dict[str, str]] = {}
-    async with httpx.AsyncClient(timeout=30.0) as cfg_client:
-        for guid in store_data.keys():
-            dining_option_maps[guid] = await _fetch_dining_option_configs(cfg_client, guid)
+    guids_needing_config = [g for g in store_data.keys() if g not in _dining_option_config_cache]
+    if guids_needing_config:
+        async with httpx.AsyncClient(timeout=30.0) as cfg_client:
+            # Batch in groups of 10 to avoid overwhelming the API
+            for i in range(0, len(guids_needing_config), 10):
+                batch = guids_needing_config[i:i+10]
+                results = await asyncio.gather(
+                    *[_fetch_dining_option_configs(cfg_client, g) for g in batch],
+                    return_exceptions=True,
+                )
+                for guid, result in zip(batch, results):
+                    if isinstance(result, dict):
+                        dining_option_maps[guid] = result
+                    else:
+                        logger.warning("Dining option config failed for %s: %s", guid[:8], result)
+                        dining_option_maps[guid] = {}
+    # Fill in from cache for already-cached restaurants
+    for guid in store_data.keys():
+        if guid not in dining_option_maps:
+            dining_option_maps[guid] = _dining_option_config_cache.get(guid, {})
 
     # Get tips from orders DB
     ws_yyyymmdd = week_start.strftime("%Y%m%d")
