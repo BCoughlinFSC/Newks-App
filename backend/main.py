@@ -15256,7 +15256,7 @@ def _query_tips_by_channel(
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """
     Query the local orders.db for tips grouped by (restaurant_guid, business_date, channel).
-    dining_option_maps: {restaurant_guid: {do_guid: do_name}} for classifying kiosk vs cashier.
+    Processes order JSON in Python to avoid slow SQLite json_each on large datasets.
     Returns: {restaurant_guid: {business_date: {"cashier": tips, "kiosk": tips}}}
     """
     from toast_orders_db import get_connection, ORDERS_DB_PATH, db_available
@@ -15265,35 +15265,52 @@ def _query_tips_by_channel(
 
     conn = get_connection(ORDERS_DB_PATH)
     try:
-        rows = conn.execute("""
-            SELECT
-                o.restaurant_guid,
-                o.business_date,
-                json_extract(o.order_json, '$.diningOption.guid') AS do_guid,
-                SUM(COALESCE(CAST(json_extract(pmt.value, '$.tipAmount') AS REAL), 0)) AS total_tips
-            FROM orders o,
-                json_each(json_extract(o.order_json, '$.checks')) AS chk,
-                json_each(json_extract(chk.value, '$.payments')) AS pmt
-            WHERE o.business_date BETWEEN ? AND ?
-                AND COALESCE(json_extract(o.order_json, '$.voided'), 0) != 1
-                AND COALESCE(json_extract(chk.value, '$.voided'), 0) != 1
-                AND COALESCE(json_extract(pmt.value, '$.paymentStatus'), '') NOT IN ('VOIDED', 'DENIED')
-                AND COALESCE(json_extract(pmt.value, '$.refundStatus'), '') != 'SUCCESSFUL'
-                AND json_extract(pmt.value, '$.originalMapPayment') IS NULL
-            GROUP BY o.restaurant_guid, o.business_date, do_guid
-        """, (week_start_yyyymmdd, week_end_yyyymmdd)).fetchall()
+        rows = conn.execute(
+            "SELECT restaurant_guid, business_date, order_json FROM orders"
+            " WHERE business_date BETWEEN ? AND ?",
+            (week_start_yyyymmdd, week_end_yyyymmdd),
+        ).fetchall()
     finally:
         conn.close()
 
+    logger.info("Cashier vs Kiosk tips: processing %d orders from orders.db", len(rows))
+
     result: Dict[str, Dict[str, Dict[str, float]]] = {}
-    for restaurant_guid, biz_date, do_guid, total_tips in rows:
-        do_name = ""
-        if do_guid:
-            rest_map = dining_option_maps.get(restaurant_guid, {})
-            do_name = rest_map.get(do_guid, "")
+    for restaurant_guid, biz_date, order_json_str in rows:
+        try:
+            order = json.loads(order_json_str)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if order.get("voided") or order.get("deleted"):
+            continue
+
+        # Get dining option GUID from order level
+        do_obj = order.get("diningOption")
+        do_guid = do_obj.get("guid", "") if isinstance(do_obj, dict) else ""
+        rest_map = dining_option_maps.get(restaurant_guid, {})
+        do_name = rest_map.get(do_guid, "") if do_guid else ""
         channel = "kiosk" if _is_kiosk_dining_option(do_name) else "cashier"
-        result.setdefault(restaurant_guid, {}).setdefault(biz_date, {"cashier": 0.0, "kiosk": 0.0})
-        result[restaurant_guid][biz_date][channel] += float(total_tips or 0)
+
+        for check in order.get("checks") or []:
+            if check.get("voided") or check.get("deleted"):
+                continue
+            for pmt in check.get("payments") or []:
+                tip = float(pmt.get("tipAmount") or 0)
+                if tip <= 0:
+                    continue
+                if pmt.get("voided"):
+                    continue
+                status = (pmt.get("paymentStatus") or "").upper()
+                if status in ("VOIDED", "DENIED"):
+                    continue
+                refund = (pmt.get("refundStatus") or "").upper()
+                if refund == "SUCCESSFUL":
+                    continue
+                if pmt.get("originalMapPayment"):
+                    continue
+                result.setdefault(restaurant_guid, {}).setdefault(biz_date, {"cashier": 0.0, "kiosk": 0.0})
+                result[restaurant_guid][biz_date][channel] += tip
+
     return result
 
 
