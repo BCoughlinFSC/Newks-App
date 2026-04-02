@@ -29,6 +29,7 @@
     { key: 'catering',      label: 'Catering Reports',    href: '/catering.html' },
     { key: 'loyalty',       label: 'Loyalty Reports',     href: '/loyalty.html' },
     { key: 'food-cost',     label: 'Food Cost (COGS)',    href: '/food-cost.html' },
+    { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },
   ];
 
   const ADMIN_LINKS = [
@@ -59,6 +60,7 @@
     if (path.endsWith('/catering.html'))              return 'catering';
     if (path.endsWith('/loyalty.html'))               return 'loyalty';
     if (path.endsWith('/food-cost.html'))             return 'food-cost';
+    if (path.endsWith('/cashier-vs-kiosk.html'))     return 'cashier-vs-kiosk';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';

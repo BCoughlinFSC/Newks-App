@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cashier vs Kiosk – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0; padding: 0;
+      background: #F8FAFC; color: #2c2c2c;
+      min-height: 100vh;
+    }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.5rem; font-weight: 700; }
+    .header p  { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+    .container {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 2rem;
+      max-width: 1800px;
+      margin: 0 auto;
+    }
+    @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+    .card {
+      background: #fff; border-radius: 12px; padding: 1.5rem;
+      border: 1px solid #e8e0d5; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .card h2 { margin: 0 0 1.25rem 0; color: #C41E3A; font-size: 1.1rem; font-weight: 700; }
+    .controls-row {
+      display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .form-group input, .form-group select {
+      padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB;
+      border-radius: 6px; font-size: 0.9rem; font-family: inherit;
+    }
+    .btn-primary {
+      background: #C41E3A; color: #fff; border: none;
+      padding: 0.55rem 1.25rem; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem; font-family: inherit;
+    }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      background: #374151; color: #fff; border: none;
+      padding: 0.55rem 1.25rem; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 0.9rem; font-family: inherit;
+    }
+    .btn-secondary:hover:not(:disabled) { background: #1F2937; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status-msg {
+      padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem;
+      font-size: 0.85rem; display: none;
+    }
+    .status-msg.info { background: #F0F9FF; border: 1px solid #BAE6FD; color: #0369A1; display: block; }
+    .status-msg.error { background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; display: block; }
+
+    /* Report table */
+    .report-table-wrap { overflow-x: auto; margin-top: 1rem; }
+    table.report { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    table.report th, table.report td {
+      padding: 0.4rem 0.6rem; border: 1px solid #D1D5DB; text-align: right;
+      white-space: nowrap;
+    }
+    table.report th { background: #F3F4F6; font-weight: 600; position: sticky; top: 0; z-index: 1; }
+    table.report th.cashier-hdr { background: #1E3A5F; color: #fff; }
+    table.report th.kiosk-hdr { background: #2E7D32; color: #fff; }
+    table.report th.cashier-sub { background: #D6E4F0; }
+    table.report th.kiosk-sub { background: #C8E6C9; }
+    table.report td.store-name { text-align: left; font-weight: 600; }
+    table.report td.date-cell { text-align: left; }
+    table.report tr.weekly-total { background: #FFF8E1; font-weight: 600; }
+    table.report tr.daily-row:hover { background: #F0F9FF; }
+    table.report td.zero { color: #9CA3AF; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Cashier vs Kiosk Counts and Dollars</h1>
+        <p>Weekly breakdown of cashier and kiosk orders, sales, and tips</p>
+      </div>
+      <a href="/" class="home-btn">Home</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div id="shared-sidebar"></div>
+
+    <div>
+      <div class="card">
+        <h2>Report Controls</h2>
+        <div class="controls-row">
+          <div class="form-group">
+            <label for="weekEndDate">Week Ending (Saturday)</label>
+            <input type="date" id="weekEndDate" />
+          </div>
+          <button class="btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
+          <button class="btn-secondary" id="excelBtn" onclick="downloadExcel()" disabled>Download Excel</button>
+        </div>
+        <div id="statusMsg" class="status-msg"></div>
+      </div>
+
+      <div class="card" style="margin-top:1rem;">
+        <h2>Results <span id="resultsMeta" style="font-weight:400;font-size:0.85rem;color:#6B7280;"></span></h2>
+        <div id="resultsWrap" class="report-table-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="shared-nav.js"></script>
+  <script>
+    const API_BASE = '';
+    let lastData = null;
+
+    function getAuthHeaders() {
+      const token = localStorage.getItem('auth_token');
+      return token ? { 'Authorization': 'Bearer ' + token } : {};
+    }
+
+    // Default to most recent Saturday
+    function getMostRecentSaturday() {
+      const d = new Date();
+      const day = d.getDay(); // 0=Sun, 6=Sat
+      const diff = day === 6 ? 0 : (day + 1); // days since last Saturday
+      d.setDate(d.getDate() - diff);
+      return d.toISOString().split('T')[0];
+    }
+
+    document.getElementById('weekEndDate').value = getMostRecentSaturday();
+
+    function showStatus(msg, type) {
+      const el = document.getElementById('statusMsg');
+      el.className = 'status-msg ' + type;
+      el.textContent = msg;
+    }
+    function clearStatus() {
+      document.getElementById('statusMsg').className = 'status-msg';
+    }
+
+    function fmt$(v) {
+      if (v == null || v === 0) return '$0.00';
+      return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtInt(v) {
+      if (v == null) return '0';
+      return v.toLocaleString('en-US');
+    }
+    function fmtTpc(v) {
+      if (v == null || v === 0) return '0.00';
+      return v.toFixed(2);
+    }
+
+    async function runReport() {
+      const wed = document.getElementById('weekEndDate').value;
+      if (!wed) { showStatus('Please select a week ending date.', 'error'); return; }
+
+      const btn = document.getElementById('runBtn');
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+      clearStatus();
+      document.getElementById('resultsWrap').innerHTML = '';
+      document.getElementById('resultsMeta').textContent = '';
+      document.getElementById('excelBtn').disabled = true;
+
+      try {
+        showStatus('Fetching data from Toast ERA API + Orders DB...', 'info');
+        const resp = await fetch(API_BASE + '/api/cashier-vs-kiosk', {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ week_end_date: wed }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(err.detail || resp.statusText);
+        }
+        lastData = await resp.json();
+        renderReport(lastData);
+        document.getElementById('excelBtn').disabled = false;
+        clearStatus();
+      } catch (e) {
+        showStatus('Error: ' + e.message, 'error');
+        lastData = null;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Report';
+      }
+    }
+
+    function renderReport(data) {
+      const stores = data.stores || [];
+      document.getElementById('resultsMeta').textContent =
+        `${stores.length} stores | ${data.weekStart} to ${data.weekEnd} | Generated: ${data.generatedAt}`;
+
+      if (!stores.length) {
+        document.getElementById('resultsWrap').innerHTML = '<p style="color:#6B7280;">No data found for this week.</p>';
+        return;
+      }
+
+      let html = `<table class="report">
+        <thead>
+          <tr>
+            <th rowspan="2">Store</th>
+            <th rowspan="2">Date</th>
+            <th colspan="4" class="cashier-hdr">Cashier</th>
+            <th colspan="4" class="kiosk-hdr">Kiosk</th>
+          </tr>
+          <tr>
+            <th class="cashier-sub">Checks</th>
+            <th class="cashier-sub">Net Sales</th>
+            <th class="cashier-sub">Tips</th>
+            <th class="cashier-sub">Tips/Check</th>
+            <th class="kiosk-sub">Checks</th>
+            <th class="kiosk-sub">Net Sales</th>
+            <th class="kiosk-sub">Tips</th>
+            <th class="kiosk-sub">Tips/Check</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+      for (const store of stores) {
+        const wc = store.weekly.cashier;
+        const wk = store.weekly.kiosk;
+        const label = store.storeId ? `${store.storeId} - ${store.storeName}` : store.storeName;
+
+        // Weekly total row
+        html += `<tr class="weekly-total">
+          <td class="store-name">${esc(label)}</td>
+          <td class="date-cell">Weekly Total</td>
+          <td>${fmtInt(wc.checkCount)}</td>
+          <td>${fmt$(wc.netSales)}</td>
+          <td>${fmt$(wc.tips)}</td>
+          <td>${fmtTpc(wc.tipsPerCheck)}</td>
+          <td>${fmtInt(wk.checkCount)}</td>
+          <td>${fmt$(wk.netSales)}</td>
+          <td>${fmt$(wk.tips)}</td>
+          <td>${fmtTpc(wk.tipsPerCheck)}</td>
+        </tr>`;
+
+        // Daily rows
+        for (const day of store.daily) {
+          const dc = day.cashier;
+          const dk = day.kiosk;
+          html += `<tr class="daily-row">
+            <td></td>
+            <td class="date-cell">${day.date}</td>
+            <td${dc.checkCount === 0 ? ' class="zero"' : ''}>${fmtInt(dc.checkCount)}</td>
+            <td${dc.netSales === 0 ? ' class="zero"' : ''}>${fmt$(dc.netSales)}</td>
+            <td${dc.tips === 0 ? ' class="zero"' : ''}>${fmt$(dc.tips)}</td>
+            <td${dc.tipsPerCheck === 0 ? ' class="zero"' : ''}>${fmtTpc(dc.tipsPerCheck)}</td>
+            <td${dk.checkCount === 0 ? ' class="zero"' : ''}>${fmtInt(dk.checkCount)}</td>
+            <td${dk.netSales === 0 ? ' class="zero"' : ''}>${fmt$(dk.netSales)}</td>
+            <td${dk.tips === 0 ? ' class="zero"' : ''}>${fmt$(dk.tips)}</td>
+            <td${dk.tipsPerCheck === 0 ? ' class="zero"' : ''}>${fmtTpc(dk.tipsPerCheck)}</td>
+          </tr>`;
+        }
+      }
+
+      html += '</tbody></table>';
+      document.getElementById('resultsWrap').innerHTML = html;
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    async function downloadExcel() {
+      const wed = document.getElementById('weekEndDate').value;
+      if (!wed) return;
+
+      const btn = document.getElementById('excelBtn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        const resp = await fetch(API_BASE + '/api/cashier-vs-kiosk/excel?week_end_date=' + wed, {
+          headers: getAuthHeaders(),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(err.detail || resp.statusText);
+        }
+        const result = await resp.json();
+        const byteChars = atob(result.data);
+        const byteArr = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([byteArr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = result.filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        showStatus('Excel error: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Download Excel';
+      }
+    }
+  </script>
+</body>
+</html>

@@ -15198,6 +15198,396 @@ async def generate_menu_mix_report(req: MenuMixRequest):
         }
 
 
+# ------------------------------------------------------------------
+# Cashier vs Kiosk Report
+# ------------------------------------------------------------------
+
+_KIOSK_DINING_OPTIONS = {"X-Dine-In (K)", "X-To Go (K)"}
+
+
+def _is_kiosk_dining_option(dining_opt: str) -> bool:
+    return dining_opt in _KIOSK_DINING_OPTIONS or "(K)" in dining_opt
+
+
+# Cache: restaurant_guid → {dining_option_guid: name}
+_dining_option_config_cache: Dict[str, Dict[str, str]] = {}
+
+
+async def _fetch_dining_option_configs(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+) -> Dict[str, str]:
+    """Fetch dining option GUID→name mapping from Toast Config API. Cached per restaurant."""
+    if restaurant_guid in _dining_option_config_cache:
+        return _dining_option_config_cache[restaurant_guid]
+
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
+    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/diningOptions"
+    try:
+        resp = await client.get(url, headers=headers, timeout=30.0)
+        if resp.status_code != 200:
+            logger.warning("Dining option config fetch failed for %s: HTTP %s",
+                           restaurant_guid[:8] + "...", resp.status_code)
+            _dining_option_config_cache[restaurant_guid] = {}
+            return {}
+        do_list = resp.json()
+        mapping: Dict[str, str] = {}
+        if isinstance(do_list, list):
+            for do in do_list:
+                guid = do.get("guid", "")
+                name = do.get("name", "")
+                if guid and name:
+                    mapping[guid] = name
+        _dining_option_config_cache[restaurant_guid] = mapping
+        logger.info("Dining option configs cached for %s: %d options",
+                    restaurant_guid[:8] + "...", len(mapping))
+        return mapping
+    except Exception as exc:
+        logger.warning("Dining option config error for %s: %s", restaurant_guid[:8] + "...", exc)
+        _dining_option_config_cache[restaurant_guid] = {}
+        return {}
+
+
+def _query_tips_by_channel(
+    week_start_yyyymmdd: str,
+    week_end_yyyymmdd: str,
+    dining_option_maps: Dict[str, Dict[str, str]],
+) -> Dict[str, Dict[str, Dict[str, float]]]:
+    """
+    Query the local orders.db for tips grouped by (restaurant_guid, business_date, channel).
+    dining_option_maps: {restaurant_guid: {do_guid: do_name}} for classifying kiosk vs cashier.
+    Returns: {restaurant_guid: {business_date: {"cashier": tips, "kiosk": tips}}}
+    """
+    from toast_orders_db import get_connection, ORDERS_DB_PATH, db_available
+    if not db_available():
+        return {}
+
+    conn = get_connection(ORDERS_DB_PATH)
+    try:
+        rows = conn.execute("""
+            SELECT
+                o.restaurant_guid,
+                o.business_date,
+                json_extract(o.order_json, '$.diningOption.guid') AS do_guid,
+                SUM(COALESCE(CAST(json_extract(pmt.value, '$.tipAmount') AS REAL), 0)) AS total_tips
+            FROM orders o,
+                json_each(json_extract(o.order_json, '$.checks')) AS chk,
+                json_each(json_extract(chk.value, '$.payments')) AS pmt
+            WHERE o.business_date BETWEEN ? AND ?
+                AND COALESCE(json_extract(o.order_json, '$.voided'), 0) != 1
+                AND COALESCE(json_extract(chk.value, '$.voided'), 0) != 1
+                AND COALESCE(json_extract(pmt.value, '$.paymentStatus'), '') NOT IN ('VOIDED', 'DENIED')
+                AND COALESCE(json_extract(pmt.value, '$.refundStatus'), '') != 'SUCCESSFUL'
+                AND json_extract(pmt.value, '$.originalMapPayment') IS NULL
+            GROUP BY o.restaurant_guid, o.business_date, do_guid
+        """, (week_start_yyyymmdd, week_end_yyyymmdd)).fetchall()
+    finally:
+        conn.close()
+
+    result: Dict[str, Dict[str, Dict[str, float]]] = {}
+    for restaurant_guid, biz_date, do_guid, total_tips in rows:
+        do_name = ""
+        if do_guid:
+            rest_map = dining_option_maps.get(restaurant_guid, {})
+            do_name = rest_map.get(do_guid, "")
+        channel = "kiosk" if _is_kiosk_dining_option(do_name) else "cashier"
+        result.setdefault(restaurant_guid, {}).setdefault(biz_date, {"cashier": 0.0, "kiosk": 0.0})
+        result[restaurant_guid][biz_date][channel] += float(total_tips or 0)
+    return result
+
+
+async def _build_cashier_vs_kiosk_data(
+    week_end_date: date,
+    location_filter: Optional[List[str]] = None,
+) -> dict:
+    """Core logic shared by the JSON endpoint and the Excel export."""
+    week_start = week_end_date - timedelta(days=6)
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        locations = await get_all_active_locations(client)
+        restaurant_ids = [loc.restaurantGuid for loc in locations]
+        restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
+        guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
+        guid_to_ext = {loc.restaurantGuid: (loc.externalId or "") for loc in locations}
+
+        if location_filter:
+            filter_set = set(location_filter)
+            restaurant_ids = [g for g in restaurant_ids if g in filter_set
+                              or guid_to_ext.get(g, "") in filter_set
+                              or guid_to_name.get(g, "") in filter_set]
+
+        report_guid = await request_toast_report(
+            client, week_start, week_end_date, restaurant_ids,
+            report_type="metrics", group_by=["DINING_OPTION"],
+        )
+        era_rows = await fetch_toast_report(client, report_guid, report_type="metrics")
+        if not isinstance(era_rows, list):
+            era_rows = []
+
+    # Aggregate ERA data: {guid: {date_str: {cashier: {checks, net}, kiosk: {checks, net}}}}
+    store_data: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
+    for row in era_rows:
+        if not isinstance(row, dict):
+            continue
+        guid = row.get("restaurantGuid", "")
+        if guid not in guid_to_name:
+            continue
+
+        biz_date_raw = str(row.get("businessDate", "")).replace("-", "")
+        if len(biz_date_raw) == 8:
+            date_key = biz_date_raw
+        else:
+            continue
+
+        dining_opt = str(row.get("diningOption", "") or "").strip()
+        channel = "kiosk" if _is_kiosk_dining_option(dining_opt) else "cashier"
+        net = float(row.get("netSalesAmount", 0) or 0)
+        checks = float(row.get("ordersCount", 0) or 0)
+
+        store_data.setdefault(guid, {}).setdefault(date_key, {
+            "cashier": {"checkCount": 0.0, "netSales": 0.0},
+            "kiosk": {"checkCount": 0.0, "netSales": 0.0},
+        })
+        store_data[guid][date_key][channel]["checkCount"] += checks
+        store_data[guid][date_key][channel]["netSales"] += net
+
+    # Fetch dining option configs for all restaurants that have ERA data
+    dining_option_maps: Dict[str, Dict[str, str]] = {}
+    async with httpx.AsyncClient(timeout=30.0) as cfg_client:
+        for guid in store_data.keys():
+            dining_option_maps[guid] = await _fetch_dining_option_configs(cfg_client, guid)
+
+    # Get tips from orders DB
+    ws_yyyymmdd = week_start.strftime("%Y%m%d")
+    we_yyyymmdd = week_end_date.strftime("%Y%m%d")
+    tips_data = _query_tips_by_channel(ws_yyyymmdd, we_yyyymmdd, dining_option_maps)
+
+    # Build response
+    stores_list = []
+    for guid in sorted(store_data.keys(), key=lambda g: guid_to_ext.get(g, g)):
+        ext_id = guid_to_ext.get(guid, "")
+        name = guid_to_name.get(guid, guid[:8])
+        daily_entries = store_data[guid]
+
+        weekly_cashier = {"checkCount": 0, "netSales": 0.0, "tips": 0.0}
+        weekly_kiosk = {"checkCount": 0, "netSales": 0.0, "tips": 0.0}
+        daily_list = []
+
+        for d_key in sorted(daily_entries.keys()):
+            day = daily_entries[d_key]
+            c_tips = tips_data.get(guid, {}).get(d_key, {}).get("cashier", 0.0)
+            k_tips = tips_data.get(guid, {}).get(d_key, {}).get("kiosk", 0.0)
+
+            c_checks = int(day["cashier"]["checkCount"])
+            k_checks = int(day["kiosk"]["checkCount"])
+            c_net = round(day["cashier"]["netSales"], 2)
+            k_net = round(day["kiosk"]["netSales"], 2)
+            c_tips = round(c_tips, 2)
+            k_tips = round(k_tips, 2)
+            c_tpc = round(c_tips / c_checks, 2) if c_checks else 0.0
+            k_tpc = round(k_tips / k_checks, 2) if k_checks else 0.0
+
+            formatted_date = f"{d_key[:4]}-{d_key[4:6]}-{d_key[6:8]}"
+
+            daily_list.append({
+                "date": formatted_date,
+                "cashier": {"checkCount": c_checks, "netSales": c_net, "tips": c_tips, "tipsPerCheck": c_tpc},
+                "kiosk": {"checkCount": k_checks, "netSales": k_net, "tips": k_tips, "tipsPerCheck": k_tpc},
+            })
+
+            weekly_cashier["checkCount"] += c_checks
+            weekly_cashier["netSales"] += c_net
+            weekly_cashier["tips"] += c_tips
+            weekly_kiosk["checkCount"] += k_checks
+            weekly_kiosk["netSales"] += k_net
+            weekly_kiosk["tips"] += k_tips
+
+        weekly_cashier["netSales"] = round(weekly_cashier["netSales"], 2)
+        weekly_cashier["tips"] = round(weekly_cashier["tips"], 2)
+        weekly_cashier["tipsPerCheck"] = round(weekly_cashier["tips"] / weekly_cashier["checkCount"], 2) if weekly_cashier["checkCount"] else 0.0
+        weekly_kiosk["netSales"] = round(weekly_kiosk["netSales"], 2)
+        weekly_kiosk["tips"] = round(weekly_kiosk["tips"], 2)
+        weekly_kiosk["tipsPerCheck"] = round(weekly_kiosk["tips"] / weekly_kiosk["checkCount"], 2) if weekly_kiosk["checkCount"] else 0.0
+
+        stores_list.append({
+            "storeId": ext_id,
+            "storeName": name,
+            "restaurantGuid": guid,
+            "weekly": {"cashier": weekly_cashier, "kiosk": weekly_kiosk},
+            "daily": daily_list,
+        })
+
+    return {
+        "weekName": week_end_date.isoformat(),
+        "weekStart": week_start.isoformat(),
+        "weekEnd": week_end_date.isoformat(),
+        "stores": stores_list,
+        "generatedAt": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+@app.post("/api/cashier-vs-kiosk")
+async def cashier_vs_kiosk_report(payload: dict = Body(...)):
+    """
+    Cashier vs Kiosk Counts and Dollars report.
+    Expects: {"week_end_date": "YYYY-MM-DD", "locations": [...] (optional)}
+    """
+    wed_str = payload.get("week_end_date")
+    if not wed_str:
+        raise HTTPException(status_code=400, detail="week_end_date required (YYYY-MM-DD)")
+    try:
+        week_end = date.fromisoformat(wed_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="week_end_date must be YYYY-MM-DD")
+
+    location_filter = payload.get("locations") or None
+    return await _build_cashier_vs_kiosk_data(week_end, location_filter)
+
+
+@app.get("/api/cashier-vs-kiosk/excel")
+async def cashier_vs_kiosk_excel(week_end_date: str):
+    """
+    Excel export of the Cashier vs Kiosk report.
+    Returns base64-encoded xlsx with filename.
+    """
+    try:
+        week_end = date.fromisoformat(week_end_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="week_end_date must be YYYY-MM-DD")
+
+    data = await _build_cashier_vs_kiosk_data(week_end)
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = data["weekEnd"]
+
+    header_font_white = Font(bold=True, size=10, color="FFFFFF")
+    header_fill_blue = PatternFill("solid", fgColor="1E3A5F")
+    header_fill_green = PatternFill("solid", fgColor="2E7D32")
+    bold_font = Font(bold=True, size=10)
+    money_fmt = '#,##0.00'
+    int_fmt = '#,##0'
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+
+    # Title
+    ws.merge_cells("A1:P1")
+    ws["A1"] = "Cashier vs Kiosk Counts and Dollars"
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A3"] = f"Report generated at:  {data['generatedAt']}"
+
+    # Column group headers
+    ws["I4"] = "Cashier"
+    ws["I4"].font = header_font_white
+    ws["I4"].fill = header_fill_blue
+    ws.merge_cells("I4:L4")
+    ws["M4"] = "Kiosk"
+    ws["M4"].font = header_font_white
+    ws["M4"].fill = header_fill_green
+    ws.merge_cells("M4:P4")
+
+    # Column headers row
+    col_headers = [
+        ("A", "Week Name"), ("B", "Week Start"), ("C", "Week End"),
+        ("D", "Store ID"), ("E", "Store Name"), ("F", "Date Of Business"),
+        ("I", "Check Count"), ("J", "Net Sales"), ("K", "Tips"), ("L", "Tips Per Check"),
+        ("M", "Check Count"), ("N", "Net Sales"), ("O", "Tips"), ("P", "Tips Per Check"),
+    ]
+    for col_letter, label in col_headers:
+        cell = ws[f"{col_letter}5"]
+        cell.value = label
+        cell.font = bold_font
+        cell.border = thin_border
+        if col_letter in ("I", "J", "K", "L"):
+            cell.fill = PatternFill("solid", fgColor="D6E4F0")
+        elif col_letter in ("M", "N", "O", "P"):
+            cell.fill = PatternFill("solid", fgColor="C8E6C9")
+
+    # Widths
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 12
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 10
+    ws.column_dimensions["E"].width = 35
+    ws.column_dimensions["F"].width = 18
+    for c in "IJKLMNOP":
+        ws.column_dimensions[c].width = 14
+
+    row_num = 6
+    for store in data["stores"]:
+        # Weekly total row
+        ws[f"A{row_num}"] = data["weekEnd"]
+        ws[f"B{row_num}"] = data["weekStart"]
+        ws[f"C{row_num}"] = data["weekEnd"]
+        ws[f"D{row_num}"] = store["storeId"]
+        ws[f"E{row_num}"] = store["storeName"]
+        ws[f"F{row_num}"] = "Weekly Total"
+        ws[f"F{row_num}"].font = bold_font
+
+        wc = store["weekly"]["cashier"]
+        wk = store["weekly"]["kiosk"]
+        ws[f"I{row_num}"] = wc["checkCount"]
+        ws[f"J{row_num}"] = wc["netSales"]
+        ws[f"K{row_num}"] = wc["tips"]
+        ws[f"L{row_num}"] = wc["tipsPerCheck"]
+        ws[f"M{row_num}"] = wk["checkCount"]
+        ws[f"N{row_num}"] = wk["netSales"]
+        ws[f"O{row_num}"] = wk["tips"]
+        ws[f"P{row_num}"] = wk["tipsPerCheck"]
+
+        for c in "IJKLMNOP":
+            cell = ws[f"{c}{row_num}"]
+            cell.border = thin_border
+            if c in ("J", "K", "L", "N", "O", "P"):
+                cell.number_format = money_fmt
+            else:
+                cell.number_format = int_fmt
+        for c in "ABCDEF":
+            ws[f"{c}{row_num}"].font = bold_font
+
+        row_num += 1
+
+        # Daily rows
+        for day in store["daily"]:
+            ws[f"F{row_num}"] = day["date"]
+            dc = day["cashier"]
+            dk = day["kiosk"]
+            ws[f"I{row_num}"] = dc["checkCount"]
+            ws[f"J{row_num}"] = dc["netSales"]
+            ws[f"K{row_num}"] = dc["tips"]
+            ws[f"L{row_num}"] = dc["tipsPerCheck"]
+            ws[f"M{row_num}"] = dk["checkCount"]
+            ws[f"N{row_num}"] = dk["netSales"]
+            ws[f"O{row_num}"] = dk["tips"]
+            ws[f"P{row_num}"] = dk["tipsPerCheck"]
+
+            for c in "IJKLMNOP":
+                cell = ws[f"{c}{row_num}"]
+                cell.border = thin_border
+                if c in ("J", "K", "L", "N", "O", "P"):
+                    cell.number_format = money_fmt
+                else:
+                    cell.number_format = int_fmt
+            row_num += 1
+
+    from io import BytesIO
+    buf = BytesIO()
+    wb.save(buf)
+    xlsx_bytes = buf.getvalue()
+
+    filename = f"Cashier_vs_Kiosk_{data['weekEnd']}.xlsx"
+    return {
+        "filename": filename,
+        "data": base64.b64encode(xlsx_bytes).decode("ascii"),
+    }
+
+
 # ------------------
 # Static Frontend
 # ------------------
@@ -15399,7 +15789,8 @@ async def monkey_lock_the_day_notify(payload: dict = Body(...)):
             )
 
             msg = MIMEMultipart()
-            msg["From"] = gmail_user
+            send_as = os.getenv("GMAIL_SEND_AS", gmail_user)
+            msg["From"] = send_as
             msg["To"] = ", ".join(to_addrs)
             msg["Cc"] = ", ".join(cc_addresses)
             msg["Subject"] = f"Monkey Media — Unposted Order{'s' if len(orders) > 1 else ''} for {store_name} ({biz_date})"
