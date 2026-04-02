@@ -15263,54 +15263,60 @@ def _query_tips_by_channel(
     if not db_available():
         return {}
 
+    # Only query for restaurants we have ERA data for
+    guid_list = list(dining_option_maps.keys())
+    if not guid_list:
+        return {}
+
+    logger.info("Cashier vs Kiosk tips: querying orders.db for %d restaurants, dates %s-%s",
+                len(guid_list), week_start_yyyymmdd, week_end_yyyymmdd)
+
     conn = get_connection(ORDERS_DB_PATH)
+    result: Dict[str, Dict[str, Dict[str, float]]] = {}
+    order_count = 0
     try:
-        rows = conn.execute(
-            "SELECT restaurant_guid, business_date, order_json FROM orders"
-            " WHERE business_date BETWEEN ? AND ?",
-            (week_start_yyyymmdd, week_end_yyyymmdd),
-        ).fetchall()
+        for guid in guid_list:
+            cursor = conn.execute(
+                "SELECT restaurant_guid, business_date, order_json FROM orders"
+                " WHERE business_date BETWEEN ? AND ? AND restaurant_guid = ?",
+                (week_start_yyyymmdd, week_end_yyyymmdd, guid),
+            )
+            for restaurant_guid, biz_date, order_json_str in cursor:
+                order_count += 1
+                try:
+                    order = json.loads(order_json_str)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if order.get("voided") or order.get("deleted"):
+                    continue
+                do_obj = order.get("diningOption")
+                do_guid = do_obj.get("guid", "") if isinstance(do_obj, dict) else ""
+                rest_map = dining_option_maps.get(restaurant_guid, {})
+                do_name = rest_map.get(do_guid, "") if do_guid else ""
+                channel = "kiosk" if _is_kiosk_dining_option(do_name) else "cashier"
+                for check in order.get("checks") or []:
+                    if check.get("voided") or check.get("deleted"):
+                        continue
+                    for pmt in check.get("payments") or []:
+                        tip = float(pmt.get("tipAmount") or 0)
+                        if tip <= 0:
+                            continue
+                        if pmt.get("voided"):
+                            continue
+                        status = (pmt.get("paymentStatus") or "").upper()
+                        if status in ("VOIDED", "DENIED"):
+                            continue
+                        refund = (pmt.get("refundStatus") or "").upper()
+                        if refund == "SUCCESSFUL":
+                            continue
+                        if pmt.get("originalMapPayment"):
+                            continue
+                        result.setdefault(restaurant_guid, {}).setdefault(biz_date, {"cashier": 0.0, "kiosk": 0.0})
+                        result[restaurant_guid][biz_date][channel] += tip
     finally:
         conn.close()
 
-    logger.info("Cashier vs Kiosk tips: processing %d orders from orders.db", len(rows))
-
-    result: Dict[str, Dict[str, Dict[str, float]]] = {}
-    for restaurant_guid, biz_date, order_json_str in rows:
-        try:
-            order = json.loads(order_json_str)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if order.get("voided") or order.get("deleted"):
-            continue
-
-        # Get dining option GUID from order level
-        do_obj = order.get("diningOption")
-        do_guid = do_obj.get("guid", "") if isinstance(do_obj, dict) else ""
-        rest_map = dining_option_maps.get(restaurant_guid, {})
-        do_name = rest_map.get(do_guid, "") if do_guid else ""
-        channel = "kiosk" if _is_kiosk_dining_option(do_name) else "cashier"
-
-        for check in order.get("checks") or []:
-            if check.get("voided") or check.get("deleted"):
-                continue
-            for pmt in check.get("payments") or []:
-                tip = float(pmt.get("tipAmount") or 0)
-                if tip <= 0:
-                    continue
-                if pmt.get("voided"):
-                    continue
-                status = (pmt.get("paymentStatus") or "").upper()
-                if status in ("VOIDED", "DENIED"):
-                    continue
-                refund = (pmt.get("refundStatus") or "").upper()
-                if refund == "SUCCESSFUL":
-                    continue
-                if pmt.get("originalMapPayment"):
-                    continue
-                result.setdefault(restaurant_guid, {}).setdefault(biz_date, {"cashier": 0.0, "kiosk": 0.0})
-                result[restaurant_guid][biz_date][channel] += tip
-
+    logger.info("Cashier vs Kiosk tips: processed %d orders", order_count)
     return result
 
 
