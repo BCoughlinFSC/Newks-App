@@ -15249,49 +15249,33 @@ async def _fetch_dining_option_configs(
         return {}
 
 
-def _query_tips_by_channel(
-    week_start_yyyymmdd: str,
-    week_end_yyyymmdd: str,
+async def _fetch_tips_by_channel(
+    client: httpx.AsyncClient,
+    restaurant_guids: List[str],
+    start_date: date,
+    end_date: date,
     dining_option_maps: Dict[str, Dict[str, str]],
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """
-    Query the local orders.db for tips grouped by (restaurant_guid, business_date, channel).
-    Processes order JSON in Python to avoid slow SQLite json_each on large datasets.
-    Returns: {restaurant_guid: {business_date: {"cashier": tips, "kiosk": tips}}}
+    Fetch tips from cached orders (same approach as tip pool report).
+    Processes one restaurant+day at a time using get_cached_orders.
+    Returns: {restaurant_guid: {business_date_yyyymmdd: {"cashier": tips, "kiosk": tips}}}
     """
-    from toast_orders_db import get_connection, ORDERS_DB_PATH, db_available
-    if not db_available():
-        return {}
-
-    # Only query for restaurants we have ERA data for
-    guid_list = list(dining_option_maps.keys())
-    if not guid_list:
-        return {}
-
-    logger.info("Cashier vs Kiosk tips: querying orders.db for %d restaurants, dates %s-%s",
-                len(guid_list), week_start_yyyymmdd, week_end_yyyymmdd)
-
-    conn = get_connection(ORDERS_DB_PATH)
     result: Dict[str, Dict[str, Dict[str, float]]] = {}
     order_count = 0
-    try:
-        for guid in guid_list:
-            cursor = conn.execute(
-                "SELECT restaurant_guid, business_date, order_json FROM orders"
-                " WHERE business_date BETWEEN ? AND ? AND restaurant_guid = ?",
-                (week_start_yyyymmdd, week_end_yyyymmdd, guid),
-            )
-            for restaurant_guid, biz_date, order_json_str in cursor:
+
+    for idx, guid in enumerate(restaurant_guids):
+        rest_map = dining_option_maps.get(guid, {})
+        d = start_date
+        while d <= end_date:
+            biz_date = to_business_date(d)
+            orders = await _fetch_orders_for_restaurant_day(client, guid, biz_date)
+            for order in orders:
                 order_count += 1
-                try:
-                    order = json.loads(order_json_str)
-                except (json.JSONDecodeError, TypeError):
-                    continue
                 if order.get("voided") or order.get("deleted"):
                     continue
                 do_obj = order.get("diningOption")
                 do_guid = do_obj.get("guid", "") if isinstance(do_obj, dict) else ""
-                rest_map = dining_option_maps.get(restaurant_guid, {})
                 do_name = rest_map.get(do_guid, "") if do_guid else ""
                 channel = "kiosk" if _is_kiosk_dining_option(do_name) else "cashier"
                 for check in order.get("checks") or []:
@@ -15311,12 +15295,13 @@ def _query_tips_by_channel(
                             continue
                         if pmt.get("originalMapPayment"):
                             continue
-                        result.setdefault(restaurant_guid, {}).setdefault(biz_date, {"cashier": 0.0, "kiosk": 0.0})
-                        result[restaurant_guid][biz_date][channel] += tip
-    finally:
-        conn.close()
+                        result.setdefault(guid, {}).setdefault(biz_date, {"cashier": 0.0, "kiosk": 0.0})
+                        result[guid][biz_date][channel] += tip
+            d += timedelta(days=1)
+        if (idx + 1) % 10 == 0:
+            logger.info("Cashier vs Kiosk tips: %d/%d restaurants processed", idx + 1, len(restaurant_guids))
 
-    logger.info("Cashier vs Kiosk tips: processed %d orders", order_count)
+    logger.info("Cashier vs Kiosk tips: done — %d restaurants, %d orders", len(restaurant_guids), order_count)
     return result
 
 
@@ -15375,12 +15360,11 @@ async def _build_cashier_vs_kiosk_data(
         store_data[guid][date_key][channel]["checkCount"] += checks
         store_data[guid][date_key][channel]["netSales"] += net
 
-    # Fetch dining option configs for all restaurants that have ERA data (parallel)
+    # Fetch dining option configs (parallel, cached after first call)
     dining_option_maps: Dict[str, Dict[str, str]] = {}
     guids_needing_config = [g for g in store_data.keys() if g not in _dining_option_config_cache]
     if guids_needing_config:
         async with httpx.AsyncClient(timeout=30.0) as cfg_client:
-            # Batch in groups of 10 to avoid overwhelming the API
             for i in range(0, len(guids_needing_config), 10):
                 batch = guids_needing_config[i:i+10]
                 results = await asyncio.gather(
@@ -15393,15 +15377,15 @@ async def _build_cashier_vs_kiosk_data(
                     else:
                         logger.warning("Dining option config failed for %s: %s", guid[:8], result)
                         dining_option_maps[guid] = {}
-    # Fill in from cache for already-cached restaurants
     for guid in store_data.keys():
         if guid not in dining_option_maps:
             dining_option_maps[guid] = _dining_option_config_cache.get(guid, {})
 
-    # Get tips from orders DB
-    ws_yyyymmdd = week_start.strftime("%Y%m%d")
-    we_yyyymmdd = week_end_date.strftime("%Y%m%d")
-    tips_data = _query_tips_by_channel(ws_yyyymmdd, we_yyyymmdd, dining_option_maps)
+    # Fetch tips from cached orders (one restaurant+day at a time, same as tip pool)
+    async with httpx.AsyncClient(timeout=120.0) as tips_client:
+        tips_data = await _fetch_tips_by_channel(
+            tips_client, list(store_data.keys()), week_start, week_end_date, dining_option_maps,
+        )
 
     # Build response
     stores_list = []
