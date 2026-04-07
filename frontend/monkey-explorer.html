@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Monkey Media Schema Explorer – Newk's</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0; background: #F8FAFC; color: #1F2937;
+    }
+    .header {
+      background: #C41E3A; padding: 1rem 1.5rem;
+      display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+    .header h1 { margin: 0; color: white; font-size: 1.15rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15); color: white;
+      border: 1px solid rgba(255,255,255,0.3); border-radius: 6px;
+      padding: 0.4rem 0.9rem; text-decoration: none; font-size: 0.82rem;
+    }
+    .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
+    .card {
+      background: white; border-radius: 8px; padding: 1rem 1.25rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 1rem;
+    }
+    .card h2 { margin: 0 0 0.75rem; font-size: 0.95rem; color: #C41E3A; }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    input[type=text], textarea, select {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.85rem; padding: 0.5rem 0.65rem;
+      border: 1px solid #D1D5DB; border-radius: 6px; background: white;
+    }
+    textarea { width: 100%; min-height: 110px; resize: vertical; }
+    input[type=text] { min-width: 280px; }
+    button {
+      background: #C41E3A; color: white; border: none; border-radius: 6px;
+      padding: 0.5rem 0.9rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+    }
+    button.secondary { background: #4B5563; }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    table {
+      border-collapse: collapse; width: 100%;
+      font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.78rem;
+    }
+    th, td {
+      border: 1px solid #E5E7EB; padding: 0.35rem 0.55rem; text-align: left;
+      max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    th { background: #F3F4F6; position: sticky; top: 0; }
+    tr:nth-child(even) td { background: #FAFAFA; }
+    .table-wrap { max-height: 60vh; overflow: auto; border: 1px solid #E5E7EB; border-radius: 6px; }
+    .meta { font-size: 0.78rem; color: #6B7280; margin-top: 0.5rem; }
+    .err { color: #B91C1C; font-size: 0.82rem; margin-top: 0.5rem; white-space: pre-wrap; }
+    .clickable { color: #2563EB; cursor: pointer; text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Monkey Media Schema Explorer</h1>
+    <a href="home.html" class="home-btn">← Home</a>
+  </div>
+  <div class="container">
+
+    <div class="card">
+      <h2>Quick Actions</h2>
+      <div class="row">
+        <button onclick="listTables()">List msr.* tables</button>
+        <input type="text" id="colsTable" placeholder="table name (e.g. items)" />
+        <button class="secondary" onclick="listColumns()">Show columns</button>
+      </div>
+      <div class="row" style="margin-top:0.6rem">
+        <input type="text" id="guidInput" placeholder="GUID to search across all string columns"
+               value="a54c9608-e602-4fab-ba28-41b0e03d9ee6" style="min-width:380px" />
+        <button onclick="searchGuid()">Search GUID</button>
+        <span class="meta">(scans every char/varchar/uniqueidentifier column in msr.*)</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Custom SELECT</h2>
+      <textarea id="sqlBox">SELECT TOP 50 * FROM msr.items</textarea>
+      <div class="row" style="margin-top:0.5rem">
+        <button onclick="runQuery()">Run query</button>
+        <span class="meta">SELECT/WITH only · single statement · max 2000 rows</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Results</h2>
+      <div id="meta" class="meta"></div>
+      <div id="err" class="err"></div>
+      <div id="results" class="table-wrap"></div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function setBusy(busy) {
+  document.querySelectorAll('button').forEach(b => b.disabled = busy);
+  $('meta').textContent = busy ? 'Running…' : '';
+}
+
+function showError(e) {
+  $('err').textContent = typeof e === 'string' ? e : (e?.detail || e?.message || JSON.stringify(e));
+  $('results').innerHTML = '';
+}
+
+function renderTable(data) {
+  $('err').textContent = '';
+  const { columns = [], rows = [], rowCount = 0 } = data || {};
+  $('meta').textContent = `${rowCount} row${rowCount === 1 ? '' : 's'}`;
+  if (!columns.length) { $('results').innerHTML = '<em>(no columns)</em>'; return; }
+  let h = '<table><thead><tr>';
+  for (const c of columns) h += `<th>${c}</th>`;
+  h += '</tr></thead><tbody>';
+  for (const r of rows) {
+    h += '<tr>';
+    for (let i = 0; i < r.length; i++) {
+      const v = r[i];
+      const txt = v === null ? '<span style="color:#9CA3AF">NULL</span>' : String(v);
+      // If the cell is a table name in the tables listing, make it clickable
+      const isTablesView = columns.length === 1 && columns[0] === 'TABLE_NAME';
+      if (isTablesView) {
+        h += `<td><span class="clickable" onclick="quickColumns('${v}')">${txt}</span></td>`;
+      } else {
+        h += `<td title="${(v == null ? '' : String(v).replace(/"/g,'&quot;'))}">${txt}</td>`;
+      }
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table>';
+  $('results').innerHTML = h;
+}
+
+async function api(url, opts = {}) {
+  setBusy(true);
+  try {
+    const res = await fetch(url, opts);
+    const body = await res.json();
+    if (!res.ok) { showError(body); return null; }
+    return body;
+  } catch (e) {
+    showError(e);
+    return null;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function listTables() {
+  const data = await api('/api/monkey/explore/tables');
+  if (data) renderTable(data);
+}
+
+async function listColumns() {
+  const t = $('colsTable').value.trim();
+  if (!t) return;
+  const data = await api('/api/monkey/explore/columns?table=' + encodeURIComponent(t));
+  if (data) renderTable(data);
+}
+
+function quickColumns(t) {
+  $('colsTable').value = t;
+  listColumns();
+}
+
+async function runQuery() {
+  const sql = $('sqlBox').value.trim();
+  if (!sql) return;
+  const data = await api('/api/monkey/explore/query', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ sql }),
+  });
+  if (data) renderTable(data);
+}
+
+async function searchGuid() {
+  const guid = $('guidInput').value.trim();
+  if (!guid) return;
+  $('meta').textContent = 'Scanning every msr.* string column — this can take a minute…';
+  const data = await api('/api/monkey/explore/search-guid', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ guid }),
+  });
+  if (!data) return;
+  // Render hits as a table
+  const cols = ['table', 'column', 'dataType', 'matchCount', 'sample'];
+  const rows = data.hits.map(h => cols.map(c => h[c]));
+  renderTable({ columns: cols, rows, rowCount: data.hitCount });
+  if (data.hitCount === 0) $('meta').textContent = 'No matches in any msr.* string column.';
+  else $('meta').textContent = `${data.hitCount} column(s) contain that GUID.`;
+}
+</script>
+</body>
+</html>

@@ -15909,6 +15909,133 @@ async def monkey_stores():
         conn.close()
 
 
+# ── Monkey Media Azure SQL Explorer (read-only) ────────────────────
+
+def _run_monkey_azure_query(sql: str, params: tuple = ()) -> dict:
+    """Execute a read-only query against the Monkey Azure SQL DB.
+
+    Restricted to a single SELECT statement. Returns {columns, rows, rowCount}.
+    """
+    import re
+    import sync_monkey as sm
+
+    s = (sql or "").strip().rstrip(";").strip()
+    if not s:
+        raise HTTPException(status_code=400, detail="Empty query")
+    if ";" in s:
+        raise HTTPException(status_code=400, detail="Only a single statement is allowed")
+    if not re.match(r"^(?:select|with)\b", s, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Only SELECT/WITH queries are allowed")
+    forbidden = re.compile(
+        r"\b(insert|update|delete|drop|truncate|alter|create|grant|revoke|merge|exec|execute|sp_|xp_)\b",
+        re.IGNORECASE,
+    )
+    if forbidden.search(s):
+        raise HTTPException(status_code=400, detail="Query contains a forbidden keyword")
+
+    conn = sm.get_azure_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(s, params) if params else cur.execute(s)
+        cols = [d[0] for d in cur.description] if cur.description else []
+        raw = cur.fetchmany(2000)
+        rows = []
+        for r in raw:
+            row = []
+            for v in r:
+                if isinstance(v, datetime):
+                    v = v.strftime("%Y-%m-%d %H:%M:%S")
+                elif v is not None and not isinstance(v, (int, float, str, bool)):
+                    v = str(v)
+                row.append(v)
+            rows.append(row)
+        return {"columns": cols, "rows": rows, "rowCount": len(rows)}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.get("/api/monkey/explore/tables")
+async def monkey_explore_tables():
+    """List all tables in the msr schema on Azure SQL."""
+    return _run_monkey_azure_query(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+        "WHERE TABLE_SCHEMA='msr' ORDER BY TABLE_NAME"
+    )
+
+
+@app.get("/api/monkey/explore/columns")
+async def monkey_explore_columns(table: str):
+    """List columns for a given msr.<table>."""
+    import re
+    if not re.match(r"^[A-Za-z0-9_]+$", table or ""):
+        raise HTTPException(status_code=400, detail="Invalid table name")
+    return _run_monkey_azure_query(
+        "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE "
+        "FROM INFORMATION_SCHEMA.COLUMNS "
+        f"WHERE TABLE_SCHEMA='msr' AND TABLE_NAME='{table}' "
+        "ORDER BY ORDINAL_POSITION"
+    )
+
+
+@app.post("/api/monkey/explore/query")
+async def monkey_explore_query(payload: dict = Body(...)):
+    """Run an arbitrary read-only SELECT against Monkey Azure SQL."""
+    return _run_monkey_azure_query(payload.get("sql", ""))
+
+
+@app.post("/api/monkey/explore/search-guid")
+async def monkey_explore_search_guid(payload: dict = Body(...)):
+    """Search every string column in msr.* for a GUID-like value.
+
+    Returns a list of {table, column, matchCount, sample} hits.
+    """
+    guid = (payload.get("guid") or "").strip().lower()
+    import re
+    if not re.match(r"^[0-9a-f-]{8,64}$", guid):
+        raise HTTPException(status_code=400, detail="Invalid guid")
+
+    import sync_monkey as sm
+    conn = sm.get_azure_connection()
+    hits = []
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA='msr' AND DATA_TYPE IN "
+            "('char','varchar','nchar','nvarchar','text','ntext','uniqueidentifier')"
+        )
+        cols = cur.fetchall()
+        for tbl, col, dtype in cols:
+            try:
+                q = (
+                    f"SELECT TOP 5 [{col}] FROM msr.[{tbl}] "
+                    f"WHERE LOWER(CAST([{col}] AS NVARCHAR(200))) LIKE '%{guid}%'"
+                )
+                c2 = conn.cursor()
+                c2.execute(q)
+                samples = c2.fetchall()
+                if samples:
+                    hits.append({
+                        "table": tbl,
+                        "column": col,
+                        "dataType": dtype,
+                        "matchCount": len(samples),
+                        "sample": str(samples[0][0]) if samples[0][0] is not None else None,
+                    })
+            except Exception as e:
+                # Skip columns that error (permissions, etc.)
+                continue
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return {"guid": guid, "hits": hits, "hitCount": len(hits)}
+
+
 # ── CrunchTime (Food Cost / COGS) API ──────────────────────────────
 
 
