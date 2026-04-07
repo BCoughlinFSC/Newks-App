@@ -15993,6 +15993,7 @@ async def monkey_explore_search_guid(payload: dict = Body(...)):
     Returns a list of {table, column, matchCount, sample} hits.
     """
     guid = (payload.get("guid") or "").strip().lower()
+    tables_filter = payload.get("tables") or []  # optional list of table names (LIKE patterns)
     import re
     if not re.match(r"^[0-9a-f-]{8,64}$", guid):
         raise HTTPException(status_code=400, detail="Invalid guid")
@@ -16002,11 +16003,17 @@ async def monkey_explore_search_guid(payload: dict = Body(...)):
     hits = []
     try:
         cur = conn.cursor()
-        cur.execute(
+        base_q = (
             "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
             "WHERE TABLE_SCHEMA='msr' AND DATA_TYPE IN "
             "('char','varchar','nchar','nvarchar','text','ntext','uniqueidentifier')"
         )
+        if tables_filter:
+            safe = [t for t in tables_filter if re.match(r"^[A-Za-z0-9_%]+$", t)]
+            if safe:
+                like_clauses = " OR ".join([f"TABLE_NAME LIKE '{t}'" for t in safe])
+                base_q += f" AND ({like_clauses})"
+        cur.execute(base_q)
         cols = cur.fetchall()
         total = len(cols)
         logger.info("[guid-search] scanning %d columns for '%s'", total, guid)

@@ -76,7 +76,11 @@
         <input type="text" id="guidInput" placeholder="GUID to search across all string columns"
                value="a54c9608-e602-4fab-ba28-41b0e03d9ee6" style="min-width:380px" />
         <button onclick="searchGuid()">Search GUID</button>
-        <span class="meta">(scans every char/varchar/uniqueidentifier column in msr.*)</span>
+      </div>
+      <div class="row" style="margin-top:0.4rem">
+        <input type="text" id="guidTables" placeholder="optional: limit to tables (comma-separated, % wildcards ok)"
+               value="%item%pos%,items,order_items,%production%modifier%" style="min-width:560px" />
+        <span class="meta">leave blank to scan all msr.* string columns</span>
       </div>
     </div>
 
@@ -183,11 +187,14 @@ async function runQuery() {
 async function searchGuid() {
   const guid = $('guidInput').value.trim();
   if (!guid) return;
-  $('meta').textContent = 'Scanning every msr.* string column — this can take a minute…';
+  const tables = $('guidTables').value.split(',').map(s => s.trim()).filter(Boolean);
+  $('meta').textContent = tables.length
+    ? `Scanning ${tables.length} table pattern(s)…`
+    : 'Scanning every msr.* string column — this can take a minute…';
   const data = await api('/api/monkey/explore/search-guid', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ guid }),
+    body: JSON.stringify({ guid, tables }),
   });
   if (!data) return;
   // Render hits as a table
