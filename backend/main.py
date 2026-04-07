@@ -16008,8 +16008,11 @@ async def monkey_explore_search_guid(payload: dict = Body(...)):
             "('char','varchar','nchar','nvarchar','text','ntext','uniqueidentifier')"
         )
         cols = cur.fetchall()
-        for tbl, col, dtype in cols:
+        total = len(cols)
+        logger.info("[guid-search] scanning %d columns for '%s'", total, guid)
+        for i, (tbl, col, dtype) in enumerate(cols, 1):
             try:
+                logger.info("[guid-search] (%d/%d) msr.%s.%s (%s)", i, total, tbl, col, dtype)
                 q = (
                     f"SELECT TOP 5 [{col}] FROM msr.[{tbl}] "
                     f"WHERE LOWER(CAST([{col}] AS NVARCHAR(200))) LIKE '%{guid}%'"
@@ -16018,6 +16021,7 @@ async def monkey_explore_search_guid(payload: dict = Body(...)):
                 c2.execute(q)
                 samples = c2.fetchall()
                 if samples:
+                    logger.info("[guid-search]   ✓ HIT in msr.%s.%s (%d sample rows)", tbl, col, len(samples))
                     hits.append({
                         "table": tbl,
                         "column": col,
