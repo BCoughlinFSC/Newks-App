@@ -11,3 +11,5 @@ numpy
 openpyxl
 pyodbc
 apscheduler
+azure-storage-blob
+psycopg[binary]
