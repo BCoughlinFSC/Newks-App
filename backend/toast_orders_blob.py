@@ -49,13 +49,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 try:
-    from azure.storage.blob import BlobServiceClient, ContainerClient
+    from azure.storage.blob import BlobServiceClient, ContainerClient, ContentSettings
     from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
     _SDK_AVAILABLE = True
 except ImportError:
     _SDK_AVAILABLE = False
     BlobServiceClient = None  # type: ignore
     ContainerClient = None  # type: ignore
+    ContentSettings = None  # type: ignore
     ResourceNotFoundError = Exception  # type: ignore
     ResourceExistsError = Exception  # type: ignore
 
@@ -213,8 +214,10 @@ def store_orders(
                  compressed,
                  overwrite=True,
                  metadata=metadata,
-                 content_type="application/json",
-                 content_encoding="gzip",
+                 content_settings=ContentSettings(
+                     content_type="application/json",
+                     content_encoding="gzip",
+                 ),
              )
 
     # Clear status markers
