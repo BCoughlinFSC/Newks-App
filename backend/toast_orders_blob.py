@@ -318,7 +318,11 @@ def get_cached_orders(
         return []
 
     try:
-        raw = gzip.decompress(data)
+        # Try gzip first; fall back to raw JSON for legacy (pre-gzip) blobs
+        if data[:2] == b'\x1f\x8b':
+            raw = gzip.decompress(data)
+        else:
+            raw = data
         return json.loads(raw)
     except Exception as exc:
         logger.warning("Failed to parse cached orders %s|%s: %s",
