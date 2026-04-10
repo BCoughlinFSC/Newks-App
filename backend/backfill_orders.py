@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 
-import toast_orders_db
+import toast_orders_blob as toast_orders_db
 
 # ── Config from .env ──────────────────────────────────────────────────────────
 

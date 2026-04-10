@@ -40,7 +40,7 @@ from aloha_sql_importer import import_aloha_sql_range, import_aloha_sql_last_day
 import aloha_db
 import aloha_sales_db
 from aloha_sales_importer import import_aloha_sales_range, import_aloha_sales_last_days, import_fiscal_calendar
-import toast_orders_db
+import toast_orders_blob as toast_orders_db
 import toast_config_db
 import toast_config_builder
 import monkey_db
@@ -10208,22 +10208,8 @@ async def admin_validation_net_sales(
 
     orders_lookup: Dict[str, float] = {}  # "date|store" → calc_net
     try:
-        def _query_orders_net(start_ymd: str, end_ymd: str) -> list:
-            conn = toast_orders_db.get_connection()
-            conn.execute("PRAGMA cache_size=-64000")  # 64 MB cache
-            result = conn.execute("""
-                SELECT business_date, restaurant_guid,
-                       SUM(COALESCE(json_extract(order_json, '$.checks[0].amount'), 0)) as calc_net
-                FROM orders
-                WHERE business_date BETWEEN ? AND ?
-                  AND COALESCE(json_extract(order_json, '$.voided'), 0) != 1
-                GROUP BY business_date, restaurant_guid
-            """, (start_ymd, end_ymd)).fetchall()
-            conn.close()
-            return result
-
         rows = await asyncio.wait_for(
-            asyncio.to_thread(_query_orders_net, start_yyyymmdd, end_yyyymmdd),
+            asyncio.to_thread(toast_orders_db.get_daily_net_sales, start_yyyymmdd, end_yyyymmdd),
             timeout=30.0,
         )
 
