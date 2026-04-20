@@ -1040,6 +1040,15 @@
       const CACHE_KEY = 'toastLocationsCache';
       const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+      // Always fetch ownership (lightweight, no cache) so filters work regardless of location cache
+      try {
+        const ownResp = await fetch('/api/location-ownership', { headers: authToken ? getAuthHeaders() : {} });
+        if (ownResp.ok) {
+          const ownData = await ownResp.json();
+          ownershipByGuid = ownData.byGuid || {};
+        }
+      } catch (e) { /* non-fatal */ }
+
       if (!forceRefresh) {
         try {
           const raw = window.localStorage.getItem(CACHE_KEY);
@@ -1064,16 +1073,9 @@
         }
       }
       try {
-        const [resp, ownResp] = await Promise.all([
-          fetch('/locations', { headers: authToken ? getAuthHeaders() : {} }),
-          fetch('/api/location-ownership', { headers: authToken ? getAuthHeaders() : {} }).catch(() => null),
-        ]);
+        const resp = await fetch('/locations', { headers: authToken ? getAuthHeaders() : {} });
         if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
         locations = await resp.json();
-        if (ownResp && ownResp.ok) {
-          const ownData = await ownResp.json();
-          ownershipByGuid = ownData.byGuid || {};
-        }
         try {
           window.localStorage.setItem(CACHE_KEY, JSON.stringify({ locations, timestamp: Date.now() }));
         } catch (e) {
