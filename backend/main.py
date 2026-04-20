@@ -14063,8 +14063,9 @@ async def _fetch_employee_hours(
     headers = {**standard_headers, "Toast-Restaurant-External-ID": restaurant_guid}
     labor_url = f"{TOAST_STANDARD_API_BASE_URL}/labor/v1/timeEntries"
 
-    # Keyed by employee guid -> {name, job, reg_hours, ot_hours}
-    by_employee: Dict[str, Dict] = {}
+    # Keyed by (employee_guid, job_guid) so an employee who works multiple
+    # tip-pool-eligible jobs in the same period gets a separate row for each.
+    by_employee: Dict[tuple, Dict] = {}
     hours_by_day: Dict[str, float] = {}  # date_iso -> total hours
 
     start_dt = datetime(start_date.year, start_date.month, start_date.day)
@@ -14128,8 +14129,9 @@ async def _fetch_employee_hours(
                     reg_h = float(entry.get("regularHours") or 0)
                     ot_h = float(entry.get("overtimeHours") or 0)
                     wage = entry.get("hourlyWage")  # None for salaried employees
-                    if emp_guid not in by_employee:
-                        by_employee[emp_guid] = {
+                    emp_job_key = (emp_guid, job_guid)
+                    if emp_job_key not in by_employee:
+                        by_employee[emp_job_key] = {
                             "employeeName": emp_name,
                             "employeeId": emp_ext_id,
                             "jobTitle": job_title,
@@ -14137,11 +14139,11 @@ async def _fetch_employee_hours(
                             "overtimeHours": 0.0,
                             "hourlyWage": None,
                         }
-                    by_employee[emp_guid]["regularHours"] += reg_h
-                    by_employee[emp_guid]["overtimeHours"] += ot_h
-                    # Keep the most recent non-null wage seen for this employee
+                    by_employee[emp_job_key]["regularHours"] += reg_h
+                    by_employee[emp_job_key]["overtimeHours"] += ot_h
+                    # Keep the most recent non-null wage seen for this employee+job
                     if wage is not None:
-                        by_employee[emp_guid]["hourlyWage"] = float(wage)
+                        by_employee[emp_job_key]["hourlyWage"] = float(wage)
                     # Track hours by day using inDate
                     in_date_raw = entry.get("inDate") or ""
                     try:
