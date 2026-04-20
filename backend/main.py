@@ -14127,6 +14127,7 @@ async def _fetch_employee_hours(
                     emp_ext_id = emp_info.get("externalId") or ""
                     reg_h = float(entry.get("regularHours") or 0)
                     ot_h = float(entry.get("overtimeHours") or 0)
+                    wage = entry.get("hourlyWage")  # None for salaried employees
                     if emp_guid not in by_employee:
                         by_employee[emp_guid] = {
                             "employeeName": emp_name,
@@ -14134,9 +14135,13 @@ async def _fetch_employee_hours(
                             "jobTitle": job_title,
                             "regularHours": 0.0,
                             "overtimeHours": 0.0,
+                            "hourlyWage": None,
                         }
                     by_employee[emp_guid]["regularHours"] += reg_h
                     by_employee[emp_guid]["overtimeHours"] += ot_h
+                    # Keep the most recent non-null wage seen for this employee
+                    if wage is not None:
+                        by_employee[emp_guid]["hourlyWage"] = float(wage)
                     # Track hours by day using inDate
                     in_date_raw = entry.get("inDate") or ""
                     try:
@@ -14170,6 +14175,7 @@ async def _fetch_employee_hours(
                 "regularHours": reg,
                 "overtimeHours": ot,
                 "hoursWorked": total_h,
+                "payRate": round(data["hourlyWage"], 2) if data.get("hourlyWage") is not None else None,
             })
     return results, hours_by_day
 
