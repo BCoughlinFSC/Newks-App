@@ -280,6 +280,14 @@
             </label>
             <span class="loc-count" id="locCount">Loading...</span>
           </div>
+          <div style="display:flex;gap:0.4rem;margin-bottom:0.5rem;">
+            <button type="button" onclick="filterByOwnership('all')" id="ownFilter_all"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #C41E3A;background:#C41E3A;color:#fff;cursor:pointer;font-weight:600;">All</button>
+            <button type="button" onclick="filterByOwnership('Company')" id="ownFilter_Company"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Company</button>
+            <button type="button" onclick="filterByOwnership('Franchise')" id="ownFilter_Franchise"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Franchise</button>
+          </div>
           <div class="loc-grid" id="locGrid">
             <span style="color:#6B7280; font-size:0.82rem;">Loading locations...</span>
           </div>
@@ -333,7 +341,7 @@
 
         grid.innerHTML = allLocations.map(loc =>
           `<label class="loc-item">
-            <input type="checkbox" class="loc-cb" value="${esc(loc.id)}" checked />
+            <input type="checkbox" class="loc-cb" value="${esc(loc.id)}" data-ownership="${esc(loc.ownershipType||'Franchise')}" checked />
             <span>${esc(loc.id)} – ${esc(loc.name)}</span>
           </label>`
         ).join('');
@@ -364,6 +372,23 @@
       const checked = document.querySelectorAll('.loc-cb:checked').length;
       const total = document.querySelectorAll('.loc-cb').length;
       document.getElementById('locCount').textContent = `${checked} / ${total} selected`;
+    }
+
+    function filterByOwnership(type) {
+      document.querySelectorAll('.loc-cb').forEach(cb => {
+        cb.checked = (type === 'all') || (cb.dataset.ownership === type);
+      });
+      document.getElementById('selectAllLocs').checked = (type === 'all');
+      updateLocCount();
+      ['all', 'Company', 'Franchise'].forEach(t => {
+        const btn = document.getElementById(`ownFilter_${t}`);
+        if (!btn) return;
+        const active = t === type;
+        btn.style.background = active ? '#C41E3A' : '#fff';
+        btn.style.color = active ? '#fff' : '#374151';
+        btn.style.borderColor = active ? '#C41E3A' : '#6B7280';
+        btn.style.fontWeight = active ? '600' : '400';
+      });
     }
 
     function getSelectedLocations() {

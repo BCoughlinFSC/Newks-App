@@ -637,6 +637,14 @@
             </label>
             <span class="count-badge" id="locationCount"></span>
           </div>
+          <div style="display:flex;gap:0.4rem;margin:0.3rem 0 0.5rem;">
+            <button type="button" onclick="filterByOwnership('all')" id="ownFilter_all"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #C41E3A;background:#C41E3A;color:#fff;cursor:pointer;font-weight:600;">All</button>
+            <button type="button" onclick="filterByOwnership('Company')" id="ownFilter_Company"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Company</button>
+            <button type="button" onclick="filterByOwnership('Franchise')" id="ownFilter_Franchise"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Franchise</button>
+          </div>
           <div class="scroll-grid" id="locationsGrid">
             <div style="padding: 0.25rem; color: #555c7b; font-size: 0.85rem;">Loading locations...</div>
           </div>
@@ -897,6 +905,7 @@
     // State
     // ──────────────────────────────────────────────────────────
     let locations = [];
+    let ownershipByGuid = {}; // Toast GUID → "Company" | "Franchise"
     let savedReports = [];
     let currentReportId = null;
     let currentResults = null;
@@ -1055,9 +1064,16 @@
         }
       }
       try {
-        const resp = await fetch('/locations', { headers: authToken ? getAuthHeaders() : {} });
+        const [resp, ownResp] = await Promise.all([
+          fetch('/locations', { headers: authToken ? getAuthHeaders() : {} }),
+          fetch('/api/location-ownership', { headers: authToken ? getAuthHeaders() : {} }).catch(() => null),
+        ]);
         if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
         locations = await resp.json();
+        if (ownResp && ownResp.ok) {
+          const ownData = await ownResp.json();
+          ownershipByGuid = ownData.byGuid || {};
+        }
         try {
           window.localStorage.setItem(CACHE_KEY, JSON.stringify({ locations, timestamp: Date.now() }));
         } catch (e) {
@@ -1085,7 +1101,8 @@
       }
       grid.innerHTML = locations.map(loc => `
         <label>
-          <input type="checkbox" class="location-checkbox" value="${loc.restaurantGuid}" checked />
+          <input type="checkbox" class="location-checkbox" value="${loc.restaurantGuid}"
+            data-ownership="${ownershipByGuid[loc.restaurantGuid] || 'Franchise'}" checked />
           ${loc.restaurantName}
         </label>
       `).join('');
@@ -1098,6 +1115,23 @@
       const selected = document.querySelectorAll('.location-checkbox:checked').length;
       const el = document.getElementById('locationCount');
       if (el) el.textContent = `${selected} of ${total} selected`;
+    }
+
+    function filterByOwnership(type) {
+      document.querySelectorAll('.location-checkbox').forEach(cb => {
+        cb.checked = (type === 'all') || (cb.dataset.ownership === type);
+      });
+      document.getElementById('selectAllLocations').checked = (type === 'all');
+      updateLocationCount();
+      ['all', 'Company', 'Franchise'].forEach(t => {
+        const btn = document.getElementById(`ownFilter_${t}`);
+        if (!btn) return;
+        const active = t === type;
+        btn.style.background = active ? '#C41E3A' : '#fff';
+        btn.style.color = active ? '#fff' : '#374151';
+        btn.style.borderColor = active ? '#C41E3A' : '#6B7280';
+        btn.style.fontWeight = active ? '600' : '400';
+      });
     }
 
     function toggleAllLocations() {

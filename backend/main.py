@@ -10066,6 +10066,54 @@ async def admin_upload_db(
     return {"status": "ok", "db_name": db_name, "size_mb": round(size_mb, 1), "path": target_path}
 
 
+@app.post("/api/admin/upload-store-information")
+async def admin_upload_store_information(
+    file: UploadFile = File(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Upload the Store Information Excel to refresh store_ownership.json."""
+    content = await file.read()
+    try:
+        import io
+        import pandas as pd
+        df = pd.read_excel(io.BytesIO(content), header=0)
+        required = {"Restaurant ID", "Restaurant Name", "Company Name", "Company or Franchisee", "Toast GUID"}
+        missing = required - set(df.columns)
+        if missing:
+            raise HTTPException(400, f"Missing columns: {missing}")
+
+        ownership = {}
+        for _, row in df.iterrows():
+            rid_raw = row.get("Restaurant ID")
+            if pd.isna(rid_raw):
+                continue
+            rid = str(int(rid_raw))
+            ot = str(row.get("Company or Franchisee", "Franchise")).strip()
+            guid_raw = str(row.get("Toast GUID", "")).strip()
+            guid = guid_raw if guid_raw not in ("0", "nan", "") else None
+            ownership[rid] = {
+                "ownershipType": ot,
+                "restaurantName": str(row.get("Restaurant Name", "")).strip(),
+                "companyName": str(row.get("Company Name", "")).strip() if pd.notna(row.get("Company Name")) else "",
+                "toastGuid": guid,
+            }
+
+        out_path = os.path.join(os.path.dirname(__file__), "data", "store_ownership.json")
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(ownership, f, indent=2)
+
+        company_count = sum(1 for v in ownership.values() if v["ownershipType"] == "Company")
+        franchise_count = sum(1 for v in ownership.values() if v["ownershipType"] == "Franchise")
+        logger.info("Admin uploaded Store Information: %d stores (%d Company, %d Franchise) by %s",
+                    len(ownership), company_count, franchise_count, admin_user.email)
+        return {"status": "ok", "total": len(ownership), "company": company_count, "franchise": franchise_count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse Store Information Excel: {e}")
+
+
 @app.post("/api/admin/aloha-sales/push-rows")
 async def admin_push_aloha_sales_rows(
     payload: dict = Body(...),
@@ -12789,20 +12837,51 @@ def _build_wpy_period(
     }
 
 
+def _load_store_ownership() -> dict:
+    """Load store_ownership.json → {aloha_id: {ownershipType, toastGuid, ...}}"""
+    path = os.path.join(os.path.dirname(__file__), "store_ownership.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
 @app.get("/api/aloha-sales/locations")
 async def list_aloha_sales_locations():
-    """Return distinct Aloha locations that have sales data."""
+    """Return distinct Aloha locations that have sales data, including ownershipType."""
     if not aloha_sales_db.db_available():
         return []
+    ownership = _load_store_ownership()
     conn = aloha_sales_db.get_connection()
     try:
         rows = conn.execute(
             "SELECT DISTINCT location, restaurant_name FROM aloha_sales_data "
             "WHERE net_sales > 0 ORDER BY CAST(location AS INTEGER)"
         ).fetchall()
-        return [{"id": r[0], "name": r[1]} for r in rows]
+        result = []
+        for r in rows:
+            ot = ownership.get(r[0], {}).get("ownershipType", "Franchise")
+            result.append({"id": r[0], "name": r[1], "ownershipType": ot})
+        return result
     finally:
         conn.close()
+
+
+@app.get("/api/location-ownership")
+async def get_location_ownership():
+    """Return ownership type (Company/Franchise) keyed by Aloha ID and Toast GUID."""
+    ownership = _load_store_ownership()
+    by_aloha = {rid: v["ownershipType"] for rid, v in ownership.items()}
+    by_guid = {}
+    for rid, v in ownership.items():
+        if v.get("toastGuid"):
+            by_guid[v["toastGuid"]] = v["ownershipType"]
+    # Also derive from flash loc mapping for any GUIDs not in store_ownership.json
+    guid_to_loc = _get_flash_loc_mapping()
+    for guid, aloha_id in guid_to_loc.items():
+        if guid not in by_guid and aloha_id in by_aloha:
+            by_guid[guid] = by_aloha[aloha_id]
+    return {"byAlohaId": by_aloha, "byGuid": by_guid}
 
 
 @app.post("/api/wpy-report")
