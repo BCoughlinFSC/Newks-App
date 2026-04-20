@@ -14102,33 +14102,51 @@ async def build_tip_pool_report(
     per_location: List[Dict] = []
     errors: List[str] = []
 
-    for restaurant_guid in restaurant_ids:
+    # Process all restaurants in parallel (max 5 at a time to avoid Toast API rate limits)
+    sem = asyncio.Semaphore(5)
+
+    async def _process_one(restaurant_guid: str):
         loc_name = loc_name_map.get(restaurant_guid, restaurant_guid[:8])
-        try:
-            # Fetch employee and job configs for name resolution
-            emp_map, job_map = await asyncio.gather(
-                _fetch_employee_configs(client, restaurant_guid),
-                _fetch_job_configs(client, restaurant_guid),
-            )
-            # Fetch tips and employee hours in parallel
-            tips, employees = await asyncio.gather(
-                _fetch_tips_for_restaurant(client, restaurant_guid, start_date, end_date),
-                _fetch_employee_hours(client, restaurant_guid, start_date, end_date, emp_map, job_map),
-            )
-            grand_total_tips += tips
-            # Tag each employee with their location
-            for emp in employees:
-                emp["restaurantName"] = loc_name
-            all_employees.extend(employees)
-            total_loc_hours = sum(e["hoursWorked"] for e in employees)
-            per_location.append({
-                "restaurantName": loc_name,
-                "totalTips": round(tips, 2),
-                "totalHours": round(total_loc_hours, 2),
-            })
-        except Exception as exc:
-            errors.append(f"{loc_name}: {str(exc)}")
-            logger.warning(f"Tip pool error for {loc_name}: {exc}", exc_info=True)
+        async with sem:
+            try:
+                # Fetch employee configs, job configs, AND tips all in parallel
+                # (tips don't need emp/job maps)
+                emp_map, job_map, tips = await asyncio.gather(
+                    _fetch_employee_configs(client, restaurant_guid),
+                    _fetch_job_configs(client, restaurant_guid),
+                    _fetch_tips_for_restaurant(client, restaurant_guid, start_date, end_date),
+                )
+                # Hours need emp/job maps — fetch after
+                employees = await _fetch_employee_hours(
+                    client, restaurant_guid, start_date, end_date, emp_map, job_map
+                )
+                for emp in employees:
+                    emp["restaurantName"] = loc_name
+                total_loc_hours = sum(e["hoursWorked"] for e in employees)
+                return {
+                    "tips": tips,
+                    "employees": employees,
+                    "location": {
+                        "restaurantName": loc_name,
+                        "totalTips": round(tips, 2),
+                        "totalHours": round(total_loc_hours, 2),
+                    },
+                    "error": None,
+                }
+            except Exception as exc:
+                logger.warning(f"Tip pool error for {loc_name}: {exc}", exc_info=True)
+                return {"tips": 0.0, "employees": [], "location": None, "error": f"{loc_name}: {str(exc)}"}
+
+    results = await asyncio.gather(*[_process_one(guid) for guid in restaurant_ids])
+
+    for r in results:
+        if r["error"]:
+            errors.append(r["error"])
+        else:
+            grand_total_tips += r["tips"]
+            all_employees.extend(r["employees"])
+            if r["location"]:
+                per_location.append(r["location"])
 
     # Calculate totals
     grand_total_hours = sum(e["hoursWorked"] for e in all_employees)
