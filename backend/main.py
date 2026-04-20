@@ -13832,19 +13832,9 @@ _TIP_POOL_JOBS = {
 }
 
 
-async def _fetch_tips_for_restaurant(
-    client: httpx.AsyncClient,
-    restaurant_guid: str,
-    start_date: date,
-    end_date: date,
-) -> float:
-    """Sum credit-card tipAmount across all orders for one restaurant over a date range."""
-    orders = await _fetch_orders_for_restaurant_date_range(
-        client, restaurant_guid, start_date, end_date
-    )
-    total_tips = 0.0
-    skipped_tips = 0.0
-    skipped_reasons: list = []
+def _sum_tips_from_orders(orders: List[Dict]) -> float:
+    """Sum valid credit-card tip amounts from a list of orders."""
+    total = 0.0
     for order in orders:
         if order.get("voided") or order.get("deleted"):
             continue
@@ -13855,31 +13845,44 @@ async def _fetch_tips_for_restaurant(
                 tip = float(pmt.get("tipAmount") or 0)
                 if tip == 0:
                     continue
-                # Skip voided, refunded, or denied payments
                 pmt_voided = pmt.get("voided", False)
                 pmt_status = (pmt.get("paymentStatus") or "").upper()
                 refund_status = (pmt.get("refundStatus") or "").upper()
-                original_pmt = pmt.get("originalMapPayment")  # refund reference
+                original_pmt = pmt.get("originalMapPayment")
                 if pmt_voided or pmt_status in ("VOIDED", "DENIED") or refund_status in ("SUCCESSFUL",) or original_pmt:
-                    skipped_tips += tip
-                    skipped_reasons.append({
-                        "tip": tip,
-                        "voided": pmt_voided,
-                        "status": pmt_status,
-                        "refundStatus": refund_status,
-                        "hasOriginalPmt": bool(original_pmt),
-                        "type": pmt.get("type"),
-                    })
                     continue
-                if tip > 0:
-                    total_tips += tip
-    if skipped_tips > 0:
-        logger.info(
-            f"Tip pool tips: restaurant={restaurant_guid[:8]}, "
-            f"total=${total_tips:.2f}, skipped=${skipped_tips:.2f}, "
-            f"skipped_details={skipped_reasons}"
-        )
-    return total_tips
+                total += tip
+    return total
+
+
+async def _fetch_tips_for_restaurant(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    start_date: date,
+    end_date: date,
+) -> tuple:
+    """
+    Sum credit-card tipAmount across all orders for one restaurant over a date range.
+    Returns (total_tips: float, tips_by_day: {date_iso: float}).
+    """
+    total_tips = 0.0
+    tips_by_day: Dict[str, float] = {}
+    d = start_date
+    while d <= end_date:
+        day_str = d.isoformat()
+        bdate = to_business_date(d)
+        orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, bdate)
+        day_tips = _sum_tips_from_orders(orders)
+        tips_by_day[day_str] = day_tips
+        total_tips += day_tips
+        d += timedelta(days=1)
+        if d <= end_date:
+            await asyncio.sleep(0.12)
+    logger.info(
+        f"Tip pool tips: restaurant={restaurant_guid[:8]}, "
+        f"total=${total_tips:.2f}, days={len(tips_by_day)}"
+    )
+    return total_tips, tips_by_day
 
 
 async def _fetch_employee_configs(
@@ -13976,6 +13979,7 @@ async def _fetch_employee_hours(
 
     # Keyed by employee guid -> {name, job, reg_hours, ot_hours}
     by_employee: Dict[str, Dict] = {}
+    hours_by_day: Dict[str, float] = {}  # date_iso -> total hours
 
     start_dt = datetime(start_date.year, start_date.month, start_date.day)
     end_dt = datetime(end_date.year, end_date.month, end_date.day)
@@ -14047,6 +14051,15 @@ async def _fetch_employee_hours(
                         }
                     by_employee[emp_guid]["regularHours"] += reg_h
                     by_employee[emp_guid]["overtimeHours"] += ot_h
+                    # Track hours by day using inDate
+                    in_date_raw = entry.get("inDate") or ""
+                    try:
+                        day_key = in_date_raw[:10]  # "YYYY-MM-DD"
+                        if day_key not in hours_by_day:
+                            hours_by_day[day_key] = 0.0
+                        hours_by_day[day_key] += reg_h + ot_h
+                    except Exception:
+                        pass
         except Exception as exc:
             logger.warning(f"Tip pool labor exception for {restaurant_guid[:8]}: {exc}", exc_info=True)
         chunk_start = chunk_end + timedelta(days=1)
@@ -14072,7 +14085,7 @@ async def _fetch_employee_hours(
                 "overtimeHours": ot,
                 "hoursWorked": total_h,
             })
-    return results
+    return results, hours_by_day
 
 
 async def build_tip_pool_report(
@@ -14111,13 +14124,14 @@ async def build_tip_pool_report(
             try:
                 # Fetch employee configs, job configs, AND tips all in parallel
                 # (tips don't need emp/job maps)
-                emp_map, job_map, tips = await asyncio.gather(
+                emp_map, job_map, tips_result = await asyncio.gather(
                     _fetch_employee_configs(client, restaurant_guid),
                     _fetch_job_configs(client, restaurant_guid),
                     _fetch_tips_for_restaurant(client, restaurant_guid, start_date, end_date),
                 )
+                tips, tips_by_day = tips_result
                 # Hours need emp/job maps — fetch after
-                employees = await _fetch_employee_hours(
+                employees, hours_by_day = await _fetch_employee_hours(
                     client, restaurant_guid, start_date, end_date, emp_map, job_map
                 )
                 for emp in employees:
@@ -14125,6 +14139,8 @@ async def build_tip_pool_report(
                 total_loc_hours = sum(e["hoursWorked"] for e in employees)
                 return {
                     "tips": tips,
+                    "tips_by_day": tips_by_day,
+                    "hours_by_day": hours_by_day,
                     "employees": employees,
                     "location": {
                         "restaurantName": loc_name,
@@ -14135,9 +14151,13 @@ async def build_tip_pool_report(
                 }
             except Exception as exc:
                 logger.warning(f"Tip pool error for {loc_name}: {exc}", exc_info=True)
-                return {"tips": 0.0, "employees": [], "location": None, "error": f"{loc_name}: {str(exc)}"}
+                return {"tips": 0.0, "tips_by_day": {}, "hours_by_day": {}, "employees": [], "location": None, "error": f"{loc_name}: {str(exc)}"}
 
     results = await asyncio.gather(*[_process_one(guid) for guid in restaurant_ids])
+
+    # Aggregate across restaurants — merge daily tips and hours
+    combined_tips_by_day: Dict[str, float] = {}
+    combined_hours_by_day: Dict[str, float] = {}
 
     for r in results:
         if r["error"]:
@@ -14147,6 +14167,24 @@ async def build_tip_pool_report(
             all_employees.extend(r["employees"])
             if r["location"]:
                 per_location.append(r["location"])
+            for day, t in r.get("tips_by_day", {}).items():
+                combined_tips_by_day[day] = combined_tips_by_day.get(day, 0.0) + t
+            for day, h in r.get("hours_by_day", {}).items():
+                combined_hours_by_day[day] = combined_hours_by_day.get(day, 0.0) + h
+
+    # Build tipPoolByDay — all days in range, sorted ascending
+    all_days = sorted(set(list(combined_tips_by_day.keys()) + list(combined_hours_by_day.keys())))
+    tip_pool_by_day = []
+    for day in all_days:
+        day_tips = round(combined_tips_by_day.get(day, 0.0), 2)
+        day_hours = round(combined_hours_by_day.get(day, 0.0), 2)
+        day_rate = round(day_tips / day_hours, 4) if day_hours > 0 else 0.0
+        tip_pool_by_day.append({
+            "date": day,
+            "totalTips": day_tips,
+            "totalHours": day_hours,
+            "hourlyRate": day_rate,
+        })
 
     # Calculate totals
     grand_total_hours = sum(e["hoursWorked"] for e in all_employees)
@@ -14181,6 +14219,7 @@ async def build_tip_pool_report(
             "tipShare": round(grand_total_tips, 2),
         },
         "tipPoolByLocation": per_location,
+        "tipPoolByDay": tip_pool_by_day,
         "errors": errors,
     }
 

@@ -3503,6 +3503,22 @@
           return [c(emp.restaurantName || '', dL), c(emp.employeeId || '', dL), c(emp.employeeName || '', dL), c(emp.jobTitle || '', dL), n(emp.regularHours || 0, dR), n(emp.overtimeHours || 0, dR), n(emp.tipShare || 0, dR)];
         });
         addWS(WB, [empHdr, empTotRow, ...empDataRows], 'Payroll');
+        // Daily breakdown sheet
+        const byDay = currentResults.tipPoolByDay || [];
+        if (byDay.length > 0) {
+          const dayHdr = [c('Date', S.navyL), c('Total Tips', S.navyR), c('Total Hours', S.navyR), c('Tip Rate / Hr', S.navyR)];
+          const dayRows = byDay.map((row, idx) => {
+            const alt = idx % 2 === 1;
+            const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+            return [c(row.date || '', dL), n(row.totalTips || 0, dR), n(row.totalHours || 0, dR), n(row.hourlyRate || 0, dR)];
+          });
+          // Totals row
+          const dayTipTotal = byDay.reduce((s, r) => s + (r.totalTips || 0), 0);
+          const dayHrTotal  = byDay.reduce((s, r) => s + (r.totalHours || 0), 0);
+          const dayRate     = dayHrTotal > 0 ? dayTipTotal / dayHrTotal : 0;
+          const dayTotRow   = [c('TOTAL', S.navyL), n(dayTipTotal, S.navyR), n(dayHrTotal, S.navyR), n(dayRate, S.navyR)];
+          addWS(WB, [dayHdr, dayTotRow, ...dayRows], 'Daily');
+        }
 
       // ── Royalty report ─────────────────────────────────────────────────────
       } else if (currentResults && currentResults.royaltyTable) {
