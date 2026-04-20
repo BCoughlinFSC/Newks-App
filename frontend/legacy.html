@@ -3506,55 +3506,74 @@
           }
         }
 
-      // ── Tip Pool report ────────────────────────────────────────────────────
+      // ── Tip Pool report — one Excel file per store ─────────────────────────
       } else if (currentResults && currentResults.tipPoolTable) {
-        const tpSummary = currentResults.tipPoolSummary || {};
-        const tpRows = currentResults.tipPoolTable || [];
-        const tpTotals = currentResults.tipPoolTotals || {};
-        const tpByLoc = currentResults.tipPoolByLocation || [];
-        // Summary sheet
-        const sumRows = [
-          [c('Payroll Report Calculation', mkS(navy, '#fff', true, false))],
-          [],
-          [c('Total Tips', S.navyL), n(tpSummary.totalTips || 0, S.navyR)],
-          [c('Total Hours', S.navyL), n(tpSummary.totalHours || 0, S.navyR)],
-          [c('Hourly Tip Rate', S.navyL), n(tpSummary.hourlyRate || 0, S.navyR)],
-        ];
-        if (tpByLoc.length > 1) {
-          sumRows.push([]);
-          sumRows.push([c('Location', S.navyL), c('Tips', S.navyR), c('Hours', S.navyR)]);
-          tpByLoc.forEach((loc, idx) => {
-            const alt = idx % 2 === 1;
-            const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
-            sumRows.push([c(loc.restaurantName || '', dL), n(loc.totalTips || 0, dR), n(loc.totalHours || 0, dR)]);
-          });
-        }
-        addWS(WB, sumRows, 'Summary');
-        // Employee breakdown sheet
-        const empHdr = [c('Location', S.navyL), c('Employee ID', S.navyL), c('Employee', S.navyL), c('Job Title', S.navyL), c('Regular Hours', S.navyR), c('Overtime Hours', S.navyR), c('Tip Share', S.navyR)];
-        const empTotRow = [c('', S.navyL), c('', S.navyL), c('TOTAL', S.navyL), c('', S.navyL), n(tpTotals.regularHours || 0, S.navyR), n(tpTotals.overtimeHours || 0, S.navyR), n(tpTotals.tipShare || 0, S.navyR)];
-        const empDataRows = tpRows.map((emp, idx) => {
-          const alt = idx % 2 === 1;
-          const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
-          return [c(emp.restaurantName || '', dL), c(emp.employeeId || '', dL), c(emp.employeeName || '', dL), c(emp.jobTitle || '', dL), n(emp.regularHours || 0, dR), n(emp.overtimeHours || 0, dR), n(emp.tipShare || 0, dR)];
+        const tpSummary  = currentResults.tipPoolSummary    || {};
+        const tpRows     = currentResults.tipPoolTable      || [];
+        const tpByLoc    = currentResults.tipPoolByLocation || [];
+        const hourlyRate = tpSummary.hourlyRate || 0;
+
+        // Group employees by store
+        const byStore = {};
+        tpRows.forEach(emp => {
+          const loc = emp.restaurantName || 'Unknown';
+          if (!byStore[loc]) byStore[loc] = [];
+          byStore[loc].push(emp);
         });
-        addWS(WB, [empHdr, empTotRow, ...empDataRows], 'Payroll');
-        // Daily breakdown sheet
-        const byDay = currentResults.tipPoolByDay || [];
-        if (byDay.length > 0) {
-          const dayHdr = [c('Date', S.navyL), c('Total Tips', S.navyR), c('Total Hours', S.navyR), c('Tip Rate / Hr', S.navyR)];
-          const dayRows = byDay.map((row, idx) => {
+        const storeNames = Object.keys(byStore).sort();
+
+        if (storeNames.length === 0) { showStatus('error', 'Nothing to export.'); return; }
+
+        // Generate one workbook per store and stagger downloads
+        storeNames.forEach((storeName, storeIdx) => {
+          const storeWB = XLSX.utils.book_new();
+          const emps    = byStore[storeName];
+          const locData = tpByLoc.find(l => l.restaurantName === storeName) || {};
+
+          // ── Summary sheet ────────────────────────────────────────────────
+          const storeSumRows = [
+            [c('Payroll Report', mkS(navy, 'FFFFFF', true, false))],
+            [blank()],
+            [c('Location',    S.navyL), c(storeName,               S.dL)],
+            [c('Total Tips',  S.navyL), n(locData.totalTips  || 0, S.navyR)],
+            [c('Total Hours', S.navyL), n(locData.totalHours || 0, S.navyR)],
+            [c('Tip Rate/Hr', S.navyL), n(hourlyRate,              S.navyR)],
+          ];
+          addWS(storeWB, storeSumRows, 'Summary');
+
+          // ── Payroll sheet (with Tip Rate/Hr column) ──────────────────────
+          const empHdr = [
+            c('Employee ID',    S.navyL), c('Employee',       S.navyL), c('Job Title',       S.navyL),
+            c('Regular Hours',  S.navyR), c('Overtime Hours', S.navyR),
+            c('Tip Rate/Hr',    S.navyR), c('Tip Share',      S.navyR),
+          ];
+          const storeRegHrs = emps.reduce((s, e) => s + (e.regularHours  || 0), 0);
+          const storeOTHrs  = emps.reduce((s, e) => s + (e.overtimeHours || 0), 0);
+          const storeTipTot = emps.reduce((s, e) => s + (e.tipShare      || 0), 0);
+          const empTotRow = [
+            c('', S.navyL), c('TOTAL', S.navyL), c('', S.navyL),
+            n(storeRegHrs, S.navyR), n(storeOTHrs, S.navyR),
+            c('',          S.navyL), n(storeTipTot, S.navyR),
+          ];
+          const empDataRows = emps.map((emp, idx) => {
             const alt = idx % 2 === 1;
             const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
-            return [c(row.date || '', dL), n(row.totalTips || 0, dR), n(row.totalHours || 0, dR), n(row.hourlyRate || 0, dR)];
+            return [
+              c(emp.employeeId    || '', dL), c(emp.employeeName  || '', dL),
+              c(emp.jobTitle      || '', dL),
+              n(emp.regularHours  || 0,  dR), n(emp.overtimeHours || 0,  dR),
+              n(hourlyRate,              dR), n(emp.tipShare       || 0,  dR),
+            ];
           });
-          // Totals row
-          const dayTipTotal = byDay.reduce((s, r) => s + (r.totalTips || 0), 0);
-          const dayHrTotal  = byDay.reduce((s, r) => s + (r.totalHours || 0), 0);
-          const dayRate     = dayHrTotal > 0 ? dayTipTotal / dayHrTotal : 0;
-          const dayTotRow   = [c('TOTAL', S.navyL), n(dayTipTotal, S.navyR), n(dayHrTotal, S.navyR), n(dayRate, S.navyR)];
-          addWS(WB, [dayHdr, dayTotRow, ...dayRows], 'Daily');
-        }
+          addWS(storeWB, [empHdr, empTotRow, ...empDataRows], 'Payroll');
+
+          // Stagger downloads so the browser doesn't block multiple saves
+          const storeFile = storeName.replace(/[^a-z0-9\s]/gi, '').trim().replace(/\s+/g, '_').toLowerCase();
+          setTimeout(() => {
+            XLSX.writeFile(storeWB, `payroll_${storeFile}_${dateStr}.xlsx`);
+          }, storeIdx * 400);
+        });
+        return; // Per-store files already queued — skip the single-file write below
 
       // ── Royalty report ─────────────────────────────────────────────────────
       } else if (currentResults && currentResults.royaltyTable) {
