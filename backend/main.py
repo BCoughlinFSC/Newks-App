@@ -13390,11 +13390,18 @@ def _build_flash_period_from_api(
 
 
 def _get_flash_loc_mapping() -> dict:
-    """Load Toast GUID → Aloha location ID mapping."""
-    mapping_path = os.path.join(os.path.dirname(__file__), "data", "aloha", "aloha_location_mapping.json")
-    if os.path.exists(mapping_path):
-        with open(mapping_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+    """Load Toast GUID → Aloha location ID mapping.
+    Prefers backend/aloha_location_mapping.json (tracked in git),
+    falls back to backend/data/aloha/aloha_location_mapping.json (legacy path).
+    """
+    base = os.path.dirname(__file__)
+    for mapping_path in [
+        os.path.join(base, "aloha_location_mapping.json"),
+        os.path.join(base, "data", "aloha", "aloha_location_mapping.json"),
+    ]:
+        if os.path.exists(mapping_path):
+            with open(mapping_path, "r", encoding="utf-8") as f:
+                return json.load(f)
     return {}
 
 

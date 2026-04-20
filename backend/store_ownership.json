@@ -5,11 +5,47 @@
     "companyName": "Newco Dining LLC",
     "toastGuid": "a1e17ab4-c5a4-426f-b211-8f297e0db88c"
   },
+  "1002": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Southaven MS (Goodman Ave)",
+    "companyName": "Mooney Restaurant Ventures Inc",
+    "toastGuid": "1f1dcbf7-825a-4cb0-9289-0dfed05eedb7"
+  },
   "1003": {
     "ownershipType": "Company",
     "restaurantName": "Flowood MS",
     "companyName": "Newco Dining LLC",
     "toastGuid": "d93f2ed0-12b9-42c7-9b77-3ac92e6415fd"
+  },
+  "1004": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Tuscaloosa AL",
+    "companyName": "SBM Holdings LLC",
+    "toastGuid": "d7ab920e-b4bc-4245-97cb-b749db37dccd"
+  },
+  "1005": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Hattiesburg MS (Hardy St)",
+    "companyName": "Gulf/United Diners LLC",
+    "toastGuid": "c65f8836-4a00-45ce-a861-a3a1ddff34b3"
+  },
+  "1006": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Collierville TN",
+    "companyName": "Mooney Restaurant Ventures Inc",
+    "toastGuid": "bb6fedb9-dd3b-4541-9f60-b77198f6d67e"
+  },
+  "1007": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Cypress TX",
+    "companyName": "Temcomp LLC",
+    "toastGuid": "3340a83a-6fc6-4542-962b-d4f873437099"
+  },
+  "1008": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Birmingham AL (Downtown)",
+    "companyName": "CKJ Eateries LLC",
+    "toastGuid": "6863fa94-0d1e-4bfe-91dd-c0f239797ad8"
   },
   "1009": {
     "ownershipType": "Company",
@@ -41,174 +77,6 @@
     "companyName": "Newco Dining LLC",
     "toastGuid": "18d3a03d-9c6a-40b5-a74c-2ce346e3d5ef"
   },
-  "1019": {
-    "ownershipType": "Company",
-    "restaurantName": "Murfreesboro TN (Avenues)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "5e8b9e62-c74e-4a3b-ac90-8e3cdfc1171a"
-  },
-  "1023": {
-    "ownershipType": "Company",
-    "restaurantName": "Panama City FL",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "af1eefaf-9dc0-4d82-8faa-b8cfc92d4b2a"
-  },
-  "1024": {
-    "ownershipType": "Company",
-    "restaurantName": "Longview TX",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "571e325a-0ab2-44ad-a6cc-db540ad6113b"
-  },
-  "1034": {
-    "ownershipType": "Company",
-    "restaurantName": "Franklin TN (Cool Springs)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "38c5fc36-9554-426c-b433-6bea616b0a5f"
-  },
-  "1037": {
-    "ownershipType": "Company",
-    "restaurantName": "Tallahassee FL",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "4353ef74-9651-4a2e-8379-51cef5b7a96a"
-  },
-  "1040": {
-    "ownershipType": "Company",
-    "restaurantName": "Ridgeland MS (Township)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "b0a73c6b-b1cb-4baf-98cd-a8031ebf4a49"
-  },
-  "1051": {
-    "ownershipType": "Company",
-    "restaurantName": "Jacksonville FL (The Avenues)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "b34e0c22-9e08-4358-aacf-4784729b4774"
-  },
-  "1054": {
-    "ownershipType": "Company",
-    "restaurantName": "West Plano TX",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "cdef84d3-5c6d-4c1f-b10d-d5798842be12"
-  },
-  "1056": {
-    "ownershipType": "Company",
-    "restaurantName": "Jacksonville FL (Parkway)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "c19b1d75-9037-400e-bd6d-341116070af2"
-  },
-  "1060": {
-    "ownershipType": "Company",
-    "restaurantName": "Vicksburg MS",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "694ce676-4fca-44c0-ba3d-409c6900ad9d"
-  },
-  "1061": {
-    "ownershipType": "Company",
-    "restaurantName": "Summerville SC",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "f05b840b-b9c7-4c17-8ba7-bc1bb2884aed"
-  },
-  "1057": {
-    "ownershipType": "Company",
-    "restaurantName": "Nacogdoches TX",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "e8484606-af17-4cfc-bd0f-91b01ee60fd9"
-  },
-  "1075": {
-    "ownershipType": "Company",
-    "restaurantName": "Pensacola FL (Cordova Mall)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "380abc44-7e1e-46b8-a922-78bf99017abe"
-  },
-  "1087": {
-    "ownershipType": "Company",
-    "restaurantName": "Baton Rouge LA (Corporate)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "9052f94f-59c5-4265-999b-575d4fe41310"
-  },
-  "1099": {
-    "ownershipType": "Company",
-    "restaurantName": "Mobile AL (McGowin Park)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "005d4f3b-715e-4b77-88e8-09c2d1ed3a89"
-  },
-  "1104": {
-    "ownershipType": "Company",
-    "restaurantName": "Mobile AL (Westgate Pavilion)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "b52c8d0f-81fd-4c99-bd10-6fa901348ace"
-  },
-  "1130": {
-    "ownershipType": "Company",
-    "restaurantName": "Jacksonville FL (Butler Point)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "f3c437d1-07c2-42bb-9b48-77e29d09c4fe"
-  },
-  "1118": {
-    "ownershipType": "Company",
-    "restaurantName": "Murfreesboro TN (Northgate)",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "25d48919-fad3-4329-9aac-d5d96515a2c2"
-  },
-  "1119": {
-    "ownershipType": "Company",
-    "restaurantName": "Lufkin TX",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "8b5f3e1b-5a92-4ca9-b893-40c36e5e4f62"
-  },
-  "1176": {
-    "ownershipType": "Company",
-    "restaurantName": "Chattanooga TN",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "da88e78a-3f47-4baf-ba76-3e5a7e925d6c"
-  },
-  "1197": {
-    "ownershipType": "Company",
-    "restaurantName": "Pascagoula MS",
-    "companyName": "Newco Dining LLC",
-    "toastGuid": "9fc3101b-8b55-4fbc-b6cb-195813efc0a1"
-  },
-  "1188": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Lubbock TX (Broadway)",
-    "companyName": "The McDougal Companies",
-    "toastGuid": null
-  },
-  "1002": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Southaven MS (Goodman Ave)",
-    "companyName": "Mooney Restaurant Ventures Inc",
-    "toastGuid": "1f1dcbf7-825a-4cb0-9289-0dfed05eedb7"
-  },
-  "1005": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Hattiesburg MS (Hardy St)",
-    "companyName": "Gulf/United Diners LLC",
-    "toastGuid": "c65f8836-4a00-45ce-a861-a3a1ddff34b3"
-  },
-  "1004": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Tuscaloosa AL",
-    "companyName": "SBM Holdings LLC",
-    "toastGuid": "d7ab920e-b4bc-4245-97cb-b749db37dccd"
-  },
-  "1006": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Collierville TN",
-    "companyName": "Mooney Restaurant Ventures Inc",
-    "toastGuid": "bb6fedb9-dd3b-4541-9f60-b77198f6d67e"
-  },
-  "1007": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Cypress TX",
-    "companyName": "Temcomp LLC",
-    "toastGuid": "3340a83a-6fc6-4542-962b-d4f873437099"
-  },
-  "1008": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Birmingham AL (Downtown)",
-    "companyName": "CKJ Eateries LLC",
-    "toastGuid": "6863fa94-0d1e-4bfe-91dd-c0f239797ad8"
-  },
   "1017": {
     "ownershipType": "Franchise",
     "restaurantName": "Huntsville AL",
@@ -221,6 +89,12 @@
     "companyName": "Russell Restaurant Group, LLC",
     "toastGuid": "d9577cb4-2d5a-4b52-9de0-4043f2265b8a"
   },
+  "1019": {
+    "ownershipType": "Company",
+    "restaurantName": "Murfreesboro TN (Avenues)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "5e8b9e62-c74e-4a3b-ac90-8e3cdfc1171a"
+  },
   "1020": {
     "ownershipType": "Franchise",
     "restaurantName": "Tupelo MS",
@@ -232,6 +106,18 @@
     "restaurantName": "Shreveport LA",
     "companyName": "Quail Ridge Enterprises LLC",
     "toastGuid": "1970cf05-2866-4ea4-a4ac-266b36816fce"
+  },
+  "1023": {
+    "ownershipType": "Company",
+    "restaurantName": "Panama City FL",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "af1eefaf-9dc0-4d82-8faa-b8cfc92d4b2a"
+  },
+  "1024": {
+    "ownershipType": "Company",
+    "restaurantName": "Longview TX",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "571e325a-0ab2-44ad-a6cc-db540ad6113b"
   },
   "1026": {
     "ownershipType": "Franchise",
@@ -269,6 +155,12 @@
     "companyName": "Temcomp LLC",
     "toastGuid": "1f8d20e0-dc30-471e-9096-c8dfa4295e9d"
   },
+  "1034": {
+    "ownershipType": "Company",
+    "restaurantName": "Franklin TN (Cool Springs)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "38c5fc36-9554-426c-b433-6bea616b0a5f"
+  },
   "1035": {
     "ownershipType": "Franchise",
     "restaurantName": "Monroe LA",
@@ -281,23 +173,35 @@
     "companyName": "Gulf/United Diners LLC",
     "toastGuid": "be38b1c3-89dd-43d7-86f0-611eb0333438"
   },
+  "1037": {
+    "ownershipType": "Company",
+    "restaurantName": "Tallahassee FL",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "4353ef74-9651-4a2e-8379-51cef5b7a96a"
+  },
   "1039": {
     "ownershipType": "Franchise",
     "restaurantName": "Byram MS",
     "companyName": "Russell Restaurant Group, LLC",
     "toastGuid": "a7cccaa8-7c1c-4f46-b76f-7987e6e3cc2f"
   },
-  "1042": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Hot Springs AR",
-    "companyName": "Roundtable Enterprises LLC",
-    "toastGuid": "347e7817-21da-472a-b678-40f3790e6a1a"
+  "1040": {
+    "ownershipType": "Company",
+    "restaurantName": "Ridgeland MS (Township)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "b0a73c6b-b1cb-4baf-98cd-a8031ebf4a49"
   },
   "1041": {
     "ownershipType": "Franchise",
     "restaurantName": "Starkville MS",
     "companyName": "MDH Foods",
     "toastGuid": "ce32dcb6-0cd6-48af-9651-1314544bfb3a"
+  },
+  "1042": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Hot Springs AR",
+    "companyName": "Roundtable Enterprises LLC",
+    "toastGuid": "347e7817-21da-472a-b678-40f3790e6a1a"
   },
   "1043": {
     "ownershipType": "Franchise",
@@ -322,6 +226,48 @@
     "restaurantName": "Bossier City LA",
     "companyName": "Quail Ridge Enterprises LLC",
     "toastGuid": "ee7af43e-a9e1-412e-90fb-9b9880d3fa0c"
+  },
+  "1051": {
+    "ownershipType": "Company",
+    "restaurantName": "Jacksonville FL (The Avenues)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "b34e0c22-9e08-4358-aacf-4784729b4774"
+  },
+  "1053": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Knoxville TN (Cedar Bluff)",
+    "companyName": "Roundtable Enterprises LLC",
+    "toastGuid": "1d8180bd-90fc-4efb-870e-125a03aecae8"
+  },
+  "1054": {
+    "ownershipType": "Company",
+    "restaurantName": "West Plano TX",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "cdef84d3-5c6d-4c1f-b10d-d5798842be12"
+  },
+  "1056": {
+    "ownershipType": "Company",
+    "restaurantName": "Jacksonville FL (Parkway)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "c19b1d75-9037-400e-bd6d-341116070af2"
+  },
+  "1057": {
+    "ownershipType": "Company",
+    "restaurantName": "Nacogdoches TX",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "e8484606-af17-4cfc-bd0f-91b01ee60fd9"
+  },
+  "1060": {
+    "ownershipType": "Company",
+    "restaurantName": "Vicksburg MS",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "694ce676-4fca-44c0-ba3d-409c6900ad9d"
+  },
+  "1061": {
+    "ownershipType": "Company",
+    "restaurantName": "Summerville SC",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "f05b840b-b9c7-4c17-8ba7-bc1bb2884aed"
   },
   "1062": {
     "ownershipType": "Franchise",
@@ -359,23 +305,17 @@
     "companyName": "Relentless Restaurants LLC",
     "toastGuid": "577ac58c-9834-4c4e-a6b9-8d0e8266e18d"
   },
+  "1075": {
+    "ownershipType": "Company",
+    "restaurantName": "Pensacola FL (Cordova Mall)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "380abc44-7e1e-46b8-a922-78bf99017abe"
+  },
   "1076": {
     "ownershipType": "Franchise",
     "restaurantName": "West Monroe LA",
     "companyName": "Fort Miro Foods LLC",
     "toastGuid": "ac9a34be-24a0-4470-b4e6-be35140153a1"
-  },
-  "1088": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Atlanta GA (Perimeter Mall)",
-    "companyName": "Glacier Hospitality LLC",
-    "toastGuid": "a0b2a3c5-74fc-4ad1-a711-6d8a64be3007"
-  },
-  "1097": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Spanish Fort AL",
-    "companyName": "Gulf/United Diners LLC",
-    "toastGuid": "3a5bb077-3866-4d86-aa53-78b12a84bbf6"
   },
   "1079": {
     "ownershipType": "Franchise",
@@ -389,29 +329,17 @@
     "companyName": "Temcomp LLC",
     "toastGuid": "b42b1def-510f-42b1-a0c4-2947fda858a8"
   },
-  "1094": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Norcross GA (Peachtree Corners)",
-    "companyName": "Southeast Diners",
-    "toastGuid": "8d61082d-da30-40d8-915d-2a83dc5b0ec5"
+  "1087": {
+    "ownershipType": "Company",
+    "restaurantName": "Baton Rouge LA (Corporate)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "9052f94f-59c5-4265-999b-575d4fe41310"
   },
-  "1120": {
+  "1088": {
     "ownershipType": "Franchise",
-    "restaurantName": "Rogers AR (Pinnacle)",
-    "companyName": "Relentless Restaurants LLC",
-    "toastGuid": "e1c1e1ee-c2b1-47fa-bf42-95de0d7fa9b2"
-  },
-  "1134": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Meridian MS",
-    "companyName": "CKJ Eateries LLC",
-    "toastGuid": "d604905c-aa66-46ad-b418-5ab4ee88e42f"
-  },
-  "1131": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Dothan AL",
-    "companyName": "Southeast Diners",
-    "toastGuid": "6a6c7ca4-0ad5-4b2a-afc9-662e9f335ae7"
+    "restaurantName": "Atlanta GA (Perimeter Mall)",
+    "companyName": "Glacier Hospitality LLC",
+    "toastGuid": "a0b2a3c5-74fc-4ad1-a711-6d8a64be3007"
   },
   "1090": {
     "ownershipType": "Franchise",
@@ -419,17 +347,71 @@
     "companyName": "Seeds to Summit KE",
     "toastGuid": "88f6c21f-1f05-41f0-8dc9-56ee6a7a2205"
   },
+  "1094": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Norcross GA (Peachtree Corners)",
+    "companyName": "Southeast Diners",
+    "toastGuid": "8d61082d-da30-40d8-915d-2a83dc5b0ec5"
+  },
+  "1097": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Spanish Fort AL",
+    "companyName": "Gulf/United Diners LLC",
+    "toastGuid": "3a5bb077-3866-4d86-aa53-78b12a84bbf6"
+  },
+  "1099": {
+    "ownershipType": "Company",
+    "restaurantName": "Mobile AL (McGowin Park)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "005d4f3b-715e-4b77-88e8-09c2d1ed3a89"
+  },
+  "1104": {
+    "ownershipType": "Company",
+    "restaurantName": "Mobile AL (Westgate Pavilion)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "b52c8d0f-81fd-4c99-bd10-6fa901348ace"
+  },
+  "1118": {
+    "ownershipType": "Company",
+    "restaurantName": "Murfreesboro TN (Northgate)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "25d48919-fad3-4329-9aac-d5d96515a2c2"
+  },
+  "1119": {
+    "ownershipType": "Company",
+    "restaurantName": "Lufkin TX",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "8b5f3e1b-5a92-4ca9-b893-40c36e5e4f62"
+  },
+  "1120": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Rogers AR (Pinnacle)",
+    "companyName": "Relentless Restaurants LLC",
+    "toastGuid": "e1c1e1ee-c2b1-47fa-bf42-95de0d7fa9b2"
+  },
   "1127": {
     "ownershipType": "Franchise",
     "restaurantName": "Jonesboro AR (East Highland)",
     "companyName": "Roundtable Enterprises LLC",
     "toastGuid": "15f1aaf8-a6c3-4354-bad6-63785961fd71"
   },
-  "1148": {
+  "1129": {
     "ownershipType": "Franchise",
-    "restaurantName": "Frisco TX (Near Hall Office Park and Frisco Star)",
-    "companyName": "AVKY Solutions, LLC",
-    "toastGuid": "3add7aff-d2fc-4ff7-8c1d-2bf86d5c7aca"
+    "restaurantName": "Canton GA (Canton Cumming Hwy)",
+    "companyName": "Glacier Hospitality LLC",
+    "toastGuid": "70ba606a-bb0a-445d-818f-8d30260e9c57"
+  },
+  "1130": {
+    "ownershipType": "Company",
+    "restaurantName": "Jacksonville FL (Butler Point)",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "f3c437d1-07c2-42bb-9b48-77e29d09c4fe"
+  },
+  "1131": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Dothan AL",
+    "companyName": "Southeast Diners",
+    "toastGuid": "6a6c7ca4-0ad5-4b2a-afc9-662e9f335ae7"
   },
   "1133": {
     "ownershipType": "Franchise",
@@ -437,11 +419,35 @@
     "companyName": "NFCO LLC",
     "toastGuid": "a70f7d7c-827a-44af-9dab-4e7d9c9d976e"
   },
+  "1134": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Meridian MS",
+    "companyName": "CKJ Eateries LLC",
+    "toastGuid": "d604905c-aa66-46ad-b418-5ab4ee88e42f"
+  },
+  "1139": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Smyrna GA",
+    "companyName": "Glacier Hospitality LLC",
+    "toastGuid": "47b4ea54-2c25-4f40-9f1d-9b2f4e25708e"
+  },
+  "1144": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Gainesville FL (Butler North)",
+    "companyName": "FAST-One of FL Inc",
+    "toastGuid": "62fd2c58-220b-48d0-88d3-37542ad59e81"
+  },
   "1147": {
     "ownershipType": "Franchise",
     "restaurantName": "Tucker GA (Northlake Pkwy)",
     "companyName": "Southeast Diners",
     "toastGuid": "9e8f983a-dcc8-404c-9b03-d2ff11e41365"
+  },
+  "1148": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Frisco TX (Near Hall Office Park and Frisco Star)",
+    "companyName": "AVKY Solutions, LLC",
+    "toastGuid": "3add7aff-d2fc-4ff7-8c1d-2bf86d5c7aca"
   },
   "1154": {
     "ownershipType": "Franchise",
@@ -454,12 +460,6 @@
     "restaurantName": "Columbus GA (Whittlesey Blvd)",
     "companyName": "Southeast Diners",
     "toastGuid": "580e0c1b-5489-415f-a609-b52991bf1df0"
-  },
-  "1129": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Canton GA (Canton Cumming Hwy)",
-    "companyName": "Glacier Hospitality LLC",
-    "toastGuid": "70ba606a-bb0a-445d-818f-8d30260e9c57"
   },
   "1166": {
     "ownershipType": "Franchise",
@@ -479,11 +479,11 @@
     "companyName": "Roundtable Enterprises LLC",
     "toastGuid": "e54f0079-5c7c-44e1-a054-ced2ebbff036"
   },
-  "1179": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Texarkana TX (S Cowhorn Creek)",
-    "companyName": "CTM Hospitality LLC",
-    "toastGuid": "183e438f-9915-456d-a926-0b26d2c0d381"
+  "1176": {
+    "ownershipType": "Company",
+    "restaurantName": "Chattanooga TN",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "da88e78a-3f47-4baf-ba76-3e5a7e925d6c"
   },
   "1178": {
     "ownershipType": "Franchise",
@@ -491,23 +491,17 @@
     "companyName": "Relentless Restaurants LLC",
     "toastGuid": "494119f6-f7d1-4304-8a62-63303aa742a1"
   },
+  "1179": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Texarkana TX (S Cowhorn Creek)",
+    "companyName": "CTM Hospitality LLC",
+    "toastGuid": "183e438f-9915-456d-a926-0b26d2c0d381"
+  },
   "1180": {
     "ownershipType": "Franchise",
     "restaurantName": "San Angelo TX",
     "companyName": "CKJ Eateries LLC",
     "toastGuid": "48c02d33-a0a2-4f3d-9112-4fe11144c79d"
-  },
-  "1184": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Benton AR",
-    "companyName": "Relentless Restaurants LLC",
-    "toastGuid": "49e583cc-3bec-4259-9901-970c63decfae"
-  },
-  "1183": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Cullman AL",
-    "companyName": "CKJ Eateries LLC",
-    "toastGuid": "a8687e40-640e-4d86-bae5-2a684cb8c4c3"
   },
   "1182": {
     "ownershipType": "Franchise",
@@ -515,29 +509,35 @@
     "companyName": "Barkin Eateries LLC",
     "toastGuid": "ae2c3942-483a-45d2-a775-74edfa3fd4ee"
   },
-  "1144": {
+  "1183": {
     "ownershipType": "Franchise",
-    "restaurantName": "Gainesville FL (Butler North)",
-    "companyName": "FAST-One of FL Inc",
-    "toastGuid": "62fd2c58-220b-48d0-88d3-37542ad59e81"
+    "restaurantName": "Cullman AL",
+    "companyName": "CKJ Eateries LLC",
+    "toastGuid": "a8687e40-640e-4d86-bae5-2a684cb8c4c3"
   },
-  "1139": {
+  "1184": {
     "ownershipType": "Franchise",
-    "restaurantName": "Smyrna GA",
-    "companyName": "Glacier Hospitality LLC",
-    "toastGuid": "47b4ea54-2c25-4f40-9f1d-9b2f4e25708e"
-  },
-  "1189": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Fort Smith AR",
+    "restaurantName": "Benton AR",
     "companyName": "Relentless Restaurants LLC",
-    "toastGuid": "63b9d37d-a0b0-4fbb-9de4-cc133d15acbc"
+    "toastGuid": "49e583cc-3bec-4259-9901-970c63decfae"
   },
   "1187": {
     "ownershipType": "Franchise",
     "restaurantName": "Athens GA (Baxter Street)",
     "companyName": "Barkin Eateries LLC",
     "toastGuid": "61cf23aa-ecb0-4c87-9bc1-9adb271a6f89"
+  },
+  "1188": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Lubbock TX (Broadway)",
+    "companyName": "The McDougal Companies",
+    "toastGuid": null
+  },
+  "1189": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Fort Smith AR",
+    "companyName": "Relentless Restaurants LLC",
+    "toastGuid": "63b9d37d-a0b0-4fbb-9de4-cc133d15acbc"
   },
   "1190": {
     "ownershipType": "Franchise",
@@ -551,23 +551,11 @@
     "companyName": "Russell Restaurant Group, LLC",
     "toastGuid": "4f092f7c-70ec-4293-bda6-8b743eceff6c"
   },
-  "1053": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Knoxville TN (Cedar Bluff)",
-    "companyName": "Roundtable Enterprises LLC",
-    "toastGuid": "1d8180bd-90fc-4efb-870e-125a03aecae8"
-  },
   "1195": {
     "ownershipType": "Franchise",
     "restaurantName": "Mandeville LA",
     "companyName": "Russell Restaurant Group, LLC",
     "toastGuid": "07a31b62-d025-4da8-b296-2e7181abfcdc"
-  },
-  "1198": {
-    "ownershipType": "Franchise",
-    "restaurantName": "Athens GA (UGA)",
-    "companyName": "Barkin Eateries LLC",
-    "toastGuid": "9b4eb686-c998-4d7d-aa8f-2f2dc022dc9f"
   },
   "1196": {
     "ownershipType": "Franchise",
@@ -575,10 +563,28 @@
     "companyName": "Boro Foods LLC",
     "toastGuid": "f4cccfd5-991d-4cea-8419-7792b6c6a69b"
   },
+  "1197": {
+    "ownershipType": "Company",
+    "restaurantName": "Pascagoula MS",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "9fc3101b-8b55-4fbc-b6cb-195813efc0a1"
+  },
+  "1198": {
+    "ownershipType": "Franchise",
+    "restaurantName": "Athens GA (UGA)",
+    "companyName": "Barkin Eateries LLC",
+    "toastGuid": "9b4eb686-c998-4d7d-aa8f-2f2dc022dc9f"
+  },
   "1199": {
     "ownershipType": "Franchise",
     "restaurantName": "Wichita KS (Waterfront)",
     "companyName": "Nuke It, LLC",
     "toastGuid": "7ba61337-a059-4ab3-8f5a-8c2defbdf9e7"
+  },
+  "5002": {
+    "ownershipType": "Company",
+    "restaurantName": "Rockwall TX",
+    "companyName": "Newco Dining LLC",
+    "toastGuid": "541986a2-f756-45ce-bb75-93c97fe9dec3"
   }
 }

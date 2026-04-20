@@ -75,3 +75,8 @@ response.txt
 !Toast Price Tiers Mapping .xlsx
 !backend/price_tier_mapping.csv
 
+# Exception: location config files (not DBs, safe to track)
+!backend/data/aloha/aloha_location_mapping.json
+!backend/data/fbc_location_mapping.json
+!backend/data/fbc_store_mapping.json
+
