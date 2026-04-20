@@ -3544,26 +3544,26 @@
           ];
           addWS(storeWB, storeSumRows, 'Summary');
 
-          // ── Payroll sheet (with Pay Rate + Tip Rate/Hr columns) ─────────
+          // ── Payroll sheet (Location · Pay Rate · Tip Rate/Hr columns) ──
           const empHdr = [
-            c('Employee ID',    S.navyL), c('Employee',       S.navyL), c('Job Title',       S.navyL),
-            c('Regular Hours',  S.navyR), c('Overtime Hours', S.navyR),
+            c('Location',       S.navyL), c('Employee ID',    S.navyL), c('Employee',        S.navyL),
+            c('Job Title',      S.navyL), c('Regular Hours',  S.navyR), c('Overtime Hours',  S.navyR),
             c('Pay Rate',       S.navyR), c('Tip Rate/Hr',    S.navyR), c('Tip Share',       S.navyR),
           ];
           const storeRegHrs = emps.reduce((s, e) => s + (e.regularHours  || 0), 0);
           const storeOTHrs  = emps.reduce((s, e) => s + (e.overtimeHours || 0), 0);
           const storeTipTot = emps.reduce((s, e) => s + (e.tipShare      || 0), 0);
           const empTotRow = [
-            c('', S.navyL), c('TOTAL', S.navyL), c('', S.navyL),
-            n(storeRegHrs, S.navyR), n(storeOTHrs, S.navyR),
+            c(storeName, S.navyL), c('', S.navyL), c('TOTAL', S.navyL),
+            c('', S.navyL), n(storeRegHrs, S.navyR), n(storeOTHrs, S.navyR),
             c('', S.navyL), c('', S.navyL), n(storeTipTot, S.navyR),
           ];
           const empDataRows = emps.map((emp, idx) => {
             const alt = idx % 2 === 1;
             const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
             return [
-              c(emp.employeeId    || '', dL), c(emp.employeeName  || '', dL),
-              c(emp.jobTitle      || '', dL),
+              c(storeName,            dL), c(emp.employeeId    || '', dL),
+              c(emp.employeeName      || '', dL), c(emp.jobTitle  || '', dL),
               n(emp.regularHours  || 0,  dR), n(emp.overtimeHours || 0,  dR),
               emp.payRate != null ? n(emp.payRate, dR) : c('—', dR),
               n(hourlyRate,              dR), n(emp.tipShare       || 0,  dR),
