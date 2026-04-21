@@ -234,6 +234,30 @@
     let allLocations = [];
     const PERIODS = ['Daily', 'WTD', 'PTD', 'QTD', 'YTD'];
 
+    // Franchisee/company group display order — mirrors the legacy SSRS reference report.
+    // Groups not listed here appear after these, in first-seen order.
+    const COMPANY_GROUP_ORDER = [
+      'FBC - Odair Ferro',
+      'Company - Marc Hostetler',
+      'Company - Matt Wilson',
+      'FBC - Mike Jones',
+      'Company - Nathan Neinast',
+      'Company - Gene Pearson',
+      'Company - Sean Gaughan',
+    ];
+
+    function sortCompanyGroups(groupNames) {
+      const idx = (name) => {
+        const i = COMPANY_GROUP_ORDER.indexOf(name);
+        return i === -1 ? COMPANY_GROUP_ORDER.length : i;
+      };
+      return groupNames.slice().sort((a, b) => {
+        const da = idx(a), db = idx(b);
+        if (da !== db) return da - db;
+        return a.localeCompare(b);
+      });
+    }
+
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     document.getElementById('reportDate').value = yesterday.toISOString().split('T')[0];
@@ -444,12 +468,13 @@
 
       // Group by FBC (Franchise Business Consultant) — falls back to company/entity
       const companyGroups = {};
-      const companyOrder = [];
       for (const loc of locations) {
         const co = loc.fbcGroup || loc.company || 'Unknown';
-        if (!companyGroups[co]) { companyGroups[co] = []; companyOrder.push(co); }
+        if (!companyGroups[co]) companyGroups[co] = [];
         companyGroups[co].push(loc);
       }
+      // Match SSRS reference ordering
+      const companyOrder = sortCompanyGroups(Object.keys(companyGroups));
 
       let html = '<div class="flash-table-wrap"><table class="flash-table">';
       html += '<thead>';
@@ -788,12 +813,12 @@
         const firstPeriod = PERIODS.find(p => reportData.periods[p]?.channels[ch]?.locations?.length);
         const locations = firstPeriod ? reportData.periods[firstPeriod].channels[ch].locations : [];
         const companyGroups = {};
-        const companyOrder = [];
         for (const loc of locations) {
           const co = loc.fbcGroup || loc.company || 'Unknown';
-          if (!companyGroups[co]) { companyGroups[co] = []; companyOrder.push(co); }
+          if (!companyGroups[co]) companyGroups[co] = [];
           companyGroups[co].push(loc);
         }
+        const companyOrder = sortCompanyGroups(Object.keys(companyGroups));
 
         for (const co of companyOrder) {
           const coLocs = companyGroups[co];

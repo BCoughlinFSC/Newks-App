@@ -5345,8 +5345,71 @@ _DINING_OPTION_TO_DB_COL = {
     # "Union Aramark (POS 2)": n/a
 }
 
+# Dining options that should NEVER be treated as catering (even if name contains
+# "catering" as a substring — none today, but keeps the fallback safe).
+_NON_CATERING_OVERRIDES: set[str] = set()
+
+
+def _classify_dining_option(dining_opt: str) -> Tuple[Optional[str], bool]:
+    """Return (db_column, is_catering) for a dining option.
+
+    Uses the exact _DINING_OPTION_TO_DB_COL map first, then falls back to a
+    case-insensitive keyword match so that new/variant catering labels
+    (e.g. "X-Catering", "Catering-OLO", "EzCater Online", "Online Catering OLO")
+    automatically route to catering_net_sales instead of silently leaking into
+    NonCatering via the Net - Catering subtraction.
+    """
+    if not dining_opt:
+        return (None, False)
+    name = dining_opt.strip()
+    # 1) exact hardcoded mapping
+    db_col = _DINING_OPTION_TO_DB_COL.get(name)
+    if db_col is not None:
+        return (db_col, db_col == "catering_net_sales")
+    # 2) explicit overrides — never catering
+    if name in _NON_CATERING_OVERRIDES:
+        return (None, False)
+    # 3) case-insensitive catering keyword fallback
+    lower = name.lower()
+    if ("catering" in lower) or ("ezcater" in lower) or ("ez cater" in lower):
+        return ("catering_net_sales", True)
+    # 4) unknown — leave unmapped (will only hit net_sales total)
+    return (None, False)
+
+
 # GNG (Grab N Go) sales category GUID — items with this salesCategory are GNG revenue
 _GNG_SALES_CATEGORY_GUID = "497c8ee0-a5f3-44bf-a699-11c3e8ebf9a0"
+
+# Catering sales category GUID — items in this salesCategory are catering revenue
+# regardless of which dining option they're rung up under. The SSRS reference
+# report attributes catering by item salesCategory, not by order diningOption.
+_CATERING_SALES_CATEGORY_GUID = "05cb784b-881f-4da9-a7bd-956efd2ce099"
+
+# Catering dining option GUID — orders under this dopt are already counted as
+# catering via ERA's groupBy=DINING_OPTION output. We only need to RE-CLASSIFY
+# catering-salesCategory items that were rung up under a different dopt (e.g.
+# a boxed-lunch catering order rung in as Call-In).
+_CATERING_DINING_OPTION_GUID = "b823dbd8-e248-4d39-8fb6-b47d06e764dc"
+
+# Chain-wide Newk's dining-option GUID → aloha_sales_db column. Used when
+# reclassifying catering-salesCategory items that were rung up under a
+# non-catering dopt: we ADD to catering_net_sales and SUBTRACT from the
+# column the item was originally booked into. GUIDs verified against ERA
+# diningOption names across 7 stores on 2026-04-16 (see probe_dopt_guid_map.py).
+_DINING_OPTION_GUID_TO_DB_COL: Dict[str, str] = {
+    "fe9d83c4-5e7a-485a-9825-12b9a7a2d917": "dinein_net_sales",      # Dine In
+    "9aeda505-5443-4a31-aba5-7b90b4632c01": "togo_net_sales",         # ToGo
+    "18e3fe91-b5b0-41e2-b69f-ee149817d27c": "callin_net_sales",       # Call-In
+    "53cedf50-f68d-480b-ab19-939eb601bd24": "olo_net_sales",          # X-ToGo-OLO
+    "68d696e6-98b6-4f3a-8c45-f87d71090be7": "delivery_net_sales",     # X-Doordash (R)
+    "3fd8a153-d1bd-4a3e-91cd-9cf7074c7d10": "delivery_net_sales",     # X-UberEats (R)
+    "d0b4a05b-20ff-468b-9409-237068bf22ea": "delivery_net_sales",     # X-GrubHub (R)
+    "80e81bb9-c5a6-4699-ac54-6d095d89c9c7": "dinein_net_sales",       # X-Dine-In (K)
+    "e6f9a691-0962-40bb-8bbc-dd00f1e4684a": "dinein_net_sales",       # X-Dine-In-OLO
+    "abaf2c91-bf39-4103-b222-2d9d30756574": "curbside_olo_net_sales", # X-Curbside-OLO
+    "f03c63b2-31a9-41a0-a2da-6cfa8fba37e1": "togo_net_sales",         # X-To Go (K)
+    # Catering dopt itself is excluded — revenue there is already in catering.
+}
 
 _nightly_flash_last_result: Dict[str, Any] = {}
 _flash_import_progress: Dict[str, Any] = {}  # live progress for in-flight imports
@@ -5356,26 +5419,41 @@ async def _compute_sc_and_gng(
     client: httpx.AsyncClient,
     restaurant_guid: str,
     business_date_yyyymmdd: str,
-) -> Tuple[float, float, Dict[str, float]]:
+) -> Tuple[float, float, Dict[str, float], Dict[str, float], int]:
     """
     Walk orders for one restaurant+day and compute:
       1. Total restaurant-destination service charges (to subtract from net sales)
       2. Total GNG (Grab N Go) item sales (salesCategory GUID match)
       3. SC broken down by dining option (to subtract from the correct channel)
+      4. Catering-salesCategory revenue booked under NON-catering dining options,
+         keyed by SOURCE dining-option GUID.  Caller reclassifies by subtracting
+         from the source column and adding to catering_net_sales — matches the
+         SSRS REF report's item-level attribution logic.
+      5. Count of non-catering-dopt checks that contained catering-salesCategory
+         items (so they're counted toward catering_checks / excluded from
+         NonCateringChecks, matching the REF report).
 
-    Returns (service_charge_total, gng_sales_total, sc_by_dining_option).
+    Returns (service_charge_total, gng_sales_total, sc_by_dining_option,
+             catering_leakage_by_source_dopt_guid, catering_leakage_checks).
     sc_by_dining_option: {"Catering": 1390.00, "Delivery": 30.00, ...}
+    catering_leakage_by_source_dopt_guid: {"<dopt_guid>": 479.00, ...}
     """
     orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
 
     total_sc = 0.0
     total_gng = 0.0
     sc_by_dining_opt: Dict[str, float] = {}
+    catering_leakage_by_dopt: Dict[str, float] = {}
+    catering_leakage_checks = 0
 
     for order in orders:
         if order.get("voided"):
             continue
-        # Get the dining option for this order
+        # Is this order on the Catering dining option? If so, ERA already
+        # attributes its revenue to catering_net_sales — no reclassification.
+        dopt_guid = (order.get("diningOption") or {}).get("guid") or ""
+        order_is_catering_dopt = (dopt_guid == _CATERING_DINING_OPTION_GUID)
+
         for check in order.get("checks", []):
             if check.get("voided"):
                 continue
@@ -5387,7 +5465,11 @@ async def _compute_sc_and_gng(
                 destination = applied_sc.get("destination") or "RESTAURANT"
                 if destination == "RESTAURANT":
                     total_sc += charge_amount
-                    # Map SC to dining option channel based on SC name
+                    # Map SC to dining option channel based on SC name.
+                    # IMPORTANT: only route to a channel if the name clearly
+                    # matches — generic "Service Fee" etc. must NOT default to
+                    # Catering (that caused ~$600 of catering leakage on
+                    # 2026-04-16 across Tuscaloosa/Hattiesburg/Starkville).
                     sc_name = str(applied_sc.get("name", "") or "").strip().upper()
                     if sc_name.startswith("CAT") or "CATERING" in sc_name or "EZCATER" in sc_name:
                         sc_channel = "Catering"
@@ -5396,22 +5478,34 @@ async def _compute_sc_and_gng(
                     elif "TOGO" in sc_name or "TO GO" in sc_name or "CURBSIDE" in sc_name:
                         sc_channel = "ToGo"
                     else:
-                        sc_channel = "Catering"  # Default: most SC are catering-related
-                    sc_by_dining_opt[sc_channel] = sc_by_dining_opt.get(sc_channel, 0) + charge_amount
-            # GNG from selections
+                        sc_channel = None  # unknown — only subtract from net_sales total
+                    if sc_channel is not None:
+                        sc_by_dining_opt[sc_channel] = sc_by_dining_opt.get(sc_channel, 0) + charge_amount
+
+            # Walk selections for: GNG revenue AND catering-item leakage
+            check_has_catering_leak = False
             for sel in check.get("selections", []):
                 if sel.get("voided"):
                     continue
                 sc_obj = sel.get("salesCategory") or {}
-                if sc_obj.get("guid") == _GNG_SALES_CATEGORY_GUID:
+                sc_guid = sc_obj.get("guid")
+                if sc_guid == _GNG_SALES_CATEGORY_GUID:
                     total_gng += float(sel.get("price") or 0)
+                elif sc_guid == _CATERING_SALES_CATEGORY_GUID and not order_is_catering_dopt:
+                    # Catering-category item rung up under a non-catering dopt.
+                    # REF reclassifies this revenue into catering.
+                    price = float(sel.get("price") or 0)
+                    catering_leakage_by_dopt[dopt_guid] = catering_leakage_by_dopt.get(dopt_guid, 0) + price
+                    check_has_catering_leak = True
+            if check_has_catering_leak:
+                catering_leakage_checks += 1
 
     # Also populate the SC cache so other code paths benefit
     global _sc_daily_cache
     cache_key = f"{restaurant_guid}|{business_date_yyyymmdd}"
     _sc_daily_cache[cache_key] = total_sc
 
-    return total_sc, total_gng, sc_by_dining_opt
+    return total_sc, total_gng, sc_by_dining_opt, catering_leakage_by_dopt, catering_leakage_checks
 
 
 async def nightly_flash_import_job():
@@ -5472,13 +5566,13 @@ async def nightly_flash_import_job():
                 loc_data[loc_id]["net_sales"] += net
                 loc_data[loc_id]["check_count"] += orders
 
-                # Map to specific DB column
-                db_col = _DINING_OPTION_TO_DB_COL.get(dining_opt)
+                # Map to specific DB column (exact → case-insensitive catering fallback)
+                db_col, is_catering = _classify_dining_option(dining_opt)
                 if db_col and db_col in loc_data[loc_id]:
                     loc_data[loc_id][db_col] += net
 
                 # Track catering checks for NonCateringChecks
-                if dining_opt in ("Catering", "X-EzCater", "X-Online Catering"):
+                if is_catering:
                     loc_data[loc_id]["_catering_checks"] += orders
 
             # 5. Walk orders for each location: compute service charges + GNG sales
@@ -5492,7 +5586,7 @@ async def nightly_flash_import_job():
 
                 if guid:
                     try:
-                        sc_amount, gng_amount, sc_by_dopt = await _compute_sc_and_gng(
+                        sc_amount, gng_amount, sc_by_dopt, cat_leak_by_dopt, cat_leak_checks = await _compute_sc_and_gng(
                             client, guid, yesterday_yyyymmdd
                         )
                         _SC_CHANNEL_TO_DB_COL = {
@@ -5515,6 +5609,22 @@ async def nightly_flash_import_job():
                         if gng_amount > 0:
                             data["gng_net_sales"] = gng_amount
                             gng_total += gng_amount
+                        # Reclassify item-level catering leakage: subtract from
+                        # the source non-catering dopt column, add to catering.
+                        # Matches SSRS REF item-level attribution logic.
+                        for src_dopt_guid, leak_amt in cat_leak_by_dopt.items():
+                            if leak_amt <= 0:
+                                continue
+                            src_col = _DINING_OPTION_GUID_TO_DB_COL.get(src_dopt_guid)
+                            if src_col and src_col in data:
+                                data[src_col] -= leak_amt
+                            data["catering_net_sales"] += leak_amt
+                        if cat_leak_checks > 0:
+                            # Leakage checks belong to catering per REF; remove
+                            # them from NonCateringChecks.
+                            data["checks_minus_catering"] = max(
+                                0, data["checks_minus_catering"] - cat_leak_checks
+                            )
                         await asyncio.sleep(0.3)  # Rate limit courtesy
                     except Exception as exc:
                         logger.warning("Flash import: SC/GNG fetch failed for %s: %s", loc_id, exc)
@@ -5524,14 +5634,21 @@ async def nightly_flash_import_job():
 
             # 6. Get store info for restaurant names
             store_info = aloha_sales_db.get_store_info()
+            ownership = _load_store_ownership()
 
             # 7. Build DataFrame and upsert into aloha_sales_db
             rows_for_df = []
             for loc_id, data in loc_data.items():
                 si = store_info.get(loc_id, {})
+                own = ownership.get(str(loc_id), {}) if ownership else {}
+                rname = (
+                    (si.get("restaurant_name") or "").strip()
+                    or (own.get("restaurantName") or "").strip()
+                    or guid_to_name.get(data.get("_guid", ""), "")
+                )
                 rows_for_df.append({
                     "RestaurantID": loc_id,
-                    "RestaurantName": si.get("restaurant_name", guid_to_name.get(data.get("_guid", ""), "")),
+                    "RestaurantName": rname,
                     "NetSales": data["net_sales"],
                     "OLONetSales": data["olo_net_sales"],
                     "DeliveryNetSales": data["delivery_net_sales"],
@@ -10529,11 +10646,11 @@ async def _run_flash_import_for_date(target_date: date):
                 loc_data[loc_id]["net_sales"] += net
                 loc_data[loc_id]["check_count"] += orders
 
-                db_col = _DINING_OPTION_TO_DB_COL.get(dining_opt)
+                db_col, is_catering = _classify_dining_option(dining_opt)
                 if db_col and db_col in loc_data[loc_id]:
                     loc_data[loc_id][db_col] += net
 
-                if dining_opt in ("Catering", "X-EzCater", "X-Online Catering"):
+                if is_catering:
                     loc_data[loc_id]["_catering_checks"] += orders
 
             # Service charges + GNG from orders
@@ -10544,7 +10661,7 @@ async def _run_flash_import_for_date(target_date: date):
 
                 if guid:
                     try:
-                        sc_amount, gng_amount, sc_by_dopt = await _compute_sc_and_gng(
+                        sc_amount, gng_amount, sc_by_dopt, cat_leak_by_dopt, cat_leak_checks = await _compute_sc_and_gng(
                             client, guid, target_yyyymmdd
                         )
                         # Toast ERA netSalesAmount INCLUDES restaurant-destination
@@ -10567,17 +10684,38 @@ async def _run_flash_import_for_date(target_date: date):
                                     data[db_col] -= sc_val
                         if gng_amount > 0:
                             data["gng_net_sales"] = gng_amount
+                        # Reclassify item-level catering leakage: subtract from
+                        # the source non-catering dopt column, add to catering.
+                        # Matches SSRS REF item-level attribution logic.
+                        for src_dopt_guid, leak_amt in cat_leak_by_dopt.items():
+                            if leak_amt <= 0:
+                                continue
+                            src_col = _DINING_OPTION_GUID_TO_DB_COL.get(src_dopt_guid)
+                            if src_col and src_col in data:
+                                data[src_col] -= leak_amt
+                            data["catering_net_sales"] += leak_amt
+                        if cat_leak_checks > 0:
+                            data["checks_minus_catering"] = max(
+                                0, data["checks_minus_catering"] - cat_leak_checks
+                            )
                         await asyncio.sleep(0.3)
                     except Exception as exc:
                         logger.warning("Flash import SC/GNG for %s: %s", loc_id, exc)
 
             store_info = aloha_sales_db.get_store_info()
+            ownership = _load_store_ownership()
             rows_for_df = []
             for loc_id, data in loc_data.items():
                 si = store_info.get(loc_id, {})
+                own = ownership.get(str(loc_id), {}) if ownership else {}
+                rname = (
+                    (si.get("restaurant_name") or "").strip()
+                    or (own.get("restaurantName") or "").strip()
+                    or guid_to_name.get(data.get("_guid", ""), "")
+                )
                 rows_for_df.append({
                     "RestaurantID": loc_id,
-                    "RestaurantName": si.get("restaurant_name", ""),
+                    "RestaurantName": rname,
                     "NetSales": data["net_sales"],
                     "OLONetSales": data["olo_net_sales"],
                     "DeliveryNetSales": data["delivery_net_sales"],
