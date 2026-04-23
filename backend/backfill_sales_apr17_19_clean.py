@@ -74,11 +74,11 @@ STORE_GROUPING = 9
 STORE_GROUP    = 243
 
 # Dates to clean-repoll (order matters — processed sequentially)
-DATES = ["2026-04-17", "2026-04-18", "2026-04-19", "2026-04-20", "2026-04-21"]
+DATES = ["2026-04-17", "2026-04-18", "2026-04-19", "2026-04-20", "2026-04-21", "2026-04-22"]
 
 # Royalty rebuild covers the full affected window
 ROYALTY_START = "2026-04-13"
-ROYALTY_END   = "2026-04-21"
+ROYALTY_END   = "2026-04-22"
 
 CHECKPOINT_FILE = os.path.join(SCRIPT_DIR, "backfill_checkpoint.json")
 
@@ -417,7 +417,7 @@ async def main():
     # ── Final summary ────────────────────────────────────────────────────────
     total_dur = time.time() - overall_start
     print("\n" + "=" * 70)
-    print("APR 17-19 CLEAN BACKFILL COMPLETE")
+    print("APR 17-22 CLEAN BACKFILL COMPLETE")
     print("=" * 70)
     print(f"{'Date':<14} {'Stores':>6} {'OK':>5} {'Fail':>5} {'Rollup $':>14}")
     print("-" * 50)
