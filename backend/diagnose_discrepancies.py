@@ -105,11 +105,11 @@ def section_1(conn):
                 SUM(NetSales)  AS TotalNetSales,
                 COUNT(*)       AS DayPartRowCount
             FROM dev_aloha.dbo.tbl_SalesDataByDayPart
-            WHERE StoreNum = ?
+            WHERE RestaurantID = ?
               AND DateOfBusiness BETWEEN ? AND ?
             GROUP BY DateOfBusiness
             ORDER BY DateOfBusiness
-        """, ALBANY_STORE, ALBANY_START, ALBANY_END).fetchall()
+        """, str(ALBANY_STORE), ALBANY_START, ALBANY_END).fetchall()
 
         rollup_grand_total = 0.0
         if rows:
@@ -200,27 +200,27 @@ def section_1(conn):
         rows = conn.execute("""
             SELECT
                 ModificationID,
-                COUNT(*)      AS RowCount,
+                COUNT(*)      AS RowCnt,
                 SUM(DiscPric) AS TotalDiscPric
             FROM toast.dbo.hstItem
             WHERE StoreNum = ?
               AND DateOfBusiness BETWEEN ? AND ?
               AND Voided        = 0
               AND Deferred      = 0
-              AND ModificationID != '0'
+              AND ModificationID <> '0'
             GROUP BY ModificationID
             ORDER BY COUNT(*) DESC
         """, ALBANY_STORE, ALBANY_START, ALBANY_END).fetchall()
 
         if rows:
             total_mod_sales = 0.0
-            print(f"  {'ModificationID':<40} {'RowCount':>10}  {'TotalDiscPric':>14}")
+            print(f"  {'ModificationID':<40} {'RowCnt':>10}  {'TotalDiscPric':>14}")
             print(f"  {'-'*40} {'-'*10}  {'-'*14}")
             for r in rows:
-                mod_id, row_count, total = r
+                mod_id, row_cnt, total = r
                 total = float(total) if total is not None else 0.0
                 total_mod_sales += total
-                print(f"  {str(mod_id):<40} {row_count:>10}  {fmt_dollar(total):>14}")
+                print(f"  {str(mod_id):<40} {row_cnt:>10}  {fmt_dollar(total):>14}")
             print()
             print(f"  Total DiscPric in ModificationID != '0' rows: {fmt_dollar(total_mod_sales)}")
             flag(total_mod_sales > 100,
@@ -255,8 +255,8 @@ def section_2(conn):
     try:
         row = conn.execute("""
             SELECT
-                SUM(NetSales)       AS ChainTotal,
-                COUNT(DISTINCT StoreNum) AS StoreCount
+                SUM(NetSales)              AS ChainTotal,
+                COUNT(DISTINCT RestaurantID) AS StoreCount
             FROM dev_aloha.dbo.tbl_SalesDataByDayPart
             WHERE DateOfBusiness = ?
         """, GAP_DATE).fetchone()
@@ -287,16 +287,16 @@ def section_2(conn):
     stores_419_totals = {}
     try:
         rows = conn.execute("""
-            SELECT StoreNum, SUM(NetSales) AS NetSales
+            SELECT RestaurantID, SUM(NetSales) AS NetSales
             FROM dev_aloha.dbo.tbl_SalesDataByDayPart
             WHERE DateOfBusiness = '2026-04-19'
-            GROUP BY StoreNum
-            ORDER BY StoreNum
+            GROUP BY RestaurantID
+            ORDER BY RestaurantID
         """).fetchall()
 
         for r in rows:
-            stores_419.add(r[0])
-            stores_419_totals[r[0]] = float(r[1]) if r[1] is not None else 0.0
+            stores_419.add(str(r[0]))
+            stores_419_totals[str(r[0])] = float(r[1]) if r[1] is not None else 0.0
 
         print(f"  Stores present on 4/19: {len(stores_419)}")
 
@@ -310,27 +310,28 @@ def section_2(conn):
     stores_420 = set()
     try:
         rows = conn.execute("""
-            SELECT StoreNum, SUM(NetSales) AS NetSales
+            SELECT RestaurantID, SUM(NetSales) AS NetSales
             FROM dev_aloha.dbo.tbl_SalesDataByDayPart
             WHERE DateOfBusiness = ?
-            GROUP BY StoreNum
-            ORDER BY StoreNum
+            GROUP BY RestaurantID
+            ORDER BY RestaurantID
         """, GAP_DATE).fetchall()
 
         if rows:
-            print(f"  {'StoreNum':>10}  {'NetSales':>14}  {'4/19 Baseline':>15}  {'Diff':>12}  Notes")
-            print(f"  {'-'*10}  {'-'*14}  {'-'*15}  {'-'*12}  -----")
+            print(f"  {'RestaurantID':>12}  {'NetSales':>14}  {'4/19 Baseline':>15}  {'Diff':>12}  Notes")
+            print(f"  {'-'*12}  {'-'*14}  {'-'*15}  {'-'*12}  -----")
             for r in rows:
-                store_num, net_sales = r[0], float(r[1]) if r[1] is not None else 0.0
-                stores_420.add(store_num)
-                baseline = stores_419_totals.get(store_num, 0.0)
+                rest_id  = str(r[0])
+                net_sales = float(r[1]) if r[1] is not None else 0.0
+                stores_420.add(rest_id)
+                baseline = stores_419_totals.get(rest_id, 0.0)
                 diff = net_sales - baseline
                 note = ""
                 if baseline == 0.0:
                     note = "  <-- NOT IN 4/19 BASELINE"
                 elif abs(diff) > 500:
-                    note = f"  <-- LARGE SWING vs 4/19"
-                print(f"  {store_num:>10}  {fmt_dollar(net_sales):>14}  {fmt_dollar(baseline):>15}  {fmt_dollar(diff):>12}{note}")
+                    note = "  <-- LARGE SWING vs 4/19"
+                print(f"  {rest_id:>12}  {fmt_dollar(net_sales):>14}  {fmt_dollar(baseline):>15}  {fmt_dollar(diff):>12}{note}")
         else:
             print("  No rows returned for 4/20.")
 
@@ -340,7 +341,7 @@ def section_2(conn):
             print(f"  Stores in 4/19 rollup MISSING from 4/20 rollup ({len(missing_from_420)} stores):")
             for s in sorted(missing_from_420):
                 baseline = stores_419_totals.get(s, 0.0)
-                print(f"    StoreNum {s} — 4/19 NetSales was {fmt_dollar(baseline)}")
+                print(f"    RestaurantID {s} — 4/19 NetSales was {fmt_dollar(baseline)}")
         else:
             print("  No stores from 4/19 are missing from 4/20 rollup.")
 
@@ -362,7 +363,7 @@ def section_2(conn):
               AND Deferred         = 0
               AND ModificationID   = '0'
               AND (SalesCategoryGUID IS NULL
-                   OR SalesCategoryGUID != ?)
+                   OR SalesCategoryGUID <> ?)
         """, GAP_DATE, MODIFIERS_GUID).fetchone()
 
         if row:
@@ -389,6 +390,42 @@ def section_2(conn):
     except Exception as exc:
         print(f"  ERROR running hstItem 4/20 chain query: {exc}")
 
+    # ------------------------------------------------------------------
+    # 2e. hstCheck direct total for 4/20 — proposed new formula
+    # ------------------------------------------------------------------
+    subheader("2e. hstCheck SUM(Amount) — 4/20 chain total (proposed check-level formula)")
+    try:
+        row = conn.execute("""
+            SELECT
+                SUM(Amount)              AS ChainTotal,
+                COUNT(DISTINCT StoreNum) AS StoreCount,
+                COUNT(*)                 AS CheckCnt
+            FROM toast.dbo.hstCheck
+            WHERE DateOfBusiness = ?
+              AND Voided          = 0
+              AND Deleted         = 0
+        """, GAP_DATE).fetchone()
+
+        if row:
+            chk_chain_420  = float(row[0]) if row[0] is not None else 0.0
+            chk_stores_420 = int(row[1])   if row[1] is not None else 0
+            chk_count_420  = int(row[2])   if row[2] is not None else 0
+            print(f"  hstCheck chain total (4/20): {fmt_dollar(chk_chain_420)}")
+            print(f"  Distinct stores in hstCheck: {chk_stores_420}")
+            print(f"  Check count:                 {chk_count_420}")
+            print(f"  My App expected:             {fmt_dollar(GAP_APP_EXPECTED)}")
+            chk_vs_app = chk_chain_420 - GAP_APP_EXPECTED
+            print(f"  Difference (hstCheck - App): {fmt_dollar(chk_vs_app)}")
+            flag(abs(chk_vs_app) > 100,
+                 f"hstCheck Amount total differs from My App by {fmt_dollar(chk_vs_app)}")
+            if abs(chk_vs_app) <= 100:
+                print("  ✓ hstCheck.Amount closely matches My App — safe to use as rollup source")
+        else:
+            print("  No rows returned from hstCheck for 4/20.")
+
+    except Exception as exc:
+        print(f"  ERROR running hstCheck 4/20 chain query: {exc}")
+
     print()
 
 
@@ -411,6 +448,9 @@ def section_3(conn):
         subheader(f"Store {store_num} — {store_name}")
 
         try:
+            # Use a subquery to get ONE distinct Category_Name per GUID from cfg_Sales_Cats.
+            # Without this, cfg_Sales_Cats (which has ~1 row per store per category) causes
+            # a cartesian join that inflates all item counts and dollar amounts by ~98x.
             rows = conn.execute("""
                 SELECT
                     ISNULL(sc.Category_Name, 'NULL/Unknown') AS CategoryName,
@@ -419,8 +459,11 @@ def section_3(conn):
                     SUM(i.DiscPric)  AS TotalDiscPric,
                     SUM(i.Price)     AS TotalPrice
                 FROM toast.dbo.hstItem i
-                LEFT JOIN toast.dbo.cfg_Sales_Cats sc
-                    ON i.SalesCategoryGUID = sc.Category_Guid
+                LEFT JOIN (
+                    SELECT Category_Guid, MAX(Category_Name) AS Category_Name
+                    FROM toast.dbo.cfg_Sales_Cats
+                    GROUP BY Category_Guid
+                ) sc ON i.SalesCategoryGUID = sc.Category_Guid
                 WHERE i.StoreNum        = ?
                   AND i.DateOfBusiness  = ?
                   AND i.Voided          = 0
