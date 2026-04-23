@@ -3398,34 +3398,71 @@
 
           if (isMetrics) {
             const showAlohaCol = currentResults.yoySalesInfo && currentResults.yoySalesInfo.status === 'ok' && totals.some(r => r.totalNetSalesAloha != null);
-            // Newk's Net Sales only (Toast columns removed) + TOTAL column at right
+            // When hasNewks: interleave Newk's + Toast columns side-by-side per date
             const hdr = [c("Restaurant Location", S.navyL)];
-            dc.forEach(col => hdr.push(c(formatDateHeader(col), S.navyR)));
-            hdr.push(c('TOTAL', S.navyR));
+            if (hasNewks) {
+              dc.forEach(col => {
+                hdr.push(c("Newk's " + formatDateHeader(col), S.navyR));
+                hdr.push(c('Toast ' + formatDateHeader(col), S.navyR));
+              });
+              hdr.push(c("Newk's TOTAL", S.navyR));
+              hdr.push(c('Toast TOTAL', S.navyR));
+            } else {
+              dc.forEach(col => hdr.push(c(formatDateHeader(col), S.navyR)));
+              hdr.push(c('TOTAL', S.navyR));
+            }
             rows.push(hdr);
             pivotTable.forEach((row, idx) => {
               const alt = idx % 2 === 1;
               const r = [c(row.restaurantName || '', alt ? S.dLalt : S.dL)];
-              let rowTotal = 0;
+              let rowTotalNewks = 0, rowTotalToast = 0;
               dc.forEach(col => {
-                const val = hasNewks ? (row[col + '_newks'] ?? row[col] ?? 0) : (row[col] ?? 0);
-                rowTotal += val;
-                r.push(n(val, alt ? S.dRalt : S.dR));
+                if (hasNewks) {
+                  const newksVal = row[col + '_newks'] ?? row[col] ?? 0;
+                  const toastVal = row[col] ?? 0;
+                  rowTotalNewks += newksVal;
+                  rowTotalToast += toastVal;
+                  r.push(n(newksVal, alt ? S.dRalt : S.dR));
+                  r.push(n(toastVal, alt ? S.dRalt : S.dR));
+                } else {
+                  const val = row[col] ?? 0;
+                  rowTotalNewks += val;
+                  r.push(n(val, alt ? S.dRalt : S.dR));
+                }
               });
-              r.push(n(rowTotal, alt ? S.dRalt : S.dR));
+              if (hasNewks) {
+                r.push(n(rowTotalNewks, alt ? S.dRalt : S.dR));
+                r.push(n(rowTotalToast, alt ? S.dRalt : S.dR));
+              } else {
+                r.push(n(rowTotalNewks, alt ? S.dRalt : S.dR));
+              }
               rows.push(r);
             });
             const totRow = [c('TOTALS', S.navyL)];
-            let grandTotal = 0;
+            let grandNewks = 0, grandToast = 0;
             dc.forEach(col => {
               const t = totals.find(t => t.date === col);
-              const val = hasNewks ? (t?.totalNetSalesNewks ?? 0) : (t?.totalNetSales ?? 0);
-              grandTotal += val;
-              totRow.push(n(val, S.navyR));
+              if (hasNewks) {
+                const nv = t?.totalNetSalesNewks ?? 0;
+                const tv = t?.totalNetSales ?? 0;
+                grandNewks += nv;
+                grandToast += tv;
+                totRow.push(n(nv, S.navyR));
+                totRow.push(n(tv, S.navyR));
+              } else {
+                const val = t?.totalNetSales ?? 0;
+                grandNewks += val;
+                totRow.push(n(val, S.navyR));
+              }
             });
-            totRow.push(n(grandTotal, S.navyR));
+            if (hasNewks) {
+              totRow.push(n(grandNewks, S.navyR));
+              totRow.push(n(grandToast, S.navyR));
+            } else {
+              totRow.push(n(grandNewks, S.navyR));
+            }
             rows.push(totRow);
-            // Prior Year (Aloha) totals row
+            // Prior Year (Aloha) totals row — blank in Toast slot to keep alignment
             if (showAlohaCol) {
               const alohaRow = [c('PRIOR YEAR (ALOHA)', S.amberR)];
               let alohaGrandTotal = 0;
@@ -3434,10 +3471,12 @@
                 const val = t?.totalNetSalesAloha ?? 0;
                 alohaGrandTotal += val;
                 alohaRow.push(n(val, S.amberR));
+                if (hasNewks) alohaRow.push(c('', S.amberR)); // blank for Toast slot
               });
               alohaRow.push(n(alohaGrandTotal, S.amberR));
+              if (hasNewks) alohaRow.push(c('', S.amberR));
               rows.push(alohaRow);
-              // YoY % row
+              // YoY % row (based on Newk's vs Aloha)
               const yoyRow = [c('YoY %', S.amberR)];
               dc.forEach(col => {
                 const t = totals.find(t => t.date === col);
@@ -3445,9 +3484,12 @@
                 const prior = t?.totalNetSalesAloha ?? 0;
                 const pct = prior ? (((current - prior) / prior) * 100).toFixed(1) + '%' : '—';
                 yoyRow.push(c(pct, S.amberR));
+                if (hasNewks) yoyRow.push(c('', S.amberR)); // blank for Toast slot
               });
-              const totalPct = alohaGrandTotal ? (((grandTotal - alohaGrandTotal) / alohaGrandTotal) * 100).toFixed(1) + '%' : '—';
+              const grandCurrent = hasNewks ? grandNewks : grandNewks;
+              const totalPct = alohaGrandTotal ? (((grandCurrent - alohaGrandTotal) / alohaGrandTotal) * 100).toFixed(1) + '%' : '—';
               yoyRow.push(c(totalPct, S.amberR));
+              if (hasNewks) yoyRow.push(c('', S.amberR));
               rows.push(yoyRow);
             }
           } else {

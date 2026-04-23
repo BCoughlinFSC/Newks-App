@@ -105,6 +105,19 @@ async def _fetch_page(
                 headers.update(new_headers)
                 continue
 
+            if resp.status_code == 429:
+                try:
+                    retry_after = int(resp.headers.get("Retry-After", "5"))
+                except (TypeError, ValueError):
+                    retry_after = 5
+                retry_after = max(1, min(retry_after, 60))
+                log.warning(
+                    "[%s] Page %d rate-limited (429) — sleeping %ds before retry %d/%d",
+                    store_num, page, retry_after, attempt, MAX_RETRIES,
+                )
+                await asyncio.sleep(retry_after)
+                continue
+
             if 500 <= resp.status_code < 600:
                 delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
                 log.warning(
@@ -259,6 +272,14 @@ def parse_orders(raw_orders: list, store_guid: str, store_num: int, business_dat
         dining_option_guid = dining_option.get("guid") if isinstance(dining_option, dict) else _safe_str(dining_option)
         revenue_center = order.get("revenueCenter") or {}
         rc_guid = revenue_center.get("guid") if isinstance(revenue_center, dict) else _safe_str(revenue_center)
+        # Toast's actual field for daypart is `restaurantService.guid`, not `dayPart`.
+        # Matches Don's PHP extraction: ($entry->restaurantService) ? @$entry->restaurantService->guid : ''
+        restaurant_service = order.get("restaurantService") or {}
+        service_guid = (
+            restaurant_service.get("guid")
+            if isinstance(restaurant_service, dict)
+            else _safe_str(restaurant_service)
+        )
         server_info = order.get("server") or {}
         server_guid = server_info.get("guid") if isinstance(server_info, dict) else _safe_str(server_info)
 
@@ -275,7 +296,7 @@ def parse_orders(raw_orders: list, store_guid: str, store_num: int, business_dat
             "LastModifiedDevice": _safe_str(order.get("lastModifiedDevice")),
             "Source": _safe_str(order.get("source")),
             "Duration": order.get("duration"),
-            "DayPart": _safe_str(order.get("dayPart")),
+            "DayPart": service_guid,
             "ExcessFood": _safe_str(order.get("excessFood")),
             "Tab": _safe_str(order.get("tab")),
             "RequiredPrepTime": _safe_str(order.get("requiredPrepTime")),
@@ -304,7 +325,7 @@ def parse_orders(raw_orders: list, store_guid: str, store_num: int, business_dat
             check_rows.append({
                 "CheckID": check_guid,
                 "DateOfBusiness": biz_date,
-                "DayPart": _safe_str(order.get("dayPart")),
+                "DayPart": service_guid,
                 "StoreID": store_guid,
                 "StoreNum": store_num,
                 "OrderID": order_guid,
@@ -341,7 +362,7 @@ def parse_orders(raw_orders: list, store_guid: str, store_num: int, business_dat
                     store_guid=store_guid,
                     store_num=store_num,
                     biz_date=biz_date,
-                    daypart=_safe_str(order.get("dayPart")),
+                    daypart=service_guid,
                     order_mode=dining_option_guid,
                     parent_guid=None,
                     depth=0,
@@ -398,9 +419,14 @@ def _flatten_selection(
     )
 
     # Price fields
+    # DiscPric = actual charged price (post all discounts).
+    # We intentionally ignore preDiscountPrice here: Toast sets preDiscountPrice
+    # to the pre-discount item price even for check-level discounts, which causes
+    # SUM(DiscPric) in the rollup to overstate net sales by the full discount amount.
+    # Using `price` (the actual amount charged) keeps the rollup aligned with
+    # Toast web's Net Sales figure and the Royalty Report baseline.
     price = sel.get("price", 0) or 0
-    pre_discount = sel.get("preDiscountPrice")
-    disc_price = pre_discount if pre_discount is not None else price
+    disc_price = price
 
     # MultiLocationId (MLI) — Toast sends this on the item object
     mli = item_info.get("multiLocationId") if isinstance(item_info, dict) else None
@@ -463,6 +489,7 @@ async def pull_store_for_date(
     business_date: str,
     restaurant_guid: str = None,
     skip_rollup: bool = False,
+    skip_items: bool = False,
 ) -> PullResult:
     """
     Pull one store's data for one business date from Toast API and write
@@ -537,8 +564,11 @@ async def pull_store_for_date(
         log.info("Upserting checks to hstCheck...")
         db.upsert_checks(conn, parsed["checks"])
 
-        log.info("Inserting items to hstItem_temp and running sp_Update_Sold_Items_From_Check...")
-        db.upsert_items(conn, parsed["items"])
+        if skip_items:
+            log.info("Skipping items (skip_items=True)")
+        else:
+            log.info("Inserting items to hstItem_temp and running sp_Update_Sold_Items_From_Check...")
+            db.upsert_items(conn, parsed["items"])
 
         if not skip_rollup:
             log.info("Running rollup (sp_toast_SalesDataByDayPart)...")
