@@ -2216,6 +2216,10 @@ ORDER BY DateOfBusiness</pre>
       if (_repollStoresLoaded) return;
       try {
         const resp  = await fetch('/api/admin/repoll/stores', { headers: getAuthHeaders() });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
         const stores = await resp.json();
         const sel   = document.getElementById('repollStore');
         sel.innerHTML = `<option value="">All Stores (${stores.length})</option>`;
