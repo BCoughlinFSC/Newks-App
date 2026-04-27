@@ -13751,15 +13751,19 @@ async def repoll_get_stores(
     current_user: User = Depends(get_current_user),
 ):
     """Return active Toast stores for the repoll store picker."""
-    conn = repoll_db.get_toast_connection()
     try:
-        stores = repoll_db.get_live_toast_stores(conn)
-    finally:
-        conn.close()
-    return [
-        {"store_num": s["store_num"], "name": s.get("name", "")}
-        for s in stores if s.get("store_num")
-    ]
+        conn = repoll_db.get_toast_connection()
+        try:
+            stores = repoll_db.get_live_toast_stores(conn)
+        finally:
+            conn.close()
+        return [
+            {"store_num": s["store_num"], "name": s.get("name", "")}
+            for s in stores if s.get("store_num")
+        ]
+    except Exception as exc:
+        logger.error("repoll_get_stores failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Could not load stores: {exc}")
 
 
 @app.post("/api/admin/repoll/start")
