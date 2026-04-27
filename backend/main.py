@@ -15,7 +15,7 @@ import os
 
 import httpx
 from httpx import HTTPStatusError
-from fastapi import FastAPI, HTTPException, Query, Body, Depends, status, APIRouter, Response, UploadFile, File, Request
+from fastapi import FastAPI, HTTPException, Query, Body, Depends, status, APIRouter, Response, UploadFile, File, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -56,6 +56,8 @@ from olo_client import (
     filter_batches_by_date_range,
 )
 from email_service import send_invite_email
+import toast_puller_db as repoll_db
+from toast_puller import fetch_orders_with_retry, parse_orders
 
 # ------------------
 # Config
@@ -13525,6 +13527,285 @@ def _build_flash_period_from_api(
         "priorRange": {"start": prior_start, "end": prior_end},
         "channels": channels,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Toast Repoll — chain-wide or single-store, with live progress polling
+# ──────────────────────────────────────────────────────────────────────────────
+
+_REPOLL_STORE_GROUPING = 9
+_REPOLL_STORE_GROUP    = 243
+
+# In-memory job store.  Keyed by job_id (10-char hex).
+# Survives as long as the process is alive; old completed jobs are pruned on
+# each new start request (keeps the last 20).
+_repoll_jobs: dict = {}
+
+
+class RepollRequest(BaseModel):
+    store_num:  Optional[int] = None   # None = all stores
+    start_date: str                    # YYYY-MM-DD
+    end_date:   str                    # YYYY-MM-DD
+
+
+def _rlog(job_id: str, msg: str) -> None:
+    """Append a timestamped line to the job log and echo to app logger."""
+    ts = datetime.utcnow().strftime("%H:%M:%S")
+    _repoll_jobs[job_id]["logs"].append(f"[{ts}] {msg}")
+    logger.info("[repoll %s] %s", job_id, msg)
+
+
+def _repoll_date_range(start: str, end: str):
+    """Yield each date string from start to end inclusive."""
+    d = date.fromisoformat(start)
+    e = date.fromisoformat(end)
+    while d <= e:
+        yield d.isoformat()
+        d += timedelta(days=1)
+
+
+async def _run_repoll_job(job_id: str, payload: RepollRequest) -> None:
+    """
+    Background task that drives the full repoll sequence:
+      1. For each date in range, for each store:
+           delete stale rows → fetch Toast API → write staging → direct copy → hstItem
+      2. Fix DayPartIDs (the post-repoll SSMS step, now automated)
+      3. Rebuild tbl_SalesDataByDayPart rollup
+      4. Rebuild royalty table
+    Progress is written to _repoll_jobs[job_id]["logs"] and polled by the UI.
+    """
+    job        = _repoll_jobs[job_id]
+    start_date = payload.start_date
+    end_date   = payload.end_date
+    dates      = list(_repoll_date_range(start_date, end_date))
+
+    try:
+        # ── Load active stores ────────────────────────────────────────────────
+        conn = repoll_db.get_toast_connection()
+        try:
+            all_stores = repoll_db.get_live_toast_stores(conn)
+        finally:
+            conn.close()
+
+        if payload.store_num:
+            stores = [s for s in all_stores if int(s["store_num"]) == payload.store_num]
+            if not stores:
+                _rlog(job_id, f"ERROR: Store {payload.store_num} not found in active Toast stores")
+                job["status"] = "failed"
+                return
+        else:
+            stores = [s for s in all_stores if s.get("guid") and s.get("store_num")]
+
+        total_units = len(stores) * len(dates)
+        _rlog(job_id, f"Starting: {len(stores)} store(s) × {len(dates)} date(s) = {total_units} units")
+        _rlog(job_id, f"Date range: {start_date} → {end_date}")
+        job["summary"]["stores_total"]  = total_units
+        job["summary"]["stores_done"]   = 0
+        job["summary"]["stores_failed"] = 0
+
+        # ── Main loop: date-first ─────────────────────────────────────────────
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            for date_sql in dates:
+                date_yyyymmdd = date_sql.replace("-", "")
+                _rlog(job_id, f"── {date_sql} ──────────────────────────────────────────────")
+
+                for s in stores:
+                    store_num  = int(s["store_num"])
+                    store_guid = str(s["guid"])
+                    store_name = s.get("name", f"Store {store_num}")
+                    _rlog(job_id, f"  → {store_num}  {store_name}")
+
+                    try:
+                        # Delete stale rows
+                        conn = repoll_db.get_toast_connection()
+                        try:
+                            cur = conn.cursor()
+                            cur.execute(
+                                "DELETE FROM toast.dbo.hstItem  WHERE StoreNum=? AND DateOfBusiness=?",
+                                store_num, date_sql)
+                            deleted = cur.rowcount
+                            cur.execute(
+                                "DELETE FROM toast.dbo.hstCheck WHERE StoreNum=? AND DateOfBusiness=?",
+                                store_num, date_sql)
+                            cur.execute(
+                                "DELETE FROM toast.dbo.hstOrder WHERE StoreNum=? AND DateOfBusiness=?",
+                                store_num, date_sql)
+                            conn.commit()
+                        finally:
+                            conn.close()
+
+                        # Truncate staging table
+                        conn = repoll_db.get_toast_connection()
+                        try:
+                            conn.execute("TRUNCATE TABLE dbo.hstItem_temp")
+                            conn.commit()
+                        finally:
+                            conn.close()
+
+                        # Fetch from Toast API
+                        orders, errors = await fetch_orders_with_retry(
+                            client, store_guid, store_num, date_yyyymmdd)
+
+                        if errors and not orders:
+                            raise Exception(f"API error: {errors[0]}")
+
+                        if not orders:
+                            _rlog(job_id, f"    {store_num} / {date_sql}: 0 orders (closed day)")
+                            job["summary"]["stores_done"] += 1
+                            continue
+
+                        parsed = parse_orders(orders, store_guid, store_num, date_yyyymmdd)
+                        _rlog(job_id,
+                              f"    {store_num} / {date_sql}: "
+                              f"{len(parsed['orders'])} orders / "
+                              f"{len(parsed['checks'])} checks / "
+                              f"{len(parsed['items'])} items")
+
+                        # Write to staging
+                        conn = repoll_db.get_toast_connection()
+                        try:
+                            if parsed["orders"]:
+                                repoll_db.upsert_orders(conn, parsed["orders"])
+                            if parsed["checks"]:
+                                repoll_db.upsert_checks(conn, parsed["checks"])
+                            if parsed["items"]:
+                                repoll_db.upsert_items(
+                                    conn, parsed["items"],
+                                    skip_truncate=True, skip_proc=True)
+                        finally:
+                            conn.close()
+
+                        # Direct copy staging → hstItem (bypasses encrypted merge proc)
+                        conn = repoll_db.get_toast_connection()
+                        try:
+                            inserted = repoll_db.direct_copy_items_from_temp(
+                                conn, store_num, date_sql)
+                            _rlog(job_id,
+                                  f"    {store_num} / {date_sql}: {inserted} rows → hstItem")
+                        finally:
+                            conn.close()
+
+                        job["summary"]["stores_done"] += 1
+
+                    except Exception as exc:
+                        _rlog(job_id, f"    ERROR {store_num} / {date_sql}: {exc}")
+                        job["summary"]["stores_failed"] += 1
+
+                # ── Fix DayPartIDs for this date ──────────────────────────────
+                _rlog(job_id, f"  Fixing DayPartIDs for {date_sql}…")
+                conn = repoll_db.get_toast_connection()
+                try:
+                    fixed = repoll_db.fix_daypart_ids(conn, date_sql, date_sql)
+                    _rlog(job_id, f"  DayPartID fix: {fixed} rows updated")
+                finally:
+                    conn.close()
+
+                # ── Rebuild rollup for this date ──────────────────────────────
+                _rlog(job_id, f"  Rebuilding rollup for {date_sql}…")
+                conn = repoll_db.get_toast_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "DELETE FROM dev_aloha.dbo.tbl_SalesDataByDayPart "
+                        "WHERE DateOfBusiness = ?", date_sql)
+                    _rlog(job_id, f"  Deleted {cur.rowcount} stale rollup rows")
+                    conn.commit()
+                    repoll_db.run_rollup(
+                        conn,
+                        start_date=date_sql,
+                        end_date=date_sql,
+                        store_grouping=_REPOLL_STORE_GROUPING,
+                        store_group=_REPOLL_STORE_GROUP,
+                    )
+                    _rlog(job_id, f"  Rollup complete for {date_sql}")
+                finally:
+                    conn.close()
+
+        # ── Rebuild royalty for full range ────────────────────────────────────
+        _rlog(job_id, f"Rebuilding royalty table {start_date} → {end_date}…")
+        conn = repoll_db.get_toast_connection()
+        try:
+            conn.execute(
+                "EXEC dev_aloha.dbo.sp_tbl_Royalty_Values @StartDate=?, @EndDate=?",
+                start_date, end_date)
+            conn.commit()
+            _rlog(job_id, "Royalty rebuild complete")
+        finally:
+            conn.close()
+
+        job["status"] = "done"
+        done   = job["summary"]["stores_done"]
+        failed = job["summary"]["stores_failed"]
+        _rlog(job_id, f"✓ Complete — {done} store/dates done, {failed} failed")
+
+    except Exception as exc:
+        _rlog(job_id, f"FATAL: {exc}")
+        logger.error("Repoll job %s failed: %s", job_id, exc, exc_info=True)
+        job["status"] = "failed"
+    finally:
+        job["finished_at"] = datetime.utcnow().isoformat()
+
+
+@app.get("/api/admin/repoll/stores")
+async def repoll_get_stores(
+    current_user: User = Depends(get_current_user),
+):
+    """Return active Toast stores for the repoll store picker."""
+    conn = repoll_db.get_toast_connection()
+    try:
+        stores = repoll_db.get_live_toast_stores(conn)
+    finally:
+        conn.close()
+    return [
+        {"store_num": s["store_num"], "name": s.get("name", "")}
+        for s in stores if s.get("store_num")
+    ]
+
+
+@app.post("/api/admin/repoll/start")
+async def repoll_start(
+    payload: RepollRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Start a chain-wide or single-store repoll as a background job.
+    Returns immediately with a job_id.
+    Poll GET /api/admin/repoll/status/{job_id} every 3 s for live progress.
+    """
+    # Prune old completed jobs — keep the last 20
+    finished = [jid for jid, j in _repoll_jobs.items()
+                if j["status"] in ("done", "failed")]
+    for old_id in finished[:-20]:
+        _repoll_jobs.pop(old_id, None)
+
+    job_id = uuid.uuid4().hex[:10]
+    _repoll_jobs[job_id] = {
+        "job_id":      job_id,
+        "status":      "running",
+        "logs":        [],
+        "started_at":  datetime.utcnow().isoformat(),
+        "finished_at": None,
+        "started_by":  current_user.email,
+        "store_num":   payload.store_num,
+        "start_date":  payload.start_date,
+        "end_date":    payload.end_date,
+        "summary":     {"stores_total": 0, "stores_done": 0, "stores_failed": 0},
+    }
+    background_tasks.add_task(_run_repoll_job, job_id, payload)
+    return {"job_id": job_id}
+
+
+@app.get("/api/admin/repoll/status/{job_id}")
+async def repoll_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Return current status, logs, and summary for a repoll job."""
+    job = _repoll_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 def _get_flash_loc_mapping() -> dict:

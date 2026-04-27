@@ -358,6 +358,7 @@
     <button class="admin-tab" data-tab="dbhealth">Database Health</button>
     <button class="admin-tab" data-tab="toastconfig">Toast Config</button>
     <button class="admin-tab" data-tab="validation">Validation</button>
+    <button class="admin-tab" data-tab="repoll" id="repollTab">&#x21BB; Repoll</button>
   </nav>
 
   <!-- ─── Status toast ─────────────────────────────────── -->
@@ -652,6 +653,65 @@ ORDER BY DateOfBusiness</pre>
       </div>
     </div>
 
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- TAB: Repoll                                          -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="tab-panel" id="tab-repoll">
+
+      <div class="section-header">
+        <div>
+          <h2>Toast Repoll</h2>
+          <div class="user-count">Re-pull data from Toast API &rarr; hstItem / hstCheck / hstOrder &rarr; DayPartID fix &rarr; rollup &rarr; royalty. No SSMS required.</div>
+        </div>
+      </div>
+
+      <!-- ─── Form ──────────────────────────────────────────── -->
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+        <div style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap;">
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Store</label>
+            <select id="repollStore" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;min-width:240px;">
+              <option value="">All Stores (~97)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+            <input type="date" id="repollStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+            <input type="date" id="repollEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <button class="btn-primary" id="repollStartBtn" onclick="startRepoll()" style="background:#C41E3A;">&#x21BB; Start Repoll</button>
+        </div>
+        <div id="repollFormMsg" style="margin-top:0.65rem;font-size:0.83rem;color:#6B7280;"></div>
+      </div>
+
+      <!-- ─── Live log card ─────────────────────────────────── -->
+      <div id="repollLogCard" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+          <div>
+            <h3 style="margin:0;color:#1E3A5F;font-size:1rem;">Progress</h3>
+            <div id="repollJobMeta" style="font-size:0.78rem;color:#6B7280;margin-top:0.15rem;"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.75rem;">
+            <span id="repollProgressText" style="font-size:0.82rem;color:#6B7280;"></span>
+            <span id="repollJobStatus" style="font-size:0.85rem;font-weight:700;padding:0.25rem 0.65rem;border-radius:20px;"></span>
+          </div>
+        </div>
+        <!-- Progress bar -->
+        <div style="background:#E5E7EB;border-radius:4px;height:6px;margin-bottom:0.75rem;overflow:hidden;">
+          <div id="repollProgressBar" style="height:100%;background:#C41E3A;border-radius:4px;width:0%;transition:width 0.4s ease;"></div>
+        </div>
+        <!-- Log output -->
+        <pre id="repollLog"
+             style="background:#0F172A;color:#E2E8F0;padding:1rem;border-radius:8px;
+                    font-size:0.76rem;max-height:480px;overflow-y:auto;margin:0;
+                    white-space:pre-wrap;word-break:break-word;line-height:1.5;"></pre>
+      </div>
+
+    </div><!-- /tab-repoll -->
+
   </main>
 
   <!-- ─── Auth Modal ───────────────────────────────────── -->
@@ -820,6 +880,9 @@ ORDER BY DateOfBusiness</pre>
           break;
         case 'validation':
           // Nothing to preload — user triggers manually
+          break;
+        case 'repoll':
+          loadRepollStores();
           break;
       }
     }
@@ -2141,6 +2204,139 @@ ORDER BY DateOfBusiness</pre>
         switchTab(savedTab);
       }
     });
+
+    // ──────────────────────────────────────────────────────
+    // Repoll
+    // ──────────────────────────────────────────────────────
+    let _repollJobId       = null;
+    let _repollPollTimer   = null;
+    let _repollStoresLoaded = false;
+
+    async function loadRepollStores() {
+      if (_repollStoresLoaded) return;
+      try {
+        const resp  = await fetch('/api/admin/repoll/stores', { headers: getAuthHeaders() });
+        const stores = await resp.json();
+        const sel   = document.getElementById('repollStore');
+        sel.innerHTML = `<option value="">All Stores (${stores.length})</option>`;
+        stores
+          .sort((a, b) => parseInt(a.store_num) - parseInt(b.store_num))
+          .forEach(s => {
+            const opt = document.createElement('option');
+            opt.value       = s.store_num;
+            opt.textContent = `${s.store_num} – ${s.name}`;
+            sel.appendChild(opt);
+          });
+        _repollStoresLoaded = true;
+      } catch (e) {
+        document.getElementById('repollFormMsg').textContent = 'Could not load store list: ' + e.message;
+      }
+    }
+
+    async function startRepoll() {
+      const storeVal  = document.getElementById('repollStore').value;
+      const startDate = document.getElementById('repollStart').value;
+      const endDate   = document.getElementById('repollEnd').value;
+      const msg       = document.getElementById('repollFormMsg');
+
+      if (!startDate || !endDate) { msg.textContent = 'Please select a start and end date.'; return; }
+      if (endDate < startDate)    { msg.textContent = 'End date must be on or after start date.'; return; }
+
+      msg.textContent = '';
+      document.getElementById('repollStartBtn').disabled = true;
+
+      try {
+        const payload = {
+          start_date: startDate,
+          end_date:   endDate,
+          store_num:  storeVal ? parseInt(storeVal) : null,
+        };
+        const resp = await fetch('/api/admin/repoll/start', {
+          method:  'POST',
+          headers: getAuthHeaders(),
+          body:    JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        _repollJobId = data.job_id;
+
+        // Show log card
+        const logCard = document.getElementById('repollLogCard');
+        logCard.style.display = 'block';
+        document.getElementById('repollLog').textContent = '';
+        document.getElementById('repollProgressBar').style.width = '0%';
+        document.getElementById('repollJobMeta').textContent =
+          `Job ${_repollJobId} · ${storeVal ? 'Store ' + storeVal : 'All Stores'} · ${startDate}${startDate !== endDate ? ' → ' + endDate : ''}`;
+        _setRepollStatus('running');
+
+        // Start polling
+        if (_repollPollTimer) clearInterval(_repollPollTimer);
+        _repollPollTimer = setInterval(_pollRepollStatus, 3000);
+
+      } catch (e) {
+        msg.textContent = 'Failed to start repoll: ' + e.message;
+        document.getElementById('repollStartBtn').disabled = false;
+      }
+    }
+
+    async function _pollRepollStatus() {
+      if (!_repollJobId) return;
+      try {
+        const resp = await fetch(`/api/admin/repoll/status/${_repollJobId}`, {
+          headers: getAuthHeaders(),
+        });
+        if (!resp.ok) return;
+        const job = await resp.json();
+
+        // Update log (append only new lines for efficiency)
+        const logEl = document.getElementById('repollLog');
+        logEl.textContent = job.logs.join('\n');
+        logEl.scrollTop   = logEl.scrollHeight;
+
+        // Progress bar
+        const s = job.summary || {};
+        const pct = s.stores_total > 0
+          ? Math.round((s.stores_done / s.stores_total) * 100)
+          : 0;
+        document.getElementById('repollProgressBar').style.width = pct + '%';
+        document.getElementById('repollProgressText').textContent =
+          s.stores_total > 0 ? `${s.stores_done} / ${s.stores_total}` : '';
+
+        _setRepollStatus(job.status);
+
+        if (job.status === 'done' || job.status === 'failed') {
+          clearInterval(_repollPollTimer);
+          _repollPollTimer = null;
+          document.getElementById('repollStartBtn').disabled = false;
+          if (job.status === 'done') {
+            document.getElementById('repollProgressBar').style.width = '100%';
+          }
+        }
+      } catch (e) {
+        // Network blip — keep polling
+      }
+    }
+
+    function _setRepollStatus(status) {
+      const el = document.getElementById('repollJobStatus');
+      if (status === 'running') {
+        el.textContent        = 'Running…';
+        el.style.background   = '#FEF3C7';
+        el.style.color        = '#92400E';
+      } else if (status === 'done') {
+        el.textContent        = '✓ Complete';
+        el.style.background   = '#D1FAE5';
+        el.style.color        = '#065F46';
+      } else {
+        el.textContent        = '✗ Failed';
+        el.style.background   = '#FEE2E2';
+        el.style.color        = '#991B1B';
+      }
+    }
+
   </script>
 </body>
 </html>

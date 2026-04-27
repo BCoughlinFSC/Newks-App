@@ -180,12 +180,6 @@ def upsert_orders(conn: pyodbc.Connection, rows: list[dict]) -> int:
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
-    # Truncate string fields to match SQL Server column sizes
-    def _trunc(val, maxlen):
-        if val is None: return None
-        s = str(val)
-        return s[:maxlen] if len(s) > maxlen else s
-
     for row in rows:
         params = (
             _trunc(row["OrderID"], 100), row["DateOfBusiness"],
@@ -219,7 +213,12 @@ def upsert_orders(conn: pyodbc.Connection, rows: list[dict]) -> int:
     return len(rows)
 
 
-def upsert_items(conn: pyodbc.Connection, rows: list[dict]) -> int:
+def upsert_items(
+    conn: pyodbc.Connection,
+    rows: list[dict],
+    skip_truncate: bool = False,
+    skip_proc: bool = False,
+) -> int:
     """
     INSERT item rows into toast.dbo.hstItem_temp, then call
     sp_Update_Sold_Items_From_Check to merge them into hstItem.
@@ -230,8 +229,13 @@ def upsert_items(conn: pyodbc.Connection, rows: list[dict]) -> int:
        ItemID from cfg_RestaurantService and cfg_menu_items
     3. The proc is idempotent — running it on already-merged data is safe
 
-    IMPORTANT: This function should only be called when NO other puller
-    is running (serial execution only).
+    IMPORTANT: With default args (both skip flags False), this function must
+    run serially — it TRUNCATEs the shared dbo.hstItem_temp and runs a proc.
+
+    For batch backfill, callers can set skip_truncate=True and skip_proc=True
+    so they can TRUNCATE once up front, run many parallel inserts, then call
+    run_items_merge_proc() once at the end. In that mode the per-store work
+    (DELETE from hstItem + INSERT into hstItem_temp) is safe to parallelize.
     """
     if not rows:
         return 0
@@ -242,8 +246,9 @@ def upsert_items(conn: pyodbc.Connection, rows: list[dict]) -> int:
 
     cursor = conn.cursor()
 
-    # Ensure hstItem_temp is empty
-    cursor.execute("TRUNCATE TABLE dbo.hstItem_temp")
+    # Ensure hstItem_temp is empty (skipped in batch mode)
+    if not skip_truncate:
+        cursor.execute("TRUNCATE TABLE dbo.hstItem_temp")
 
     # DELETE existing hstItem rows for this store/date BEFORE the merge.
     # This prevents duplicates when our Python field values differ slightly
@@ -257,8 +262,11 @@ def upsert_items(conn: pyodbc.Connection, rows: list[dict]) -> int:
     log.info("Deleted %d existing hstItem rows", deleted)
     conn.commit()
 
-    insert_sql = """
-    INSERT INTO dbo.hstItem_temp (
+    # Multi-row VALUES batching — sends ~50 rows per round trip instead of 1.
+    # Avoids fast_executemany's buffer-inference bug while still being 50x
+    # faster than a per-row execute() loop. SQL Server parameter limit is
+    # 2100, so with 32 cols per row we keep batch size at 50 (1600 params).
+    column_list = """
         DateOfBusiness, StoreID, StoreNum, OrderID, CheckID,
         DayPart, DayPartID, SelectionID, ParentGUID, ItemGUID,
         ParentID, ItemID, ModificationID, ModifierItemID,
@@ -267,20 +275,13 @@ def upsert_items(conn: pyodbc.Connection, rows: list[dict]) -> int:
         OrderMode, Price, DiscPric, Tax, TaxInclusion,
         SystemTime, Voided, VoidDate, VoidReason,
         AppliedDiscountAmount, MenuItemMLI, ParentMLI
-    ) VALUES (
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?
-    )
     """
+    COLS_PER_ROW = 32
+    ROWS_PER_BATCH = 50
+    single_row_placeholder = "(" + ",".join(["?"] * COLS_PER_ROW) + ")"
 
-    for row in rows:
-        params = (
+    def _row_params(row):
+        return (
             row["DateOfBusiness"], _trunc(row["StoreID"], 100), row["StoreNum"],
             _trunc(row["OrderID"], 100), _trunc(row["CheckID"], 100),
             _trunc(row.get("DayPart"), 100), row.get("DayPartID"),
@@ -307,18 +308,94 @@ def upsert_items(conn: pyodbc.Connection, rows: list[dict]) -> int:
             row.get("AppliedDiscountAmount", 0),
             row.get("MenuItemMLI"), row.get("ParentMLI"),
         )
-        cursor.execute(insert_sql, params)
+
+    for i in range(0, len(rows), ROWS_PER_BATCH):
+        chunk = rows[i:i + ROWS_PER_BATCH]
+        placeholders = ",".join([single_row_placeholder] * len(chunk))
+        batch_sql = f"INSERT INTO dbo.hstItem_temp ({column_list}) VALUES {placeholders}"
+        flat_params = []
+        for row in chunk:
+            flat_params.extend(_row_params(row))
+        cursor.execute(batch_sql, flat_params)
     conn.commit()
-    log.info("Bulk inserted %d rows into hstItem_temp", len(rows))
+    log.info("Bulk inserted %d rows into hstItem_temp (batched)", len(rows))
 
     # Now run sp_Update_Sold_Items_From_Check to merge temp → hstItem
     # This also populates DayPartID, ParentID, ItemID from config tables
-    log.info("Running sp_Update_Sold_Items_From_Check...")
-    cursor.execute("EXEC dbo.sp_Update_Sold_Items_From_Check")
-    conn.commit()
-    log.info("sp_Update_Sold_Items_From_Check complete — items merged into hstItem")
+    if not skip_proc:
+        log.info("Running sp_Update_Sold_Items_From_Check...")
+        cursor.execute("EXEC dbo.sp_Update_Sold_Items_From_Check")
+        conn.commit()
+        log.info("sp_Update_Sold_Items_From_Check complete — items merged into hstItem")
 
     return len(rows)
+
+
+def run_items_merge_proc(conn: pyodbc.Connection) -> None:
+    """Explicit entry point for running the items merge proc once after a
+    batch backfill has accumulated rows in dbo.hstItem_temp."""
+    cursor = conn.cursor()
+    log.info("Running sp_Update_Sold_Items_From_Check (batch mode, once)...")
+    cursor.execute("EXEC dbo.sp_Update_Sold_Items_From_Check")
+    conn.commit()
+    log.info("sp_Update_Sold_Items_From_Check complete.")
+
+
+def direct_copy_items_from_temp(conn: pyodbc.Connection,
+                                 store_num: int, biz_date: str) -> int:
+    """
+    Copy items directly from hstItem_temp → hstItem WITHOUT calling
+    sp_Update_Sold_Items_From_Check.
+
+    WHY THIS EXISTS
+    ---------------
+    sp_Update_Sold_Items_From_Check is encrypted and applies JOIN logic
+    against cfg_RestaurantService / cfg_menu_items that produces a consistent
+    ~8% row/amount inflation (confirmed 2026-04-23 during Memphis 1032 and
+    Albany 1154 repolls — e.g. Memphis 4/17 went from $7,405 → $7,907 after
+    the proc ran on fresh API data).
+
+    This direct copy preserves every field that parse_orders provides from
+    the Toast API. DayPartID will be NULL if parse_orders did not populate it;
+    sp_toast_SalesDataByDayPart groups on DayPart (varchar) which IS populated
+    from the API, so net-sales totals are unaffected.
+
+    SCHEMA NOTE
+    -----------
+    hstItem has a MenuGroupMLI column that hstItem_temp does not — written NULL.
+    UniqueID is an IDENTITY PK — omitted so SQL Server auto-assigns it.
+    """
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO dbo.hstItem (
+            DateOfBusiness, StoreID, StoreNum, OrderID, CheckID,
+            DayPart, DayPartID, SelectionID, ParentGUID, ItemGUID,
+            ParentID, ItemID, ModificationID, ModifierItemID,
+            SubModificationID, SubModifierItemID,
+            Deferred, PreModifier, Quantity, SalesCategoryGUID,
+            OrderMode, Price, DiscPric, Tax, TaxInclusion,
+            SystemTime, Voided, VoidDate, VoidReason,
+            AppliedDiscountAmount, MenuGroupMLI, MenuItemMLI, ParentMLI
+        )
+        SELECT
+            DateOfBusiness, StoreID, StoreNum, OrderID, CheckID,
+            DayPart, DayPartID, SelectionID, ParentGUID, ItemGUID,
+            ParentID, ItemID, ModificationID, ModifierItemID,
+            SubModificationID, SubModifierItemID,
+            Deferred, PreModifier, Quantity, SalesCategoryGUID,
+            OrderMode, Price, DiscPric, Tax, TaxInclusion,
+            SystemTime, Voided, VoidDate, VoidReason,
+            AppliedDiscountAmount, NULL, MenuItemMLI, ParentMLI
+        FROM dbo.hstItem_temp
+        WHERE StoreNum = ? AND DateOfBusiness = ?
+    """, store_num, biz_date)
+    inserted = cursor.rowcount
+    conn.commit()
+    log.info(
+        "direct_copy_items_from_temp: %d rows → hstItem  store=%s  date=%s",
+        inserted, store_num, biz_date,
+    )
+    return inserted
 
 
 # ── Pipeline Health queries ───────────────────────────────────────────────────
@@ -614,3 +691,35 @@ def run_rollup(conn: pyodbc.Connection, start_date: str, end_date: str,
     conn.execute(sql)
     conn.commit()
     log.info("Rollup complete")
+
+
+def fix_daypart_ids(conn: pyodbc.Connection, start_date: str, end_date: str) -> int:
+    """
+    Back-fill hstItem.DayPartID from the GUID stored in hstItem.DayPart.
+
+    The nightly PHP pull and Python repoll both populate hstItem.DayPart (a GUID
+    varchar) but leave hstItem.DayPartID = NULL because the GUID→integer lookup
+    is not done at insert time.  DayPartID = NULL causes the Flash Report channel
+    breakdown (DineIn / ToGo / CallIn / OLO / GNG / CheckCount) to show 0.
+
+    Joins cfg_RestaurantService to resolve GUID → integer ID and updates in one
+    statement.  Safe to run multiple times — the WHERE DayPartID IS NULL clause
+    means already-fixed rows are never touched.
+
+    Returns the number of rows updated.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE hi
+        SET    hi.DayPartID = rs.DayPartID
+        FROM   toast.dbo.hstItem hi
+        JOIN   toast.dbo.cfg_RestaurantService rs
+            ON rs.GUID = hi.DayPart
+        WHERE  hi.DateOfBusiness BETWEEN ? AND ?
+          AND  hi.DayPartID IS NULL
+          AND  hi.DayPart   IS NOT NULL
+    """, start_date, end_date)
+    conn.commit()
+    updated = cur.rowcount
+    log.info("fix_daypart_ids %s → %s: %d rows updated", start_date, end_date, updated)
+    return updated
