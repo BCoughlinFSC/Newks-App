@@ -10161,7 +10161,8 @@ async def admin_toast_config_menu_export(
     Wide-format CSV export of the Toast menu with one column per distinct tag.
 
     Columns: toast_item_name, item_guid, multi_location_id, sales_cat, item_plu,
-    then one TRUE/FALSE column per distinct tag name (alphabetical).
+    then one column per distinct tag name (alphabetical). Cell holds the tag
+    name if the item has that tag, else blank.
     Deduplicated by (multi_location_id, item_guid); tag set is the union across
     all store_guids that carry the item.
     """
@@ -10221,7 +10222,7 @@ async def admin_toast_config_menu_export(
             entry["sales_cat"],
             entry["item_plu"],
         ]
-        row.extend("TRUE" if t in item_tags else "FALSE" for t in all_tags)
+        row.extend(t if t in item_tags else "" for t in all_tags)
         writer.writerow(row)
 
     csv_bytes = buf.getvalue().encode("utf-8-sig")
