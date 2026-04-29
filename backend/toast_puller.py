@@ -336,7 +336,7 @@ def parse_orders(raw_orders: list, store_guid: str, store_num: int, business_dat
                 "TaxExemptState": _safe_str(check.get("taxExemptState")),
                 "TaxExemptNumber": _safe_str(check.get("taxExemptNumber")),
                 "Amount": check.get("amount", 0),
-                "DiscountAmount": check.get("discountAmount"),
+                "DiscountAmount": sum((d.get("discountAmount") or 0) for d in (check.get("appliedDiscounts") or []) if isinstance(d, dict)),
                 "TotalAmount": check.get("totalAmount", 0),
                 "TaxAmount": check.get("taxAmount", 0),
                 "CreatedDevice": _safe_str(check.get("createdDevice")),

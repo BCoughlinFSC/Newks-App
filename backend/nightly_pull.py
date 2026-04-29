@@ -165,7 +165,19 @@ async def pull_store(
 
 async def main():
     overall_start = time.time()
-    target_date   = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    if len(sys.argv) > 1:
+        target_date = sys.argv[1]
+        try:
+            date.fromisoformat(target_date)
+        except ValueError:
+            print(f"ERROR: Invalid date '{target_date}'. Use YYYY-MM-DD format.")
+            print("  Examples:")
+            print("    python nightly_pull.py              # pulls yesterday")
+            print("    python nightly_pull.py 2026-04-27   # repoll specific date")
+            sys.exit(1)
+    else:
+        target_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     log.info("=" * 70)
     log.info("NIGHTLY PULL — %s", target_date)
