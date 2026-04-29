@@ -4040,9 +4040,10 @@ def pivot_menu_items_by_tag(
                 else:
                     logger.info(f"  Skipping zero-sales item {item_name} (guid: {item_guid[:8]}...) - already has sales")
 
-        # Always add any item that belongs to this tag (from tags_mapping) but not yet in breakdown,
-        # so the Toast Items popup shows the full list including 0-count items.
-        if tag_name in all_items_per_tag:
+        # When include_zero_sales is enabled, add any tag-member item that wasn't
+        # caught by items_with_zero_sales (normalized tag matching catches more
+        # than the lowercase match used above).
+        if include_zero_sales and tag_name in all_items_per_tag:
             for item_guid, item_name in sorted(all_items_per_tag[tag_name].items()):
                 if item_guid not in items_in_tag:
                     items_in_tag.add(item_guid)
