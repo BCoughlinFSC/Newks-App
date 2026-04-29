@@ -584,6 +584,7 @@ ORDER BY DateOfBusiness</pre>
         <div style="display:flex;gap:0.5rem;">
           <button class="btn-primary" id="syncAllConfigBtn" style="background:#1E3A5F;">Sync All Locations</button>
           <button class="btn-primary" id="rebuildAttrMapBtn" style="background:#059669;">Rebuild Attribute Map</button>
+          <button class="btn-primary" id="exportMenuTagsBtn" style="background:#7C3AED;" title="Wide CSV: one row per item (MLI + GUID), TRUE/FALSE column for every tag">Export Menu + Tags CSV</button>
         </div>
       </div>
 
@@ -1983,6 +1984,40 @@ ORDER BY DateOfBusiness</pre>
       }
     }
 
+    async function exportMenuTagsCsv() {
+      const btn = document.getElementById('exportMenuTagsBtn');
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Exporting...';
+      try {
+        const resp = await fetch('/api/admin/toast-config/menu-export', {
+          headers: getAuthHeaders(),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        const blob = await resp.blob();
+        const dispo = resp.headers.get('Content-Disposition') || '';
+        const m = dispo.match(/filename="?([^"]+)"?/);
+        const filename = m ? m[1] : `toast_menu_tags_${new Date().toISOString().slice(0,10)}.csv`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showStatus('success', `Downloaded ${filename} (${(blob.size/1024).toFixed(0)} KB)`);
+      } catch (err) {
+        showStatus('error', `Export failed: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    }
+
     // ──────────────────────────────────────────────────────
     // CrunchTime / Sigma Upload
     // ──────────────────────────────────────────────────────
@@ -2194,6 +2229,7 @@ ORDER BY DateOfBusiness</pre>
       document.getElementById('refreshDbHealthBtn').addEventListener('click', loadDbHealth);
       document.getElementById('syncAllConfigBtn').addEventListener('click', () => syncToastConfig('all'));
       document.getElementById('rebuildAttrMapBtn').addEventListener('click', () => syncToastConfig('attribute-map'));
+      document.getElementById('exportMenuTagsBtn').addEventListener('click', exportMenuTagsCsv);
 
       // Auth gate
       const isAuth = await checkAuth();

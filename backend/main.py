@@ -10153,6 +10153,89 @@ async def admin_toast_config_sync(
     return result
 
 
+@app.get("/api/admin/toast-config/menu-export")
+async def admin_toast_config_menu_export(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Wide-format CSV export of the Toast menu with one column per distinct tag.
+
+    Columns: toast_item_name, item_guid, multi_location_id, sales_cat, item_plu,
+    then one TRUE/FALSE column per distinct tag name (alphabetical).
+    Deduplicated by (multi_location_id, item_guid); tag set is the union across
+    all store_guids that carry the item.
+    """
+    import io
+    import sqlite3
+    db_path = toast_config_db.TOAST_CONFIG_DB_PATH
+
+    with toast_config_db.get_connection(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        all_tags = [r[0] for r in conn.execute(
+            "SELECT DISTINCT tag_name FROM cfg_tags WHERE tag_name != '' ORDER BY tag_name"
+        ).fetchall()]
+
+        rows = conn.execute(
+            """SELECT multi_location_id, item_guid, item_name, sales_cat,
+                      item_plu, item_tags
+                 FROM cfg_menu_items
+                WHERE multi_location_id != '' AND item_guid != ''"""
+        ).fetchall()
+
+    # Aggregate by (mli, item_guid): union of tag names, first-seen item fields.
+    agg: dict = {}
+    for r in rows:
+        key = (r["multi_location_id"], r["item_guid"])
+        entry = agg.get(key)
+        if entry is None:
+            entry = {
+                "toast_item_name": r["item_name"] or "",
+                "item_guid": r["item_guid"],
+                "multi_location_id": r["multi_location_id"],
+                "sales_cat": r["sales_cat"] or "",
+                "item_plu": r["item_plu"] or 0,
+                "tags": set(),
+            }
+            agg[key] = entry
+        try:
+            tag_list = json.loads(r["item_tags"] or "[]")
+        except (TypeError, ValueError):
+            tag_list = []
+        for t in tag_list:
+            name = t.get("name") if isinstance(t, dict) else None
+            if name:
+                entry["tags"].add(name)
+
+    # Build CSV
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    header = ["toast_item_name", "item_guid", "multi_location_id", "sales_cat", "item_plu"] + all_tags
+    writer.writerow(header)
+
+    for entry in sorted(agg.values(), key=lambda e: (e["sales_cat"], e["toast_item_name"])):
+        item_tags = entry["tags"]
+        row = [
+            entry["toast_item_name"],
+            entry["item_guid"],
+            entry["multi_location_id"],
+            entry["sales_cat"],
+            entry["item_plu"],
+        ]
+        row.extend("TRUE" if t in item_tags else "FALSE" for t in all_tags)
+        writer.writerow(row)
+
+    csv_bytes = buf.getvalue().encode("utf-8-sig")
+    today = datetime.now().strftime("%Y-%m-%d")
+    filename = f"toast_menu_tags_{today}.csv"
+    logger.info("Admin exported Toast menu tags CSV (%d items, %d tag cols) by %s",
+                len(agg), len(all_tags), admin_user.email)
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.post("/api/admin/upload-db")
 async def admin_upload_db(
     db_name: str = Query(..., description="Target DB: aloha_sales, crunchtime, punchh, monkey"),
