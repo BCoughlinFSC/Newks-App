@@ -75,6 +75,9 @@ response.txt
 !Toast Price Tiers Mapping .xlsx
 !backend/price_tier_mapping.csv
 
+# Exception: Toast→Aloha mapping table (source of truth for menu performance YoY)
+!Updated Mapping Table.xlsx
+
 # Exception: location config files (not DBs, safe to track)
 !backend/data/aloha/aloha_location_mapping.json
 !backend/data/fbc_location_mapping.json
