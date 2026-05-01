@@ -3145,6 +3145,69 @@
       }
     }
 
+    // Normalize a tag for "do these two tag lists match" comparisons.
+    // Strips a leading "* " prefix and lowercases so "* Consolidated Pizza"
+    // and "consolidated pizza" compare equal.
+    function _normalizeTagForMatch(s) {
+      return String(s || '').replace(/^\*\s*/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    async function _fetchAllConsolidatedCategories() {
+      try {
+        const r = await fetch('/api/consolidated-categories');
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Array.isArray(data?.categories) ? data.categories : [];
+      } catch { return []; }
+    }
+
+    // Modal-confirm handler. Reads the checkbox choices, then decides whether
+    // the on-screen report already covers every consolidated category. If yes,
+    // export immediately. If no, fire a fresh /api/reports/run with the full
+    // category list, swap that into currentResults for the duration of the
+    // export build, then restore — the UI display itself never changes.
+    async function confirmAndExport() {
+      currentExcelOptions = {
+        includeDaily:  document.getElementById('excelOptIncludeDaily').checked,
+        includeSplits: document.getElementById('excelOptIncludeSplits').checked,
+      };
+      try { localStorage.setItem('excelOptions', JSON.stringify(currentExcelOptions)); } catch {}
+      closeExcelOptionsModal();
+
+      let stashedResults = null;
+      try {
+        const allCats = await _fetchAllConsolidatedCategories();
+        if (allCats.length > 0 && currentReportConfig) {
+          const haveTagsNorm = (currentReportConfig.itemTags || []).map(_normalizeTagForMatch);
+          const allTagsNorm  = allCats.map(_normalizeTagForMatch);
+          const haveAll = allTagsNorm.every(t => haveTagsNorm.includes(t));
+          if (!haveAll) {
+            showStatus('info', 'Generating Excel — fetching all categories…');
+            document.getElementById('loadingOverlay')?.classList.remove('hidden');
+            const expandedConfig = { ...currentReportConfig, itemTags: allCats };
+            const resp = await fetch('/api/reports/run', {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify(expandedConfig),
+            });
+            if (!resp.ok) {
+              const errText = await resp.text();
+              throw new Error('Failed to fetch all-category data: ' + errText);
+            }
+            stashedResults = currentResults;
+            currentResults = await resp.json();
+          }
+        }
+        exportExcel();
+        showStatus('success', 'Excel downloaded.');
+      } catch (err) {
+        showStatus('error', `Export failed: ${err.message}`);
+      } finally {
+        document.getElementById('loadingOverlay')?.classList.add('hidden');
+        if (stashedResults) currentResults = stashedResults;
+      }
+    }
+
     function exportExcel() {
       if (!currentResults) return;
       if (typeof XLSX === 'undefined') {
@@ -3270,12 +3333,18 @@
       // Layout (Option A):
       //   - one parent row per Aloha-rolled-up item (or per Toast item when not collapsed)
       //   - indented sub-rows for each underlying Toast item, with Toast Name,
-      //     Toast Qty, ConsolidatedCat (from mapping table), EE Tag (from mapping table)
+      //     Toast Qty, EE Tag (from mapping table)
       //   - daily columns appear only when includeDaily is true
       //   - parent rows show Aloha Qty (when YoY is on); sub-rows leave that column blank
+      // Note: the Consolidated Category column was removed — each tag section header
+      // already names the category, so the per-row column was redundant.
+      // EE Tag renders blank when missing/0 (instead of a literal 0).
       function buildBreakdownSheet(items, sortedDates, hasAloha, collapseAloha,
                                    hdrL, hdrR, subL, subR, includeDaily) {
         const dateCols = includeDaily ? sortedDates : [];
+        // Render EE as blank when zero/missing so empty cells aren't littered with 0.
+        const eeCell = (val, style) =>
+          (val != null && Number(val) > 0) ? n(val, style) : c('', style);
         const rows = [];
         const byTag = {};
         items.forEach(item => {
@@ -3288,15 +3357,12 @@
           // Tag header — top dark band
           const tagHdr = [c(tagName, hdrL), c('Total', hdrR)];
           if (hasAloha) tagHdr.push(c('Aloha Qty', hdrR));
-          // The two new always-on columns
-          tagHdr.push(c('Consolidated Cat', hdrR));
           tagHdr.push(c('EE Tag', hdrR));
           dateCols.forEach(d => tagHdr.push(c(formatDateHeader(d), hdrR)));
           rows.push(tagHdr);
           // Sub-header
           const sub = [c('Menu Item Name', subL), c('Qty Sold', subR)];
           if (hasAloha) sub.push(c('Aloha Qty', subR));
-          sub.push(c('Consolidated Cat', subR));
           sub.push(c('EE Tag', subR));
           dateCols.forEach(() => sub.push(c('Qty Sold', subR)));
           rows.push(sub);
@@ -3309,15 +3375,12 @@
             // Parent row (Aloha-rollup name when collapsed, else the Toast item itself)
             const parent = [c(item.menuItemName || 'Unknown', dL), n(item.totalQty || 0, dR)];
             if (hasAloha) parent.push(n(item.alohaQty || 0, dR));
-            // For non-collapsed rows, ConsolidatedCat / EE come from the row itself.
-            // For collapsed rows, the parent represents multiple Toast items so we
-            // leave parent's cat/EE blank and put per-item values in the sub-rows.
+            // For collapsed rows the parent represents multiple Toast items so leave
+            // EE blank on the parent (each underlying item shows its own EE in sub-row).
             if (collapseAloha) {
-              parent.push(c('', dL));
               parent.push(c('', dR));
             } else {
-              parent.push(c(item.consolidatedCat || '', dL));
-              parent.push(item.entreeEquivTag != null ? n(item.entreeEquivTag, dR) : c('', dR));
+              parent.push(eeCell(item.entreeEquivTag, dR));
             }
             dateCols.forEach(d => parent.push(n(item.daily?.[d] || 0, dR)));
             rows.push(parent);
@@ -3332,8 +3395,7 @@
                     n(td.qty || 0, dR),
                   ];
                   if (hasAloha) sr.push(c('', dR));   // Aloha Qty is a parent-level concept
-                  sr.push(c(td.consolidatedCat || '', dL));
-                  sr.push(td.entreeEquivTag != null ? n(td.entreeEquivTag, dR) : c('', dR));
+                  sr.push(eeCell(td.entreeEquivTag, dR));
                   dateCols.forEach(d => sr.push(n(td.daily?.[d] || 0, dR)));
                   rows.push(sr);
                 });
@@ -3342,6 +3404,63 @@
         });
         return rows;
       }
+
+      // ── Helper: build the Finance Summary sheet (multi-store reports only) ──
+      // One row per Aloha-rolled-up item, sectioned by * Consolidated tag.
+      // Columns: Menu Item Name, PSPD TY, PSPD LY, Mix Change.
+      // PSPD = Per Store Per Day = total qty / (numStores * numDays).
+      // Skips the LY/Mix Change columns when YoY data is unavailable.
+      function buildFinanceSummarySheet(items, sortedDates, hasAloha) {
+        const numDays = Math.max(sortedDates.length, 1);
+        const numStores = Math.max((currentResults?.pivotTable || []).length, 1);
+        const denom = numDays * numStores;
+        const rows = [];
+
+        // Sheet-level title row + denominator note
+        rows.push([c('Finance Summary  (Per Store Per Day)', S.blueL),
+                   c('', S.blueR), c('', S.blueR), c('', S.blueR)]);
+        rows.push([c(`Stores: ${numStores}    Days: ${numDays}    Denominator: ${denom}`,
+                     S.dLbld), c('', S.dR), c('', S.dR), c('', S.dR)]);
+        rows.push([blank(), blank(), blank(), blank()]);
+
+        const byTag = {};
+        items.forEach(item => {
+          const tag = item.itemTagName || 'All Items';
+          if (!byTag[tag]) byTag[tag] = [];
+          byTag[tag].push(item);
+        });
+
+        Object.keys(byTag).sort().forEach((tagName, tIdx) => {
+          if (tIdx > 0) rows.push([blank(), blank(), blank(), blank()]);
+          // Tag header band
+          const tagHdr = [c(tagName, S.blueL), c('PSPD TY', S.blueR)];
+          if (hasAloha) { tagHdr.push(c('PSPD LY', S.blueR)); tagHdr.push(c('Mix Change', S.blueR)); }
+          rows.push(tagHdr);
+          // Sub-header
+          const sub = [c('Menu Item Name', S.lBlueL), c('PSPD TY', S.lBlueR)];
+          if (hasAloha) { sub.push(c('PSPD LY', S.lBlueR)); sub.push(c('Mix Change', S.lBlueR)); }
+          rows.push(sub);
+          // Roll up to Aloha-named items so each row matches one Aloha menu item
+          const rolled = groupItemsByAloha(byTag[tagName], sortedDates);
+          rolled.slice()
+            .sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0))
+            .forEach((item, idx) => {
+              const alt = idx % 2 === 1;
+              const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+              const pspdTY = (item.totalQty || 0) / denom;
+              const row = [c(item.menuItemName || 'Unknown', dL), n(round1(pspdTY), dR)];
+              if (hasAloha) {
+                const pspdLY = (item.alohaQty || 0) / denom;
+                const diff   = pspdTY - pspdLY;
+                row.push(n(round1(pspdLY), dR));
+                row.push(n(round1(diff),   dR));
+              }
+              rows.push(row);
+            });
+        });
+        return rows;
+      }
+      function round1(x) { return Math.round((x + Number.EPSILON) * 10) / 10; }
 
       // ── Helper: build the Summary front page ───────────────────────────────
       // Listed first in every menu performance Excel. Pulls from currentReportConfig
@@ -3548,15 +3667,23 @@
           const sortedDates = [...dateColumns].sort();
           const includeDaily  = !!currentExcelOptions.includeDaily;
           const includeSplits = !!currentExcelOptions.includeSplits;
+          const isMultiStore  = (currentResults.pivotTable || []).length > 1;
 
           // Sheet 1: Summary front page (always)
           addWS(WB, buildSummarySheet(), 'Summary');
 
-          // Sheet 2: All Items (always)
+          // Sheet 2: Finance Summary (chain / multi-store reports only)
+          // Per Store Per Day averages by Aloha item, TY vs LY.
+          if (isMultiStore) {
+            addWS(WB, buildFinanceSummarySheet(itemBreakdownDaily, sortedDates, hasAloha),
+              'Finance Summary');
+          }
+
+          // Sheet 3: All Items (always)
           addWS(WB, buildBreakdownSheet(itemBreakdownDaily, sortedDates, hasAloha, collapseAloha,
             S.blueL, S.blueR, S.lBlueL, S.lBlueR, includeDaily), 'All Items');
 
-          // Sheet 3-4: In-Store + OLO (only if user opted in)
+          // Sheets 4-5: In-Store + OLO (only if user opted in)
           if (includeSplits) {
             const inStoreItems = currentResults.orderModeSplit?.inStore?.itemBreakdownDaily || [];
             if (inStoreItems.length > 0)
@@ -3899,15 +4026,7 @@
       // Excel options modal wiring (menu performance reports only)
       document.getElementById('closeExcelOptionsModal').addEventListener('click', closeExcelOptionsModal);
       document.getElementById('cancelExcelOptionsBtn').addEventListener('click', closeExcelOptionsModal);
-      document.getElementById('confirmExcelOptionsBtn').addEventListener('click', () => {
-        currentExcelOptions = {
-          includeDaily:  document.getElementById('excelOptIncludeDaily').checked,
-          includeSplits: document.getElementById('excelOptIncludeSplits').checked,
-        };
-        try { localStorage.setItem('excelOptions', JSON.stringify(currentExcelOptions)); } catch {}
-        closeExcelOptionsModal();
-        exportExcel();
-      });
+      document.getElementById('confirmExcelOptionsBtn').addEventListener('click', confirmAndExport);
       window.exportToastPricing = exportToastPricing; // expose for shared-nav.js
       document.getElementById('toggleToastColumnsBtn').addEventListener('click', toggleToastColumns);
       document.getElementById('toggleDailyColumnsBtn').addEventListener('click', toggleDailyColumns);

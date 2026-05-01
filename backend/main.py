@@ -7651,6 +7651,28 @@ def _load_mapping_table_excel() -> Tuple[str, List[str], List[Dict]]:
     return path, columns, rows
 
 
+@app.get("/api/consolidated-categories")
+async def get_consolidated_categories():
+    """
+    Return the canonical list of "* Consolidated …" tag names from
+    consolidated_category_ids. The Excel export uses this to fire a
+    re-fetch when the on-screen report was filtered to a subset, so the
+    download always covers every category instead of just what the user
+    was looking at.
+    """
+    if not toast_config_db.db_available():
+        return {"categories": []}
+    try:
+        with toast_config_db.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT tag_name FROM consolidated_category_ids ORDER BY tag_name"
+            ).fetchall()
+        return {"categories": [r[0] for r in rows if r[0]]}
+    except Exception as exc:
+        logger.warning(f"Failed to load consolidated categories: {exc}")
+        return {"categories": []}
+
+
 @app.get("/api/mapping-table")
 async def get_mapping_table():
     """Return the Toast–Aloha consolidated mapping table for viewing/editing."""
