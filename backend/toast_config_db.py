@@ -761,6 +761,51 @@ def get_toast_items_with_tags(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, 
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Per-item attribute lookup (consolidated category + EE tag)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_item_attribute_lookup(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, Dict[str, object]]:
+    """
+    Return {item_guid: {"consolidated_cat": str, "entree_equiv_tag": float, "recipe": str}}
+    AND a parallel {normalized_toast_item_name: {...}} fallback, merged into one dict
+    keyed by both the guid and the normalized name. The menu performance Excel export
+    uses this to stamp each row with its consolidated category and EE tag.
+
+    Lookup priority for a given row: try guid first, then normalized name.
+    Returns empty dict if DB unavailable.
+    """
+    if not os.path.exists(db_path):
+        return {}
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute(
+                """SELECT item_guid, toast_item_name, consolidated_cat,
+                          entree_equiv_tag, recipe
+                   FROM mli_plu_attribute_map"""
+            ).fetchall()
+        lookup: Dict[str, Dict[str, object]] = {}
+        for guid, tname, cat, ee, recipe in rows:
+            entry = {
+                "consolidated_cat": cat or "",
+                "entree_equiv_tag": float(ee) if ee is not None else 0.0,
+                "recipe": recipe or "",
+            }
+            if guid:
+                # Skip the synthetic "x:" placeholder guids written by
+                # sync_mapping_excel_to_db.py — those won't match any real Toast guid.
+                if not str(guid).startswith("x:"):
+                    lookup[guid] = entry
+            if tname:
+                norm = " ".join(str(tname).strip().lower().split())
+                if norm and norm not in lookup:
+                    lookup[norm] = entry
+        return lookup
+    except Exception as exc:
+        logger.warning(f"Failed to build item attribute lookup: {exc}")
+        return {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Toast-to-Aloha lookup maps (replaces SalesConsolidator Excel dependency)
 # ──────────────────────────────────────────────────────────────────────────────
 
