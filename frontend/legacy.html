@@ -3339,15 +3339,20 @@
       // Note: the Consolidated Category column was removed — each tag section header
       // already names the category, so the per-row column was redundant.
       // EE Tag renders blank when missing/0 (instead of a literal 0).
+      // Items with totalQty == 0 are dropped unless the report's
+      // "Include items with 0 sales" option is on.
       function buildBreakdownSheet(items, sortedDates, hasAloha, collapseAloha,
                                    hdrL, hdrR, subL, subR, includeDaily) {
         const dateCols = includeDaily ? sortedDates : [];
+        const includeZero = !!currentReportConfig?.includeZeroSales;
         // Render EE as blank when zero/missing so empty cells aren't littered with 0.
         const eeCell = (val, style) =>
           (val != null && Number(val) > 0) ? n(val, style) : c('', style);
         const rows = [];
         const byTag = {};
         items.forEach(item => {
+          // Skip pre-rollup items with 0 qty unless the user opted into zero-sales.
+          if (!includeZero && (item.totalQty || 0) === 0) return;
           const tag = item.itemTagName || 'All Items';
           if (!byTag[tag]) byTag[tag] = [];
           byTag[tag].push(item);
@@ -3368,7 +3373,10 @@
           rows.push(sub);
           // Items — collapse to Aloha rollup when YoY is on so each parent row
           // can be expanded with its underlying Toast items as sub-rows.
-          const tagItems = collapseAloha ? groupItemsByAloha(byTag[tagName], sortedDates) : byTag[tagName];
+          let tagItems = collapseAloha ? groupItemsByAloha(byTag[tagName], sortedDates) : byTag[tagName];
+          // After rollup, drop any Aloha rollups whose sum is still 0 (defensive
+          // — the per-row pre-filter above usually catches this).
+          if (!includeZero) tagItems = tagItems.filter(it => (it.totalQty || 0) > 0);
           tagItems.slice().sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0)).forEach((item, idx) => {
             const alt = idx % 2 === 1;
             const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
@@ -3386,8 +3394,10 @@
             rows.push(parent);
             // Sub-rows: underlying Toast items (only when we collapsed and have details)
             if (collapseAloha && Array.isArray(item.toastDetails) && item.toastDetails.length > 0) {
-              item.toastDetails
-                .slice()
+              let details = item.toastDetails.slice();
+              // Hide 0-qty Toast detail rows unless the user wants them.
+              if (!includeZero) details = details.filter(td => (td.qty || 0) > 0);
+              details
                 .sort((a, b) => (b.qty || 0) - (a.qty || 0))
                 .forEach(td => {
                   const sr = [
@@ -3414,6 +3424,7 @@
         const numDays = Math.max(sortedDates.length, 1);
         const numStores = Math.max((currentResults?.pivotTable || []).length, 1);
         const denom = numDays * numStores;
+        const includeZero = !!currentReportConfig?.includeZeroSales;
         const rows = [];
 
         // Sheet-level title row + denominator note
@@ -3425,6 +3436,7 @@
 
         const byTag = {};
         items.forEach(item => {
+          if (!includeZero && (item.totalQty || 0) === 0) return;
           const tag = item.itemTagName || 'All Items';
           if (!byTag[tag]) byTag[tag] = [];
           byTag[tag].push(item);
@@ -3440,8 +3452,11 @@
           const sub = [c('Menu Item Name', S.lBlueL), c('PSPD TY', S.lBlueR)];
           if (hasAloha) { sub.push(c('PSPD LY', S.lBlueR)); sub.push(c('Mix Change', S.lBlueR)); }
           rows.push(sub);
-          // Roll up to Aloha-named items so each row matches one Aloha menu item
-          const rolled = groupItemsByAloha(byTag[tagName], sortedDates);
+          // Roll up to Aloha-named items so each row matches one Aloha menu item.
+          // Defensive post-rollup filter so Aloha groups whose underlying items
+          // all summed to 0 don't slip through.
+          let rolled = groupItemsByAloha(byTag[tagName], sortedDates);
+          if (!includeZero) rolled = rolled.filter(it => (it.totalQty || 0) > 0);
           rolled.slice()
             .sort((a, b) => (b.totalQty || 0) - (a.totalQty || 0))
             .forEach((item, idx) => {
