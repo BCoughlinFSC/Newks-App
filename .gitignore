@@ -78,6 +78,9 @@ response.txt
 # Exception: Toast→Aloha mapping table (source of truth for menu performance YoY)
 !Updated Mapping Table.xlsx
 
+# Exception: PLU range source file (loaded into plu_ranges via import_plu_ranges.py)
+!backend/Item PLU Ranges.xlsx
+
 # Exception: location config files (not DBs, safe to track)
 !backend/data/aloha/aloha_location_mapping.json
 !backend/data/fbc_location_mapping.json
