@@ -2182,14 +2182,15 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
     
     metadata = metadata_resp.json()
     current_hash = metadata.get("hash") or metadata.get("version") or str(metadata)
-    
+    logger.info(f"MENU TAGS PATH=V3  restaurant={restaurant_guid}  hash={str(current_hash)[:16]}")
+
     # Check cache
     if restaurant_guid in _menu_tags_cache:
         cached = _menu_tags_cache[restaurant_guid]
         if cached.get("hash") == current_hash:
             logger.info(f"Menu tags cache HIT for restaurant {restaurant_guid}")
             return cached["mapping"]
-    
+
     logger.info(f"Menu tags cache MISS for restaurant {restaurant_guid}, fetching from API")
     
     # Fetch menus V3
@@ -2435,12 +2436,13 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
 
 async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: str) -> Dict[str, List[Dict]]:
     """Fallback to V2 menus API if V3 not available"""
+    logger.info(f"MENU TAGS PATH=V2  restaurant={restaurant_guid}  (V3 not entitled or errored)")
     standard_headers = await get_standard_api_auth_headers()
     headers_with_guid = {
         **standard_headers,
         "Toast-Restaurant-External-ID": restaurant_guid
     }
-    
+
     menus_url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus"
     menus_resp = await client.get(menus_url, headers=headers_with_guid)
     
@@ -3888,11 +3890,19 @@ def pivot_menu_items_by_tag(
                 "entree_equiv_tag": ee_val,
                 "guest_count_tag":  gc_val,
             }
-    # Live Toast PLU — same source-of-truth principle as the live tag attrs.
-    # If the caller passes a plu_mapping (built from the same V3 menus payload
-    # that produced tags_mapping) we use it directly. Otherwise we fall back
-    # to the SQLite snapshot from cfg_menu_items, then to the Excel mapping.
-    _live_plu_map = plu_mapping if plu_mapping else (
+    # SQLite snapshot fallback — covers items the live API call didn't return
+    # (e.g. items tagged in stores other than restaurant_ids[0], or items the
+    # V2 menus payload omits). Populated by sync_toast_config; might be stale,
+    # but stale-but-present beats blank when the live API is missing data.
+    _sqlite_tag_attrs = (
+        toast_config_db.get_live_item_tag_attrs()
+        if toast_config_db.db_available() else {}
+    )
+    # Live Toast PLU — caller passes plu_mapping built from the same V3 menus
+    # payload as tags_mapping when available. SQLite snapshot is the second
+    # fallback; Excel mapping is the third.
+    _live_plu_map = plu_mapping or {}
+    _sqlite_plu_map = (
         toast_config_db.get_live_toast_plu_map()
         if toast_config_db.db_available() else {}
     )
@@ -3902,31 +3912,55 @@ def pivot_menu_items_by_tag(
         Returns: (consolidated_cat, entree_equiv_tag, recipe, guest_count_tag,
                   toast_plu, item_classification, item_subclass)
 
-        Live-first sourcing: every attribute prefers the value derived from
-        Toast Menus API data (tags + cfg_menu_items). The Excel mapping
-        (mli_plu_attribute_map) only fills in for items Toast hasn't tagged.
+        Three-tier fallback for each value:
+          1. Live V3/V2 Menus API data (tags_mapping / plu_mapping)
+          2. SQLite snapshot from cfg_map_item_tags / cfg_menu_items
+             (last sync_toast_config run; covers all stores)
+          3. Excel mli_plu_attribute_map (manual mapping)
+
+        Stale-but-present beats blank when the live API call doesn't return
+        data for an item (e.g. items tagged only in stores other than the
+        first one we fetch from, or V2 omissions).
         """
         entry = _attr_lookup.get(guid) if guid else None
         if entry is None and name:
             entry = _attr_lookup.get(_normalize_item_name(name))
-        # Live attrs are keyed by guid only — work even when there's no Excel
-        # mapping row.
-        live_attrs = _live_tag_attrs.get(guid, {}) if guid else {}
-        live_plu   = _live_plu_map.get(guid, 0)    if guid else 0
+
+        live_attrs   = _live_tag_attrs.get(guid, {})    if guid else {}
+        sqlite_attrs = _sqlite_tag_attrs.get(guid, {})  if guid else {}
+        live_plu     = _live_plu_map.get(guid, 0)       if guid else 0
+        sqlite_plu   = _sqlite_plu_map.get(guid, 0)     if guid else 0
 
         # Excel-side fallbacks (default to empty/zero when no Excel row).
-        ex_cat   = str(entry.get("consolidated_cat", "") or "") if entry else ""
-        ex_ee    = float(entry.get("entree_equiv_tag", 0.0) or 0.0) if entry else 0.0
-        ex_recipe = str(entry.get("recipe", "") or "") if entry else ""
-        ex_gc    = float(entry.get("guest_count_tag", 0.0) or 0.0) if entry else 0.0
-        ex_plu   = int(entry.get("toast_plu", 0) or 0) if entry else 0
-        ex_aplu  = int(entry.get("aloha_plu", 0) or 0) if entry else 0
+        ex_cat    = str(entry.get("consolidated_cat", "") or "")        if entry else ""
+        ex_ee     = float(entry.get("entree_equiv_tag", 0.0) or 0.0)    if entry else 0.0
+        ex_recipe = str(entry.get("recipe", "") or "")                  if entry else ""
+        ex_gc     = float(entry.get("guest_count_tag", 0.0) or 0.0)     if entry else 0.0
+        ex_plu    = int(entry.get("toast_plu", 0) or 0)                 if entry else 0
+        ex_aplu   = int(entry.get("aloha_plu", 0) or 0)                 if entry else 0
 
-        consolidated_cat = str(live_attrs.get("consolidated_cat", "") or "") or ex_cat
-        recipe           = str(live_attrs.get("recipe", "") or "")           or ex_recipe
-        entree_equiv_tag = float(live_attrs.get("entree_equiv_tag") or 0.0)  or ex_ee
-        guest_count_tag  = float(live_attrs.get("guest_count_tag")  or 0.0)  or ex_gc
-        toast_plu        = int(live_plu) or ex_plu
+        # Walk the chain: live → sqlite → excel; first non-empty wins.
+        consolidated_cat = (
+            str(live_attrs.get("consolidated_cat", "") or "")
+            or str(sqlite_attrs.get("consolidated_cat", "") or "")
+            or ex_cat
+        )
+        recipe = (
+            str(live_attrs.get("recipe", "") or "")
+            or str(sqlite_attrs.get("recipe", "") or "")
+            or ex_recipe
+        )
+        entree_equiv_tag = (
+            float(live_attrs.get("entree_equiv_tag") or 0.0)
+            or float(sqlite_attrs.get("entree_equiv_tag") or 0.0)
+            or ex_ee
+        )
+        guest_count_tag = (
+            float(live_attrs.get("guest_count_tag") or 0.0)
+            or float(sqlite_attrs.get("guest_count_tag") or 0.0)
+            or ex_gc
+        )
+        toast_plu = int(live_plu) or int(sqlite_plu) or ex_plu
 
         # Item Classification (Aloha range): try the Excel-mapping aloha_plu
         # first, then fall back to deriving aloha_plu from the Toast PLU prefix.
