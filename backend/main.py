@@ -3802,11 +3802,18 @@ def pivot_menu_items_by_tag(
     # PLU range classifier — Aloha ranges → "Item Classification" (broader),
     # Toast ranges → "Item Subclass" (more granular). Built once per report.
     _plu_classify = toast_config_db.get_plu_range_classifier()
-    # Live Recipe Tag map sourced from Toast Menus API tags (cfg_map_item_tags).
-    # Authoritative when present; Excel mli_plu_attribute_map.recipe is the
-    # fallback for items Toast hasn't tagged yet.
-    _recipe_live_map = (
-        toast_config_db.get_live_recipe_tag_map()
+    # Live tag-derived attrs sourced from Toast Menus API tags
+    # (cfg_map_item_tags + cfg_tags). Authoritative when present; the Excel
+    # mli_plu_attribute_map values are the fallback for items Toast hasn't
+    # tagged yet. Covers Recipe Tag, Consolidated Category, EE Tag, GC Tag.
+    _live_tag_attrs = (
+        toast_config_db.get_live_item_tag_attrs()
+        if toast_config_db.db_available() else {}
+    )
+    # Live Toast PLU sourced from cfg_menu_items (Menus API). Falls back to
+    # the Excel mapping's toast_plu for items not yet synced.
+    _live_plu_map = (
+        toast_config_db.get_live_toast_plu_map()
         if toast_config_db.db_available() else {}
     )
 
@@ -3815,35 +3822,47 @@ def pivot_menu_items_by_tag(
         Returns: (consolidated_cat, entree_equiv_tag, recipe, guest_count_tag,
                   toast_plu, item_classification, item_subclass)
 
-        recipe: prefers the live Toast tag value (comma-joined when an item
-        has multiple recipe tags), falls back to the Excel mapping's recipe
-        column for items Toast hasn't tagged yet.
+        Live-first sourcing: every attribute prefers the value derived from
+        Toast Menus API data (tags + cfg_menu_items). The Excel mapping
+        (mli_plu_attribute_map) only fills in for items Toast hasn't tagged.
         """
-        entry = _attr_lookup.get(guid)
+        entry = _attr_lookup.get(guid) if guid else None
         if entry is None and name:
             entry = _attr_lookup.get(_normalize_item_name(name))
-        # Live recipe is keyed by guid only — works even when the item has
-        # no Excel mapping row at all.
-        live_recipe = _recipe_live_map.get(guid, "") if guid else ""
-        if entry is None:
-            return "", 0.0, live_recipe, 0.0, 0, "", ""
-        toast_plu = int(entry.get("toast_plu", 0) or 0)
-        aloha_plu = int(entry.get("aloha_plu", 0) or 0)
-        # Classification: try Aloha range with explicit aloha_plu first, then
-        # fall back to derived aloha_plu from the Toast prefix-strip heuristic.
-        item_classification = _plu_classify("Aloha", aloha_plu) if aloha_plu else ""
+        # Live attrs are keyed by guid only — work even when there's no Excel
+        # mapping row.
+        live_attrs = _live_tag_attrs.get(guid, {}) if guid else {}
+        live_plu   = _live_plu_map.get(guid, 0)    if guid else 0
+
+        # Excel-side fallbacks (default to empty/zero when no Excel row).
+        ex_cat   = str(entry.get("consolidated_cat", "") or "") if entry else ""
+        ex_ee    = float(entry.get("entree_equiv_tag", 0.0) or 0.0) if entry else 0.0
+        ex_recipe = str(entry.get("recipe", "") or "") if entry else ""
+        ex_gc    = float(entry.get("guest_count_tag", 0.0) or 0.0) if entry else 0.0
+        ex_plu   = int(entry.get("toast_plu", 0) or 0) if entry else 0
+        ex_aplu  = int(entry.get("aloha_plu", 0) or 0) if entry else 0
+
+        consolidated_cat = str(live_attrs.get("consolidated_cat", "") or "") or ex_cat
+        recipe           = str(live_attrs.get("recipe", "") or "")           or ex_recipe
+        entree_equiv_tag = float(live_attrs.get("entree_equiv_tag") or 0.0)  or ex_ee
+        guest_count_tag  = float(live_attrs.get("guest_count_tag")  or 0.0)  or ex_gc
+        toast_plu        = int(live_plu) or ex_plu
+
+        # Item Classification (Aloha range): try the Excel-mapping aloha_plu
+        # first, then fall back to deriving aloha_plu from the Toast PLU prefix.
+        item_classification = _plu_classify("Aloha", ex_aplu) if ex_aplu else ""
         if not item_classification and toast_plu:
             item_classification = _plu_classify(
                 "Aloha", toast_config_db.derive_aloha_plu_from_toast(toast_plu)
             )
-        # Subclass: direct Toast range lookup.
+        # Item Subclass: direct Toast range lookup against the live PLU.
         item_subclass = _plu_classify("Toast", toast_plu) if toast_plu else ""
-        recipe = live_recipe or str(entry.get("recipe", "") or "")
+
         return (
-            str(entry.get("consolidated_cat", "") or ""),
-            float(entry.get("entree_equiv_tag", 0.0) or 0.0),
+            consolidated_cat,
+            entree_equiv_tag,
             recipe,
-            float(entry.get("guest_count_tag", 0.0) or 0.0),
+            guest_count_tag,
             toast_plu,
             item_classification,
             item_subclass,
