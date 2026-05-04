@@ -921,11 +921,13 @@ def get_toast_to_aloha_maps(db_path: str = TOAST_CONFIG_DB_PATH) -> Optional[Dic
 #   '*' prefix             → Consolidated Category   (e.g. "* Consolidated Soups")
 #   'EE <number>'          → Entree Equiv Tag         (e.g. "EE 1", "EE .5")
 #   'Guest Count <number>' → Guest Count Tag          (e.g. "Guest Count 0.5")
+#   '<YYYY>LTO<n>'         → LTO marker, ignored      (e.g. "2025LTO4", "2026LTO1")
 #   'Catering Menu'        → category, ignored
 #   anything else          → Recipe Tag               (e.g. "ChickenSalad")
 
-_EE_TAG_RE = re.compile(r"^EE\s+(\.?\d+(?:\.\d+)?)$",            re.IGNORECASE)
-_GC_TAG_RE = re.compile(r"^Guest\s+Count\s+(\d+(?:\.\d+)?)$",    re.IGNORECASE)
+_EE_TAG_RE  = re.compile(r"^EE\s+(\.?\d+(?:\.\d+)?)$",         re.IGNORECASE)
+_GC_TAG_RE  = re.compile(r"^Guest\s+Count\s+(\d+(?:\.\d+)?)$", re.IGNORECASE)
+_LTO_TAG_RE = re.compile(r"^\d{4}LTO\d*$",                     re.IGNORECASE)
 
 
 def get_live_item_tag_attrs(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, Dict[str, object]]:
@@ -987,6 +989,9 @@ def get_live_item_tag_attrs(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, Di
                     gc[guid] = v
             except ValueError:
                 pass
+            continue
+        # Skip LTO-year markers — they're season/promo flags, not recipes.
+        if _LTO_TAG_RE.match(s):
             continue
         # Anything left is a recipe tag.
         recipes.setdefault(guid, set()).add(name)
