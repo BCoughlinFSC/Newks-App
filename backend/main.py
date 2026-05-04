@@ -2201,10 +2201,24 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
         return await get_menu_tags_mapping_v2(client, restaurant_guid)
     
     menus_data = menus_resp.json()
-    
+
     # Build mapping: menuItemGuid/modifierGuid -> [{tagGuid, tagName}, ...]
     mapping = {}
-    
+    # Parallel mapping: menuItemGuid/modifierGuid -> int PLU. Same source-of-
+    # truth concerns as tags — we want PLU live from Toast, not stale Excel.
+    plu_mapping: Dict[str, int] = {}
+
+    def _coerce_plu(v) -> int:
+        if v is None or v == "":
+            return 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            try:
+                return int(float(v))
+            except (TypeError, ValueError):
+                return 0
+
     # Process menu items
     for menu in menus_data.get("menus", []):
         for group in menu.get("menuGroups", []):
@@ -2212,7 +2226,7 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
                 item_guid = item.get("guid")
                 if not item_guid:
                     continue
-                
+
                 tags = []
                 for tag in item.get("itemTags", []):
                     tag_guid = tag.get("guid", "")
@@ -2222,9 +2236,13 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
                             "tagGuid": tag_guid,
                             "tagName": tag_name
                         })
-                
+
                 if tags:
                     mapping[item_guid] = tags
+
+                _plu = _coerce_plu(item.get("plu"))
+                if _plu:
+                    plu_mapping[item_guid] = _plu
     
     # Process modifiers from modifierGroupReferences and modifierOptionReferences
     modifier_group_refs = menus_data.get("modifierGroupReferences", {})
@@ -2263,7 +2281,11 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
                 mapping[mod_option_guid] = tags
             else:
                 mapping[mod_option_guid] = []
-    
+
+            _plu = _coerce_plu(mod_option.get("plu"))
+            if _plu:
+                plu_mapping[mod_option_guid] = _plu
+
     # Process modifier option references directly
     # NOTE: modifierOptionReferences keys are numeric IDs, but each option has a "guid" field with the actual UUID
     for mod_option_id, mod_option in modifier_option_refs.items():
@@ -2287,7 +2309,7 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
         # Debug: Check for target modifier
         if mod_option_guid == "6d02e1aa-41c4-489e-bd72-90d12d79edf2" or (mod_option_name and "half black" in mod_option_name.lower()):
             logger.info(f"DEBUG (V3): Found target modifier in modifierOptionReferences - id={mod_option_id}, guid={mod_option_guid}, name='{mod_option_name}'")
-        
+
         tags = []
         for tag in mod_option.get("itemTags", []):
             tag_guid = tag.get("guid", "")
@@ -2297,14 +2319,18 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
                     "tagGuid": tag_guid,
                     "tagName": tag_name
                 })
-        
+
         # Include in mapping even if no tags (for GUID lookup)
         # Use the actual GUID, not the numeric ID key
         if tags:
             mapping[mod_option_guid] = tags
         else:
             mapping[mod_option_guid] = []
-    
+
+        _plu = _coerce_plu(mod_option.get("plu"))
+        if _plu:
+            plu_mapping[mod_option_guid] = _plu
+
     # Debug: Check if target GUID is in our mapping
     target_guid = "6d02e1aa-41c4-489e-bd72-90d12d79edf2"
     if target_guid in mapping:
@@ -2318,7 +2344,8 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
     # Cache it
     _menu_tags_cache[restaurant_guid] = {
         "hash": current_hash,
-        "mapping": mapping
+        "mapping": mapping,
+        "plu_mapping": plu_mapping,
     }
 
     # Opportunistic write to toast_config.db (non-blocking, best-effort)
@@ -3762,7 +3789,8 @@ def pivot_menu_items_by_tag(
     selected_tags: List[str],
     item_names_mapping: Dict[str, str] = None,
     menu_item_guids: set = None,
-    include_zero_sales: bool = False
+    include_zero_sales: bool = False,
+    plu_mapping: Dict[str, int] = None,
 ) -> dict:
     logger.info(f"pivot_menu_items_by_tag called with include_zero_sales={include_zero_sales}, selected_tags={selected_tags}, tags_mapping size={len(tags_mapping)}")
     """
@@ -3860,9 +3888,11 @@ def pivot_menu_items_by_tag(
                 "entree_equiv_tag": ee_val,
                 "guest_count_tag":  gc_val,
             }
-    # Live Toast PLU sourced from cfg_menu_items (Menus API). Falls back to
-    # the Excel mapping's toast_plu for items not yet synced.
-    _live_plu_map = (
+    # Live Toast PLU — same source-of-truth principle as the live tag attrs.
+    # If the caller passes a plu_mapping (built from the same V3 menus payload
+    # that produced tags_mapping) we use it directly. Otherwise we fall back
+    # to the SQLite snapshot from cfg_menu_items, then to the Excel mapping.
+    _live_plu_map = plu_mapping if plu_mapping else (
         toast_config_db.get_live_toast_plu_map()
         if toast_config_db.db_available() else {}
     )
@@ -8991,13 +9021,18 @@ async def build_menu_mix_report_fallback(
         }
     
     menu_item_guids = {r.get("menuItemGuid") for r in all_rows[:menu_item_count] if r.get("menuItemGuid")}
+    # Pull the live PLU mapping captured during the same V3 fetch that built
+    # tags_mapping. Pivot uses this as its authoritative PLU source.
+    _live_plu_for_pivot = (_menu_tags_cache.get(restaurant_ids[0], {})
+                           .get("plu_mapping") or {})
     result = pivot_menu_items_by_tag(
         filtered_rows,
         filtered_mapping,
         report_config.itemTags,
         item_names_mapping,
         menu_item_guids,
-        report_config.includeZeroSales
+        report_config.includeZeroSales,
+        _live_plu_for_pivot,
     )
     result["debugInfo"] = {
         "path": "menu_fallback",
@@ -9858,13 +9893,18 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # but we also need all items from all_tags_mapping that have the selected tags
                 # So we'll pass filtered_mapping which already contains all items with selected tags
                 # The pivot function will then include items with 0 sales from this mapping
+                # Live PLU mapping captured during the same V3 fetch — gives
+                # the All Items sheet a "live from Toast" PLU column.
+                _live_plu_for_pivot = (_menu_tags_cache.get(restaurant_ids[0], {})
+                                       .get("plu_mapping") or {})
                 result = pivot_menu_items_by_tag(
                     filtered_rows,
                     filtered_mapping,  # Use filtered_mapping which has all items with selected tags
                     report_config.itemTags,
                     item_names_mapping,
                     menu_item_guids,  # Pass menu item GUIDs to identify modifiers
-                    report_config.includeZeroSales  # Include items with 0 sales
+                    report_config.includeZeroSales,  # Include items with 0 sales
+                    _live_plu_for_pivot,
                 )
                 result["debugInfo"] = {
                     "path": "menu",
