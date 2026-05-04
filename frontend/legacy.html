@@ -3311,6 +3311,10 @@
         lAmberRalt: mkS('FDE68A', '92400E', false, true),
         // Warning
         warnL: mkS(warn,  warnTxt, true, false, true),
+        // Missing-data flag (light red bg) — used to highlight blank Recipe /
+        // EE / Guest Count tags on the All Items sheet so audit gaps stand out.
+        missL: mkS('FECACA', '991B1B', false, false),
+        missR: mkS('FECACA', '991B1B', false, true),
       };
 
       // ── Cell constructors ──────────────────────────────────────────────────
@@ -3537,9 +3541,12 @@
             // SUMing the column doesn't double-count.
             row.push(r._firstOfRollup ? numCell(r.alohaQty, aR) : c('', aR));
           }
-          row.push(numCell(r.entreeEquivTag, dR));
-          row.push(numCell(r.guestCountTag,  dR));
-          row.push(c(r.recipe || '', dL));
+          // Missing tag values get a light-red flag so audit gaps stand out.
+          const eePresent = r.entreeEquivTag != null && Number(r.entreeEquivTag) > 0;
+          const gcPresent = r.guestCountTag  != null && Number(r.guestCountTag)  > 0;
+          row.push(eePresent ? n(r.entreeEquivTag, dR) : c('', S.missR));
+          row.push(gcPresent ? n(r.guestCountTag,  dR) : c('', S.missR));
+          row.push(r.recipe ? c(r.recipe, dL) : c('', S.missL));
           row.push(r.plu ? n(r.plu, dR) : c('', dR));
           dateCols.forEach(d => row.push(n(r.daily?.[d] || 0, dR)));
           rows.push(row);
