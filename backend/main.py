@@ -3800,16 +3800,18 @@ def pivot_menu_items_by_tag(
     # menu performance Excel export can show ConsolidatedCat + EE alongside qty.
     _attr_lookup = toast_config_db.get_item_attribute_lookup() if toast_config_db.db_available() else {}
 
-    def _attr_for(guid: str, name: str) -> Tuple[str, float, str]:
+    def _attr_for(guid: str, name: str) -> Tuple[str, float, str, float, int]:
         entry = _attr_lookup.get(guid)
         if entry is None and name:
             entry = _attr_lookup.get(_normalize_item_name(name))
         if entry is None:
-            return "", 0.0, ""
+            return "", 0.0, "", 0.0, 0
         return (
             str(entry.get("consolidated_cat", "") or ""),
             float(entry.get("entree_equiv_tag", 0.0) or 0.0),
             str(entry.get("recipe", "") or ""),
+            float(entry.get("guest_count_tag", 0.0) or 0.0),
+            int(entry.get("toast_plu", 0) or 0),
         )
 
     modifier_count_in_pivot = 0
@@ -3900,9 +3902,10 @@ def pivot_menu_items_by_tag(
                     tag_totals[canonical] = 0
                 tag_totals[canonical] += quantity_sold
             
-            # Look up the per-item consolidated category + EE tag from the mapping
-            # table. Cheap O(1) dict lookup; falls back to ('', 0.0, '') on misses.
-            _cat, _ee, _recipe = _attr_for(menu_item_guid, menu_item_name)
+            # Look up the per-item consolidated category + EE tag + Guest Count tag
+            # + Toast PLU from the mapping table. Cheap O(1) dict lookup; falls back
+            # to ('', 0.0, '', 0.0, 0) on misses.
+            _cat, _ee, _recipe, _gct, _plu = _attr_for(menu_item_guid, menu_item_name)
 
             # Track item-level breakdown by tag (SAME for both menu items and modifiers)
             if canonical not in tag_item_breakdown:
@@ -3914,6 +3917,8 @@ def pivot_menu_items_by_tag(
                     "consolidatedCat": _cat,
                     "entreeEquivTag": _ee,
                     "recipe": _recipe,
+                    "guestCountTag": _gct,
+                    "plu": _plu,
                 }
             tag_item_breakdown[canonical][menu_item_guid]["totalQty"] += quantity_sold
 
@@ -3928,6 +3933,8 @@ def pivot_menu_items_by_tag(
                     "consolidatedCat": _cat,
                     "entreeEquivTag": _ee,
                     "recipe": _recipe,
+                    "guestCountTag": _gct,
+                    "plu": _plu,
                 }
             tag_item_breakdown_daily[canonical][menu_item_guid]["totalQty"] += quantity_sold
             if business_date:
@@ -4026,6 +4033,8 @@ def pivot_menu_items_by_tag(
                     "consolidatedCat":  item_data.get("consolidatedCat", ""),
                     "entreeEquivTag":   item_data.get("entreeEquivTag", 0.0),
                     "recipe":           item_data.get("recipe", ""),
+                    "guestCountTag":    item_data.get("guestCountTag", 0.0),
+                    "plu":              item_data.get("plu", 0),
                 })
                 if tag_name in tag_item_breakdown_daily and menu_item_guid in tag_item_breakdown_daily[tag_name]:
                     daily_data = tag_item_breakdown_daily[tag_name][menu_item_guid]
@@ -4038,6 +4047,8 @@ def pivot_menu_items_by_tag(
                         "consolidatedCat":  daily_data.get("consolidatedCat", ""),
                         "entreeEquivTag":   daily_data.get("entreeEquivTag", 0.0),
                         "recipe":           daily_data.get("recipe", ""),
+                        "guestCountTag":    daily_data.get("guestCountTag", 0.0),
+                        "plu":              daily_data.get("plu", 0),
                     })
                 
                 # Track modifier totals for debugging
@@ -4058,7 +4069,7 @@ def pivot_menu_items_by_tag(
                 if item_guid not in items_in_tag:
                     logger.info(f"  Adding zero-sales item: {item_name} (guid: {item_guid[:8]}...)")
                     items_in_tag.add(item_guid)
-                    _zcat, _zee, _zrec = _attr_for(item_guid, item_name)
+                    _zcat, _zee, _zrec, _zgct, _zplu = _attr_for(item_guid, item_name)
                     item_breakdown_rows.append({
                         "itemTagName": tag_name,
                         "menuItemGuid": item_guid,
@@ -4067,6 +4078,8 @@ def pivot_menu_items_by_tag(
                         "consolidatedCat": _zcat,
                         "entreeEquivTag": _zee,
                         "recipe": _zrec,
+                        "guestCountTag": _zgct,
+                        "plu": _zplu,
                     })
                     item_breakdown_daily_rows.append({
                         "itemTagName": tag_name,
@@ -4077,6 +4090,8 @@ def pivot_menu_items_by_tag(
                         "consolidatedCat": _zcat,
                         "entreeEquivTag": _zee,
                         "recipe": _zrec,
+                        "guestCountTag": _zgct,
+                        "plu": _zplu,
                     })
                 else:
                     logger.info(f"  Skipping zero-sales item {item_name} (guid: {item_guid[:8]}...) - already has sales")
@@ -4088,7 +4103,7 @@ def pivot_menu_items_by_tag(
             for item_guid, item_name in sorted(all_items_per_tag[tag_name].items()):
                 if item_guid not in items_in_tag:
                     items_in_tag.add(item_guid)
-                    _zcat, _zee, _zrec = _attr_for(item_guid, item_name)
+                    _zcat, _zee, _zrec, _zgct, _zplu = _attr_for(item_guid, item_name)
                     item_breakdown_rows.append({
                         "itemTagName": tag_name,
                         "menuItemGuid": item_guid,
@@ -4097,6 +4112,8 @@ def pivot_menu_items_by_tag(
                         "consolidatedCat": _zcat,
                         "entreeEquivTag": _zee,
                         "recipe": _zrec,
+                        "guestCountTag": _zgct,
+                        "plu": _zplu,
                     })
                     item_breakdown_daily_rows.append({
                         "itemTagName": tag_name,
@@ -4107,6 +4124,8 @@ def pivot_menu_items_by_tag(
                         "consolidatedCat": _zcat,
                         "entreeEquivTag": _zee,
                         "recipe": _zrec,
+                        "guestCountTag": _zgct,
+                        "plu": _zplu,
                     })
     
     # Log modifier totals for debugging

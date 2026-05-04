@@ -821,6 +821,10 @@
           <input type="checkbox" id="excelOptIncludeSplits" style="width:16px;height:16px;accent-color:#C41E3A;" />
           Include In-Store / OLO breakdown sheets
         </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:500;cursor:pointer;">
+          <input type="checkbox" id="excelOptIncludeAllCats" style="width:16px;height:16px;accent-color:#C41E3A;" />
+          Include all consolidated categories (overrides current tag filter)
+        </label>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelExcelOptionsBtn">Cancel</button>
@@ -1884,6 +1888,8 @@
           consolidatedCat: item.consolidatedCat || '',
           entreeEquivTag:  item.entreeEquivTag || 0,
           recipe:          item.recipe || '',
+          guestCountTag:   item.guestCountTag || 0,
+          plu:             item.plu || 0,
           daily:           item.daily || {},
         });
         if (item.daily && dateColumns?.length > 0) {
@@ -3112,15 +3118,17 @@
 
     // Per-download options chosen via the modal (menu performance reports only).
     // Default to "minimal" — Summary sheet + per-tag breakdown only, no daily
-    // columns, no In-Store/OLO sheets — to keep small downloads small.
-    let currentExcelOptions = { includeDaily: false, includeSplits: false };
+    // columns, no In-Store/OLO sheets, current tag filter only — to keep small
+    // downloads small.
+    let currentExcelOptions = { includeDaily: false, includeSplits: false, includeAllCats: false };
 
     function openExcelOptionsModal() {
       // Prefill last-used choices from localStorage so it remembers across sessions
       try {
         const saved = JSON.parse(localStorage.getItem('excelOptions') || '{}');
-        if (typeof saved.includeDaily  === 'boolean') document.getElementById('excelOptIncludeDaily').checked  = saved.includeDaily;
-        if (typeof saved.includeSplits === 'boolean') document.getElementById('excelOptIncludeSplits').checked = saved.includeSplits;
+        if (typeof saved.includeDaily   === 'boolean') document.getElementById('excelOptIncludeDaily').checked   = saved.includeDaily;
+        if (typeof saved.includeSplits  === 'boolean') document.getElementById('excelOptIncludeSplits').checked  = saved.includeSplits;
+        if (typeof saved.includeAllCats === 'boolean') document.getElementById('excelOptIncludeAllCats').checked = saved.includeAllCats;
       } catch {}
       document.getElementById('excelOptionsModal').classList.remove('hidden');
     }
@@ -3168,34 +3176,39 @@
     // export build, then restore — the UI display itself never changes.
     async function confirmAndExport() {
       currentExcelOptions = {
-        includeDaily:  document.getElementById('excelOptIncludeDaily').checked,
-        includeSplits: document.getElementById('excelOptIncludeSplits').checked,
+        includeDaily:   document.getElementById('excelOptIncludeDaily').checked,
+        includeSplits:  document.getElementById('excelOptIncludeSplits').checked,
+        includeAllCats: document.getElementById('excelOptIncludeAllCats').checked,
       };
       try { localStorage.setItem('excelOptions', JSON.stringify(currentExcelOptions)); } catch {}
       closeExcelOptionsModal();
 
       let stashedResults = null;
       try {
-        const allCats = await _fetchAllConsolidatedCategories();
-        if (allCats.length > 0 && currentReportConfig) {
-          const haveTagsNorm = (currentReportConfig.itemTags || []).map(_normalizeTagForMatch);
-          const allTagsNorm  = allCats.map(_normalizeTagForMatch);
-          const haveAll = allTagsNorm.every(t => haveTagsNorm.includes(t));
-          if (!haveAll) {
-            showStatus('info', 'Generating Excel — fetching all categories…');
-            document.getElementById('loadingOverlay')?.classList.remove('hidden');
-            const expandedConfig = { ...currentReportConfig, itemTags: allCats };
-            const resp = await fetch('/api/reports/run', {
-              method: 'POST',
-              headers: getAuthHeaders(),
-              body: JSON.stringify(expandedConfig),
-            });
-            if (!resp.ok) {
-              const errText = await resp.text();
-              throw new Error('Failed to fetch all-category data: ' + errText);
+        // Only expand to all consolidated categories when the user explicitly opts in.
+        // Otherwise the export uses whatever tag filter is currently on screen.
+        if (currentExcelOptions.includeAllCats) {
+          const allCats = await _fetchAllConsolidatedCategories();
+          if (allCats.length > 0 && currentReportConfig) {
+            const haveTagsNorm = (currentReportConfig.itemTags || []).map(_normalizeTagForMatch);
+            const allTagsNorm  = allCats.map(_normalizeTagForMatch);
+            const haveAll = allTagsNorm.every(t => haveTagsNorm.includes(t));
+            if (!haveAll) {
+              showStatus('info', 'Generating Excel — fetching all categories…');
+              document.getElementById('loadingOverlay')?.classList.remove('hidden');
+              const expandedConfig = { ...currentReportConfig, itemTags: allCats };
+              const resp = await fetch('/api/reports/run', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(expandedConfig),
+              });
+              if (!resp.ok) {
+                const errText = await resp.text();
+                throw new Error('Failed to fetch all-category data: ' + errText);
+              }
+              stashedResults = currentResults;
+              currentResults = await resp.json();
             }
-            stashedResults = currentResults;
-            currentResults = await resp.json();
           }
         }
         exportExcel();
@@ -3415,6 +3428,109 @@
         return rows;
       }
 
+      // ── Helper: build the All Items sheet as a flat, filterable table ──────
+      // One row per Toast item. Consolidated Category is a column (not a section
+      // header) so the sheet can be sorted/filtered/pivoted in Excel.
+      // Columns:
+      //   Consolidated Category | Menu Item Name | Qty Sold |
+      //   [Aloha Item, Aloha Qty]  ← only when YoY is on  |
+      //   EE Tag | Guest Count Tag | PLU |
+      //   [daily date columns]     ← only when includeDaily is true
+      // Sort: Consolidated Category A→Z, then Qty descending within category.
+      // Aloha Qty handling (when collapseAloha is on): the qty is the rollup's
+      // total (multiple Toast items roll into one Aloha item), so to keep an
+      // Excel SUM correct it's shown only on the FIRST Toast row for each
+      // Aloha rollup; subsequent rows in the same rollup leave it blank but
+      // still show the Aloha Item Name for filtering.
+      function buildAllItemsFlatSheet(items, sortedDates, hasAloha, collapseAloha, includeDaily) {
+        const dateCols = includeDaily ? sortedDates : [];
+        const includeZero = !!currentReportConfig?.includeZeroSales;
+        const numCell = (val, style) =>
+          (val != null && Number(val) > 0) ? n(val, style) : c('', style);
+
+        // Build the per-Toast-item row list. When collapseAloha is on, the input
+        // `items` are pre-rollup (one per Toast item); we just enrich each row
+        // with its Aloha rollup name + a flag for whether it's the first row of
+        // that rollup so we know where to show alohaQty.
+        const flatRows = [];
+        const seenAlohaRollup = new Set();
+        items.forEach(item => {
+          if (!includeZero && (item.totalQty || 0) === 0) return;
+          const alohaName = item.alohaItemName || item?.alohaDetails?.[0]?.name || '';
+          let firstOfRollup = false;
+          if (alohaName) {
+            const key = alohaName.toLowerCase().trim();
+            if (!seenAlohaRollup.has(key)) {
+              seenAlohaRollup.add(key);
+              firstOfRollup = true;
+            }
+          } else {
+            // No Aloha rollup → treat the row itself as its own group so its
+            // alohaQty (if any) is shown.
+            firstOfRollup = true;
+          }
+          flatRows.push({
+            consolidatedCat: item.consolidatedCat || item.itemTagName || '',
+            menuItemName:    item.menuItemName || 'Unknown',
+            totalQty:        item.totalQty || 0,
+            alohaItemName:   alohaName,
+            alohaQty:        item.alohaQty || 0,
+            entreeEquivTag:  item.entreeEquivTag || 0,
+            guestCountTag:   item.guestCountTag || 0,
+            plu:             item.plu || 0,
+            daily:           item.daily || {},
+            _firstOfRollup:  firstOfRollup,
+          });
+        });
+
+        // Sort: Consolidated Category A→Z, then Qty desc within category.
+        flatRows.sort((a, b) => {
+          const ca = (a.consolidatedCat || '~').toLowerCase();
+          const cb = (b.consolidatedCat || '~').toLowerCase();
+          if (ca !== cb) return ca < cb ? -1 : 1;
+          return (b.totalQty || 0) - (a.totalQty || 0);
+        });
+
+        // Header row
+        const hdr = [
+          c('Consolidated Category', S.blueL),
+          c('Menu Item Name',        S.blueL),
+          c('Qty Sold',              S.blueR),
+        ];
+        if (hasAloha) {
+          hdr.push(c('Aloha Item',     S.amberL));
+          hdr.push(c('Aloha Qty',      S.amberR));
+        }
+        hdr.push(c('EE Tag',           S.blueR));
+        hdr.push(c('Guest Count Tag',  S.blueR));
+        hdr.push(c('PLU',              S.blueR));
+        dateCols.forEach(d => hdr.push(c(formatDateHeader(d), S.lBlueR)));
+
+        const rows = [hdr];
+        flatRows.forEach((r, idx) => {
+          const alt = idx % 2 === 1;
+          const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+          const aR = alt ? S.lAmberRalt : S.lAmberR;
+          const row = [
+            c(r.consolidatedCat, dL),
+            c(r.menuItemName,    dL),
+            n(r.totalQty,        dR),
+          ];
+          if (hasAloha) {
+            row.push(c(r.alohaItemName || '', alt ? S.dLalt : S.dL));
+            // Show Aloha Qty only on the first Toast row of each rollup so
+            // SUMing the column doesn't double-count.
+            row.push(r._firstOfRollup ? numCell(r.alohaQty, aR) : c('', aR));
+          }
+          row.push(numCell(r.entreeEquivTag, dR));
+          row.push(numCell(r.guestCountTag,  dR));
+          row.push(r.plu ? n(r.plu, dR) : c('', dR));
+          dateCols.forEach(d => row.push(n(r.daily?.[d] || 0, dR)));
+          rows.push(row);
+        });
+        return rows;
+      }
+
       // ── Helper: build the Finance Summary sheet (multi-store reports only) ──
       // One row per Aloha-rolled-up item, sectioned by * Consolidated tag.
       // Columns: Menu Item Name, PSPD TY, PSPD LY, Mix Change.
@@ -3535,6 +3651,7 @@
         sectionHdr('Download Options');
         kv('Include Daily Breakdown',  currentExcelOptions.includeDaily  ? 'Yes' : 'No');
         kv('Include In-Store / OLO Sheets', currentExcelOptions.includeSplits ? 'Yes' : 'No');
+        kv('Include All Consolidated Categories', currentExcelOptions.includeAllCats ? 'Yes' : 'No');
         kv('Generated At', new Date().toLocaleString());
 
         rows.push([c('', S.dL), c('', S.dR)]);
@@ -3694,9 +3811,9 @@
               'Finance Summary');
           }
 
-          // Sheet 3: All Items (always)
-          addWS(WB, buildBreakdownSheet(itemBreakdownDaily, sortedDates, hasAloha, collapseAloha,
-            S.blueL, S.blueR, S.lBlueL, S.lBlueR, includeDaily), 'All Items');
+          // Sheet 3: All Items (always) — flat table so Excel can sort/filter freely
+          addWS(WB, buildAllItemsFlatSheet(itemBreakdownDaily, sortedDates, hasAloha, collapseAloha, includeDaily),
+            'All Items');
 
           // Sheets 4-5: In-Store + OLO (only if user opted in)
           if (includeSplits) {

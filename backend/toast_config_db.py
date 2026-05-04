@@ -766,10 +766,12 @@ def get_toast_items_with_tags(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, 
 
 def get_item_attribute_lookup(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, Dict[str, object]]:
     """
-    Return {item_guid: {"consolidated_cat": str, "entree_equiv_tag": float, "recipe": str}}
+    Return {item_guid: {"consolidated_cat": str, "entree_equiv_tag": float,
+                        "recipe": str, "guest_count_tag": float, "toast_plu": int}}
     AND a parallel {normalized_toast_item_name: {...}} fallback, merged into one dict
     keyed by both the guid and the normalized name. The menu performance Excel export
-    uses this to stamp each row with its consolidated category and EE tag.
+    uses this to stamp each row with its consolidated category, EE tag,
+    Guest Count tag, and Toast PLU.
 
     Lookup priority for a given row: try guid first, then normalized name.
     Returns empty dict if DB unavailable.
@@ -780,15 +782,17 @@ def get_item_attribute_lookup(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, 
         with get_connection(db_path) as conn:
             rows = conn.execute(
                 """SELECT item_guid, toast_item_name, consolidated_cat,
-                          entree_equiv_tag, recipe
+                          entree_equiv_tag, recipe, guest_count_tag, toast_plu
                    FROM mli_plu_attribute_map"""
             ).fetchall()
         lookup: Dict[str, Dict[str, object]] = {}
-        for guid, tname, cat, ee, recipe in rows:
+        for guid, tname, cat, ee, recipe, gct, tplu in rows:
             entry = {
                 "consolidated_cat": cat or "",
                 "entree_equiv_tag": float(ee) if ee is not None else 0.0,
                 "recipe": recipe or "",
+                "guest_count_tag": float(gct) if gct is not None else 0.0,
+                "toast_plu": int(tplu) if tplu is not None else 0,
             }
             if guid:
                 # Skip the synthetic "x:" placeholder guids written by
