@@ -3748,6 +3748,14 @@ def compute_sales_summary_by_location(
     }
 
 
+# Tag-name patterns used to classify live Toast tags into the EE / Guest Count /
+# LTO buckets (mirror of toast_config_db._EE_TAG_RE etc.; kept inline here so
+# we avoid the SQLite round-trip on every report run).
+_EE_TAG_RE_LIVE  = re.compile(r"^EE\s+(\.?\d+(?:\.\d+)?)$",         re.IGNORECASE)
+_GC_TAG_RE_LIVE  = re.compile(r"^Guest\s+Count\s+(\d+(?:\.\d+)?)$", re.IGNORECASE)
+_LTO_TAG_RE_LIVE = re.compile(r"^\d{4}LTO\d*$",                     re.IGNORECASE)
+
+
 def pivot_menu_items_by_tag(
     analytics_rows: List[dict],
     tags_mapping: Dict[str, List[Dict]],
@@ -3802,14 +3810,56 @@ def pivot_menu_items_by_tag(
     # PLU range classifier — Aloha ranges → "Item Classification" (broader),
     # Toast ranges → "Item Subclass" (more granular). Built once per report.
     _plu_classify = toast_config_db.get_plu_range_classifier()
-    # Live tag-derived attrs sourced from Toast Menus API tags
-    # (cfg_map_item_tags + cfg_tags). Authoritative when present; the Excel
-    # mli_plu_attribute_map values are the fallback for items Toast hasn't
-    # tagged yet. Covers Recipe Tag, Consolidated Category, EE Tag, GC Tag.
-    _live_tag_attrs = (
-        toast_config_db.get_live_item_tag_attrs()
-        if toast_config_db.db_available() else {}
-    )
+    # Live tag-derived attrs — derived directly from `tags_mapping`, which is
+    # fetched fresh from the Toast V3 Menus API on each report run (with
+    # metadata-hash caching). This means changes published in Toastweb appear
+    # in the report as soon as Toast's API has propagated them — no separate
+    # toast_config sync needed. The Excel mli_plu_attribute_map values stay
+    # as a fallback for items Toast hasn't tagged.
+    _live_tag_attrs: Dict[str, Dict[str, object]] = {}
+    for _guid, _tags in (tags_mapping or {}).items():
+        if not _guid or not _tags:
+            continue
+        recipes: set = set()
+        consol:  set = set()
+        ee_val: float = 0.0
+        gc_val: float = 0.0
+        for _t in _tags:
+            _name = (_t.get("tagName") if isinstance(_t, dict) else "") or ""
+            _s = _name.strip()
+            if not _s or _s == "Catering Menu":
+                continue
+            if _s.startswith("*"):
+                consol.add(_name)
+                continue
+            m = _EE_TAG_RE_LIVE.match(_s)
+            if m:
+                try:
+                    v = float(m.group(1))
+                    if v > ee_val:
+                        ee_val = v
+                except ValueError:
+                    pass
+                continue
+            m = _GC_TAG_RE_LIVE.match(_s)
+            if m:
+                try:
+                    v = float(m.group(1))
+                    if v > gc_val:
+                        gc_val = v
+                except ValueError:
+                    pass
+                continue
+            if _LTO_TAG_RE_LIVE.match(_s):
+                continue
+            recipes.add(_name)
+        if recipes or consol or ee_val or gc_val:
+            _live_tag_attrs[_guid] = {
+                "recipe":           ", ".join(sorted(recipes)),
+                "consolidated_cat": ", ".join(sorted(consol)),
+                "entree_equiv_tag": ee_val,
+                "guest_count_tag":  gc_val,
+            }
     # Live Toast PLU sourced from cfg_menu_items (Menus API). Falls back to
     # the Excel mapping's toast_plu for items not yet synced.
     _live_plu_map = (
