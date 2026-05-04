@@ -16,8 +16,7 @@ If restaurant_guid is omitted, probes the first active location returned by
 /restaurants. Add more restaurants to scan multiple locations.
 """
 import asyncio
-import json
-import os
+import sqlite3
 import sys
 from typing import Optional
 
@@ -25,31 +24,62 @@ import httpx
 
 # Reuse main.py's auth helpers + config
 import main as backend_main
+import toast_config_db
+
+
+def _stores_with_item(item_guid: str) -> list:
+    """Look up which store_guids carry this item via cfg_menu_items."""
+    db = toast_config_db.TOAST_CONFIG_DB_PATH
+    try:
+        with sqlite3.connect(db) as c:
+            return [
+                {"store_guid": r[0], "store_name": r[1] or ""}
+                for r in c.execute(
+                    """SELECT DISTINCT cmi.store_guid,
+                              COALESCE(cmi2.store_num, '')
+                       FROM cfg_menu_items cmi
+                       LEFT JOIN cfg_menu_items cmi2 ON cmi2.store_guid = cmi.store_guid
+                       WHERE cmi.item_guid = ?""", (item_guid,)
+                ).fetchall()
+            ]
+    except Exception:
+        return []
 
 
 async def _get_active_locations(client: httpx.AsyncClient) -> list:
-    """Pull active restaurant_guids from Toast (mirrors sync_toast_config logic)."""
-    headers = await backend_main.get_standard_api_auth_headers()
-    base = backend_main.TOAST_STANDARD_API_BASE_URL
-    resp = await client.get(f"{base}/restaurants/v1/restaurants",
-                            headers=headers, timeout=30.0)
-    resp.raise_for_status()
-    return [r for r in resp.json() if r.get("isActive", True)]
+    """Pull active locations from the Toast ERA API (matches sync_toast_config)."""
+    # Lazy import — sync_toast_config has its own ERA auth helpers we can reuse.
+    from sync_toast_config import _get_active_locations as _f
+    return await _f(client)
 
 
 async def probe(item_guid: str, restaurant_guid: Optional[str]) -> None:
-    headers = await backend_main.get_standard_api_auth_headers()
     base = backend_main.TOAST_STANDARD_API_BASE_URL
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # Resolve restaurant_guid if not provided
+        # Resolve restaurant_guid: explicit arg → SQLite lookup → ERA API list.
         if not restaurant_guid:
-            locs = await _get_active_locations(client)
-            if not locs:
-                print("ERROR: no active restaurants found"); return
-            restaurant_guid = locs[0].get("restaurantGuid") or locs[0].get("guid")
-            print(f"Using first active restaurant: {restaurant_guid}")
+            stores = _stores_with_item(item_guid)
+            if stores:
+                print(f"Found {len(stores)} store(s) carrying this item in SQLite:")
+                for s in stores[:10]:
+                    print(f"  - {s['store_guid']}")
+                restaurant_guid = stores[0]["store_guid"]
+                print(f"\nProbing first one: {restaurant_guid}")
+            else:
+                print("Item not in cfg_menu_items; falling back to ERA active locations…")
+                try:
+                    locs = await _get_active_locations(client)
+                except Exception as e:
+                    print(f"ERROR: ERA locations call failed: {e}")
+                    print("Pass a restaurant_guid as the 2nd arg to skip the lookup.")
+                    return
+                if not locs:
+                    print("ERROR: no active restaurants found"); return
+                restaurant_guid = locs[0].get("restaurantGuid") or locs[0].get("guid")
+                print(f"Using first active restaurant: {restaurant_guid}")
 
+        headers = await backend_main.get_standard_api_auth_headers()
         h = {**headers, "Toast-Restaurant-External-ID": restaurant_guid}
 
         # Step 1: V3 metadata (do we even have access?)
