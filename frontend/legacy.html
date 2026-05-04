@@ -1883,14 +1883,16 @@
         // Aloha rollup parent. daily is per-Toast-item too so the daily
         // sub-row breakdown can be rendered when the option is on.
         entry.toastDetails.push({
-          name:            item.menuItemName || 'Unknown Item',
-          qty:             item.totalQty || 0,
-          consolidatedCat: item.consolidatedCat || '',
-          entreeEquivTag:  item.entreeEquivTag || 0,
-          recipe:          item.recipe || '',
-          guestCountTag:   item.guestCountTag || 0,
-          plu:             item.plu || 0,
-          daily:           item.daily || {},
+          name:               item.menuItemName || 'Unknown Item',
+          qty:                item.totalQty || 0,
+          consolidatedCat:    item.consolidatedCat || '',
+          entreeEquivTag:     item.entreeEquivTag || 0,
+          recipe:             item.recipe || '',
+          guestCountTag:      item.guestCountTag || 0,
+          plu:                item.plu || 0,
+          itemClassification: item.itemClassification || '',
+          itemSubclass:       item.itemSubclass || '',
+          daily:              item.daily || {},
         });
         if (item.daily && dateColumns?.length > 0) {
           dateColumns.forEach(d => { entry.daily[d] = (entry.daily[d]||0) + (item.daily?.[d]||0); });
@@ -3432,10 +3434,13 @@
       // One row per Toast item. Consolidated Category is a column (not a section
       // header) so the sheet can be sorted/filtered/pivoted in Excel.
       // Columns:
-      //   Consolidated Category | Menu Item Name | Qty Sold |
+      //   Consolidated Category | Item Classification | Item Subclass |
+      //   Menu Item Name | Qty Sold |
       //   [Aloha Item, Aloha Qty]  ← only when YoY is on  |
       //   EE Tag | Guest Count Tag | PLU |
       //   [daily date columns]     ← only when includeDaily is true
+      // Item Classification = Aloha-style range name (e.g. "Soups").
+      // Item Subclass       = Toast-style range name (e.g. "Entrée Bowl Soup").
       // Sort: Consolidated Category A→Z, then Qty descending within category.
       // Aloha Qty handling (when collapseAloha is on): the qty is the rollup's
       // total (multiple Toast items roll into one Aloha item), so to keep an
@@ -3470,16 +3475,18 @@
             firstOfRollup = true;
           }
           flatRows.push({
-            consolidatedCat: item.consolidatedCat || item.itemTagName || '',
-            menuItemName:    item.menuItemName || 'Unknown',
-            totalQty:        item.totalQty || 0,
-            alohaItemName:   alohaName,
-            alohaQty:        item.alohaQty || 0,
-            entreeEquivTag:  item.entreeEquivTag || 0,
-            guestCountTag:   item.guestCountTag || 0,
-            plu:             item.plu || 0,
-            daily:           item.daily || {},
-            _firstOfRollup:  firstOfRollup,
+            consolidatedCat:    item.consolidatedCat || item.itemTagName || '',
+            itemClassification: item.itemClassification || '',
+            itemSubclass:       item.itemSubclass || '',
+            menuItemName:       item.menuItemName || 'Unknown',
+            totalQty:           item.totalQty || 0,
+            alohaItemName:      alohaName,
+            alohaQty:           item.alohaQty || 0,
+            entreeEquivTag:     item.entreeEquivTag || 0,
+            guestCountTag:      item.guestCountTag || 0,
+            plu:                item.plu || 0,
+            daily:              item.daily || {},
+            _firstOfRollup:     firstOfRollup,
           });
         });
 
@@ -3494,6 +3501,8 @@
         // Header row
         const hdr = [
           c('Consolidated Category', S.blueL),
+          c('Item Classification',   S.blueL),
+          c('Item Subclass',         S.blueL),
           c('Menu Item Name',        S.blueL),
           c('Qty Sold',              S.blueR),
         ];
@@ -3512,9 +3521,11 @@
           const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
           const aR = alt ? S.lAmberRalt : S.lAmberR;
           const row = [
-            c(r.consolidatedCat, dL),
-            c(r.menuItemName,    dL),
-            n(r.totalQty,        dR),
+            c(r.consolidatedCat,    dL),
+            c(r.itemClassification, dL),
+            c(r.itemSubclass,       dL),
+            c(r.menuItemName,       dL),
+            n(r.totalQty,           dR),
           ];
           if (hasAloha) {
             row.push(c(r.alohaItemName || '', alt ? S.dLalt : S.dL));

@@ -172,6 +172,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mli_unique
 
 CREATE INDEX IF NOT EXISTS idx_mli_consol
     ON mli_plu_attribute_map(consolidated_cat);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- plu_ranges  —  Aloha & Toast PLU range → "Range Name" lookup table
+-- Sourced from the "Item PLU Ranges.xlsx" export (Newk's master ranges file).
+-- Used to stamp every menu performance row with an "Item Classification"
+-- (Aloha-style, broader) and "Item Subclass" (Toast-style, more granular).
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS plu_ranges (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_type    TEXT NOT NULL,           -- 'Aloha' | 'Toast'
+    range_name  TEXT NOT NULL,
+    range_start INTEGER NOT NULL,
+    range_end   INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plu_ranges_unique
+    ON plu_ranges(pos_type, range_start, range_end);
+
+CREATE INDEX IF NOT EXISTS idx_plu_ranges_lookup
+    ON plu_ranges(pos_type, range_start);
 """
 
 
@@ -767,11 +787,12 @@ def get_toast_items_with_tags(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, 
 def get_item_attribute_lookup(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, Dict[str, object]]:
     """
     Return {item_guid: {"consolidated_cat": str, "entree_equiv_tag": float,
-                        "recipe": str, "guest_count_tag": float, "toast_plu": int}}
+                        "recipe": str, "guest_count_tag": float,
+                        "toast_plu": int, "aloha_plu": int}}
     AND a parallel {normalized_toast_item_name: {...}} fallback, merged into one dict
     keyed by both the guid and the normalized name. The menu performance Excel export
     uses this to stamp each row with its consolidated category, EE tag,
-    Guest Count tag, and Toast PLU.
+    Guest Count tag, Toast PLU, and Aloha PLU.
 
     Lookup priority for a given row: try guid first, then normalized name.
     Returns empty dict if DB unavailable.
@@ -782,17 +803,19 @@ def get_item_attribute_lookup(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, 
         with get_connection(db_path) as conn:
             rows = conn.execute(
                 """SELECT item_guid, toast_item_name, consolidated_cat,
-                          entree_equiv_tag, recipe, guest_count_tag, toast_plu
+                          entree_equiv_tag, recipe, guest_count_tag,
+                          toast_plu, aloha_plu
                    FROM mli_plu_attribute_map"""
             ).fetchall()
         lookup: Dict[str, Dict[str, object]] = {}
-        for guid, tname, cat, ee, recipe, gct, tplu in rows:
+        for guid, tname, cat, ee, recipe, gct, tplu, aplu in rows:
             entry = {
                 "consolidated_cat": cat or "",
                 "entree_equiv_tag": float(ee) if ee is not None else 0.0,
                 "recipe": recipe or "",
                 "guest_count_tag": float(gct) if gct is not None else 0.0,
                 "toast_plu": int(tplu) if tplu is not None else 0,
+                "aloha_plu": int(aplu) if aplu is not None else 0,
             }
             if guid:
                 # Skip the synthetic "x:" placeholder guids written by
@@ -884,3 +907,143 @@ def get_toast_to_aloha_maps(db_path: str = TOAST_CONFIG_DB_PATH) -> Optional[Dic
     except Exception as exc:
         logger.warning(f"Failed to build Toast-to-Aloha maps: {exc}")
         return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PLU Range Classification (Aloha + Toast)
+# ──────────────────────────────────────────────────────────────────────────────
+# Sourced from "Item PLU Ranges.xlsx" (Newk's master ranges export). The Aloha
+# ranges give us a broad-stroke "Item Classification" (e.g. "Soups", "Pizza"),
+# the Toast ranges give a more granular "Item Subclass" (e.g. "Entrée Bowl Soup").
+
+def import_plu_ranges_from_excel(
+    xlsx_path: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+    replace: bool = True,
+) -> int:
+    """
+    Read "Item PLU Ranges.xlsx" and load it into the plu_ranges table.
+
+    Expected sheet layout (the export file's first sheet):
+      Row 0: title  ("Item PLU Ranges")
+      Row 1: "Report generated at: ..."
+      Row 2: header  ("POS Type" | "Range Name" | "Range Start" | "Range End")
+      Row 3+: data
+
+    Returns the number of rows inserted. When replace=True (default), wipes
+    the table first so re-imports stay in sync with the Excel source of truth.
+    """
+    initialize_db(db_path)
+    df = pd.read_excel(xlsx_path, header=2)
+    df = df.dropna(subset=["POS Type", "Range Name", "Range Start", "Range End"])
+
+    rows = []
+    for _, r in df.iterrows():
+        try:
+            rows.append((
+                str(r["POS Type"]).strip(),
+                str(r["Range Name"]).strip(),
+                int(r["Range Start"]),
+                int(r["Range End"]),
+            ))
+        except (ValueError, TypeError):
+            continue  # skip malformed rows silently
+
+    with get_connection(db_path) as conn:
+        if replace:
+            conn.execute("DELETE FROM plu_ranges")
+        conn.executemany(
+            """INSERT OR IGNORE INTO plu_ranges
+               (pos_type, range_name, range_start, range_end)
+               VALUES (?, ?, ?, ?)""",
+            rows,
+        )
+    logger.info(f"Imported {len(rows)} PLU ranges from {xlsx_path}")
+    return len(rows)
+
+
+def get_plu_range_classifier(db_path: str = TOAST_CONFIG_DB_PATH):
+    """
+    Return a callable `classify(pos_type, plu) -> str` that resolves a PLU to
+    its Range Name.  Loads all ranges into memory once for fast lookups during
+    a report build (typical: ~350 rows, classifying thousands of items).
+
+    Algorithm: ranges are stored sorted by start; lookup uses bisect to find
+    the rightmost range whose start <= plu, then checks `plu <= end`. Returns
+    "" when there's no match or DB is unavailable.
+    """
+    if not os.path.exists(db_path):
+        return lambda pos_type, plu: ""
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute(
+                """SELECT pos_type, range_start, range_end, range_name
+                   FROM plu_ranges
+                   ORDER BY pos_type, range_start"""
+            ).fetchall()
+    except Exception as exc:
+        logger.warning(f"Failed to load plu_ranges: {exc}")
+        return lambda pos_type, plu: ""
+
+    # Bucket per pos_type as parallel sorted lists for bisect.
+    import bisect
+    starts: Dict[str, List[int]] = {}
+    payload: Dict[str, List[tuple]] = {}  # (end, name)
+    for pos_type, rstart, rend, rname in rows:
+        starts.setdefault(pos_type, []).append(int(rstart))
+        payload.setdefault(pos_type, []).append((int(rend), str(rname)))
+
+    def classify(pos_type: str, plu) -> str:
+        if not plu:
+            return ""
+        try:
+            plu_int = int(plu)
+        except (ValueError, TypeError):
+            return ""
+        s = starts.get(pos_type)
+        p = payload.get(pos_type)
+        if not s:
+            return ""
+        idx = bisect.bisect_right(s, plu_int) - 1
+        if idx < 0:
+            return ""
+        rend, rname = p[idx]
+        return rname if plu_int <= rend else ""
+
+    return classify
+
+
+# Toast PLU prefixes that "wrap" an underlying Aloha PLU. Stripping these and
+# re-classifying against the Aloha ranges lets us assign an Aloha-style
+# "Item Classification" to Toast items that have no explicit aloha_plu in
+# mli_plu_attribute_map. The Aloha ranges file's own footer documents these:
+#   300200-300210  Toast Parent Items - POS
+#   400200-400210  Toast Parent Items - OLO
+_TOAST_TO_ALOHA_PLU_PREFIXES = (300, 400, 600, 700)
+
+
+def derive_aloha_plu_from_toast(toast_plu) -> int:
+    """
+    Best-effort: turn a Toast PLU into the underlying Aloha PLU by stripping
+    a known leading prefix. Returns 0 if no prefix matches or input is empty.
+
+    This is heuristic — Toast PLUs were originally minted by adding a 3-digit
+    prefix to the matching Aloha PLU (300=POS, 400=OLO, etc.). When an item's
+    explicit aloha_plu is missing from mli_plu_attribute_map, this gives us a
+    reasonable fallback for classification.
+    """
+    if not toast_plu:
+        return 0
+    try:
+        n = int(toast_plu)
+    except (ValueError, TypeError):
+        return 0
+    s = str(n)
+    for prefix in _TOAST_TO_ALOHA_PLU_PREFIXES:
+        ps = str(prefix)
+        if s.startswith(ps) and len(s) > len(ps):
+            try:
+                return int(s[len(ps):])
+            except ValueError:
+                continue
+    return 0
