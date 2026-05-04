@@ -3802,17 +3802,31 @@ def pivot_menu_items_by_tag(
     # PLU range classifier — Aloha ranges → "Item Classification" (broader),
     # Toast ranges → "Item Subclass" (more granular). Built once per report.
     _plu_classify = toast_config_db.get_plu_range_classifier()
+    # Live Recipe Tag map sourced from Toast Menus API tags (cfg_map_item_tags).
+    # Authoritative when present; Excel mli_plu_attribute_map.recipe is the
+    # fallback for items Toast hasn't tagged yet.
+    _recipe_live_map = (
+        toast_config_db.get_live_recipe_tag_map()
+        if toast_config_db.db_available() else {}
+    )
 
     def _attr_for(guid: str, name: str) -> Tuple[str, float, str, float, int, str, str]:
         """
         Returns: (consolidated_cat, entree_equiv_tag, recipe, guest_count_tag,
                   toast_plu, item_classification, item_subclass)
+
+        recipe: prefers the live Toast tag value (comma-joined when an item
+        has multiple recipe tags), falls back to the Excel mapping's recipe
+        column for items Toast hasn't tagged yet.
         """
         entry = _attr_lookup.get(guid)
         if entry is None and name:
             entry = _attr_lookup.get(_normalize_item_name(name))
+        # Live recipe is keyed by guid only — works even when the item has
+        # no Excel mapping row at all.
+        live_recipe = _recipe_live_map.get(guid, "") if guid else ""
         if entry is None:
-            return "", 0.0, "", 0.0, 0, "", ""
+            return "", 0.0, live_recipe, 0.0, 0, "", ""
         toast_plu = int(entry.get("toast_plu", 0) or 0)
         aloha_plu = int(entry.get("aloha_plu", 0) or 0)
         # Classification: try Aloha range with explicit aloha_plu first, then
@@ -3824,10 +3838,11 @@ def pivot_menu_items_by_tag(
             )
         # Subclass: direct Toast range lookup.
         item_subclass = _plu_classify("Toast", toast_plu) if toast_plu else ""
+        recipe = live_recipe or str(entry.get("recipe", "") or "")
         return (
             str(entry.get("consolidated_cat", "") or ""),
             float(entry.get("entree_equiv_tag", 0.0) or 0.0),
-            str(entry.get("recipe", "") or ""),
+            recipe,
             float(entry.get("guest_count_tag", 0.0) or 0.0),
             toast_plu,
             item_classification,

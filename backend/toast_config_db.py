@@ -22,6 +22,7 @@ Usage
 import json
 import logging
 import os
+import re
 import sqlite3
 from typing import Dict, List, Optional
 
@@ -907,6 +908,72 @@ def get_toast_to_aloha_maps(db_path: str = TOAST_CONFIG_DB_PATH) -> Optional[Dic
     except Exception as exc:
         logger.warning(f"Failed to build Toast-to-Aloha maps: {exc}")
         return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Live Recipe Tag lookup (sourced from Toast tags via Menus API)
+# ──────────────────────────────────────────────────────────────────────────────
+# Recipe tag = any Toast tag on an item that is NOT one of the "metadata" tags
+# Toast uses for entree-equiv / guest count / consolidated categories. Pulled
+# live from cfg_map_item_tags + cfg_tags so the column reflects whatever's
+# currently in Toastweb — no Excel re-sync needed.
+
+# Tag names that look like recipes by convention but are actually metadata.
+# The user audited the full tag list (220 tags) and confirmed these aren't
+# recipes; everything else that isn't *-prefixed should be treated as one.
+_NON_RECIPE_TAG_RE = re.compile(
+    r"^(?:"
+    r"EE\s+\.?\d+(?:\.\d+)?"           # "EE 1", "EE .5", "EE 12"
+    r"|Guest\s+Count\s+\d+(?:\.\d+)?"  # "Guest Count 1", "Guest Count 0.5"
+    r"|Catering\s+Menu"                # category, not a recipe
+    r")$",
+    re.IGNORECASE,
+)
+
+
+def get_live_recipe_tag_map(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, str]:
+    """
+    Return {item_guid: "RecipeTagA, RecipeTagB"} sourced live from the Toast
+    Menus API tag data (cfg_map_item_tags + cfg_tags). Multiple matching tags
+    per item are sorted and comma-joined.
+
+    Excluded: tag names starting with '*' (consolidated categories), the
+    EE / Guest Count metadata tags, and "Catering Menu" (category-like).
+
+    Returns {} when DB is unavailable.
+    """
+    if not os.path.exists(db_path):
+        return {}
+    try:
+        with get_connection(db_path) as conn:
+            # DISTINCT is critical — cfg_map_item_tags has the same
+            # (item_guid, tag_guid) row per store, so without dedup the join
+            # returns ~38 million rows on a real install.
+            rows = conn.execute(
+                """SELECT DISTINCT mit.item_guid, ct.tag_name
+                   FROM cfg_map_item_tags mit
+                   JOIN cfg_tags ct ON ct.tag_guid = mit.tag_guid
+                   WHERE ct.tag_name != ''
+                     AND ct.tag_name NOT LIKE '*%'
+                     AND ct.tag_name NOT LIKE 'EE %'
+                     AND ct.tag_name NOT LIKE 'Guest Count %'
+                     AND ct.tag_name != 'Catering Menu'"""
+            ).fetchall()
+    except Exception as exc:
+        logger.warning(f"Failed to load live recipe tags: {exc}")
+        return {}
+
+    by_item: Dict[str, set] = {}
+    for guid, name in rows:
+        if not guid or not name:
+            continue
+        # Belt-and-suspenders: re-check the regex exclusions in case the
+        # SQL LIKE filters miss an edge case (e.g. "EE12" with no space).
+        if _NON_RECIPE_TAG_RE.match(name.strip()):
+            continue
+        by_item.setdefault(guid, set()).add(name)
+
+    return {g: ", ".join(sorted(names)) for g, names in by_item.items()}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
