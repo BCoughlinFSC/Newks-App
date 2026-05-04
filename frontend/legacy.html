@@ -3437,10 +3437,12 @@
       //   Consolidated Category | Item Classification | Item Subclass |
       //   Menu Item Name | Qty Sold |
       //   [Aloha Item, Aloha Qty]  ← only when YoY is on  |
-      //   EE Tag | Guest Count Tag | PLU |
+      //   EE Tag | Guest Count Tag | Recipe Tag | PLU |
       //   [daily date columns]     ← only when includeDaily is true
       // Item Classification = Aloha-style range name (e.g. "Soups").
       // Item Subclass       = Toast-style range name (e.g. "Entrée Bowl Soup").
+      // Recipe Tag          = recipe identifier from the MLI PLU attribute map
+      //                       (e.g. "ChickenSalad", "SoupLoadedPotato").
       // Sort: Consolidated Category A→Z, then Qty descending within category.
       // Aloha Qty handling (when collapseAloha is on): the qty is the rollup's
       // total (multiple Toast items roll into one Aloha item), so to keep an
@@ -3484,6 +3486,7 @@
             alohaQty:           item.alohaQty || 0,
             entreeEquivTag:     item.entreeEquivTag || 0,
             guestCountTag:      item.guestCountTag || 0,
+            recipe:             item.recipe || '',
             plu:                item.plu || 0,
             daily:              item.daily || {},
             _firstOfRollup:     firstOfRollup,
@@ -3512,6 +3515,7 @@
         }
         hdr.push(c('EE Tag',           S.blueR));
         hdr.push(c('Guest Count Tag',  S.blueR));
+        hdr.push(c('Recipe Tag',       S.blueL));
         hdr.push(c('PLU',              S.blueR));
         dateCols.forEach(d => hdr.push(c(formatDateHeader(d), S.lBlueR)));
 
@@ -3535,6 +3539,7 @@
           }
           row.push(numCell(r.entreeEquivTag, dR));
           row.push(numCell(r.guestCountTag,  dR));
+          row.push(c(r.recipe || '', dL));
           row.push(r.plu ? n(r.plu, dR) : c('', dR));
           dateCols.forEach(d => row.push(n(r.daily?.[d] || 0, dR)));
           rows.push(row);
