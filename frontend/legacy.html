@@ -3843,6 +3843,20 @@
         kv('Include All Consolidated Categories', currentExcelOptions.includeAllCats ? 'Yes' : 'No');
         kv('Generated At', new Date().toLocaleString());
 
+        // ── Toast LY enrichment audit (only when YoY ran) ────────────────────
+        const ti = currentResults?.yoyToastInfo;
+        if (ti && cfg.yoyEnabled) {
+          rows.push([c('', S.dL), c('', S.dR)]);
+          sectionHdr('LY Toast Source');
+          kv('Status', ti.status || '—');
+          if (ti.lyStart && ti.lyEnd) kv('LY Date Range', `${ti.lyStart} → ${ti.lyEnd}`);
+          if (ti.storesChecked != null) kv('Stores in Report', ti.storesChecked);
+          if (ti.storesWithSwitchoverDate != null) kv('Stores with Switchover Date Configured', ti.storesWithSwitchoverDate);
+          if (ti.storesEligible != null) kv('Stores LY-Toast Eligible', ti.storesEligible);
+          if (ti.itemsWithLyToast != null) kv('Items with LY Toast Qty', ti.itemsWithLyToast);
+          if (ti.error) kv('Error', ti.error);
+        }
+
         rows.push([c('', S.dL), c('', S.dR)]);
         sectionHdr('Category Totals');
         rows.push([c('Consolidated Tag', S.lBlueL), c('Total Qty', S.lBlueR)]);

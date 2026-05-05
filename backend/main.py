@@ -822,6 +822,159 @@ def _enrich_metrics(
     return result
 
 
+def _compute_ly_date_range(
+    start_date: date,
+    end_date: date,
+    yoy_mode: str,
+) -> Tuple[date, date, Optional[Dict[str, str]]]:
+    """
+    Determine the Last-Year date range mirroring the same logic
+    apply_yoy_aloha_quantities uses, so Toast LY and Aloha LY agree on what
+    "a year ago" means.
+
+    Returns (ly_start, ly_end, fiscal_date_map_or_None).
+    """
+    fiscal_date_map: Optional[Dict[str, str]] = None
+    if yoy_mode == "fiscal":
+        fiscal_date_map = aloha_sales_db.get_fiscal_ly_dates(
+            start_date.isoformat(), end_date.isoformat()
+        )
+        if not fiscal_date_map:
+            yoy_mode = "same_date"
+    if fiscal_date_map:
+        ly_dates = sorted(fiscal_date_map.values())
+        return (date.fromisoformat(ly_dates[0]),
+                date.fromisoformat(ly_dates[-1]),
+                fiscal_date_map)
+    offset = 364 if yoy_mode == "same_day" else 365
+    return (start_date - timedelta(days=offset),
+            end_date - timedelta(days=offset),
+            None)
+
+
+async def apply_yoy_toast_quantities(
+    result: dict,
+    report_config: "ReportConfig",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> dict:
+    """
+    Stamp `lyToastQty` on every breakdown row by querying Toast for the same
+    period, one year prior, scoped to stores that were already on Toast then.
+
+    Eligibility: a store contributes to LY Toast only when its switchover_date
+    is on or before the LY range's start (fully post-switchover). Anything
+    partial → the store contributes 0 here and falls through to Aloha LY
+    (which the All Items + Recipe Mix Summary sheets already handle as a
+    fallback via `effectiveLyQty = lyToastQty || alohaQty`).
+    """
+    if (not result or report_config.reportType != "menu"
+            or not report_config.yoyEnabled
+            or start_date is None or end_date is None):
+        return result
+
+    switchover_map = (toast_config_db.get_switchover_date_map()
+                      if toast_config_db.db_available() else {})
+    if not switchover_map:
+        # No dates configured → nothing to do; column stays blank as in PR1.
+        result.setdefault("yoyToastInfo", {"status": "skipped",
+                                            "reason": "no switchover dates configured"})
+        return result
+
+    yoy_mode = getattr(report_config, "yoyMode", "same_date")
+    ly_start, ly_end, _ = _compute_ly_date_range(start_date, end_date, yoy_mode)
+
+    # Filter to the report's stores AND those whose switchover is on/before ly_start.
+    report_stores = list(getattr(report_config, "restaurantIds", None) or [])
+    eligible: List[str] = []
+    for guid in report_stores:
+        sd_str = switchover_map.get(guid)
+        if not sd_str:
+            continue
+        try:
+            sd = date.fromisoformat(sd_str)
+        except ValueError:
+            continue
+        if sd <= ly_start:
+            eligible.append(guid)
+
+    if not eligible:
+        result["yoyToastInfo"] = {
+            "status": "no_eligible_stores",
+            "lyStart": ly_start.isoformat(),
+            "lyEnd": ly_end.isoformat(),
+            "storesChecked": len(report_stores),
+            "storesWithSwitchoverDate": sum(1 for g in report_stores if g in switchover_map),
+        }
+        return result
+
+    # Request the same-period prior-year menu report for the eligible stores.
+    rows: List[Dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            report_guid = await request_toast_report(
+                client, ly_start, ly_end, eligible, "menu",
+                ["restaurantId"],
+            )
+            rows = await fetch_toast_report(client, report_guid, "menu") or []
+    except HTTPException as exc:
+        logger.warning(f"LY Toast report fetch failed (status={exc.status_code}): {exc.detail}")
+        result["yoyToastInfo"] = {
+            "status": "error",
+            "error": str(exc.detail)[:200],
+            "lyStart": ly_start.isoformat(),
+            "lyEnd": ly_end.isoformat(),
+            "storesEligible": len(eligible),
+        }
+        return result
+    except Exception as exc:
+        logger.warning(f"LY Toast report fetch failed: {exc}")
+        result["yoyToastInfo"] = {
+            "status": "error",
+            "error": str(exc)[:200],
+            "lyStart": ly_start.isoformat(),
+            "lyEnd": ly_end.isoformat(),
+            "storesEligible": len(eligible),
+        }
+        return result
+
+    # Aggregate by menu_item_guid (chain-wide LY total across eligible stores).
+    ly_qty_by_guid: Dict[str, float] = {}
+    for row in rows:
+        guid = row.get("menuItemGuid") or ""
+        if not guid:
+            continue
+        ly_qty_by_guid[guid] = ly_qty_by_guid.get(guid, 0.0) + (row.get("quantitySold") or 0)
+
+    # Stamp on every breakdown row in the result. orderModeSplit rows share
+    # object identity with itemBreakdownDaily rows in main.py's pivot output,
+    # so this single pass covers all four lists.
+    def _stamp(items):
+        for it in items or []:
+            g = it.get("menuItemGuid") or ""
+            if g and g in ly_qty_by_guid:
+                it["lyToastQty"] = ly_qty_by_guid[g]
+
+    _stamp(result.get("itemBreakdown"))
+    _stamp(result.get("itemBreakdownDaily"))
+    oms = result.get("orderModeSplit") or {}
+    for ch in ("inStore", "olo"):
+        _stamp(oms.get(ch, {}).get("itemBreakdown"))
+        _stamp(oms.get(ch, {}).get("itemBreakdownDaily"))
+
+    result["yoyToastInfo"] = {
+        "status": "ok",
+        "lyStart": ly_start.isoformat(),
+        "lyEnd": ly_end.isoformat(),
+        "storesChecked": len(report_stores),
+        "storesWithSwitchoverDate": sum(1 for g in report_stores if g in switchover_map),
+        "storesEligible": len(eligible),
+        "rowsReturned": len(rows),
+        "itemsWithLyToast": len(ly_qty_by_guid),
+    }
+    return result
+
+
 async def apply_yoy_aloha_quantities(
     result: dict,
     report_config: "ReportConfig",
@@ -9100,6 +9253,7 @@ async def build_menu_mix_report_fallback(
     if debug_info_extra is not None:
         result["debugInfo"]["tagMappingDebug"] = debug_info_extra
     result = await apply_yoy_aloha_quantities(result, report_config, start_date, end_date)
+    result = await apply_yoy_toast_quantities(result, report_config, start_date, end_date)
     return result
 
 @app.post("/api/reports/run")
@@ -9972,6 +10126,7 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 if debug_info_extra is not None:
                     result["debugInfo"]["tagMappingDebug"] = debug_info_extra
                 result = await apply_yoy_aloha_quantities(result, report_config, start_date, end_date)
+                result = await apply_yoy_toast_quantities(result, report_config, start_date, end_date)
                 return result
 
             # Default: Use ERA reporting API
