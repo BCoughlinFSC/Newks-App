@@ -828,6 +828,11 @@
           <input type="checkbox" id="excelOptIncludeAllCats" style="width:16px;height:16px;accent-color:#C41E3A;" />
           Include all consolidated categories (overrides current tag filter)
         </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;font-weight:500;cursor:pointer;">
+          <input type="checkbox" id="excelOptIncludePicks" style="width:16px;height:16px;accent-color:#C41E3A;" />
+          Include Pick 3 / Pick 2 / Full Pairings sheets
+          <span style="font-size:0.75rem;color:#6B7280;font-weight:400;">(adds ~30s per report)</span>
+        </label>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelExcelOptionsBtn">Cancel</button>
@@ -3144,7 +3149,11 @@
     // Default to "minimal" — Summary sheet + per-tag breakdown only, no daily
     // columns, no In-Store/OLO sheets, current tag filter only — to keep small
     // downloads small.
-    let currentExcelOptions = { includeDaily: false, includeSplits: false, includeAllCats: false };
+    let currentExcelOptions = { includeDaily: false, includeSplits: false, includeAllCats: false, includePicks: false };
+    // When includePicks is checked, confirmAndExport fetches Pick 3, Pick 2,
+    // and Full Pairings (live API) for the same date range + stores and
+    // stashes the results here so exportExcel() can render them as 3 sheets.
+    let pickPairingResults = null;
 
     function openExcelOptionsModal() {
       // Prefill last-used choices from localStorage so it remembers across sessions
@@ -3153,6 +3162,7 @@
         if (typeof saved.includeDaily   === 'boolean') document.getElementById('excelOptIncludeDaily').checked   = saved.includeDaily;
         if (typeof saved.includeSplits  === 'boolean') document.getElementById('excelOptIncludeSplits').checked  = saved.includeSplits;
         if (typeof saved.includeAllCats === 'boolean') document.getElementById('excelOptIncludeAllCats').checked = saved.includeAllCats;
+        if (typeof saved.includePicks   === 'boolean') document.getElementById('excelOptIncludePicks').checked   = saved.includePicks;
       } catch {}
       document.getElementById('excelOptionsModal').classList.remove('hidden');
     }
@@ -3203,9 +3213,11 @@
         includeDaily:   document.getElementById('excelOptIncludeDaily').checked,
         includeSplits:  document.getElementById('excelOptIncludeSplits').checked,
         includeAllCats: document.getElementById('excelOptIncludeAllCats').checked,
+        includePicks:   document.getElementById('excelOptIncludePicks').checked,
       };
       try { localStorage.setItem('excelOptions', JSON.stringify(currentExcelOptions)); } catch {}
       closeExcelOptionsModal();
+      pickPairingResults = null;
 
       let stashedResults = null;
       try {
@@ -3233,6 +3245,54 @@
               stashedResults = currentResults;
               currentResults = await resp.json();
             }
+          }
+        }
+        // Pick 3 / Pick 2 / Full Pairings — opt-in. Three sequential calls
+        // against the same date range + stores as the menu performance run.
+        if (currentExcelOptions.includePicks && currentReportConfig) {
+          const cfg = currentReportConfig;
+          const drType = document.getElementById('dateRangeType')?.value;
+          let pickStart, pickEnd;
+          if (drType === 'custom') {
+            pickStart = document.getElementById('customStartDate')?.value;
+            pickEnd   = document.getElementById('customEndDate')?.value;
+          } else if (Array.isArray(currentResults?.dateColumns) && currentResults.dateColumns.length) {
+            const sd = [...currentResults.dateColumns].sort();
+            pickStart = sd[0];
+            pickEnd   = sd[sd.length - 1];
+          }
+          if (pickStart && pickEnd) {
+            showStatus('info', 'Fetching Pick 3 / Pick 2 / Full Pairings (live API)…');
+            document.getElementById('loadingOverlay')?.classList.remove('hidden');
+            const types = [
+              { key: 'pick3',         label: 'Pick 3' },
+              { key: 'pick2',         label: 'Pick 2' },
+              { key: 'full_pairings', label: 'Full Pairings' },
+            ];
+            const out = {};
+            for (const t of types) {
+              try {
+                const r = await fetch('/api/reports/pick3', {
+                  method: 'POST',
+                  headers: getAuthHeaders(),
+                  body: JSON.stringify({
+                    start_date:    pickStart,
+                    end_date:      pickEnd,
+                    restaurantIds: cfg.restaurantIds || [],
+                    variant:       'pos',
+                    report_type:   t.key,
+                  }),
+                });
+                if (r.ok) {
+                  out[t.key] = { label: t.label, data: await r.json() };
+                } else {
+                  out[t.key] = { label: t.label, error: await r.text() };
+                }
+              } catch (err) {
+                out[t.key] = { label: t.label, error: String(err) };
+              }
+            }
+            pickPairingResults = out;
           }
         }
         exportExcel();
@@ -3802,6 +3862,82 @@
         return rows;
       }
 
+      // ── Helper: build a Pick 3 / Pick 2 / Full Pairings sheet ─────────────
+      // Aggregates each report's drillDown across stores and dates into a
+      // chain-wide totals view. Two stacked tables per sheet:
+      //   1. Parent Items   — entrée items the report counts as a "parent"
+      //                       (e.g. "(Pick 3 Entree)" items)
+      //   2. Pairing Selections — the modifier picks under those parents
+      //                       (cup soup, half salad, side, etc.)
+      // Sourced from /api/reports/pick3 (variant=pos) — see confirmAndExport.
+      function buildPickPairingSheet(block, sheetName) {
+        const rows = [];
+        rows.push([c(`${sheetName}  (POS variant — chain-wide totals)`, S.blueL),
+                   c('', S.blueR), c('', S.blueR)]);
+
+        if (block.error) {
+          rows.push([c('Status', S.dLbld), c('Error', S.warnL), c('', S.dR)]);
+          rows.push([c('Detail', S.dLbld), c(String(block.error).slice(0, 300), S.warnL), c('', S.dR)]);
+          return rows;
+        }
+        const data = block.data || {};
+        const drillDown = data.drillDown || [];
+        const summary   = data.summary || [];
+        if (!drillDown.length && !summary.length) {
+          rows.push([c('No data returned for this date range / store selection.', S.warnL),
+                     c('', S.dR), c('', S.dR)]);
+          return rows;
+        }
+
+        // Aggregate across (store, date) → grand totals per parent item / selection
+        const parentTotals = new Map();   // name → qty
+        const selectionTotals = new Map();
+        let grandTotal = 0;
+        const stores = new Set();
+        const dates = new Set();
+        drillDown.forEach(d => {
+          stores.add(d.restaurantGuid);
+          if (d.businessDate) dates.add(d.businessDate);
+          grandTotal += Number(d.pick3Total || 0);
+          (d.parentItems || []).forEach(p => {
+            parentTotals.set(p.itemName, (parentTotals.get(p.itemName) || 0) + Number(p.quantity || 0));
+          });
+          (d.selections || []).forEach(s => {
+            selectionTotals.set(s.itemName, (selectionTotals.get(s.itemName) || 0) + Number(s.quantity || 0));
+          });
+        });
+
+        // Title block
+        rows.push([c(`Stores: ${stores.size}    Days: ${dates.size}    Total ${sheetName}: ${grandTotal.toLocaleString()}`,
+                     S.dLbld), c('', S.dR), c('', S.dR)]);
+        rows.push([blank(), blank(), blank()]);
+
+        // Parent items
+        rows.push([c('Parent Items (Entrées)', S.blueL), c('Qty', S.blueR), c('% of Total', S.blueR)]);
+        const parentSorted = [...parentTotals.entries()].sort((a, b) => b[1] - a[1]);
+        parentSorted.forEach(([name, qty], i) => {
+          const alt = i % 2 === 1;
+          const pct = grandTotal > 0 ? (qty / grandTotal * 100).toFixed(1) + '%' : '—';
+          rows.push([c(name, alt ? S.dLalt : S.dL),
+                     n(qty, alt ? S.dRalt : S.dR),
+                     c(pct, alt ? S.dRalt : S.dR)]);
+        });
+        rows.push([blank(), blank(), blank()]);
+
+        // Pairing selections
+        rows.push([c('Pairing Selections', S.greenL), c('Qty', S.greenR), c('% of Total', S.greenR)]);
+        const selSorted = [...selectionTotals.entries()].sort((a, b) => b[1] - a[1]);
+        const selTotal = selSorted.reduce((s, [, q]) => s + q, 0);
+        selSorted.forEach(([name, qty], i) => {
+          const alt = i % 2 === 1;
+          const pct = selTotal > 0 ? (qty / selTotal * 100).toFixed(1) + '%' : '—';
+          rows.push([c(name, alt ? S.dLalt : S.dL),
+                     n(qty, alt ? S.dRalt : S.dR),
+                     c(pct, alt ? S.dRalt : S.dR)]);
+        });
+        return rows;
+      }
+
       // ── Helper: build the Summary front page ───────────────────────────────
       // Listed first in every menu performance Excel. Pulls from currentReportConfig
       // + currentResults so it reflects what the user actually queried, plus any
@@ -3861,6 +3997,7 @@
         kv('Include Daily Breakdown',  currentExcelOptions.includeDaily  ? 'Yes' : 'No');
         kv('Include In-Store / OLO Sheets', currentExcelOptions.includeSplits ? 'Yes' : 'No');
         kv('Include All Consolidated Categories', currentExcelOptions.includeAllCats ? 'Yes' : 'No');
+        kv('Include Pick 3 / Pick 2 / Full Pairings', currentExcelOptions.includePicks ? 'Yes' : 'No');
         kv('Generated At', new Date().toLocaleString());
 
         // ── Toast LY enrichment audit (only when YoY ran) ────────────────────
@@ -4054,6 +4191,17 @@
             if (oloItems.length > 0)
               addWS(WB, buildBreakdownSheet(oloItems, sortedDates, hasAloha, collapseAloha,
                 S.orangeL, S.orangeR, S.lOrangL, S.lOrangR, includeDaily), 'OLO');
+          }
+
+          // Sheets 6-8: Pick 3 / Pick 2 / Full Pairings (only if user opted in)
+          if (currentExcelOptions.includePicks && pickPairingResults) {
+            ['pick3', 'pick2', 'full_pairings'].forEach(key => {
+              const block = pickPairingResults[key];
+              if (!block) return;
+              const sheetName = key === 'full_pairings' ? 'Full Pairings'
+                              : key === 'pick2' ? 'Pick 2' : 'Pick 3';
+              addWS(WB, buildPickPairingSheet(block, sheetName), sheetName);
+            });
           }
 
         // ── Compact item totals ────────────────────────────────────────────
