@@ -3729,6 +3729,15 @@
         const numDays   = Math.max(sortedDates.length, 1);
         const numStores = Math.max((currentResults?.pivotTable || []).length, 1);
         const denom     = numDays * numStores;
+        // LY source preference: lyToastQty covers ONLY post-switchover stores
+        // (currently a small subset), while alohaQty covers the full chain.
+        // Mixing the two within one row distorts the comparison — a partial
+        // Toast count (e.g. 2 stores' worth) would override the chain-wide
+        // Aloha number. Only flip the source preference when EVERY store in
+        // the report is LY-Toast-eligible; until then stick with Aloha.
+        const ti = currentResults?.yoyToastInfo;
+        const useLyToast = !!(ti && ti.storesChecked > 0
+                              && ti.storesEligible === ti.storesChecked);
 
         // Only the 7 categories that have meaningful entrée values (matches
         // the P12 reference). Note "Soups" has a double space — that's the
@@ -3792,10 +3801,10 @@
               ly_full: 0, ly_half: 0, ly_all: 0,
             };
             const tyQ = rl.totalQty || 0;
-            // LY source: prefer Toast (post-switchover) over Aloha when present.
-            // Per-rollup decision so as switchover dates roll in, the LY column
-            // for those stores' items automatically flips source.
-            const lyQ = (rl.lyToastQty && rl.lyToastQty > 0)
+            // LY source: only use lyToastQty when EVERY store is eligible
+            // (see useLyToast above) so we don't mix a 2-stores-only Toast
+            // total with a chain-wide Aloha number.
+            const lyQ = (useLyToast && rl.lyToastQty && rl.lyToastQty > 0)
               ? rl.lyToastQty
               : (rl.alohaQty || 0);
             if (rl._ee === 1) { buck.ty_full += tyQ; buck.ly_full += lyQ; }
