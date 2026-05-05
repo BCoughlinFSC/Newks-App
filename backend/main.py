@@ -3969,6 +3969,21 @@ def pivot_menu_items_by_tag(
             item_classification = _plu_classify(
                 "Aloha", toast_config_db.derive_aloha_plu_from_toast(toast_plu)
             )
+        # Suppress prefix-strip false positives: when the derived Aloha range
+        # name contains "Catering", "Inactive", or "Do Not Use" but the item's
+        # consolidated category clearly isn't catering, the strip landed in a
+        # coincidental range (e.g. Toast OLO PLU 40070303 strips to 70303,
+        # which is in Aloha "Catering - Sandwich Platter Items" — wrong).
+        # Only suppress when there's NO explicit aloha_plu in the mapping —
+        # that's curated and trusted.
+        if item_classification and not ex_aplu:
+            cls_low = item_classification.lower()
+            cat_low = consolidated_cat.lower()
+            looks_suspect = (
+                "catering" in cls_low or "inactive" in cls_low or "do not use" in cls_low
+            )
+            if looks_suspect and "catering" not in cat_low:
+                item_classification = ""
         # Item Subclass: direct Toast range lookup against the live PLU.
         item_subclass = _plu_classify("Toast", toast_plu) if toast_plu else ""
 
