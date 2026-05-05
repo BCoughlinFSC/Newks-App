@@ -3962,9 +3962,16 @@ def pivot_menu_items_by_tag(
         )
         toast_plu = int(live_plu) or int(sqlite_plu) or ex_plu
 
-        # Item Classification (Aloha range): try the Excel-mapping aloha_plu
-        # first, then fall back to deriving aloha_plu from the Toast PLU prefix.
+        # Item Classification (Aloha range): three tries, in order
+        #   1. Explicit aloha_plu from the curated Excel mapping
+        #   2. Raw Toast PLU against Aloha ranges (some Aloha ranges use
+        #      Toast-style PLUs directly — e.g. "Toast Parent Items - POS"
+        #      at 300200-300210 catches Meal Deal parent items like 300204)
+        #   3. Prefix-strip the Toast PLU and look up the underlying Aloha
+        #      PLU (catches 3001003 → 1003 → "Soups" pattern)
         item_classification = _plu_classify("Aloha", ex_aplu) if ex_aplu else ""
+        if not item_classification and toast_plu:
+            item_classification = _plu_classify("Aloha", toast_plu)
         if not item_classification and toast_plu:
             item_classification = _plu_classify(
                 "Aloha", toast_config_db.derive_aloha_plu_from_toast(toast_plu)
