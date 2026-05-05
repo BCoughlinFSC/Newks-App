@@ -637,13 +637,16 @@
             </label>
             <span class="count-badge" id="locationCount"></span>
           </div>
-          <div style="display:flex;gap:0.4rem;margin:0.3rem 0 0.5rem;">
+          <div style="display:flex;gap:0.4rem;margin:0.3rem 0 0.5rem;flex-wrap:wrap;">
             <button type="button" onclick="filterByOwnership('all')" id="ownFilter_all"
               style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #C41E3A;background:#C41E3A;color:#fff;cursor:pointer;font-weight:600;">All</button>
             <button type="button" onclick="filterByOwnership('Company')" id="ownFilter_Company"
               style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Company</button>
             <button type="button" onclick="filterByOwnership('Franchise')" id="ownFilter_Franchise"
               style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Franchise</button>
+            <button type="button" onclick="filterByOwnership('Comping')" id="ownFilter_Comping"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;"
+              title="Restrict to the comp store set used by the Daily Sales Flash Report">All Comping</button>
           </div>
           <div class="scroll-grid" id="locationsGrid">
             <div style="padding: 0.25rem; color: #555c7b; font-size: 0.85rem;">Loading locations...</div>
@@ -937,6 +940,7 @@
     // ──────────────────────────────────────────────────────────
     let locations = [];
     let ownershipByGuid = {}; // Toast GUID → "Company" | "Franchise"
+    let compingGuidSet  = new Set(); // Toast GUIDs in the Daily Flash "comp store" set
     let savedReports = [];
     let currentReportId = null;
     let currentResults = null;
@@ -1078,6 +1082,15 @@
           const ownData = await ownResp.json();
           ownershipByGuid = ownData.byGuid || {};
         }
+        // Comping set — Daily Sales Flash "comp store" group, used by the
+        // "All Comping" filter button. Lightweight, no cache.
+        try {
+          const compResp = await fetch('/api/locations/comping', { headers: authToken ? getAuthHeaders() : {} });
+          if (compResp.ok) {
+            const compData = await compResp.json();
+            compingGuidSet = new Set(compData.guids || []);
+          }
+        } catch {}
       } catch (e) { /* non-fatal */ }
 
       if (!forceRefresh) {
@@ -1135,7 +1148,8 @@
       grid.innerHTML = locations.map(loc => `
         <label>
           <input type="checkbox" class="location-checkbox" value="${loc.restaurantGuid}"
-            data-ownership="${ownershipByGuid[loc.restaurantGuid] || 'Franchise'}" checked />
+            data-ownership="${ownershipByGuid[loc.restaurantGuid] || 'Franchise'}"
+            data-comping="${compingGuidSet.has(loc.restaurantGuid) ? 'true' : 'false'}" checked />
           ${loc.restaurantName}
         </label>
       `).join('');
@@ -1152,11 +1166,17 @@
 
     function filterByOwnership(type) {
       document.querySelectorAll('.location-checkbox').forEach(cb => {
-        cb.checked = (type === 'all') || (cb.dataset.ownership === type);
+        if (type === 'all') {
+          cb.checked = true;
+        } else if (type === 'Comping') {
+          cb.checked = cb.dataset.comping === 'true';
+        } else {
+          cb.checked = cb.dataset.ownership === type;
+        }
       });
       document.getElementById('selectAllLocations').checked = (type === 'all');
       updateLocationCount();
-      ['all', 'Company', 'Franchise'].forEach(t => {
+      ['all', 'Company', 'Franchise', 'Comping'].forEach(t => {
         const btn = document.getElementById(`ownFilter_${t}`);
         if (!btn) return;
         const active = t === type;

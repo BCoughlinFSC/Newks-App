@@ -1,0 +1,454 @@
+{
+  "stores": [
+    {
+      "name": "Southaven MS (Goodman Ave)",
+      "restaurant_id": "1002",
+      "store_guid": "1f1dcbf7-825a-4cb0-9289-0dfed05eedb7"
+    },
+    {
+      "name": "Collierville TN",
+      "restaurant_id": "1006",
+      "store_guid": "bb6fedb9-dd3b-4541-9f60-b77198f6d67e"
+    },
+    {
+      "name": "Cypress TX",
+      "restaurant_id": "1007",
+      "store_guid": "3340a83a-6fc6-4542-962b-d4f873437099"
+    },
+    {
+      "name": "Shreveport LA",
+      "restaurant_id": "1021",
+      "store_guid": "1970cf05-2866-4ea4-a4ac-266b36816fce"
+    },
+    {
+      "name": "Austin TX (Arboretum)",
+      "restaurant_id": "1027",
+      "store_guid": "0b30cc76-c644-4b63-bec8-bf9ffa199377"
+    },
+    {
+      "name": "College Station TX",
+      "restaurant_id": "1031",
+      "store_guid": "54c7fd7a-0522-40c9-9f59-af3f98f72cec"
+    },
+    {
+      "name": "Memphis TN (Poplar)",
+      "restaurant_id": "1032",
+      "store_guid": "18dca8e0-5a1d-4a69-951e-e124cf1266d1"
+    },
+    {
+      "name": "Waco TX",
+      "restaurant_id": "1033",
+      "store_guid": "1f8d20e0-dc30-471e-9096-c8dfa4295e9d"
+    },
+    {
+      "name": "Hot Springs AR",
+      "restaurant_id": "1042",
+      "store_guid": "347e7817-21da-472a-b678-40f3790e6a1a"
+    },
+    {
+      "name": "Atlanta GA (Brookhaven)",
+      "restaurant_id": "1043",
+      "store_guid": "3fd6f4d3-4a8d-497a-98d1-c4fe8103044f"
+    },
+    {
+      "name": "Newnan GA",
+      "restaurant_id": "1046",
+      "store_guid": "005ed493-b309-4c54-a50d-75d47383ad9b"
+    },
+    {
+      "name": "Bossier City LA",
+      "restaurant_id": "1048",
+      "store_guid": "ee7af43e-a9e1-412e-90fb-9b9880d3fa0c"
+    },
+    {
+      "name": "Little Rock AR (S. University)",
+      "restaurant_id": "1069",
+      "store_guid": "adc6b102-adf8-4fa8-ba06-7e3916eaad3a"
+    },
+    {
+      "name": "Fayetteville AR",
+      "restaurant_id": "1073",
+      "store_guid": "577ac58c-9834-4c4e-a6b9-8d0e8266e18d"
+    },
+    {
+      "name": "Houston TX (Bunker Hill)",
+      "restaurant_id": "1085",
+      "store_guid": "b42b1def-510f-42b1-a0c4-2947fda858a8"
+    },
+    {
+      "name": "Atlanta GA (Perimeter Mall)",
+      "restaurant_id": "1088",
+      "store_guid": "a0b2a3c5-74fc-4ad1-a711-6d8a64be3007"
+    },
+    {
+      "name": "Kennesaw GA",
+      "restaurant_id": "1090",
+      "store_guid": "88f6c21f-1f05-41f0-8dc9-56ee6a7a2205"
+    },
+    {
+      "name": "Rogers AR (Pinnacle)",
+      "restaurant_id": "1120",
+      "store_guid": "e1c1e1ee-c2b1-47fa-bf42-95de0d7fa9b2"
+    },
+    {
+      "name": "Jonesboro AR (East Highland)",
+      "restaurant_id": "1127",
+      "store_guid": "15f1aaf8-a6c3-4354-bad6-63785961fd71"
+    },
+    {
+      "name": "Canton GA (Canton Cumming Hwy)",
+      "restaurant_id": "1129",
+      "store_guid": "70ba606a-bb0a-445d-818f-8d30260e9c57"
+    },
+    {
+      "name": "Lone Tree CO (Lincoln Commons)",
+      "restaurant_id": "1133",
+      "store_guid": "a70f7d7c-827a-44af-9dab-4e7d9c9d976e"
+    },
+    {
+      "name": "Smyrna GA",
+      "restaurant_id": "1139",
+      "store_guid": "47b4ea54-2c25-4f40-9f1d-9b2f4e25708e"
+    },
+    {
+      "name": "Frisco TX (Near Hall Office Park and Frisco Star)",
+      "restaurant_id": "1148",
+      "store_guid": "3add7aff-d2fc-4ff7-8c1d-2bf86d5c7aca"
+    },
+    {
+      "name": "Fort Worth TX (Champions Center)",
+      "restaurant_id": "1166",
+      "store_guid": "c78ed07c-1b80-4416-878c-2308862fbe50"
+    },
+    {
+      "name": "Peachtree City GA (The Overlook)",
+      "restaurant_id": "1172",
+      "store_guid": "6c4c987c-4e1d-4d47-93ab-fc9782bb9a3c"
+    },
+    {
+      "name": "Conway AR (Lewis Crossing)",
+      "restaurant_id": "1175",
+      "store_guid": "e54f0079-5c7c-44e1-a054-ced2ebbff036"
+    },
+    {
+      "name": "Tahlequah OK",
+      "restaurant_id": "1178",
+      "store_guid": "494119f6-f7d1-4304-8a62-63303aa742a1"
+    },
+    {
+      "name": "Texarkana TX (S Cowhorn Creek)",
+      "restaurant_id": "1179",
+      "store_guid": "183e438f-9915-456d-a926-0b26d2c0d381"
+    },
+    {
+      "name": "San Angelo TX",
+      "restaurant_id": "1180",
+      "store_guid": "48c02d33-a0a2-4f3d-9112-4fe11144c79d"
+    },
+    {
+      "name": "Athens GA (Epps Bridge Pkwy)",
+      "restaurant_id": "1182",
+      "store_guid": "ae2c3942-483a-45d2-a775-74edfa3fd4ee"
+    },
+    {
+      "name": "Benton AR",
+      "restaurant_id": "1184",
+      "store_guid": "49e583cc-3bec-4259-9901-970c63decfae"
+    },
+    {
+      "name": "Athens GA (Baxter Street)",
+      "restaurant_id": "1187",
+      "store_guid": "61cf23aa-ecb0-4c87-9bc1-9adb271a6f89"
+    },
+    {
+      "name": "Fort Smith AR",
+      "restaurant_id": "1189",
+      "store_guid": "63b9d37d-a0b0-4fbb-9de4-cc133d15acbc"
+    },
+    {
+      "name": "Fort Collins CO",
+      "restaurant_id": "1190",
+      "store_guid": "f69d5d97-1e66-40f4-a0da-316083193c46"
+    },
+    {
+      "name": "Flowood MS",
+      "restaurant_id": "1003",
+      "store_guid": "d93f2ed0-12b9-42c7-9b77-3ac92e6415fd"
+    },
+    {
+      "name": "Clinton MS",
+      "restaurant_id": "1009",
+      "store_guid": "b714f540-553e-4bef-9fe6-28f21e70770e"
+    },
+    {
+      "name": "Jackson MS",
+      "restaurant_id": "1011",
+      "store_guid": "0ed74899-f247-4d4f-9b60-84a7b3c50f60"
+    },
+    {
+      "name": "Ridgeland MS (Lake Harbour)",
+      "restaurant_id": "1014",
+      "store_guid": "00a73b16-9303-4e59-b248-bc320ffc4342"
+    },
+    {
+      "name": "Ridgeland MS (Township)",
+      "restaurant_id": "1040",
+      "store_guid": "b0a73c6b-b1cb-4baf-98cd-a8031ebf4a49"
+    },
+    {
+      "name": "Vicksburg MS",
+      "restaurant_id": "1060",
+      "store_guid": "694ce676-4fca-44c0-ba3d-409c6900ad9d"
+    },
+    {
+      "name": "Baton Rouge LA (Corporate)",
+      "restaurant_id": "1087",
+      "store_guid": "9052f94f-59c5-4265-999b-575d4fe41310"
+    },
+    {
+      "name": "Mobile AL (McGowin Park)",
+      "restaurant_id": "1099",
+      "store_guid": "005d4f3b-715e-4b77-88e8-09c2d1ed3a89"
+    },
+    {
+      "name": "Mobile AL (Westgate Pavilion)",
+      "restaurant_id": "1104",
+      "store_guid": "b52c8d0f-81fd-4c99-bd10-6fa901348ace"
+    },
+    {
+      "name": "Summerville SC",
+      "restaurant_id": "1061",
+      "store_guid": "f05b840b-b9c7-4c17-8ba7-bc1bb2884aed"
+    },
+    {
+      "name": "Chattanooga TN",
+      "restaurant_id": "1176",
+      "store_guid": "da88e78a-3f47-4baf-ba76-3e5a7e925d6c"
+    },
+    {
+      "name": "Tuscaloosa AL",
+      "restaurant_id": "1004",
+      "store_guid": "d7ab920e-b4bc-4245-97cb-b749db37dccd"
+    },
+    {
+      "name": "Hattiesburg MS (Hardy St)",
+      "restaurant_id": "1005",
+      "store_guid": "c65f8836-4a00-45ce-a861-a3a1ddff34b3"
+    },
+    {
+      "name": "Birmingham AL (Downtown)",
+      "restaurant_id": "1008",
+      "store_guid": "6863fa94-0d1e-4bfe-91dd-c0f239797ad8"
+    },
+    {
+      "name": "Huntsville AL",
+      "restaurant_id": "1017",
+      "store_guid": "a368ce14-2147-48bd-aedd-9936c80245ac"
+    },
+    {
+      "name": "Brandon MS",
+      "restaurant_id": "1018",
+      "store_guid": "d9577cb4-2d5a-4b52-9de0-4043f2265b8a"
+    },
+    {
+      "name": "Tupelo MS",
+      "restaurant_id": "1020",
+      "store_guid": "afa120ac-647d-4bd7-8b83-b4d7112b96aa"
+    },
+    {
+      "name": "D`Iberville MS",
+      "restaurant_id": "1026",
+      "store_guid": "295f5b13-0ea3-4a32-9f25-399995c8724a"
+    },
+    {
+      "name": "Huntsville AL (Whitesburg)",
+      "restaurant_id": "1029",
+      "store_guid": "c793e331-e3fc-464c-87d1-03312e82535a"
+    },
+    {
+      "name": "Monroe LA",
+      "restaurant_id": "1035",
+      "store_guid": "6a776ceb-aac6-468a-9c27-9e99eeb0cd22"
+    },
+    {
+      "name": "Gulfport MS",
+      "restaurant_id": "1036",
+      "store_guid": "be38b1c3-89dd-43d7-86f0-611eb0333438"
+    },
+    {
+      "name": "Byram MS",
+      "restaurant_id": "1039",
+      "store_guid": "a7cccaa8-7c1c-4f46-b76f-7987e6e3cc2f"
+    },
+    {
+      "name": "Starkville MS",
+      "restaurant_id": "1041",
+      "store_guid": "ce32dcb6-0cd6-48af-9651-1314544bfb3a"
+    },
+    {
+      "name": "Vestavia Hills AL",
+      "restaurant_id": "1044",
+      "store_guid": "5c82bb84-92b4-4907-8950-fc29582dbeb4"
+    },
+    {
+      "name": "Montgomery AL",
+      "restaurant_id": "1062",
+      "store_guid": "12da99f3-dbaa-47d4-aca3-d2781188d76e"
+    },
+    {
+      "name": "Waugh Chapel MD",
+      "restaurant_id": "1063",
+      "store_guid": "142874c0-307f-41de-9493-d9919fd11215"
+    },
+    {
+      "name": "Opelika AL",
+      "restaurant_id": "1068",
+      "store_guid": "3d4eb896-d47b-45f4-b0a5-81e78480b018"
+    },
+    {
+      "name": "Hoover AL",
+      "restaurant_id": "1072",
+      "store_guid": "8b421062-6a5e-43e4-aca8-3f379e198c5e"
+    },
+    {
+      "name": "West Monroe LA",
+      "restaurant_id": "1076",
+      "store_guid": "ac9a34be-24a0-4470-b4e6-be35140153a1"
+    },
+    {
+      "name": "Ruston LA",
+      "restaurant_id": "1079",
+      "store_guid": "9a508480-3c7e-4c44-b576-e0ecb6594f4e"
+    },
+    {
+      "name": "Norcross GA (Peachtree Corners)",
+      "restaurant_id": "1094",
+      "store_guid": "8d61082d-da30-40d8-915d-2a83dc5b0ec5"
+    },
+    {
+      "name": "Spanish Fort AL",
+      "restaurant_id": "1097",
+      "store_guid": "3a5bb077-3866-4d86-aa53-78b12a84bbf6"
+    },
+    {
+      "name": "Dothan AL",
+      "restaurant_id": "1131",
+      "store_guid": "6a6c7ca4-0ad5-4b2a-afc9-662e9f335ae7"
+    },
+    {
+      "name": "Meridian MS",
+      "restaurant_id": "1134",
+      "store_guid": "d604905c-aa66-46ad-b418-5ab4ee88e42f"
+    },
+    {
+      "name": "Gainesville FL (Butler North)",
+      "restaurant_id": "1144",
+      "store_guid": "62fd2c58-220b-48d0-88d3-37542ad59e81"
+    },
+    {
+      "name": "Tucker GA (Northlake Pkwy)",
+      "restaurant_id": "1147",
+      "store_guid": "9e8f983a-dcc8-404c-9b03-d2ff11e41365"
+    },
+    {
+      "name": "Albany GA (Westover Blvd)",
+      "restaurant_id": "1154",
+      "store_guid": "123f2fa1-08a5-484e-9b98-9b76095ffdba"
+    },
+    {
+      "name": "Columbus GA (Whittlesey Blvd)",
+      "restaurant_id": "1157",
+      "store_guid": "580e0c1b-5489-415f-a609-b52991bf1df0"
+    },
+    {
+      "name": "Cullman AL",
+      "restaurant_id": "1183",
+      "store_guid": "a8687e40-640e-4d86-bae5-2a684cb8c4c3"
+    },
+    {
+      "name": "Magee MS",
+      "restaurant_id": "1194",
+      "store_guid": "4f092f7c-70ec-4293-bda6-8b743eceff6c"
+    },
+    {
+      "name": "Tyler TX",
+      "restaurant_id": "1015",
+      "store_guid": "e36bbc2a-fde8-4ca1-bcc2-01f6ba8092bb"
+    },
+    {
+      "name": "Longview TX",
+      "restaurant_id": "1024",
+      "store_guid": "571e325a-0ab2-44ad-a6cc-db540ad6113b"
+    },
+    {
+      "name": "West Plano TX",
+      "restaurant_id": "1054",
+      "store_guid": "cdef84d3-5c6d-4c1f-b10d-d5798842be12"
+    },
+    {
+      "name": "Nacogdoches TX",
+      "restaurant_id": "1057",
+      "store_guid": "e8484606-af17-4cfc-bd0f-91b01ee60fd9"
+    },
+    {
+      "name": "Lufkin TX",
+      "restaurant_id": "1119",
+      "store_guid": "8b5f3e1b-5a92-4ca9-b893-40c36e5e4f62"
+    },
+    {
+      "name": "Oxford MS (University)",
+      "restaurant_id": "1001",
+      "store_guid": "a1e17ab4-c5a4-426f-b211-8f297e0db88c"
+    },
+    {
+      "name": "Oxford MS (Galleria)",
+      "restaurant_id": "1016",
+      "store_guid": "18d3a03d-9c6a-40b5-a74c-2ce346e3d5ef"
+    },
+    {
+      "name": "Murfreesboro TN (Avenues)",
+      "restaurant_id": "1019",
+      "store_guid": "5e8b9e62-c74e-4a3b-ac90-8e3cdfc1171a"
+    },
+    {
+      "name": "Franklin TN (Cool Springs)",
+      "restaurant_id": "1034",
+      "store_guid": "38c5fc36-9554-426c-b433-6bea616b0a5f"
+    },
+    {
+      "name": "Murfreesboro TN (Northgate)",
+      "restaurant_id": "1118",
+      "store_guid": "25d48919-fad3-4329-9aac-d5d96515a2c2"
+    },
+    {
+      "name": "Panama City FL",
+      "restaurant_id": "1023",
+      "store_guid": "af1eefaf-9dc0-4d82-8faa-b8cfc92d4b2a"
+    },
+    {
+      "name": "Tallahassee FL",
+      "restaurant_id": "1037",
+      "store_guid": "4353ef74-9651-4a2e-8379-51cef5b7a96a"
+    },
+    {
+      "name": "Jacksonville FL (The Avenues)",
+      "restaurant_id": "1051",
+      "store_guid": "b34e0c22-9e08-4358-aacf-4784729b4774"
+    },
+    {
+      "name": "Jacksonville FL (Parkway)",
+      "restaurant_id": "1056",
+      "store_guid": "c19b1d75-9037-400e-bd6d-341116070af2"
+    },
+    {
+      "name": "Pensacola FL (Cordova Mall)",
+      "restaurant_id": "1075",
+      "store_guid": "380abc44-7e1e-46b8-a922-78bf99017abe"
+    },
+    {
+      "name": "Jacksonville FL (Butler Point)",
+      "restaurant_id": "1130",
+      "store_guid": "f3c437d1-07c2-42bb-9b48-77e29d09c4fe"
+    }
+  ]
+}

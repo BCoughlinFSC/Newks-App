@@ -85,6 +85,10 @@ response.txt
 # toast_switchover_dates via import_switchover_dates.py)
 !backend/Toast Switchover Dates.xlsx
 
+# Exception: comp store list (Daily Sales Flash Report's "comp" group)
+# served by /api/locations/comping for the location-picker "All Comping" filter
+!backend/comp_stores.json
+
 # Exception: location config files (not DBs, safe to track)
 !backend/data/aloha/aloha_location_mapping.json
 !backend/data/fbc_location_mapping.json
