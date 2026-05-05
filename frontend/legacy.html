@@ -3615,6 +3615,158 @@
         return rows;
       }
       function round1(x) { return Math.round((x + Number.EPSILON) * 10) / 10; }
+      function round3(x) { return Math.round((x + Number.EPSILON) * 1000) / 1000; }
+
+      // ── Helper: build "Recipe Mix Summary" sheet (entrée-equiv breakdown) ──
+      // Mirrors the P12 FY24 reference layout. For each consolidated category
+      // (filtered to the 7 entrée-bearing categories), groups items by Recipe
+      // tag and splits the metrics into 3 column bands per recipe:
+      //
+      //    All Entrée Equivalents  (TY, LY, Mix Change)
+      //    Full Entrée  (EE = 1 only — raw qty)
+      //    Half Entrée  (EE = 0.5 only — raw qty)
+      //
+      // Math:
+      //    Full TY/LY  = sum(qty)         where ee == 1     (raw, not weighted)
+      //    Half TY/LY  = sum(qty)         where ee == 0.5
+      //    All EE TY/LY = sum(qty × ee)   across all items in the recipe
+      // The All EE column lets EE 12 catering items contribute (qty × 12) without
+      // forcing them into the Full/Half buckets.
+      // PSPD = qty / (numStores × numDays); Mix Change = PSPD TY − PSPD LY.
+      // LY uses each Aloha rollup's alohaQty once (deduped via groupItemsByAloha)
+      // and attributes it to the rollup's primary recipe + EE (taken from the
+      // highest-qty Toast item in the rollup with non-empty recipe / non-zero EE).
+      function buildFinanceSummaryByRecipeSheet(items, sortedDates, hasAloha) {
+        const numDays   = Math.max(sortedDates.length, 1);
+        const numStores = Math.max((currentResults?.pivotTable || []).length, 1);
+        const denom     = numDays * numStores;
+
+        // Only the 7 categories that have meaningful entrée values (matches
+        // the P12 reference). Note "Soups" has a double space — that's the
+        // actual Toast tag name, not a typo.
+        const ALLOWED_CATS = [
+          '* Consolidated Sandwiches',
+          '* Consolidated Salads',
+          '* Consolidated Pizza',
+          '* Consolidated Wraps',
+          '* Consolidated  Soups',
+          '* Consolidated Desserts',
+          '* Consolidated Pasta and Mac',
+        ];
+
+        const byCat = {};
+        items.forEach(item => {
+          const cat = item.itemTagName || '';
+          if (!ALLOWED_CATS.includes(cat)) return;
+          (byCat[cat] = byCat[cat] || []).push(item);
+        });
+
+        const rows = [];
+        const COLS = 10;
+        const padBlanks = n => Array(n).fill(blank());
+
+        // Sheet-level title + denominator
+        rows.push([c('Recipe Mix Summary  (Entrée Equivalents, Per Store Per Day)', S.blueL),
+                   ...padBlanks(COLS - 1)]);
+        rows.push([c(`Stores: ${numStores}    Days: ${numDays}    Denominator: ${denom}`, S.dLbld),
+                   ...padBlanks(COLS - 1)]);
+        rows.push(padBlanks(COLS));
+
+        const r = q => round1(q / denom);
+
+        ALLOWED_CATS.forEach((cat, catIdx) => {
+          const catItems = byCat[cat];
+          if (!catItems || catItems.length === 0) return;
+
+          // Roll up by Aloha so alohaQty (LY) isn't double-counted across the
+          // multiple Toast items in a single Aloha rollup.
+          const rolled = groupItemsByAloha(catItems, sortedDates);
+
+          // Determine each rollup's primary recipe + EE (highest-qty Toast
+          // item with a non-empty recipe / non-zero EE wins).
+          rolled.forEach(rl => {
+            const dets = (rl.toastDetails || []).slice()
+              .sort((a, b) => (b.qty || 0) - (a.qty || 0));
+            const recPick = dets.find(d => d.recipe) || dets[0] || {};
+            const eePick  = dets.find(d => d.entreeEquivTag) || dets[0] || {};
+            rl._recipe = recPick.recipe || '';
+            rl._ee     = Number(eePick.entreeEquivTag) || 0;
+          });
+
+          // Aggregate by recipe within the category. Skip rollups that have
+          // no recipe or no EE — those aren't entrées for this report.
+          const byRecipe = {};
+          rolled.forEach(rl => {
+            if (!rl._recipe || !rl._ee) return;
+            const buck = byRecipe[rl._recipe] = byRecipe[rl._recipe] || {
+              ty_full: 0, ty_half: 0, ty_all: 0,
+              ly_full: 0, ly_half: 0, ly_all: 0,
+            };
+            const tyQ = rl.totalQty || 0;
+            const lyQ = rl.alohaQty || 0;
+            if (rl._ee === 1) { buck.ty_full += tyQ; buck.ly_full += lyQ; }
+            if (rl._ee === 0.5) { buck.ty_half += tyQ; buck.ly_half += lyQ; }
+            buck.ty_all += tyQ * rl._ee;
+            buck.ly_all += lyQ * rl._ee;
+          });
+
+          if (Object.keys(byRecipe).length === 0) return;
+
+          if (catIdx > 0) rows.push(padBlanks(COLS));
+
+          // Group-header row (the 3 column bands)
+          rows.push([
+            c(cat, S.navyL),
+            c('All Entrée Equivalents', S.blueR), c('', S.blueR), c('', S.blueR),
+            c('Full Entrée',           S.greenR), c('', S.greenR), c('', S.greenR),
+            c('Half Entrée',          S.orangeR), c('', S.orangeR), c('', S.orangeR),
+          ]);
+          // Column-header row
+          rows.push([
+            c('Recipe', S.lBlueL),
+            c('PSPD TY', S.lBlueR),  c('PSPD LY', S.lBlueR),  c('Mix Change', S.lBlueR),
+            c('PSPD TY', S.lGreenR), c('PSPD LY', S.lGreenR), c('Mix Change', S.lGreenR),
+            c('PSPD TY', S.lOrangR), c('PSPD LY', S.lOrangR), c('Mix Change', S.lOrangR),
+          ]);
+
+          // Recipe rows, sorted by All EE TY desc
+          const sorted = Object.entries(byRecipe)
+            .sort((a, b) => (b[1].ty_all - a[1].ty_all));
+
+          let cTyAll = 0, cTyFull = 0, cTyHalf = 0;
+          let cLyAll = 0, cLyFull = 0, cLyHalf = 0;
+
+          sorted.forEach(([recipe, b], idx) => {
+            const alt = idx % 2 === 1;
+            const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+            const tA = r(b.ty_all),  tF = r(b.ty_full),  tH = r(b.ty_half);
+            const lA = r(b.ly_all),  lF = r(b.ly_full),  lH = r(b.ly_half);
+            const mA = round1(tA - lA), mF = round1(tF - lF), mH = round1(tH - lH);
+            const lyOrDash = (v, ok) => ok ? n(v, dR) : c('—', dR);
+            rows.push([
+              c(recipe, dL),
+              n(tA, dR), lyOrDash(lA, hasAloha), lyOrDash(mA, hasAloha),
+              n(tF, dR), lyOrDash(lF, hasAloha), lyOrDash(mF, hasAloha),
+              n(tH, dR), lyOrDash(lH, hasAloha), lyOrDash(mH, hasAloha),
+            ]);
+            cTyAll += b.ty_all; cTyFull += b.ty_full; cTyHalf += b.ty_half;
+            cLyAll += b.ly_all; cLyFull += b.ly_full; cLyHalf += b.ly_half;
+          });
+
+          // Category total row
+          const tA = r(cTyAll), tF = r(cTyFull), tH = r(cTyHalf);
+          const lA = r(cLyAll), lF = r(cLyFull), lH = r(cLyHalf);
+          const totDash = (v, ok) => ok ? n(v, S.dRbld) : c('—', S.dRbld);
+          rows.push([
+            c(cat.replace('* ', '') + ' TOTAL', S.dLbld),
+            n(tA, S.dRbld), totDash(lA, hasAloha), totDash(round1(tA - lA), hasAloha),
+            n(tF, S.dRbld), totDash(lF, hasAloha), totDash(round1(tF - lF), hasAloha),
+            n(tH, S.dRbld), totDash(lH, hasAloha), totDash(round1(tH - lH), hasAloha),
+          ]);
+        });
+
+        return rows;
+      }
 
       // ── Helper: build the Summary front page ───────────────────────────────
       // Listed first in every menu performance Excel. Pulls from currentReportConfig
@@ -3832,6 +3984,11 @@
           if (isMultiStore) {
             addWS(WB, buildFinanceSummarySheet(itemBreakdownDaily, sortedDates, hasAloha),
               'Finance Summary');
+            // Sheet 2b: Recipe Mix Summary — entrée-equiv split (Full / Half / All).
+            // Mirrors the P12 FY24 reference layout, restricted to the 7
+            // entrée-bearing consolidated categories.
+            addWS(WB, buildFinanceSummaryByRecipeSheet(itemBreakdownDaily, sortedDates, hasAloha),
+              'Recipe Mix Summary');
           }
 
           // Sheet 3: All Items (always) — flat table so Excel can sort/filter freely
