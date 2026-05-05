@@ -909,12 +909,14 @@ async def apply_yoy_toast_quantities(
         return result
 
     # Request the same-period prior-year menu report for the eligible stores.
+    # groupBy=["MENU_ITEM"] matches the rest of the menu pipeline (Toast's
+    # Analytics API rejects "restaurantId" as a groupBy on the menu endpoint).
     rows: List[Dict] = []
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             report_guid = await request_toast_report(
                 client, ly_start, ly_end, eligible, "menu",
-                ["restaurantId"],
+                ["MENU_ITEM"],
             )
             rows = await fetch_toast_report(client, report_guid, "menu") or []
     except HTTPException as exc:
