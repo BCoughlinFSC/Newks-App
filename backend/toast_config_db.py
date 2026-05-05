@@ -193,6 +193,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_plu_ranges_unique
 
 CREATE INDEX IF NOT EXISTS idx_plu_ranges_lookup
     ON plu_ranges(pos_type, range_start);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- toast_switchover_dates  —  per-store cutover from Aloha to Toast
+-- Used by the menu performance YoY pipeline to decide whether the Last Year
+-- (LY) data for a given store should come from Aloha (pre-switchover) or
+-- Toast (post-switchover). Populated from Toast Switchover Dates.xlsx via
+-- import_switchover_dates.py.
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS toast_switchover_dates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    store_guid      TEXT NOT NULL UNIQUE,
+    switchover_date TEXT NOT NULL  -- ISO yyyy-mm-dd
+);
+
+CREATE INDEX IF NOT EXISTS idx_switchover_lookup
+    ON toast_switchover_dates(store_guid);
 """
 
 
@@ -1170,3 +1186,80 @@ def derive_aloha_plu_from_toast(toast_plu) -> int:
             except ValueError:
                 continue
     return 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Toast switchover dates (per-store Aloha → Toast cutover)
+# ──────────────────────────────────────────────────────────────────────────────
+# Stored in Toast Switchover Dates.xlsx (in-repo, two columns: Store GUID,
+# Switchover Date). Populated into the toast_switchover_dates SQLite table by
+# import_switchover_dates.py. Used by the menu performance YoY pipeline to
+# decide whether each store's Last Year data should come from Aloha
+# (pre-switchover) or Toast (post-switchover).
+
+def import_switchover_dates_from_excel(
+    xlsx_path: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+    replace: bool = True,
+) -> int:
+    """
+    Read 'Toast Switchover Dates.xlsx' and load into toast_switchover_dates.
+
+    Expected sheet layout:
+      Row 0: header  (Store GUID | Switchover Date)
+      Row 1+: data
+
+    Switchover Date can be a Python date, datetime, or ISO yyyy-mm-dd string.
+    Empty rows are skipped. Returns number of rows inserted.
+    """
+    initialize_db(db_path)
+    df = pd.read_excel(xlsx_path)
+    df = df.dropna(subset=["Store GUID", "Switchover Date"])
+
+    rows = []
+    for _, r in df.iterrows():
+        guid = str(r["Store GUID"]).strip()
+        raw  = r["Switchover Date"]
+        # Coerce to ISO yyyy-mm-dd
+        try:
+            if hasattr(raw, "strftime"):
+                iso = raw.strftime("%Y-%m-%d")
+            else:
+                iso = str(raw).strip()[:10]
+            # Validate
+            import datetime as _dt
+            _dt.date.fromisoformat(iso)
+        except Exception:
+            logger.warning(f"Skipping switchover row with bad date: {guid} {raw!r}")
+            continue
+        if guid:
+            rows.append((guid, iso))
+
+    with get_connection(db_path) as conn:
+        if replace:
+            conn.execute("DELETE FROM toast_switchover_dates")
+        conn.executemany(
+            """INSERT OR REPLACE INTO toast_switchover_dates
+               (store_guid, switchover_date) VALUES (?, ?)""",
+            rows,
+        )
+    logger.info(f"Imported {len(rows)} switchover dates from {xlsx_path}")
+    return len(rows)
+
+
+def get_switchover_date_map(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, str]:
+    """
+    Return {store_guid: 'YYYY-MM-DD'} of every populated switchover date.
+    Empty dict when DB unavailable or table empty — both equivalent to "no
+    store has cut over yet" for the LY pipeline's purposes.
+    """
+    if not os.path.exists(db_path):
+        return {}
+    try:
+        with get_connection(db_path) as conn:
+            return {g: d for g, d in conn.execute(
+                "SELECT store_guid, switchover_date FROM toast_switchover_dates"
+            )}
+    except Exception as exc:
+        logger.warning(f"Failed to load switchover dates: {exc}")
+        return {}

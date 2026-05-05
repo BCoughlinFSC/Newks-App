@@ -81,6 +81,10 @@ response.txt
 # Exception: PLU range source file (loaded into plu_ranges via import_plu_ranges.py)
 !backend/Item PLU Ranges.xlsx
 
+# Exception: per-store Aloha→Toast switchover dates (loaded into
+# toast_switchover_dates via import_switchover_dates.py)
+!backend/Toast Switchover Dates.xlsx
+
 # Exception: location config files (not DBs, safe to track)
 !backend/data/aloha/aloha_location_mapping.json
 !backend/data/fbc_location_mapping.json

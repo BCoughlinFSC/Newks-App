@@ -1873,6 +1873,7 @@
           grouped.set(key, {
             menuItemGuid: item.menuItemGuid, menuItemName: alohaName || item.menuItemName,
             totalQty: 0, daily: {}, alohaQty: item.alohaQty || 0,
+            lyToastQty: item.lyToastQty || 0,
             alohaItemName: alohaName || undefined, alohaDetails: item.alohaDetails || [], toastDetails: []
           });
         }
@@ -1898,6 +1899,7 @@
           dateColumns.forEach(d => { entry.daily[d] = (entry.daily[d]||0) + (item.daily?.[d]||0); });
         }
         if (item.alohaQty) entry.alohaQty = item.alohaQty;
+        if (item.lyToastQty) entry.lyToastQty = item.lyToastQty;
         if (!entry.alohaDetails?.length) entry.alohaDetails = item.alohaDetails||[];
       });
       return Array.from(grouped.values());
@@ -3440,19 +3442,21 @@
       // Columns:
       //   Consolidated Category | Item Classification | Item Subclass |
       //   Menu Item Name | Qty Sold |
-      //   [Aloha Item, Aloha Qty]  ← only when YoY is on  |
+      //   [Aloha Item, Aloha Qty, LY Toast Qty]  ← only when YoY is on  |
       //   EE Tag | Guest Count Tag | Recipe Tag | PLU |
       //   [daily date columns]     ← only when includeDaily is true
       // Item Classification = Aloha-style range name (e.g. "Soups").
       // Item Subclass       = Toast-style range name (e.g. "Entrée Bowl Soup").
       // Recipe Tag          = recipe identifier from the MLI PLU attribute map
       //                       (e.g. "ChickenSalad", "SoupLoadedPotato").
+      // LY Toast Qty        = Last Year qty from Toast (post-Aloha-switchover
+      //                       stores only). Blank for stores still pre-switchover.
       // Sort: Consolidated Category A→Z, then Qty descending within category.
       // Aloha Qty handling (when collapseAloha is on): the qty is the rollup's
       // total (multiple Toast items roll into one Aloha item), so to keep an
       // Excel SUM correct it's shown only on the FIRST Toast row for each
       // Aloha rollup; subsequent rows in the same rollup leave it blank but
-      // still show the Aloha Item Name for filtering.
+      // still show the Aloha Item Name for filtering. Same applies to LY Toast Qty.
       function buildAllItemsFlatSheet(items, sortedDates, hasAloha, collapseAloha, includeDaily) {
         const dateCols = includeDaily ? sortedDates : [];
         const includeZero = !!currentReportConfig?.includeZeroSales;
@@ -3488,6 +3492,7 @@
             totalQty:           item.totalQty || 0,
             alohaItemName:      alohaName,
             alohaQty:           item.alohaQty || 0,
+            lyToastQty:         item.lyToastQty || 0,
             entreeEquivTag:     item.entreeEquivTag || 0,
             guestCountTag:      item.guestCountTag || 0,
             recipe:             item.recipe || '',
@@ -3516,6 +3521,7 @@
         if (hasAloha) {
           hdr.push(c('Aloha Item',     S.amberL));
           hdr.push(c('Aloha Qty',      S.amberR));
+          hdr.push(c('LY Toast Qty',   S.amberR));
         }
         hdr.push(c('EE Tag',           S.blueR));
         hdr.push(c('Guest Count Tag',  S.blueR));
@@ -3537,9 +3543,12 @@
           ];
           if (hasAloha) {
             row.push(c(r.alohaItemName || '', alt ? S.dLalt : S.dL));
-            // Show Aloha Qty only on the first Toast row of each rollup so
-            // SUMing the column doesn't double-count.
-            row.push(r._firstOfRollup ? numCell(r.alohaQty, aR) : c('', aR));
+            // Show Aloha Qty / LY Toast Qty only on the first Toast row of
+            // each rollup so SUMing the column doesn't double-count. Both
+            // values stay blank for non-first rows but the Aloha Item Name
+            // still fills so users can filter by rollup.
+            row.push(r._firstOfRollup ? numCell(r.alohaQty,   aR) : c('', aR));
+            row.push(r._firstOfRollup ? numCell(r.lyToastQty, aR) : c('', aR));
           }
           // Missing tag values get a light-red flag so audit gaps stand out.
           const eePresent = r.entreeEquivTag != null && Number(r.entreeEquivTag) > 0;
@@ -3703,7 +3712,12 @@
               ly_full: 0, ly_half: 0, ly_all: 0,
             };
             const tyQ = rl.totalQty || 0;
-            const lyQ = rl.alohaQty || 0;
+            // LY source: prefer Toast (post-switchover) over Aloha when present.
+            // Per-rollup decision so as switchover dates roll in, the LY column
+            // for those stores' items automatically flips source.
+            const lyQ = (rl.lyToastQty && rl.lyToastQty > 0)
+              ? rl.lyToastQty
+              : (rl.alohaQty || 0);
             if (rl._ee === 1) { buck.ty_full += tyQ; buck.ly_full += lyQ; }
             if (rl._ee === 0.5) { buck.ty_half += tyQ; buck.ly_half += lyQ; }
             buck.ty_all += tyQ * rl._ee;
