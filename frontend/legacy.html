@@ -3279,7 +3279,7 @@
                     start_date:    pickStart,
                     end_date:      pickEnd,
                     restaurantIds: cfg.restaurantIds || [],
-                    variant:       'pos',
+                    variant:       'all',   // POS + OLO combined
                     report_type:   t.key,
                   }),
                 });
@@ -3872,7 +3872,7 @@
       // Sourced from /api/reports/pick3 (variant=pos) — see confirmAndExport.
       function buildPickPairingSheet(block, sheetName) {
         const rows = [];
-        rows.push([c(`${sheetName}  (POS variant — chain-wide totals)`, S.blueL),
+        rows.push([c(`${sheetName}  (POS + OLO combined — chain-wide totals)`, S.blueL),
                    c('', S.blueR), c('', S.blueR)]);
 
         if (block.error) {

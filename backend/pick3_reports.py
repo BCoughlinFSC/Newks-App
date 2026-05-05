@@ -615,7 +615,10 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             if start_date > end_date:
                 raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
 
-            variant = _normalize_variant(request.variant)
+            # Accept "all" so callers can pull POS + OLO totals in a single
+            # request — same Toast API cost as either variant alone, just a
+            # looser filter. Defaults to "pos" for backward compatibility.
+            variant = _normalize_variant(request.variant, ("pos", "olo", "all"))
             days_diff = (end_date - start_date).days + 1
 
             async def _fetch_menu_chunked(group_by: List[str]) -> List[Dict]:
@@ -642,10 +645,14 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             for row in all_menu_rows:
                 name  = (row.get("menuItemName") or "").strip()
                 mguid = (row.get("menuItemGuid") or "").strip().lower()
-                if variant == "olo":
-                    is_p3 = cfg["olo_parent"] in name or (olo_guid_lower and mguid == olo_guid_lower)
+                is_pos = cfg["pos_parent"] in name
+                is_olo = cfg["olo_parent"] in name or (olo_guid_lower and mguid == olo_guid_lower)
+                if variant == "all":
+                    is_p3 = is_pos or is_olo
+                elif variant == "olo":
+                    is_p3 = is_olo
                 else:
-                    is_p3 = cfg["pos_parent"] in name
+                    is_p3 = is_pos
                 if not is_p3:
                     continue
                 rguid = row.get("restaurantGuid", "")
@@ -677,20 +684,29 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             for row in all_item_mod_rows:
                 parent_name = (row.get("menuItemName") or "").strip()
                 parent_guid = (row.get("menuItemGuid") or "").strip().lower()
-                if variant == "olo":
-                    is_p3 = cfg["olo_parent"] in parent_name or (olo_guid_lower and parent_guid == olo_guid_lower)
+                p_is_pos = cfg["pos_parent"] in parent_name
+                p_is_olo = cfg["olo_parent"] in parent_name or (olo_guid_lower and parent_guid == olo_guid_lower)
+                if variant == "all":
+                    is_p3 = p_is_pos or p_is_olo
+                elif variant == "olo":
+                    is_p3 = p_is_olo
                 else:
-                    is_p3 = cfg["pos_parent"] in parent_name
+                    is_p3 = p_is_pos
                 if not is_p3:
                     continue
                 mod_name = _normalize_modifier_name((row.get("modifierName") or row.get("modifierOptionName") or "").strip())
                 if not mod_name or "(Side)" in mod_name or _is_pick3_premod_name(mod_name):
                     continue
-                if variant == "olo":
-                    if not _is_olo_pairing_choice(mod_name):
+                m_is_olo = _is_olo_pairing_choice(mod_name)
+                m_is_pos = "(POS Pairing Choice)" in mod_name
+                if variant == "all":
+                    if not (m_is_pos or m_is_olo):
+                        continue
+                elif variant == "olo":
+                    if not m_is_olo:
                         continue
                 else:
-                    if "(POS Pairing Choice)" not in mod_name:
+                    if not m_is_pos:
                         continue
                 rguid = row.get("restaurantGuid", "")
                 bdate = row.get("businessDate", "")
