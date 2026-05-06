@@ -3912,21 +3912,60 @@
           return rows;
         }
         const data = block.data || {};
-        const vb = data.variantBreakdown;
-        if (!vb) {
-          rows.push([c('No variant breakdown in response — backend may not support variant=all yet.',
-                       S.warnL), ...Array(COLS - 1).fill(blank())]);
-          return rows;
-        }
+        const drillDown = data.drillDown || [];
+
+        // Side-split fallback: when the backend's variantBreakdown is missing
+        // or has empty arrays for a side, derive POS/OLO totals from drillDown
+        // by classifying each item via its name suffix. This is the same data
+        // the standalone Pick 3 page consumes, so it's known-good.
+        const OLO_PAIRING_RE = /OLO Pairing Cho(?:ice|cie)/i;
+        const itemSide = name => {
+          const s = String(name || '');
+          if (s.includes('(POS Pairing Choice)')) return 'pos';      // selection POS
+          if (OLO_PAIRING_RE.test(s)) return 'olo';                  // selection OLO
+          // For parent items: a Pick 3/Pick 2/Full Pairing entrée vs OLO parent.
+          // Names like "Pick 3 (OLO)" / "Half Pairing (OLO)" / "Full Value Pairings (OLO)"
+          // are explicitly OLO; everything else with the entrée suffix is POS.
+          if (/\(OLO\)/i.test(s)) return 'olo';
+          return 'pos';
+        };
+        const aggregateBySide = (rows, getList) => {
+          const pos = new Map(), olo = new Map();
+          rows.forEach(d => (getList(d) || []).forEach(it => {
+            const m = itemSide(it.itemName) === 'olo' ? olo : pos;
+            m.set(it.itemName, (m.get(it.itemName) || 0) + Number(it.quantity || 0));
+          }));
+          const toList = m => [...m.entries()].sort((a, b) => b[1] - a[1])
+            .map(([itemName, quantity]) => ({ itemName, quantity }));
+          return { pos: toList(pos), olo: toList(olo) };
+        };
+
+        // Build per-side sets, preferring backend variantBreakdown when it has
+        // data for that side, falling back to drillDown-derived split.
+        const fbParents = aggregateBySide(drillDown, d => d.parentItems);
+        const fbSels    = aggregateBySide(drillDown, d => d.selections);
+        const vb        = data.variantBreakdown || {};
+        const sides = {
+          pos: {
+            parentItems: (vb.pos?.parentItems?.length ? vb.pos.parentItems : fbParents.pos),
+            selections:  (vb.pos?.selections?.length  ? vb.pos.selections  : fbSels.pos),
+            total:       (vb.pos?.total ?? fbParents.pos.reduce((s, x) => s + Number(x.quantity || 0), 0)),
+          },
+          olo: {
+            parentItems: (vb.olo?.parentItems?.length ? vb.olo.parentItems : fbParents.olo),
+            selections:  (vb.olo?.selections?.length  ? vb.olo.selections  : fbSels.olo),
+            total:       (vb.olo?.total ?? fbParents.olo.reduce((s, x) => s + Number(x.quantity || 0), 0)),
+          },
+        };
 
         // Stores / Days from the drillDown (same regardless of variant).
         const stores = new Set();
         const dates = new Set();
-        (data.drillDown || []).forEach(d => {
+        drillDown.forEach(d => {
           if (d.restaurantGuid) stores.add(d.restaurantGuid);
           if (d.businessDate) dates.add(d.businessDate);
         });
-        const grandTotal = (vb.pos?.total || 0) + (vb.olo?.total || 0);
+        const grandTotal = (sides.pos.total || 0) + (sides.olo.total || 0);
         rows.push([c(`Stores: ${stores.size}    Days: ${dates.size}    Total ${sheetName}: ${grandTotal.toLocaleString()}`,
                      S.dLbld), ...Array(COLS - 1).fill(blank())]);
         rows.push(blanks());
@@ -3981,9 +4020,9 @@
           ]);
         };
 
-        renderVariant('POS', vb.pos, S.blueL,  S.blueR,  S.lBlueL,  S.lBlueR);
+        renderVariant('POS', sides.pos, S.blueL,  S.blueR,  S.lBlueL,  S.lBlueR);
         rows.push(blanks());
-        renderVariant('OLO', vb.olo, S.orangeL, S.orangeR, S.lOrangL, S.lOrangR);
+        renderVariant('OLO', sides.olo, S.orangeL, S.orangeR, S.lOrangL, S.lOrangR);
 
         return rows;
       }
