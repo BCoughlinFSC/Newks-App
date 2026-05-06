@@ -622,11 +622,48 @@
           <label for="authPassword">Password *</label>
           <input type="password" id="authPassword" required placeholder="Enter your password" />
         </div>
+        <div style="text-align: right; margin-top: -0.5rem; margin-bottom: 0.5rem;">
+          <a href="#" id="forgotPasswordLink" style="font-size: 0.85rem; color: #C41E3A; text-decoration: none;">Forgot password?</a>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" id="cancelAuthBtn">Cancel</button>
           <button type="submit" class="btn-primary" id="authSubmitBtn">Login</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Forgot Password Modal -->
+  <div id="forgotPasswordModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Reset Password</h2>
+        <button class="modal-close" id="closeForgotModal">&times;</button>
+      </div>
+      <div id="forgotInitialState">
+        <p style="color: #6B7280; font-size: 0.9rem; line-height: 1.5; margin-bottom: 1.25rem;">
+          Enter your email address and we'll send you a link to reset your password.
+        </p>
+        <form id="forgotPasswordForm">
+          <div class="modal-form-group">
+            <label for="forgotEmail">Email *</label>
+            <input type="email" id="forgotEmail" required placeholder="your.email@example.com" />
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="cancelForgotBtn">Cancel</button>
+            <button type="submit" class="btn-primary" id="forgotSubmitBtn">Send Reset Link</button>
+          </div>
+        </form>
+      </div>
+      <div id="forgotSuccessState" style="display: none;">
+        <div style="background: #D1FAE5; color: #065F46; border: 1px solid #6EE7B7; padding: 1rem; border-radius: 8px; font-size: 0.95rem; line-height: 1.5;">
+          <strong>Check your email.</strong><br>
+          If an account exists for that address, we've sent a password reset link. The link expires in 1 hour.
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="forgotDoneBtn">Back to Login</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1084,6 +1121,58 @@
       }
     }
 
+    async function handleForgotPassword(e) {
+      e.preventDefault();
+      const email = document.getElementById('forgotEmail').value.trim();
+      if (!email) {
+        alert('Please enter your email address');
+        return;
+      }
+
+      const submitBtn = document.getElementById('forgotSubmitBtn');
+      const originalText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Sending...';
+
+      try {
+        const resp = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ email })
+        });
+
+        if (!resp.ok) {
+          const error = await resp.json().catch(() => ({detail: resp.statusText}));
+          throw new Error(error.detail || 'Failed to send reset link');
+        }
+
+        // Always show success state regardless — the API doesn't reveal whether the email exists
+        document.getElementById('forgotInitialState').style.display = 'none';
+        document.getElementById('forgotSuccessState').style.display = 'block';
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      }
+    }
+
+    function openForgotPasswordModal() {
+      document.getElementById('authModal')?.classList.add('hidden');
+      document.getElementById('forgotPasswordForm')?.reset();
+      document.getElementById('forgotInitialState').style.display = 'block';
+      document.getElementById('forgotSuccessState').style.display = 'none';
+      document.getElementById('forgotPasswordModal')?.classList.remove('hidden');
+    }
+
+    function closeForgotPasswordModal() {
+      document.getElementById('forgotPasswordModal')?.classList.add('hidden');
+      // Re-show login modal if user is not authenticated
+      if (!authToken) {
+        document.getElementById('authModal')?.classList.remove('hidden');
+      }
+    }
+
     function setupEventListeners() {
       const on = (id, evt, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); };
 
@@ -1091,6 +1180,13 @@
       on('authForm', 'submit', handleAuth);
       on('closeAuthModal', 'click', () => document.getElementById('authModal')?.classList.add('hidden'));
       on('cancelAuthBtn', 'click', () => document.getElementById('authModal')?.classList.add('hidden'));
+
+      // Forgot password
+      on('forgotPasswordLink', 'click', (e) => { e.preventDefault(); openForgotPasswordModal(); });
+      on('forgotPasswordForm', 'submit', handleForgotPassword);
+      on('closeForgotModal', 'click', closeForgotPasswordModal);
+      on('cancelForgotBtn', 'click', closeForgotPasswordModal);
+      on('forgotDoneBtn', 'click', closeForgotPasswordModal);
 
       // Logout (from sidebar)
       on('userLogoutBtn', 'click', logout);

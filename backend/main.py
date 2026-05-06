@@ -55,7 +55,7 @@ from olo_client import (
     aggregate_orders_placed_ahead,
     filter_batches_by_date_range,
 )
-from email_service import send_invite_email
+from email_service import send_invite_email, send_password_reset_email
 import toast_puller_db as repoll_db
 from toast_puller import fetch_orders_with_retry, parse_orders
 
@@ -1347,6 +1347,7 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-producti
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24 * 7  # 7 days
 INVITE_EXPIRY_HOURS = 72  # Invite link valid for 72 hours
+PASSWORD_RESET_EXPIRY_HOURS = 1  # Password reset link valid for 1 hour
 
 # Base URL for building invite links (e.g. https://reports.newks.com)
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
@@ -7911,6 +7912,100 @@ async def accept_invite(data: dict = Body(...)):
 
     logger.info(f"User {user_data['email']} accepted invite and set password")
     return {"message": "Account activated! You can now log in."}
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(data: dict = Body(...)):
+    """Request a password reset link. Public endpoint.
+
+    Always returns 200 regardless of whether the email exists, to avoid
+    leaking which addresses are registered.
+    """
+    email = (data.get("email") or "").strip().lower()
+    generic_response = {
+        "message": "If an account exists for that email, a password reset link has been sent."
+    }
+    if not email:
+        return generic_response
+
+    users = load_users()
+    target_uid = None
+    for uid, user_data in users.items():
+        if user_data.get("email", "").lower() == email:
+            target_uid = uid
+            break
+
+    if not target_uid:
+        logger.info(f"Password reset requested for unknown email: {email}")
+        return generic_response
+
+    user_data = users[target_uid]
+    if user_data.get("status") == "invited":
+        logger.info(f"Password reset requested for invited (not activated) user: {email}")
+        return generic_response
+
+    reset_token = str(uuid.uuid4())
+    reset_expiry = (datetime.now() + timedelta(hours=PASSWORD_RESET_EXPIRY_HOURS)).isoformat()
+    user_data["resetToken"] = reset_token
+    user_data["resetTokenExpiry"] = reset_expiry
+    users[target_uid] = user_data
+    save_users(users)
+
+    reset_url = f"{APP_BASE_URL}/reset-password.html?token={reset_token}"
+    email_sent = send_password_reset_email(user_data["email"], user_data["name"], reset_url)
+    if not email_sent:
+        logger.warning(f"Password reset token generated for {email} but email failed to send")
+    else:
+        logger.info(f"Password reset email sent to {email}")
+
+    return generic_response
+
+@app.get("/api/auth/reset-info")
+async def get_reset_info(token: str = Query(...)):
+    """Public endpoint — verifies a reset token and returns the user's name."""
+    users = load_users()
+    for uid, user_data in users.items():
+        if user_data.get("resetToken") == token:
+            expiry = user_data.get("resetTokenExpiry", "")
+            if expiry and datetime.fromisoformat(expiry) < datetime.now():
+                raise HTTPException(status_code=400, detail="This password reset link has expired. Please request a new one.")
+            return {"name": user_data["name"], "email": user_data["email"]}
+    raise HTTPException(status_code=404, detail="Invalid or expired password reset link")
+
+@app.post("/api/auth/reset-password")
+async def reset_password(data: dict = Body(...)):
+    """Reset a password using a token. Public endpoint. One-time use."""
+    token = data.get("token", "")
+    password = data.get("password", "")
+    if not token or not password:
+        raise HTTPException(status_code=400, detail="Token and password are required")
+
+    password = truncate_password_to_72_bytes(password)
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+
+    users = load_users()
+    target_uid = None
+    for uid, user_data in users.items():
+        if user_data.get("resetToken") == token:
+            target_uid = uid
+            break
+
+    if not target_uid:
+        raise HTTPException(status_code=404, detail="Invalid or expired password reset link")
+
+    user_data = users[target_uid]
+    expiry = user_data.get("resetTokenExpiry", "")
+    if expiry and datetime.fromisoformat(expiry) < datetime.now():
+        raise HTTPException(status_code=400, detail="This password reset link has expired. Please request a new one.")
+
+    user_data["password"] = hash_password(password)
+    user_data["resetToken"] = None
+    user_data["resetTokenExpiry"] = None
+    users[target_uid] = user_data
+    save_users(users)
+
+    logger.info(f"User {user_data['email']} reset their password")
+    return {"message": "Password reset successfully. You can now log in with your new password."}
 
 @app.get("/api/available-pages")
 async def get_available_pages():

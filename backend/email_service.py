@@ -86,3 +86,76 @@ def send_invite_email(to_email: str, user_name: str, invite_url: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to send invite email to {to_email}: {e}")
         return False
+
+
+def send_password_reset_email(to_email: str, user_name: str, reset_url: str) -> bool:
+    """Send a password reset email.
+
+    Returns True on success, False on failure (logs the error).
+    """
+    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+        logger.error("GMAIL_ADDRESS or GMAIL_APP_PASSWORD not configured — cannot send password reset email")
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Reset your Newk's Reporting password"
+    msg["From"] = f"Newk's Reports <{GMAIL_ADDRESS}>"
+    msg["To"] = to_email
+
+    plain = (
+        f"Hi {user_name},\n\n"
+        f"We received a request to reset your password for the Newk's Reporting Platform.\n\n"
+        f"Reset your password by visiting this link:\n{reset_url}\n\n"
+        f"This link expires in 1 hour. If you didn't request a password reset, you can safely ignore this email.\n\n"
+        f"— Newk's Reporting Team"
+    )
+
+    html = f"""\
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;">
+  <div style="max-width:520px;margin:2rem auto;background:#ffffff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
+    <!-- Header -->
+    <div style="background:#C41E3A;padding:1.5rem 2rem;text-align:center;">
+      <h1 style="margin:0;color:#ffffff;font-size:1.4rem;font-weight:700;">Newk's Reporting Platform</h1>
+    </div>
+    <!-- Body -->
+    <div style="padding:2rem;">
+      <h2 style="margin:0 0 0.5rem;color:#1E3A5F;font-size:1.15rem;">Hi {user_name},</h2>
+      <p style="color:#374151;font-size:0.95rem;line-height:1.6;">
+        We received a request to reset your password for the <strong>Newk's Reporting Platform</strong>.
+        Click the button below to choose a new password.
+      </p>
+      <div style="text-align:center;margin:1.75rem 0;">
+        <a href="{reset_url}"
+           style="display:inline-block;background:#C41E3A;color:#ffffff;text-decoration:none;
+                  padding:0.75rem 2rem;border-radius:8px;font-weight:700;font-size:1rem;">
+          Reset Your Password
+        </a>
+      </div>
+      <p style="color:#6B7280;font-size:0.85rem;line-height:1.5;">
+        This link expires in <strong>1 hour</strong>. If you didn't request a password reset,
+        you can safely ignore this email — your password won't change.
+      </p>
+      <p style="color:#9CA3AF;font-size:0.8rem;margin-top:1.5rem;border-top:1px solid #E5E7EB;padding-top:1rem;">
+        If the button doesn't work, copy and paste this URL into your browser:<br>
+        <a href="{reset_url}" style="color:#C41E3A;word-break:break-all;">{reset_url}</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>"""
+
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
+        logger.info(f"Password reset email sent to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send password reset email to {to_email}: {e}")
+        return False
