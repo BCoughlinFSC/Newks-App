@@ -2147,36 +2147,59 @@
       const totBg = '#1E3A5F';
 
       let html = '';
+      const multiLoc = byLocation.length > 1;
 
-      // ── Summary cards (the math) ──
-      html += `<tr><td colspan="7" style="padding:0;border:none;">
-        <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
-          <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
-            <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Tips</div>
-            <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmt$(summary.totalTips)}</div>
+      // ── Summary cards ──
+      // Per-location pool: each store's tips ÷ that store's hours = that store's rate.
+      // With multiple stores there's no single "Hourly Tip Rate" — show the totals only.
+      if (multiLoc) {
+        html += `<tr><td colspan="7" style="padding:0;border:none;">
+          <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Tips</div>
+              <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmt$(summary.totalTips)}</div>
+            </div>
+            <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Hours</div>
+              <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmtH(summary.totalHours)} hrs</div>
+            </div>
+            <div style="flex:1;min-width:220px;background:#ECFDF5;border:2px solid #10B981;border-radius:10px;padding:16px;text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Hourly Tip Rate</div>
+              <div style="font-size:18px;font-weight:600;color:#065F46;margin-top:8px;line-height:1.4;">Calculated per location</div>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;font-size:24px;font-weight:700;color:#9CA3AF;">&divide;</div>
-          <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
-            <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Hours</div>
-            <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmtH(summary.totalHours)} hrs</div>
+        </td></tr>`;
+      } else {
+        html += `<tr><td colspan="7" style="padding:0;border:none;">
+          <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Tips</div>
+              <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmt$(summary.totalTips)}</div>
+            </div>
+            <div style="display:flex;align-items:center;font-size:24px;font-weight:700;color:#9CA3AF;">&divide;</div>
+            <div style="flex:1;min-width:180px;background:${summaryBg};border:2px solid #3B82F6;border-radius:10px;padding:16px;text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Total Hours</div>
+              <div style="font-size:28px;font-weight:700;color:#1E40AF;margin-top:4px;">${fmtH(summary.totalHours)} hrs</div>
+            </div>
+            <div style="display:flex;align-items:center;font-size:24px;font-weight:700;color:#9CA3AF;">=</div>
+            <div style="flex:1;min-width:180px;background:#ECFDF5;border:2px solid #10B981;border-radius:10px;padding:16px;text-align:center;">
+              <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Hourly Tip Rate</div>
+              <div style="font-size:28px;font-weight:700;color:#065F46;margin-top:4px;">${fmt$(summary.hourlyRate)}/hr</div>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;font-size:24px;font-weight:700;color:#9CA3AF;">=</div>
-          <div style="flex:1;min-width:180px;background:#ECFDF5;border:2px solid #10B981;border-radius:10px;padding:16px;text-align:center;">
-            <div style="font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:1px;">Hourly Tip Rate</div>
-            <div style="font-size:28px;font-weight:700;color:#065F46;margin-top:4px;">${fmt$(summary.hourlyRate)}/hr</div>
-          </div>
-        </div>
-      </td></tr>`;
+        </td></tr>`;
+      }
 
       // ── Per-location summary (if multiple locations) ──
-      if (byLocation.length > 1) {
+      if (multiLoc) {
         html += `<tr><td colspan="8" style="padding:0 0 12px 0;border:none;">
           <div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:12px;">
-            <div style="font-size:12px;font-weight:600;color:#92400E;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Tips by Location</div>
+            <div style="font-size:12px;font-weight:600;color:#92400E;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Tip Pool by Location</div>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">`;
         for (const loc of byLocation) {
+          const rate = loc.hourlyRate || 0;
           html += `<span style="background:#fff;border:1px solid #D1D5DB;border-radius:6px;padding:4px 10px;font-size:13px;">
-            <strong>${loc.restaurantName}</strong>: ${fmt$(loc.totalTips)} tips, ${fmtH(loc.totalHours)} hrs
+            <strong>${loc.restaurantName}</strong>: ${fmt$(loc.totalTips)} tips &divide; ${fmtH(loc.totalHours)} hrs = <strong>${fmt$(rate)}/hr</strong>
           </span>`;
         }
         html += `</div></div></td></tr>`;
@@ -4469,10 +4492,8 @@
 
       // ── Tip Pool report — one Excel file per store ─────────────────────────
       } else if (currentResults && currentResults.tipPoolTable) {
-        const tpSummary  = currentResults.tipPoolSummary    || {};
         const tpRows     = currentResults.tipPoolTable      || [];
         const tpByLoc    = currentResults.tipPoolByLocation || [];
-        const hourlyRate = tpSummary.hourlyRate || 0;
 
         // Group employees by store
         const byStore = {};
@@ -4490,6 +4511,8 @@
           const storeWB = XLSX.utils.book_new();
           const emps    = byStore[storeName];
           const locData = tpByLoc.find(l => l.restaurantName === storeName) || {};
+          // Per-location pool rate — each store pays out exactly its own collected tips
+          const storeRate = locData.hourlyRate || 0;
 
           // ── Summary sheet ────────────────────────────────────────────────
           const storeSumRows = [
@@ -4498,7 +4521,7 @@
             [c('Location',    S.navyL), c(storeName,               S.dL)],
             [c('Total Tips',  S.navyL), n(locData.totalTips  || 0, S.navyR)],
             [c('Total Hours', S.navyL), n(locData.totalHours || 0, S.navyR)],
-            [c('Tip Rate/Hr', S.navyL), n(hourlyRate,              S.navyR)],
+            [c('Tip Rate/Hr', S.navyL), n(storeRate,               S.navyR)],
           ];
           addWS(storeWB, storeSumRows, 'Summary');
 
@@ -4524,7 +4547,7 @@
               c(emp.employeeName      || '', dL), c(emp.jobTitle  || '', dL),
               n(emp.regularHours  || 0,  dR), n(emp.overtimeHours || 0,  dR),
               emp.payRate != null ? n(emp.payRate, dR) : c('—', dR),
-              n(hourlyRate,              dR), n(emp.tipShare       || 0,  dR),
+              n(storeRate,               dR), n(emp.tipShare       || 0,  dR),
             ];
           });
           addWS(storeWB, [empHdr, empTotRow, ...empDataRows], 'Payroll');

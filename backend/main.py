@@ -15225,9 +15225,14 @@ async def build_tip_pool_report(
                 employees, hours_by_day = await _fetch_employee_hours(
                     client, restaurant_guid, start_date, end_date, emp_map, job_map
                 )
+                total_loc_hours = sum(e["hoursWorked"] for e in employees)
+                loc_rate = round(tips / total_loc_hours, 4) if total_loc_hours > 0 else 0.0
+                loc_tip_share_total = 0.0
                 for emp in employees:
                     emp["restaurantName"] = loc_name
-                total_loc_hours = sum(e["hoursWorked"] for e in employees)
+                    emp["restaurantGuid"] = restaurant_guid
+                    emp["tipShare"] = round(emp["hoursWorked"] * loc_rate, 2)
+                    loc_tip_share_total += emp["tipShare"]
                 return {
                     "tips": tips,
                     "tips_by_day": tips_by_day,
@@ -15235,8 +15240,11 @@ async def build_tip_pool_report(
                     "employees": employees,
                     "location": {
                         "restaurantName": loc_name,
+                        "restaurantGuid": restaurant_guid,
                         "totalTips": round(tips, 2),
                         "totalHours": round(total_loc_hours, 2),
+                        "hourlyRate": loc_rate,
+                        "tipShareTotal": round(loc_tip_share_total, 2),
                     },
                     "error": None,
                 }
@@ -15277,22 +15285,23 @@ async def build_tip_pool_report(
             "hourlyRate": day_rate,
         })
 
-    # Calculate totals
+    # Calculate totals (employees already carry per-location tipShare)
     grand_total_hours = sum(e["hoursWorked"] for e in all_employees)
     grand_total_regular = sum(e["regularHours"] for e in all_employees)
     grand_total_overtime = sum(e["overtimeHours"] for e in all_employees)
-    hourly_rate = round(grand_total_tips / grand_total_hours, 4) if grand_total_hours > 0 else 0.0
+    grand_total_tip_share = sum(e["tipShare"] for e in all_employees)
 
-    # Calculate each employee's tip share
-    for emp in all_employees:
-        emp["tipShare"] = round(emp["hoursWorked"] * hourly_rate, 2)
+    # Sort by location, then by hours descending within each location
+    all_employees.sort(key=lambda e: (e.get("restaurantName", ""), -e["hoursWorked"]))
 
-    # Sort by hours descending
-    all_employees.sort(key=lambda e: e["hoursWorked"], reverse=True)
+    # When a single location is selected, the blended rate equals that location's rate.
+    # Across multiple locations there is no single rate — surface a weighted average so
+    # the UI has something to display, but the truth lives in tipPoolByLocation.
+    blended_rate = round(grand_total_tips / grand_total_hours, 4) if grand_total_hours > 0 else 0.0
 
     logger.info(
-        f"Tip pool report: {len(restaurant_ids)} locations, {start_date}–{end_date}, "
-        f"tips=${grand_total_tips:.2f}, hours={grand_total_hours:.2f}, rate=${hourly_rate:.4f}/hr, "
+        f"Tip pool report (per-location pools): {len(restaurant_ids)} locations, "
+        f"{start_date}–{end_date}, tips=${grand_total_tips:.2f}, hours={grand_total_hours:.2f}, "
         f"employees={len(all_employees)}, errors={errors}"
     )
 
@@ -15300,14 +15309,16 @@ async def build_tip_pool_report(
         "tipPoolSummary": {
             "totalTips": round(grand_total_tips, 2),
             "totalHours": round(grand_total_hours, 2),
-            "hourlyRate": round(hourly_rate, 4),
+            "hourlyRate": blended_rate,
+            "perLocationPool": True,
+            "locationCount": len(per_location),
         },
         "tipPoolTable": all_employees,
         "tipPoolTotals": {
             "hoursWorked": round(grand_total_hours, 2),
             "regularHours": round(grand_total_regular, 2),
             "overtimeHours": round(grand_total_overtime, 2),
-            "tipShare": round(grand_total_tips, 2),
+            "tipShare": round(grand_total_tip_share, 2),
         },
         "tipPoolByLocation": per_location,
         "tipPoolByDay": tip_pool_by_day,
