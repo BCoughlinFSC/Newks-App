@@ -4093,6 +4093,28 @@
         const storeNames = (currentResults?.pivotTable || [])
           .map(r => r.restaurantName).filter(Boolean).sort();
         kv('Store Count', storeNames.length || (cfg.restaurantIds?.length || '—'));
+
+        // Grouping detection — compare the actually-selected stores against
+        // the known location-picker groups (All / Company / Franchise / All
+        // Comping). Reports the matching label, or "Custom" if it doesn't
+        // match any group exactly. Works regardless of whether the user
+        // clicked a filter button or hand-picked checkboxes.
+        try {
+          const selected = new Set(cfg.restaurantIds || []);
+          const allGuids = (locations || []).map(l => l.restaurantGuid);
+          const companyGuids  = allGuids.filter(g => ownershipByGuid[g] === 'Company');
+          const franchiseGuids = allGuids.filter(g => ownershipByGuid[g] === 'Franchise');
+          const compingGuids   = allGuids.filter(g => compingGuidSet.has(g));
+          const setEq = (a, b) => a.size === b.length && b.every(g => a.has(g));
+          let groupLabel = 'Custom';
+          if (selected.size === 0)                                 groupLabel = 'All Locations';
+          else if (setEq(selected, allGuids))                      groupLabel = 'All Locations';
+          else if (companyGuids.length  && setEq(selected, companyGuids))   groupLabel = 'Company';
+          else if (franchiseGuids.length && setEq(selected, franchiseGuids)) groupLabel = 'Franchise';
+          else if (compingGuids.length  && setEq(selected, compingGuids))   groupLabel = 'All Comping';
+          kv('Grouping', groupLabel);
+        } catch { /* best-effort — leave grouping off the sheet on errors */ }
+
         if (storeNames.length > 0) {
           // Cap at first 200 names to keep the sheet readable
           const list = storeNames.slice(0, 200).join(', ');
