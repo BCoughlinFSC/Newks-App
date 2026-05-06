@@ -831,7 +831,7 @@
         <label style="display:flex;align-items:center;gap:0.5rem;font-weight:500;cursor:pointer;">
           <input type="checkbox" id="excelOptIncludePicks" style="width:16px;height:16px;accent-color:#C41E3A;" />
           Include Pick 3 / Pick 2 / Full Pairings sheets
-          <span style="font-size:0.75rem;color:#6B7280;font-weight:400;">(adds ~30s per report)</span>
+          <span style="font-size:0.75rem;color:#6B7280;font-weight:400;">(order-level pull — adds 1-3 minutes for multi-day ranges)</span>
         </label>
       </div>
       <div class="modal-actions">
@@ -3282,15 +3282,21 @@
             const out = {};
             for (const t of types) {
               try {
-                const r = await fetch('/api/reports/pick3', {
+                // Use the SAME endpoint the standalone Pick 3 / Pick 2 / Full
+                // Pairings pages use — drill-down-all-stores returns per-store
+                // parentItems + selections derived from order-level parsing.
+                // The /api/reports/pick3 menu-aggregate endpoint is faster but
+                // its modifier filter rejects rows for some report shapes,
+                // producing empty Pairing Choices columns.
+                const r = await fetch('/api/reports/pick3/drill-down-all-stores', {
                   method: 'POST',
                   headers: getAuthHeaders(),
                   body: JSON.stringify({
-                    start_date:    pickStart,
-                    end_date:      pickEnd,
-                    restaurantIds: cfg.restaurantIds || [],
-                    variant:       'all',   // POS + OLO combined
-                    report_type:   t.key,
+                    start_date:     pickStart,
+                    end_date:       pickEnd,
+                    restaurant_ids: cfg.restaurantIds || [],
+                    variant:        'all',   // POS + OLO combined
+                    report_type:    t.key,
                   }),
                 });
                 if (r.ok) {
@@ -3912,61 +3918,50 @@
           return rows;
         }
         const data = block.data || {};
-        const drillDown = data.drillDown || [];
+        // /api/reports/pick3/drill-down-all-stores returns {stores: [...]}.
+        // Each store has its own parentItems + selections (chain-wide aggregation
+        // is done client-side here so we can split POS vs OLO by name suffix).
+        const stores = data.stores || [];
 
-        // Side-split fallback: when the backend's variantBreakdown is missing
-        // or has empty arrays for a side, derive POS/OLO totals from drillDown
-        // by classifying each item via its name suffix. This is the same data
-        // the standalone Pick 3 page consumes, so it's known-good.
+        // Item name → "pos" or "olo" via Toast's name conventions:
+        //   '(POS Pairing Choice)'                          → POS selection
+        //   /OLO Pairing Choice/  (also "Chocie" Toast typo) → OLO selection
+        //   '(OLO)' anywhere                                → OLO parent
+        //   anything else with the entrée suffix            → POS parent
         const OLO_PAIRING_RE = /OLO Pairing Cho(?:ice|cie)/i;
         const itemSide = name => {
           const s = String(name || '');
-          if (s.includes('(POS Pairing Choice)')) return 'pos';      // selection POS
-          if (OLO_PAIRING_RE.test(s)) return 'olo';                  // selection OLO
-          // For parent items: a Pick 3/Pick 2/Full Pairing entrée vs OLO parent.
-          // Names like "Pick 3 (OLO)" / "Half Pairing (OLO)" / "Full Value Pairings (OLO)"
-          // are explicitly OLO; everything else with the entrée suffix is POS.
-          if (/\(OLO\)/i.test(s)) return 'olo';
+          if (s.includes('(POS Pairing Choice)')) return 'pos';
+          if (OLO_PAIRING_RE.test(s))             return 'olo';
+          if (/\(OLO\)/i.test(s))                  return 'olo';
           return 'pos';
         };
-        const aggregateBySide = (rows, getList) => {
-          const pos = new Map(), olo = new Map();
-          rows.forEach(d => (getList(d) || []).forEach(it => {
-            const m = itemSide(it.itemName) === 'olo' ? olo : pos;
-            m.set(it.itemName, (m.get(it.itemName) || 0) + Number(it.quantity || 0));
-          }));
-          const toList = m => [...m.entries()].sort((a, b) => b[1] - a[1])
-            .map(([itemName, quantity]) => ({ itemName, quantity }));
-          return { pos: toList(pos), olo: toList(olo) };
-        };
 
-        // Build per-side sets, preferring backend variantBreakdown when it has
-        // data for that side, falling back to drillDown-derived split.
-        const fbParents = aggregateBySide(drillDown, d => d.parentItems);
-        const fbSels    = aggregateBySide(drillDown, d => d.selections);
-        const vb        = data.variantBreakdown || {};
-        const sides = {
-          pos: {
-            parentItems: (vb.pos?.parentItems?.length ? vb.pos.parentItems : fbParents.pos),
-            selections:  (vb.pos?.selections?.length  ? vb.pos.selections  : fbSels.pos),
-            total:       (vb.pos?.total ?? fbParents.pos.reduce((s, x) => s + Number(x.quantity || 0), 0)),
-          },
-          olo: {
-            parentItems: (vb.olo?.parentItems?.length ? vb.olo.parentItems : fbParents.olo),
-            selections:  (vb.olo?.selections?.length  ? vb.olo.selections  : fbSels.olo),
-            total:       (vb.olo?.total ?? fbParents.olo.reduce((s, x) => s + Number(x.quantity || 0), 0)),
-          },
-        };
-
-        // Stores / Days from the drillDown (same regardless of variant).
-        const stores = new Set();
-        const dates = new Set();
-        drillDown.forEach(d => {
-          if (d.restaurantGuid) stores.add(d.restaurantGuid);
-          if (d.businessDate) dates.add(d.businessDate);
+        // Aggregate across stores into POS / OLO buckets for both lists.
+        const accum = () => ({ pos: new Map(), olo: new Map() });
+        const parents = accum(), sels = accum();
+        let storeCount = 0;
+        stores.forEach(s => {
+          if (s?.restaurantGuid) storeCount++;
+          (s?.parentItems || []).forEach(p => {
+            const bucket = itemSide(p.itemName) === 'olo' ? parents.olo : parents.pos;
+            bucket.set(p.itemName, (bucket.get(p.itemName) || 0) + Number(p.quantity || 0));
+          });
+          (s?.selections || []).forEach(sel => {
+            const bucket = itemSide(sel.itemName) === 'olo' ? sels.olo : sels.pos;
+            bucket.set(sel.itemName, (bucket.get(sel.itemName) || 0) + Number(sel.quantity || 0));
+          });
         });
-        const grandTotal = (sides.pos.total || 0) + (sides.olo.total || 0);
-        rows.push([c(`Stores: ${stores.size}    Days: ${dates.size}    Total ${sheetName}: ${grandTotal.toLocaleString()}`,
+        const toList = m => [...m.entries()].sort((a, b) => b[1] - a[1])
+          .map(([itemName, quantity]) => ({ itemName, quantity }));
+        const sideTotal = m => [...m.values()].reduce((a, b) => a + b, 0);
+        const sides = {
+          pos: { parentItems: toList(parents.pos), selections: toList(sels.pos), total: sideTotal(parents.pos) },
+          olo: { parentItems: toList(parents.olo), selections: toList(sels.olo), total: sideTotal(parents.olo) },
+        };
+
+        const grandTotal = sides.pos.total + sides.olo.total;
+        rows.push([c(`Stores: ${storeCount}    Total ${sheetName}: ${grandTotal.toLocaleString()}`,
                      S.dLbld), ...Array(COLS - 1).fill(blank())]);
         rows.push(blanks());
 
