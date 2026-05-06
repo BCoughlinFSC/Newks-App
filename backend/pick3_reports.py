@@ -641,6 +641,11 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             all_menu_rows = await _fetch_menu_chunked(["MENU_ITEM"])
             summary_agg: Dict[Tuple, Dict] = {}
             parent_items_agg: Dict[Tuple, Dict[str, int]] = {}
+            # When variant=all we ALSO track POS-only and OLO-only chain-wide
+            # totals so the caller can render the two sides separately without
+            # making a second round of Toast API calls.
+            parent_pos_total: Dict[str, int] = {}
+            parent_olo_total: Dict[str, int] = {}
             olo_guid_lower = (cfg["olo_item_guid"] or "").lower()
             for row in all_menu_rows:
                 name  = (row.get("menuItemName") or "").strip()
@@ -671,6 +676,11 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
                 summary_agg[key]["pick3Total"] += qty
                 pi = parent_items_agg.setdefault(key, {})
                 pi[name] = pi.get(name, 0) + qty
+                if variant == "all":
+                    if is_pos:
+                        parent_pos_total[name] = parent_pos_total.get(name, 0) + qty
+                    if is_olo:
+                        parent_olo_total[name] = parent_olo_total.get(name, 0) + qty
 
             for r in summary_agg.values():
                 if r["restaurantGuid"] in guid_to_location:
@@ -681,6 +691,9 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
             # --- Pairing selections (MODIFIER — includes parent menu item info) ---
             all_item_mod_rows = await _fetch_menu_chunked(["MODIFIER"])
             selections_agg: Dict[Tuple, Dict[str, int]] = {}
+            # Per-variant chain-wide selection totals (variant=all only).
+            sel_pos_total: Dict[str, int] = {}
+            sel_olo_total: Dict[str, int] = {}
             for row in all_item_mod_rows:
                 parent_name = (row.get("menuItemName") or "").strip()
                 parent_guid = (row.get("menuItemGuid") or "").strip().lower()
@@ -716,6 +729,11 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
                 key = (rguid, bdate)
                 sa = selections_agg.setdefault(key, {})
                 sa[mod_name] = sa.get(mod_name, 0) + qty
+                if variant == "all":
+                    if m_is_pos:
+                        sel_pos_total[mod_name] = sel_pos_total.get(mod_name, 0) + qty
+                    if m_is_olo:
+                        sel_olo_total[mod_name] = sel_olo_total.get(mod_name, 0) + qty
 
             # --- Build drillDown ---
             all_keys = set(summary_by_key.keys()) | set(selections_agg.keys())
@@ -734,7 +752,32 @@ async def run_pick3_report(request: Pick3ReportRequest = Body(...)):
                     "parentItems":    sorted([{"itemName": n, "quantity": q} for n, q in p_map.items()], key=lambda x: (-x["quantity"], x["itemName"])),
                     "selections":     sorted([{"itemName": n, "quantity": q} for n, q in s_map.items()], key=lambda x: (-x["quantity"], x["itemName"])),
                 })
-            return {"summary": summary, "drillDown": drill_down, "pairingSource": "menu_aggregate"}
+            response = {
+                "summary":       summary,
+                "drillDown":     drill_down,
+                "pairingSource": "menu_aggregate",
+            }
+            # variant=all: also expose chain-wide totals split by side so the
+            # caller can render POS and OLO sub-sections without re-fetching.
+            if variant == "all":
+                def _to_sorted(d: Dict[str, int]) -> List[Dict]:
+                    return sorted(
+                        [{"itemName": n, "quantity": q} for n, q in d.items()],
+                        key=lambda x: (-x["quantity"], x["itemName"]),
+                    )
+                response["variantBreakdown"] = {
+                    "pos": {
+                        "parentItems": _to_sorted(parent_pos_total),
+                        "selections":  _to_sorted(sel_pos_total),
+                        "total":       sum(parent_pos_total.values()),
+                    },
+                    "olo": {
+                        "parentItems": _to_sorted(parent_olo_total),
+                        "selections":  _to_sorted(sel_olo_total),
+                        "total":       sum(parent_olo_total.values()),
+                    },
+                }
+            return response
 
     except HTTPException:
         raise

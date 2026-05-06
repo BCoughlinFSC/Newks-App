@@ -3872,78 +3872,109 @@
       }
 
       // ── Helper: build a Pick 3 / Pick 2 / Full Pairings sheet ─────────────
-      // Aggregates each report's drillDown across stores and dates into a
-      // chain-wide totals view. Two stacked tables per sheet:
-      //   1. Parent Items   — entrée items the report counts as a "parent"
-      //                       (e.g. "(Pick 3 Entree)" items)
-      //   2. Pairing Selections — the modifier picks under those parents
-      //                       (cup soup, half salad, side, etc.)
-      // Sourced from /api/reports/pick3 (variant=pos) — see confirmAndExport.
+      // Mirrors the on-screen layout from the dedicated Pick 3 / Pick 2 /
+      // Full Pairings reports — two tables side-by-side per variant section
+      // (POS, OLO), each with a TOTAL row at the bottom:
+      //
+      //                  POS section
+      //   [Pick X Entree | Qty | % of X]    [Pairing Choices | Qty | % of X]
+      //   ...                                ...
+      //   Total            N                  Total            M
+      //
+      //                  OLO section
+      //   ... same layout for OLO items ...
+      //
+      // 7-column layout: A-C = Parent Items, D = spacer, E-G = Pairing Choices.
+      // Sourced from /api/reports/pick3 with variant=all and the per-variant
+      // breakdown the backend exposes as variantBreakdown.{pos,olo}.
       function buildPickPairingSheet(block, sheetName) {
         const rows = [];
-        rows.push([c(`${sheetName}  (POS + OLO combined — chain-wide totals)`, S.blueL),
-                   c('', S.blueR), c('', S.blueR)]);
+        const COLS = 7;
+        const blanks = (n=COLS) => Array(n).fill(blank());
+
+        rows.push([c(`${sheetName}  (chain-wide totals)`, S.blueL),
+                   ...Array(COLS - 1).fill(c('', S.blueR))]);
 
         if (block.error) {
-          rows.push([c('Status', S.dLbld), c('Error', S.warnL), c('', S.dR)]);
-          rows.push([c('Detail', S.dLbld), c(String(block.error).slice(0, 300), S.warnL), c('', S.dR)]);
+          rows.push([c('Status', S.dLbld), c('Error', S.warnL), ...Array(COLS - 2).fill(blank())]);
+          rows.push([c('Detail', S.dLbld), c(String(block.error).slice(0, 300), S.warnL),
+                     ...Array(COLS - 2).fill(blank())]);
           return rows;
         }
         const data = block.data || {};
-        const drillDown = data.drillDown || [];
-        const summary   = data.summary || [];
-        if (!drillDown.length && !summary.length) {
-          rows.push([c('No data returned for this date range / store selection.', S.warnL),
-                     c('', S.dR), c('', S.dR)]);
+        const vb = data.variantBreakdown;
+        if (!vb) {
+          rows.push([c('No variant breakdown in response — backend may not support variant=all yet.',
+                       S.warnL), ...Array(COLS - 1).fill(blank())]);
           return rows;
         }
 
-        // Aggregate across (store, date) → grand totals per parent item / selection
-        const parentTotals = new Map();   // name → qty
-        const selectionTotals = new Map();
-        let grandTotal = 0;
+        // Stores / Days from the drillDown (same regardless of variant).
         const stores = new Set();
         const dates = new Set();
-        drillDown.forEach(d => {
-          stores.add(d.restaurantGuid);
+        (data.drillDown || []).forEach(d => {
+          if (d.restaurantGuid) stores.add(d.restaurantGuid);
           if (d.businessDate) dates.add(d.businessDate);
-          grandTotal += Number(d.pick3Total || 0);
-          (d.parentItems || []).forEach(p => {
-            parentTotals.set(p.itemName, (parentTotals.get(p.itemName) || 0) + Number(p.quantity || 0));
-          });
-          (d.selections || []).forEach(s => {
-            selectionTotals.set(s.itemName, (selectionTotals.get(s.itemName) || 0) + Number(s.quantity || 0));
-          });
         });
-
-        // Title block
+        const grandTotal = (vb.pos?.total || 0) + (vb.olo?.total || 0);
         rows.push([c(`Stores: ${stores.size}    Days: ${dates.size}    Total ${sheetName}: ${grandTotal.toLocaleString()}`,
-                     S.dLbld), c('', S.dR), c('', S.dR)]);
-        rows.push([blank(), blank(), blank()]);
+                     S.dLbld), ...Array(COLS - 1).fill(blank())]);
+        rows.push(blanks());
 
-        // Parent items
-        rows.push([c('Parent Items (Entrées)', S.blueL), c('Qty', S.blueR), c('% of Total', S.blueR)]);
-        const parentSorted = [...parentTotals.entries()].sort((a, b) => b[1] - a[1]);
-        parentSorted.forEach(([name, qty], i) => {
-          const alt = i % 2 === 1;
-          const pct = grandTotal > 0 ? (qty / grandTotal * 100).toFixed(1) + '%' : '—';
-          rows.push([c(name, alt ? S.dLalt : S.dL),
-                     n(qty, alt ? S.dRalt : S.dR),
-                     c(pct, alt ? S.dRalt : S.dR)]);
-        });
-        rows.push([blank(), blank(), blank()]);
+        // Render one variant section. Returns nothing — pushes rows directly.
+        const renderVariant = (label, side, hdrStyleL, hdrStyleR, subStyleL, subStyleR) => {
+          const sideTotal = side?.total || 0;
+          const parents   = side?.parentItems || [];
+          const sels      = side?.selections  || [];
+          const selTotal  = sels.reduce((s, x) => s + Number(x.quantity || 0), 0);
 
-        // Pairing selections
-        rows.push([c('Pairing Selections', S.greenL), c('Qty', S.greenR), c('% of Total', S.greenR)]);
-        const selSorted = [...selectionTotals.entries()].sort((a, b) => b[1] - a[1]);
-        const selTotal = selSorted.reduce((s, [, q]) => s + q, 0);
-        selSorted.forEach(([name, qty], i) => {
-          const alt = i % 2 === 1;
-          const pct = selTotal > 0 ? (qty / selTotal * 100).toFixed(1) + '%' : '—';
-          rows.push([c(name, alt ? S.dLalt : S.dL),
-                     n(qty, alt ? S.dRalt : S.dR),
-                     c(pct, alt ? S.dRalt : S.dR)]);
-        });
+          // Variant title row
+          rows.push([
+            c(`${sheetName}  —  ${label}    Total: ${sideTotal.toLocaleString()}`, hdrStyleL),
+            c('', hdrStyleR), c('', hdrStyleR),
+            blank(),
+            c('', hdrStyleR), c('', hdrStyleR), c('', hdrStyleR),
+          ]);
+          // Sub-headers (Item | Qty | % of side total) for both tables
+          rows.push([
+            c(`${sheetName} Entrée`, subStyleL), c('Qty', subStyleR), c(`% of ${sheetName}`, subStyleR),
+            blank(),
+            c('Pairing Choices',     subStyleL), c('Qty', subStyleR), c(`% of ${sheetName}`, subStyleR),
+          ]);
+          // Body rows — render side-by-side until we run out of either
+          const maxLen = Math.max(parents.length, sels.length);
+          for (let i = 0; i < maxLen; i++) {
+            const alt = i % 2 === 1;
+            const dL = alt ? S.dLalt : S.dL, dR = alt ? S.dRalt : S.dR;
+            const p = parents[i], s = sels[i];
+            const pName = p?.itemName ?? '';
+            const pQty  = Number(p?.quantity || 0);
+            const pPct  = (sideTotal > 0 && p) ? (pQty / sideTotal * 100).toFixed(0) + '%' : '';
+            const sName = s?.itemName ?? '';
+            const sQty  = Number(s?.quantity || 0);
+            const sPct  = (selTotal  > 0 && s) ? (sQty / selTotal  * 100).toFixed(0) + '%' : '';
+            rows.push([
+              p ? c(pName, dL) : blank(),
+              p ? n(pQty, dR) : blank(),
+              p ? c(pPct, dR) : blank(),
+              blank(),
+              s ? c(sName, dL) : blank(),
+              s ? n(sQty, dR) : blank(),
+              s ? c(sPct, dR) : blank(),
+            ]);
+          }
+          // TOTAL row for both tables
+          rows.push([
+            c('Total', S.dLbld), n(sideTotal, S.dRbld), blank(),
+            blank(),
+            c('Total', S.dLbld), n(selTotal, S.dRbld), blank(),
+          ]);
+        };
+
+        renderVariant('POS', vb.pos, S.blueL,  S.blueR,  S.lBlueL,  S.lBlueR);
+        rows.push(blanks());
+        renderVariant('OLO', vb.olo, S.orangeL, S.orangeR, S.lOrangL, S.lOrangR);
+
         return rows;
       }
 
