@@ -921,7 +921,14 @@ ORDER BY DateOfBusiness</pre>
       authToken = null;
       currentUser = null;
       document.getElementById('headerUserArea').style.display = 'none';
-      document.getElementById('authModal').classList.remove('hidden');
+      redirectToLogin();
+    }
+
+    // Bounce to the canonical /index.html login (with ?next= so the user
+    // returns to this admin page after authenticating).
+    function redirectToLogin() {
+      const here = window.location.pathname + window.location.search;
+      window.location.href = '/index.html?next=' + encodeURIComponent(here);
     }
 
     function updateHeaderUser() {
@@ -970,7 +977,7 @@ ORDER BY DateOfBusiness</pre>
           clearAuth();
         }
       }
-      document.getElementById('authModal').classList.remove('hidden');
+      redirectToLogin();
       return false;
     }
 

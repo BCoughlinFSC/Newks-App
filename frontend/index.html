@@ -1038,22 +1038,24 @@
         }
         
         const data = await resp.json();
-        
+
         // Store auth data
         localStorage.setItem('auth_token', data.access_token);
         localStorage.setItem('user', JSON.stringify(data.user));
         authToken = data.access_token;
         currentUser = data.user;
-        
-        updateUIForAuth();
-        alert(`Welcome, ${data.user.name}!`);
-        
-        // Hide auth modal
-        const authModal = document.getElementById('authModal');
-        if (authModal) {
-          authModal.classList.add('hidden');
+
+        // If the user was redirected here from a protected page, bounce
+        // them back. Only allow same-origin paths to avoid open-redirect.
+        const nextRaw = new URLSearchParams(window.location.search).get('next');
+        if (nextRaw && nextRaw.startsWith('/') && !nextRaw.startsWith('//')) {
+          window.location.href = nextRaw;
+          return;
         }
-        
+
+        updateUIForAuth();
+        document.getElementById('authModal')?.classList.add('hidden');
+
       } catch (err) {
         alert(`Error: ${err.message}`);
       } finally {

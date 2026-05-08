@@ -989,7 +989,11 @@
     }
 
     function showAuthModal() {
-      document.getElementById('authModal').classList.remove('hidden');
+      // The per-page login modal was retired in favor of the canonical
+      // login experience on /index.html. Bounce there with ?next= so the
+      // user lands back here after logging in.
+      const here = window.location.pathname + window.location.search;
+      window.location.href = '/index.html?next=' + encodeURIComponent(here);
     }
 
     async function checkAuth() {

@@ -200,13 +200,14 @@
 
   // ─── Wire up event handlers ─────────────────────
   function wireEvents() {
-    // Logout button
+    // Logout button — clear auth state and bounce to the canonical
+    // home/login page so the user always sees the same login modal.
     const logoutBtn = document.getElementById('snavLogoutBtn');
     if (logoutBtn) {
       logoutBtn.addEventListener('click', () => {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user');
-        window.location.href = '/legacy.html';
+        window.location.href = '/index.html';
       });
     }
 

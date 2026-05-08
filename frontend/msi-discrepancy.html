@@ -480,15 +480,22 @@ async function checkAuth() {
       return true;
     } catch(e) { clearAuth(); return false; }
   }
-  document.getElementById('authModal').classList.remove('hidden');
+  redirectToLogin();
   return false;
+}
+
+// Bounce to the canonical /index.html login (with ?next= so the user
+// returns to this page after authenticating).
+function redirectToLogin() {
+  const here = window.location.pathname + window.location.search;
+  window.location.href = '/index.html?next=' + encodeURIComponent(here);
 }
 
 function clearAuth() {
   localStorage.removeItem('auth_token');
   localStorage.removeItem('user');
   authToken = null; currentUser = null;
-  document.getElementById('authModal').classList.remove('hidden');
+  redirectToLogin();
 }
 
 document.getElementById('authForm').addEventListener('submit', async (e) => {
