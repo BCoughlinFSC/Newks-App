@@ -13,23 +13,46 @@
   'use strict';
 
   // ─── Nav structure ──────────────────────────────
-  const REPORT_LINKS = [
-    { key: 'sales_summary', label: 'Sales Summary',    href: '/legacy.html?report=sales_summary' },
-    { key: 'metrics',       label: 'Net Sales',         href: '/legacy.html?report=metrics' },
-    { key: 'menu',          label: 'Menu Performance',  href: '/legacy.html?report=menu' },
-    { key: 'guest_count',   label: 'Guest Count',       href: '/legacy.html?report=guest_count' },
-    { key: 'royalty',       label: 'Royalty Report',     href: '/legacy.html?report=royalty' },
-    { key: 'tip_pool',      label: 'Payroll Report',      href: '/legacy.html?report=tip_pool' },
-    { key: 'pick3',         label: 'Pick 3',             href: '/pick3.html' },
-    { key: 'pick2',         label: 'Pick 2',             href: '/pick2.html' },
-    { key: 'full-pairings', label: 'Full Pairings',      href: '/full-pairings.html' },
-    { key: 'wpy',           label: 'Weekly Sales (WPY)',  href: '/wpy.html' },
-    { key: 'daily-flash',   label: 'Daily Sales Flash',   href: '/daily-flash.html' },
-    { key: 'menu-mix',      label: 'Menu Mix Report',     href: '/menu-mix-report.html' },
-    { key: 'catering',      label: 'Catering Reports',    href: '/catering.html' },
-    { key: 'loyalty',       label: 'Loyalty Reports',     href: '/loyalty.html' },
-    { key: 'food-cost',     label: 'Food Cost (COGS)',    href: '/food-cost.html' },
-    { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },
+  // Reports are organized into categories. Reorder items inside each
+  // group (or reorder the groups themselves) by editing this array.
+  const REPORT_GROUPS = [
+    {
+      label: 'Sales & Performance',
+      links: [
+        { key: 'sales_summary',   label: 'Sales Summary',                  href: '/legacy.html?report=sales_summary' },
+        { key: 'metrics',         label: 'Net Sales',                      href: '/legacy.html?report=metrics' },
+        { key: 'netsales_weekly', label: 'Net Sales by Location – Weekly', href: '/legacy.html?report=metrics&preset=netsales_weekly' },
+        { key: 'royalty',         label: 'Royalty Report',                 href: '/legacy.html?report=royalty' },
+        { key: 'daily-flash',     label: 'Daily Sales Flash',              href: '/daily-flash.html' },
+        { key: 'wpy',             label: 'Weekly Sales (WPY)',             href: '/wpy.html' },
+      ],
+    },
+    {
+      label: 'Menu & Items',
+      links: [
+        { key: 'menu',          label: 'Menu Performance', href: '/legacy.html?report=menu' },
+        { key: 'menu-mix',      label: 'Menu Mix Report',  href: '/menu-mix-report.html' },
+        { key: 'pick3',         label: 'Pick 3',           href: '/pick3.html' },
+        { key: 'pick2',         label: 'Pick 2',           href: '/pick2.html' },
+        { key: 'full-pairings', label: 'Full Pairings',    href: '/full-pairings.html' },
+      ],
+    },
+    {
+      label: 'Operations & Labor',
+      links: [
+        { key: 'guest_count',      label: 'Guest Count',      href: '/legacy.html?report=guest_count' },
+        { key: 'tip_pool',         label: 'Payroll Report',   href: '/legacy.html?report=tip_pool' },
+        { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },
+        { key: 'food-cost',        label: 'Food Cost (COGS)', href: '/food-cost.html' },
+      ],
+    },
+    {
+      label: 'Catering & Loyalty',
+      links: [
+        { key: 'catering', label: 'Catering Reports', href: '/catering.html' },
+        { key: 'loyalty',  label: 'Loyalty Reports',  href: '/loyalty.html' },
+      ],
+    },
   ];
 
   const ADMIN_LINKS = [
@@ -48,6 +71,9 @@
       return 'home';
     }
     if (path.endsWith('/legacy.html')) {
+      // The "Net Sales by Location – Weekly" preset shares reportType=metrics
+      // but is a distinct sidebar entry. Disambiguate via ?preset=.
+      if (params.get('preset') === 'netsales_weekly') return 'netsales_weekly';
       return params.get('report') || 'sales_summary';
     }
     if (path.endsWith('/pick3.html'))                return 'pick3';
@@ -81,8 +107,10 @@
     const user = getUser();
     if (!user) return false;
     if (user.role === 'admin') return true;
+    // Empty allowedPages = no access (admins still see everything).
+    // This avoids accidentally granting full access to invited users
+    // when an admin forgets to check any boxes.
     const allowed = user.allowedPages || [];
-    if (allowed.length === 0) return true;
     return allowed.includes(pageKey);
   }
 
@@ -97,13 +125,22 @@
     const isAdmin = user && user.role === 'admin';
     const activePage = getActivePage();
 
-    // Reports section
-    let reportsHtml = REPORT_LINKS
-      .filter(link => userCanAccess(link.key))
-      .map(link => {
+    // Reports section — render each group with its own section label.
+    // Skip groups whose visible links are all filtered out by permissions.
+    let reportsHtml = REPORT_GROUPS.map(group => {
+      const visibleLinks = group.links.filter(link => userCanAccess(link.key));
+      if (visibleLinks.length === 0) return '';
+
+      const linksHtml = visibleLinks.map(link => {
         const active = link.key === activePage ? ' active' : '';
         return `<a href="${link.href}" class="snav-link${active}" data-key="${link.key}">${esc(link.label)}</a>`;
       }).join('');
+
+      return `
+        <div class="snav-group-label">${esc(group.label)}</div>
+        ${linksHtml}
+      `;
+    }).join('');
 
     // Guide link
     const guideActive = activePage === 'guide' ? ' active' : '';
@@ -126,19 +163,6 @@
         <a href="/admin.html" class="snav-link${adminPanelActive}" data-key="admin">Admin Panel</a>
       `;
     }
-
-    // Saved reports section
-    const savedReportsHtml = `
-      <div class="snav-card">
-        <h2 style="margin:0 0 0.75rem;font-size:1rem;font-weight:700;color:#1E3A5F;">Saved Reports</h2>
-        <button class="snav-btn snav-btn-primary snav-btn-full" id="snavNewReportBtn">+ New Report</button>
-        <div style="margin-top:0.75rem;">
-          <div class="snav-saved-list" id="snavSavedReportsList">
-            <div class="snav-empty">Loading...</div>
-          </div>
-        </div>
-      </div>
-    `;
 
     // User profile section
     let userHtml = '';
@@ -170,71 +194,12 @@
         </div>
         ${adminHtml}
       </div>
-      ${savedReportsHtml}
       ${userHtml}
     `;
   }
 
-  // ─── Load saved reports ─────────────────────────
-  async function loadSavedReports() {
-    const list = document.getElementById('snavSavedReportsList');
-    const token = getAuthToken();
-    if (!list) return;
-
-    if (!token) {
-      list.innerHTML = '<div class="snav-empty">Login to view saved reports</div>';
-      return;
-    }
-
-    try {
-      const resp = await fetch('/api/saved-reports', {
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
-      });
-      if (!resp.ok) throw new Error('Failed to load');
-      const reports = await resp.json();
-
-      if (reports.length === 0) {
-        list.innerHTML = '<div class="snav-empty">No saved reports yet</div>';
-        return;
-      }
-
-      list.innerHTML = reports.map(r => `
-        <div class="snav-report-item" data-id="${esc(r.id)}">
-          <div class="snav-report-name">${esc(r.name)}</div>
-          <div class="snav-report-date">Created ${new Date(r.createdAt).toLocaleDateString()}</div>
-        </div>
-      `).join('');
-
-      list.querySelectorAll('.snav-report-item').forEach(item => {
-        item.addEventListener('click', () => {
-          const reportId = item.dataset.id;
-          // If we're on legacy.html and the function exists, load inline
-          if (typeof window.loadReport === 'function') {
-            window.loadReport(reportId);
-          } else {
-            window.location.href = `/legacy.html?loadReport=${reportId}`;
-          }
-        });
-      });
-    } catch (err) {
-      list.innerHTML = '<div class="snav-empty" style="color:#ff8080;">Error loading reports</div>';
-    }
-  }
-
   // ─── Wire up event handlers ─────────────────────
   function wireEvents() {
-    // New Report button
-    const newBtn = document.getElementById('snavNewReportBtn');
-    if (newBtn) {
-      newBtn.addEventListener('click', () => {
-        if (typeof window.newReport === 'function') {
-          window.newReport();
-        } else {
-          window.location.href = '/legacy.html';
-        }
-      });
-    }
-
     // Logout button
     const logoutBtn = document.getElementById('snavLogoutBtn');
     if (logoutBtn) {
@@ -352,6 +317,22 @@
         letter-spacing: 0.5px;
         padding: 0.25rem 0.5rem;
         margin-bottom: 0.25rem;
+      }
+
+      /* Per-category header within the Reports section */
+      .snav-group-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #C41E3A;
+        letter-spacing: 0.3px;
+        padding: 0.5rem 0.5rem 0.25rem;
+        margin-top: 0.5rem;
+        border-top: 1px solid #f0e6d8;
+      }
+      .snav-group-label:first-of-type {
+        margin-top: 0;
+        border-top: none;
+        padding-top: 0.25rem;
       }
 
       .snav-link {
@@ -477,7 +458,6 @@
     injectStyles();
     container.innerHTML = buildSidebar();
     wireEvents();
-    loadSavedReports();
   }
 
   // Run on DOM ready

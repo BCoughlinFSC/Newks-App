@@ -761,8 +761,8 @@ ORDER BY DateOfBusiness</pre>
           </select>
         </div>
         <div class="modal-form-group">
-          <label>Report Access</label>
-          <p style="margin:0 0 0.5rem;font-size:0.82rem;color:#6B7280;">Select which reports this user can view. Leave all unchecked to grant access to everything.</p>
+          <label>Report Access *</label>
+          <p style="margin:0 0 0.5rem;font-size:0.82rem;color:#6B7280;">Select which reports this user can view. <strong style="color:#C41E3A;">If nothing is checked, the user will not see any reports.</strong></p>
           <div id="createUserPagesGrid" style="display:flex;flex-direction:column;gap:0.25rem;border:1px solid #E5E7EB;border-radius:8px;padding:0.5rem;max-height:220px;overflow-y:auto;">
             <div style="padding:0.5rem;text-align:center;color:#6B7280;">Loading pages&hellip;</div>
           </div>
@@ -795,7 +795,7 @@ ORDER BY DateOfBusiness</pre>
           <div style="padding:1rem;text-align:center;color:#6B7280;">Loading pages&hellip;</div>
         </div>
       </div>
-      <p style="margin:0.75rem 0 0;font-size:0.8rem;color:#9CA3AF;">Leave all unchecked to give this user access to every report.</p>
+      <p style="margin:0.75rem 0 0;font-size:0.8rem;color:#9CA3AF;">If nothing is checked, this user will not see any reports.</p>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelAssignPagesBtn">Cancel</button>
         <button type="button" class="btn-primary" id="saveAssignPagesBtn">Save Pages</button>
@@ -1093,9 +1093,13 @@ ORDER BY DateOfBusiness</pre>
                   ? `<span style="background:#1E3A5F;color:#fff;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.78rem;font-weight:600;">${restCount}</span>`
                   : `<span style="color:#9CA3AF;font-size:0.82rem;">All</span>`;
                 const pageCount = user.allowedPages?.length ?? 0;
-                const pageBadge = pageCount > 0
-                  ? `<span style="background:#7C3AED;color:#fff;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.78rem;font-weight:600;">${pageCount}</span>`
-                  : `<span style="color:#9CA3AF;font-size:0.82rem;">All</span>`;
+                // Admins implicitly see every page; for regular users, an empty
+                // allowedPages list means no access (as enforced by shared-nav.js).
+                const pageBadge = user.role === 'admin'
+                  ? `<span style="color:#9CA3AF;font-size:0.82rem;">All</span>`
+                  : pageCount > 0
+                    ? `<span style="background:#7C3AED;color:#fff;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.78rem;font-weight:600;">${pageCount}</span>`
+                    : `<span style="background:#FEE2E2;color:#C41E3A;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.78rem;font-weight:600;">None</span>`;
                 const userStatus = user.status || 'active';
                 const statusBadge = userStatus === 'invited'
                   ? '<span class="status-badge invited">Invited</span>'
@@ -1310,7 +1314,15 @@ ORDER BY DateOfBusiness</pre>
       const total = Object.keys(_availablePages).length;
       const checked = document.querySelectorAll('#assignPagesGrid .page-cb:checked').length;
       const el = document.getElementById('assignPagesCount');
-      if (el) el.textContent = checked === 0 ? 'None (will show all)' : `${checked} of ${total} selected`;
+      if (el) {
+        if (checked === 0) {
+          el.textContent = 'None (no access)';
+          el.style.color = '#C41E3A';
+        } else {
+          el.textContent = `${checked} of ${total} selected`;
+          el.style.color = '#6B7280';
+        }
+      }
       const selectAll = document.getElementById('selectAllAssignPages');
       if (selectAll) selectAll.checked = checked > 0 && checked === total;
     }

@@ -584,18 +584,22 @@
       <div class="card">
         <h2 id="builderTitle">Report Builder</h2>
 
-        <div class="form-group">
+        <!-- Report Name / Description / Save Report were retired when the builder
+             was simplified. The reportName + reportDescription inputs and the
+             reportType select remain in the DOM (display:none) because other
+             code reads their .value to drive form behavior. -->
+        <div class="form-group" style="display:none;">
           <label>Report Name</label>
           <input type="text" id="reportName" placeholder="e.g., Net Sales by Location – Weekly" />
         </div>
 
-        <div class="form-group">
+        <div class="form-group" style="display:none;">
           <label>Description <span style="font-weight:normal;color:#555c7b;">(optional)</span></label>
           <input type="text" id="reportDescription" placeholder="Brief description of this report" />
         </div>
 
         <div class="form-row">
-          <div class="form-group">
+          <div class="form-group" style="display:none;">
             <label>Report Type</label>
             <select id="reportType">
               <option value="sales_summary">Sales Summary (Tickets, Guests, PPA, Revenue, Discounts, Voids, Cash/Card)</option>
@@ -730,10 +734,13 @@
           </div>
         </div>
 
-        <!-- Action buttons -->
+        <!-- Action buttons. saveReportBtn / updateReportBtn / deleteReportBtn
+             remain in the DOM (hidden) because saveReport()/updateReport()/
+             deleteReport() in the JS still reference them — keeping them
+             prevents null-deref errors without re-introducing the buttons. -->
         <div class="btn-group">
           <button class="btn-primary" id="runReportBtn">▶ Run Report</button>
-          <button class="btn-primary" id="saveReportBtn">💾 Save Report</button>
+          <button class="btn-primary hidden" id="saveReportBtn">💾 Save Report</button>
           <button class="btn-blue hidden" id="updateReportBtn">↻ Update Report</button>
           <button class="btn-danger hidden" id="deleteReportBtn">🗑 Delete Report</button>
         </div>
@@ -4738,16 +4745,50 @@
         console.error('Error loading saved reports:', err);
       }
 
-      // Handle ?report= param from shared nav links (after all data is loaded)
+      // Handle ?report= and ?preset= params from shared nav links.
+      // The reportType <select> stays in the DOM (hidden) because lots of
+      // downstream form logic reads its .value — we just drive it via URL.
       const urlParams = new URLSearchParams(window.location.search);
-      const reportParam = urlParams.get('report');
-      if (reportParam) {
-        const reportSelect = document.getElementById('reportType');
-        if (reportSelect) {
-          reportSelect.value = reportParam;
-          reportSelect.dispatchEvent(new Event('change'));
+      const reportParam = urlParams.get('report') || 'sales_summary';
+      const presetParam = urlParams.get('preset');
+      const reportSelect = document.getElementById('reportType');
+      if (reportSelect) {
+        reportSelect.value = reportParam;
+        reportSelect.dispatchEvent(new Event('change'));
+      }
+
+      // Map (report, preset) → page title shown in the card header.
+      // Keep these labels in sync with REPORT_GROUPS in shared-nav.js.
+      const REPORT_TITLES = {
+        sales_summary:    'Sales Summary',
+        metrics:          'Net Sales',
+        menu:             'Menu Performance',
+        guest_count:      'Guest Count',
+        royalty:          'Royalty Report',
+        tip_pool:         'Payroll Report',
+      };
+      const PRESET_TITLES = {
+        netsales_weekly: 'Net Sales by Location – Weekly',
+      };
+      const titleEl = document.getElementById('builderTitle');
+      if (titleEl) {
+        titleEl.textContent =
+          (presetParam && PRESET_TITLES[presetParam]) ||
+          REPORT_TITLES[reportParam] ||
+          'Report';
+      }
+
+      // The "Net Sales by Location – Weekly" preset is functionally a
+      // metrics report with last_7_days range. Lock the date range so
+      // the page matches its name out of the box.
+      if (presetParam === 'netsales_weekly') {
+        const dateRange = document.getElementById('dateRangeType');
+        if (dateRange) {
+          dateRange.value = 'last_7_days';
+          dateRange.dispatchEvent(new Event('change'));
         }
       }
+
       // Handle ?loadReport= param from saved report links on other pages
       const loadReportParam = urlParams.get('loadReport');
       if (loadReportParam && typeof window.loadReport === 'function') {

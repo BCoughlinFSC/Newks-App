@@ -1631,15 +1631,30 @@ class User(BaseModel):
     status: Optional[str] = "active"  # "invited" or "active"
 
 # Available report pages for page-level permissions
-# Report keys match the nav link keys in shared-nav.js
+# Report keys match the nav link keys in shared-nav.js (Reports section only;
+# Admin & Data items are role-gated, not page-gated).
 AVAILABLE_PAGES = {
-    "sales_summary": "Sales Summary",
-    "metrics": "Net Sales",
-    "menu": "Menu Performance",
-    "guest_count": "Guest Count",
-    "royalty": "Royalty Report",
-    "pick3": "Pick 3",
-    "tip_pool": "Tip Pool",
+    # Sales & Performance
+    "sales_summary":     "Sales Summary",
+    "metrics":           "Net Sales",
+    "netsales_weekly":   "Net Sales by Location – Weekly",
+    "royalty":           "Royalty Report",
+    "daily-flash":       "Daily Sales Flash",
+    "wpy":               "Weekly Sales (WPY)",
+    # Menu & Items
+    "menu":              "Menu Performance",
+    "menu-mix":          "Menu Mix Report",
+    "pick3":             "Pick 3",
+    "pick2":             "Pick 2",
+    "full-pairings":     "Full Pairings",
+    # Operations & Labor
+    "guest_count":       "Guest Count",
+    "tip_pool":          "Payroll Report",
+    "cashier-vs-kiosk":  "Cashier vs Kiosk",
+    "food-cost":         "Food Cost (COGS)",
+    # Catering & Loyalty
+    "catering":          "Catering Reports",
+    "loyalty":           "Loyalty Reports",
 }
 
 class UserCreate(BaseModel):
