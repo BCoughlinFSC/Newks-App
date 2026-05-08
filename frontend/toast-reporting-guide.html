@@ -118,6 +118,23 @@
       padding: 3px 10px;
       border-radius: 20px;
     }
+    .banner-back-link {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.3);
+      padding: 6px 12px;
+      border-radius: 6px;
+      text-decoration: none;
+      margin-bottom: 6px;
+      transition: background .15s, border-color .15s;
+    }
+    .banner-back-link:hover {
+      background: rgba(255,255,255,.22);
+      border-color: rgba(255,255,255,.5);
+    }
 
     /* ─── Sidebar ────────────────────────────────────────────────────────── */
     aside {
@@ -579,6 +596,7 @@
       <p class="banner-subtitle">Transition Reference · Daily Operations · Manager Training</p>
     </div>
     <div class="banner-version">
+      <a href="/legacy.html" class="banner-back-link">&larr; Back to Reports</a>
       <span class="banner-badge">Aloha → Toast</span>
       <span class="banner-badge">2025 Edition</span>
     </div>

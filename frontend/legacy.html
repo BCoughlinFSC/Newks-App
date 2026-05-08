@@ -706,21 +706,16 @@
               <input type="checkbox" id="enableYoY" />
               Show Aloha Qty column in menu report
             </label>
-            <div class="yoy-mode-row" style="margin:6px 0 4px 22px; display:none;" id="yoyModeRow">
-              <label style="margin-right:12px; cursor:pointer;">
-                <input type="radio" name="yoyMode" value="same_date" checked /> Same Date
-                <span style="color:#6b7280; font-size:0.85em;">(e.g. Mar 20 → Mar 20 last year)</span>
-              </label>
-              <label style="cursor:pointer; margin-right:12px;">
-                <input type="radio" name="yoyMode" value="same_day" /> Same Day of Week
-                <span style="color:#6b7280; font-size:0.85em;">(e.g. Friday → Friday, 52 weeks prior)</span>
-              </label>
-              <label style="cursor:pointer;">
-                <input type="radio" name="yoyMode" value="fiscal" /> Fiscal Calendar
-                <span style="color:#6b7280; font-size:0.85em;">(matches old SSRS report)</span>
-              </label>
+            <!-- YoY mode row is hidden — fiscal-calendar comparison is the
+                 only supported mode (matches the old SSRS report). The radio
+                 inputs stay in the DOM so existing JS (getYoYMode, loadReport
+                 saved-config rehydration) keeps working without null checks. -->
+            <div class="yoy-mode-row" style="display:none;" id="yoyModeRow">
+              <input type="radio" name="yoyMode" value="same_date" />
+              <input type="radio" name="yoyMode" value="same_day" />
+              <input type="radio" name="yoyMode" value="fiscal" checked />
             </div>
-            <div class="yoy-hint" id="yoyHint">Compares to the same date range, 1 year prior (from your imported Aloha data).</div>
+            <div class="yoy-hint" id="yoyHint">Uses Newk's fiscal calendar to map prior-year dates (matches the old SSRS Weekly Sales Report).</div>
             <div id="alohaRangeWarning" class="aloha-range-warning hidden"></div>
             <details class="aloha-import-help">
               <summary>How do I import more Aloha data?</summary>
@@ -1435,15 +1430,14 @@
     function updateYoYControls() {
       const enableYoY = document.getElementById('enableYoY');
       if (!enableYoY) return;
-      const modeRow = document.getElementById('yoyModeRow');
-      if (modeRow) modeRow.style.display = enableYoY.checked ? '' : 'none';
+      // yoyModeRow stays hidden — fiscal is the only supported comparison mode.
       updateYoYHint();
       updateAlohaRangeWarning();
     }
 
     function getYoYMode() {
       const checked = document.querySelector('input[name="yoyMode"]:checked');
-      return checked ? checked.value : 'same_date';
+      return checked ? checked.value : 'fiscal';
     }
 
     function updateYoYHint() {
