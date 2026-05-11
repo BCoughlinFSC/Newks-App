@@ -10998,7 +10998,7 @@ async def admin_precompute_menu(
     # then tried TLS against a non-TLS local target → SSL WRONG_VERSION_NUMBER.
     base_url = payload.get("base_url") or "http://127.0.0.1:8000"
 
-    timeout_s = float(payload.get("timeout_s", 600.0))
+    timeout_s = float(payload.get("timeout_s", 1800.0))
 
     auth_header: Optional[str] = None
     if request is not None:

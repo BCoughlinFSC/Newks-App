@@ -79,8 +79,11 @@ DEFAULT_SHAPES: List[Dict[str, Any]] = [
            dateRangeType="last_7_days"),
     _shape("last_30_days · YoY fiscal · all stores · consolidated tags",
            dateRangeType="last_30_days"),
-    _shape("last_90_days · YoY fiscal · all stores · consolidated tags",
-           dateRangeType="last_90_days"),
+    # NOTE: last_90_days was removed from defaults — it produces ~3M modifier
+    # rows and takes ~45 minutes per run, which isn't useful as a "precompute"
+    # and risks the same OOM that motivated this work. Add back here only if
+    # users actually request 90-day windows; you'd also need to bump the
+    # admin endpoint's default timeout to ~3600s.
 ]
 
 
@@ -94,7 +97,7 @@ async def run_default_shapes(
     *,
     shapes: Optional[List[Dict[str, Any]]] = None,
     on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
-    request_timeout_s: float = 600.0,
+    request_timeout_s: float = 1800.0,
 ) -> Dict[str, Any]:
     """
     POST each shape to /api/reports/run with X-Force-Refresh: 1.
@@ -154,10 +157,13 @@ async def run_default_shapes(
                         "error":       (resp.text or "")[:400],
                     })
             except Exception as exc:
+                # httpx TimeoutException has an empty str(); fall back to
+                # repr() / class name so the UI shows something actionable.
+                err_msg = str(exc) or repr(exc) or exc.__class__.__name__
                 entry.update({
                     "status":      "error",
                     "duration_s":  round(time.time() - t0, 2),
-                    "error":       str(exc),
+                    "error":       err_msg,
                 })
             results.append(entry)
             if on_progress:
