@@ -10991,15 +10991,12 @@ async def admin_precompute_menu(
     if _precompute_menu_progress.get("running"):
         raise HTTPException(status_code=409, detail="A precompute job is already running. Wait for it to finish.")
 
-    # Default to same-origin so the precompute job hits the same process
-    # it was started from. Allow override (e.g. point at a staging URL).
-    base_url = payload.get("base_url")
-    if not base_url and request is not None:
-        scheme = request.url.scheme
-        host = request.url.netloc
-        base_url = f"{scheme}://{host}"
-    if not base_url:
-        base_url = "http://127.0.0.1:8000"
+    # Default to plain-HTTP loopback — uvicorn listens on 127.0.0.1:8000 on
+    # this server, no need to round-trip through the public HTTPS endpoint.
+    # Deriving from `request.url` was unreliable on Cloudways: the outer nginx
+    # set X-Forwarded-Proto=https, so the scheme came back as https but httpx
+    # then tried TLS against a non-TLS local target → SSL WRONG_VERSION_NUMBER.
+    base_url = payload.get("base_url") or "http://127.0.0.1:8000"
 
     timeout_s = float(payload.get("timeout_s", 600.0))
 
