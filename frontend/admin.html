@@ -1819,6 +1819,9 @@ ORDER BY DateOfBusiness</pre>
       }
     }
 
+    let _reconcilePollTimer = null;
+    let _reconcileStartedAt = null;
+
     async function runFlashReconcile() {
       const start = document.getElementById('reconcileStart').value;
       const end   = document.getElementById('reconcileEnd').value;
@@ -1835,15 +1838,13 @@ ORDER BY DateOfBusiness</pre>
       const discrepEl = document.getElementById('reconcileDiscrepancies');
 
       btn.disabled = true;
-      const origLabel = btn.textContent;
-      btn.textContent = 'Running…';
+      btn.textContent = 'Starting…';
       msgEl.style.color = '#374151';
-      msgEl.textContent = `Reconciling ${start} → ${end}… please leave this tab open.`;
+      msgEl.textContent = `Starting reconcile for ${start} → ${end}…`;
       summaryEl.innerHTML = '';
       perDateEl.innerHTML = '';
       discrepEl.innerHTML = '';
 
-      const started = Date.now();
       try {
         const resp = await fetch('/api/admin/flash-reconcile', {
           method: 'POST', headers: getAuthHeaders(),
@@ -1857,17 +1858,89 @@ ORDER BY DateOfBusiness</pre>
           try { const j = await resp.json(); detail = j.detail || detail; } catch (_) {}
           throw new Error(detail);
         }
-        const result = await resp.json();
-        renderReconcileResult(result);
-        const secs = Math.round((Date.now() - started) / 1000);
-        msgEl.style.color = '#059669';
-        msgEl.textContent = `Done in ${secs}s. ${result.discrepancy_count} discrepancy row(s) at thresholds |Δ| ≥ $${minAbs} or ${minPct}%.`;
+        _reconcileStartedAt = Date.now();
+        btn.textContent = 'Running…';
+        if (_reconcilePollTimer) clearInterval(_reconcilePollTimer);
+        // Poll immediately, then every 3s
+        await pollReconcileStatus();
+        _reconcilePollTimer = setInterval(pollReconcileStatus, 3000);
       } catch (err) {
         msgEl.style.color = '#DC2626';
-        msgEl.textContent = 'Reconcile failed: ' + err.message;
-      } finally {
+        msgEl.textContent = 'Reconcile failed to start: ' + err.message;
         btn.disabled = false;
-        btn.textContent = origLabel;
+        btn.textContent = 'Run Reconcile';
+      }
+    }
+
+    async function pollReconcileStatus() {
+      try {
+        const resp = await fetch('/api/admin/flash-reconcile/status', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        const msgEl = document.getElementById('reconcileMsg');
+        const btn = document.getElementById('reconcileRunBtn');
+
+        if (s.status === 'never_run') {
+          msgEl.textContent = 'No reconcile has run yet.';
+          return;
+        }
+
+        const completed = s.completed_days || 0;
+        const total = s.total_days || 1;
+        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        const elapsed = _reconcileStartedAt
+          ? Math.round((Date.now() - _reconcileStartedAt) / 1000)
+          : null;
+
+        if (s.running) {
+          msgEl.style.color = '#1E40AF';
+          msgEl.innerHTML =
+            `<div style="font-weight:600;margin-bottom:0.3rem;">Reconciling ${escHtml(s.range || '')}` +
+            ` — day ${completed} of ${total} (${pct}%)` +
+            (elapsed != null ? ` · ${elapsed}s elapsed` : '') + `</div>` +
+            `<div style="background:#DBEAFE;border-radius:6px;height:14px;overflow:hidden;">` +
+            `<div style="background:#2563EB;height:100%;width:${pct}%;transition:width 0.5s;border-radius:6px;"></div>` +
+            `</div>` +
+            `<div style="margin-top:0.35rem;font-size:0.82rem;color:#374151;">` +
+            `Currently processing: <strong>${escHtml(s.current_date || '')}</strong>` +
+            ` — one Toast ERA call + per-store service-charge walks (≈ 1–3 min per date).` +
+            `</div>`;
+          btn.disabled = true;
+          btn.textContent = 'Running…';
+          return;
+        }
+
+        // Not running — terminal state. Stop polling.
+        if (_reconcilePollTimer) {
+          clearInterval(_reconcilePollTimer);
+          _reconcilePollTimer = null;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Run Reconcile';
+
+        if (s.error) {
+          msgEl.style.color = '#DC2626';
+          msgEl.textContent = `Reconcile failed: ${s.error}`;
+          return;
+        }
+
+        if (s.result) {
+          renderReconcileResult(s.result);
+          const r = s.result;
+          const secs = elapsed != null ? `${elapsed}s` : '—';
+          msgEl.style.color = '#059669';
+          msgEl.textContent =
+            `Done in ${secs}. ${r.discrepancy_count} discrepancy row(s) at thresholds ` +
+            `|Δ| ≥ $${r.thresholds.min_abs_diff_usd} or ${r.thresholds.min_pct_diff}%.`;
+        } else {
+          msgEl.style.color = '#6B7280';
+          msgEl.textContent = 'Reconcile finished but no result was returned.';
+        }
+      } catch (err) {
+        const msgEl = document.getElementById('reconcileMsg');
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'Status poll failed: ' + err.message;
+        // Don't stop polling on transient errors — let user cancel by reloading.
       }
     }
 
@@ -2507,6 +2580,14 @@ ORDER BY DateOfBusiness</pre>
       // Flash reconcile
       document.getElementById('reconcileRunBtn').addEventListener('click', runFlashReconcile);
       setReconcileDefaults();
+      // Pick up an in-flight reconcile or show the last completed result on load
+      pollReconcileStatus().then(() => {
+        if (_reconcilePollTimer === null &&
+            document.getElementById('reconcileRunBtn').textContent === 'Running…') {
+          // Job still running from a prior tab; resume polling
+          _reconcilePollTimer = setInterval(pollReconcileStatus, 3000);
+        }
+      }).catch(() => { /* ignore — empty state is fine */ });
 
       // Database health + toast config buttons
       document.getElementById('refreshDbHealthBtn').addEventListener('click', loadDbHealth);

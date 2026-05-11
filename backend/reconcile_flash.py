@@ -2,9 +2,10 @@
 reconcile_flash.py — Diff the stored flash data (`aloha_sales_data`) against a
 fresh Toast ERA pull, for a given date range.
 
-Hits POST /api/admin/flash-reconcile on the running server.  Use this to find
-which (store, date) pairs have stale snapshots so you can re-import only the
-days that need it instead of guessing.
+Kicks off POST /api/admin/flash-reconcile (background task) and polls
+GET /api/admin/flash-reconcile/status until done — long ranges no longer
+trip the reverse-proxy 504.  Use this to find which (store, date) pairs have
+stale snapshots so you can re-import only the days that need it.
 
 Usage:
     python reconcile_flash.py --start 2026-05-04 --end 2026-05-10
@@ -21,12 +22,15 @@ import csv
 import json
 import os
 import sys
+import time
 from datetime import date
 
 import httpx
 
 
 DEFAULT_SERVER = "https://phpstack-1474989-6237770.cloudwaysapps.com"
+POLL_INTERVAL_S = 5.0
+POLL_TIMEOUT_S = 3600.0  # 1 hour hard ceiling on a single reconcile run
 
 
 def main():
@@ -68,22 +72,64 @@ def main():
     if args.locations:
         payload["locations"] = [s.strip() for s in args.locations.split(",") if s.strip()]
 
-    url = f"{args.server.rstrip('/')}/api/admin/flash-reconcile"
+    base = args.server.rstrip("/")
+    start_url = f"{base}/api/admin/flash-reconcile"
+    status_url = f"{base}/api/admin/flash-reconcile/status"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {args.token}",
     }
-    print(f"POST {url}")
+    print(f"POST {start_url}")
     print(f"  range={args.start} to {args.end}  thresholds: |Δ| >= ${args.min_abs:.2f} or {args.min_pct:.2f}%")
 
-    with httpx.Client(timeout=1800.0) as client:
-        resp = client.post(url, json=payload, headers=headers)
+    with httpx.Client(timeout=60.0) as client:
+        resp = client.post(start_url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            print(f"ERROR starting reconcile: {resp.status_code} {resp.text}", file=sys.stderr)
+            sys.exit(1)
+        start_info = resp.json()
+        total_days = start_info.get("total_days", 0)
+        print(f"  started: {start_info.get('status')} — {total_days} day(s) queued")
+        print("  polling status…")
 
-    if resp.status_code != 200:
-        print(f"ERROR {resp.status_code}: {resp.text}", file=sys.stderr)
-        sys.exit(1)
-
-    result = resp.json()
+        start_t = time.time()
+        last_pct = -1
+        result = None
+        while True:
+            elapsed = time.time() - start_t
+            if elapsed > POLL_TIMEOUT_S:
+                print(f"ERROR: reconcile exceeded {POLL_TIMEOUT_S/60:.0f}-minute poll ceiling. "
+                      "The job may still be running on the server; check the Admin UI.", file=sys.stderr)
+                sys.exit(1)
+            try:
+                sresp = client.get(status_url, headers=headers)
+            except httpx.HTTPError as e:
+                print(f"  poll warning: {e} (will retry)", file=sys.stderr)
+                time.sleep(POLL_INTERVAL_S)
+                continue
+            if sresp.status_code != 200:
+                print(f"  poll warning: HTTP {sresp.status_code} (will retry)", file=sys.stderr)
+                time.sleep(POLL_INTERVAL_S)
+                continue
+            s = sresp.json()
+            if not s.get("running"):
+                if s.get("error"):
+                    print(f"ERROR: reconcile failed: {s['error']}", file=sys.stderr)
+                    sys.exit(1)
+                result = s.get("result")
+                if not result:
+                    print("ERROR: reconcile finished with no result.", file=sys.stderr)
+                    sys.exit(1)
+                print(f"  done in {int(elapsed)}s.")
+                break
+            done = s.get("completed_days", 0)
+            tot = s.get("total_days", total_days or 1)
+            pct = int(round(100 * done / max(tot, 1)))
+            cur = s.get("current_date", "?")
+            if pct != last_pct:
+                print(f"  [{int(elapsed):>4}s] {done}/{tot} ({pct}%) current={cur}")
+                last_pct = pct
+            time.sleep(POLL_INTERVAL_S)
 
     if args.json_out:
         with open(args.json_out, "w") as f:

@@ -10690,20 +10690,24 @@ async def admin_flash_import_status(admin_user: User = Depends(get_current_admin
     return result
 
 
+# Module-level state for the async reconcile job — same pattern as
+# _flash_import_progress.  POST /api/admin/flash-reconcile kicks off a
+# background task and returns immediately; the UI / CLI polls
+# GET /api/admin/flash-reconcile/status until `running` flips to False.
+_flash_reconcile_progress: Dict[str, Any] = {}
+
+
 @app.post("/api/admin/flash-reconcile")
 async def admin_flash_reconcile(
     payload: dict = Body(...),
     admin_user: User = Depends(get_current_admin_user),
 ):
     """
-    For each (location, business_date) in the requested range, compute a fresh
-    flash value from Toast (same math as the nightly importer: ERA netSales
-    minus restaurant-destination service charges plus catering-leak
-    reclassification) and diff against the stored aloha_sales_data row.
-
-    Returns a punch list of (location, date) pairs whose stored value differs
-    from a fresh pull by more than the threshold — so you know which days to
-    re-import without guessing.
+    Kick off a flash reconcile job in the background.  Returns immediately
+    with {"status": "started", ...}; the actual work (Toast ERA calls + diff
+    against aloha_sales_data) runs as an asyncio task so HTTP timeouts don't
+    bite long ranges.  Poll GET /api/admin/flash-reconcile/status for
+    progress and the final result.
 
     Payload:
         {
@@ -10728,94 +10732,158 @@ async def admin_flash_reconcile(
     if (end - start).days > 31:
         raise HTTPException(status_code=400, detail="Range max 31 days")
 
+    if _flash_reconcile_progress.get("running"):
+        raise HTTPException(status_code=409, detail="A flash reconcile is already running. Wait for it to finish.")
+
     min_abs = float(payload.get("min_abs_diff", 50.0))
-    min_pct = float(payload.get("min_pct_diff", 0.5)) / 100.0
+    min_pct_pct = float(payload.get("min_pct_diff", 0.5))   # keep raw percent for display
+    min_pct = min_pct_pct / 100.0
     loc_filter = set(str(x).strip() for x in payload.get("locations") or [])
+    total_days = (end - start).days + 1
 
-    discrepancies: List[dict] = []
-    chain_stored = 0.0
-    chain_fresh = 0.0
-    chain_diff_abs = 0.0
-    per_date_summary: List[dict] = []
+    async def _run_reconcile():
+        discrepancies: List[dict] = []
+        chain_stored = 0.0
+        chain_fresh = 0.0
+        chain_diff_abs = 0.0
+        per_date_summary: List[dict] = []
 
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        d = start
-        while d <= end:
-            d_str = d.isoformat()
-            try:
-                fresh = await _compute_flash_loc_data(client, d)
-            except Exception as exc:
-                logger.error("flash-reconcile: compute failed for %s: %s", d_str, exc, exc_info=True)
-                per_date_summary.append({
-                    "business_date": d_str,
-                    "status": "compute_failed",
-                    "error": str(exc),
-                })
-                d += timedelta(days=1)
-                continue
+        _flash_reconcile_progress.update({
+            "running": True,
+            "range": f"{start.isoformat()} to {end.isoformat()}",
+            "total_days": total_days,
+            "completed_days": 0,
+            "current_date": start.isoformat(),
+            "started_at": datetime.now().isoformat(),
+            "completed_at": None,
+            "error": None,
+            "result": None,
+            "thresholds": {
+                "min_abs_diff_usd": round(min_abs, 2),
+                "min_pct_diff": round(min_pct_pct, 4),
+            },
+        })
 
-            df = aloha_sales_db.query_date_range(d_str, d_str, locations=list(loc_filter) if loc_filter else None)
-            stored_by_loc: Dict[str, float] = {}
-            if not df.empty:
-                for _, row in df.iterrows():
-                    lid = str(row["location"]).strip()
-                    if not lid:
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                d = start
+                completed = 0
+                while d <= end:
+                    d_str = d.isoformat()
+                    _flash_reconcile_progress["current_date"] = d_str
+                    try:
+                        fresh = await _compute_flash_loc_data(client, d)
+                    except Exception as exc:
+                        logger.error("flash-reconcile: compute failed for %s: %s", d_str, exc, exc_info=True)
+                        per_date_summary.append({
+                            "business_date": d_str,
+                            "status": "compute_failed",
+                            "error": str(exc),
+                        })
+                        completed += 1
+                        _flash_reconcile_progress["completed_days"] = completed
+                        d += timedelta(days=1)
                         continue
-                    stored_by_loc[lid] = float(row.get("net_sales", 0) or 0)
 
-            fresh_total = 0.0
-            stored_total = 0.0
-            all_locs = set(fresh.keys()) | set(stored_by_loc.keys())
-            if loc_filter:
-                all_locs &= loc_filter
-            for lid in all_locs:
-                fresh_val = float(fresh.get(lid, {}).get("net_sales", 0.0))
-                stored_val = float(stored_by_loc.get(lid, 0.0))
-                fresh_total += fresh_val
-                stored_total += stored_val
-                diff = stored_val - fresh_val
-                denom = max(abs(fresh_val), abs(stored_val), 1e-9)
-                pct = diff / denom
-                if abs(diff) >= min_abs or abs(pct) >= min_pct:
-                    discrepancies.append({
-                        "location": lid,
+                    df = aloha_sales_db.query_date_range(
+                        d_str, d_str,
+                        locations=list(loc_filter) if loc_filter else None,
+                    )
+                    stored_by_loc: Dict[str, float] = {}
+                    if not df.empty:
+                        for _, row in df.iterrows():
+                            lid = str(row["location"]).strip()
+                            if not lid:
+                                continue
+                            stored_by_loc[lid] = float(row.get("net_sales", 0) or 0)
+
+                    fresh_total = 0.0
+                    stored_total = 0.0
+                    all_locs = set(fresh.keys()) | set(stored_by_loc.keys())
+                    if loc_filter:
+                        all_locs &= loc_filter
+                    for lid in all_locs:
+                        fresh_val = float(fresh.get(lid, {}).get("net_sales", 0.0))
+                        stored_val = float(stored_by_loc.get(lid, 0.0))
+                        fresh_total += fresh_val
+                        stored_total += stored_val
+                        diff = stored_val - fresh_val
+                        denom = max(abs(fresh_val), abs(stored_val), 1e-9)
+                        pct = diff / denom
+                        if abs(diff) >= min_abs or abs(pct) >= min_pct:
+                            discrepancies.append({
+                                "location": lid,
+                                "business_date": d_str,
+                                "stored_net_sales": round(stored_val, 2),
+                                "fresh_net_sales": round(fresh_val, 2),
+                                "diff": round(diff, 2),
+                                "pct_diff": round(pct * 100, 2),
+                            })
+
+                    chain_stored += stored_total
+                    chain_fresh += fresh_total
+                    chain_diff_abs += abs(stored_total - fresh_total)
+                    per_date_summary.append({
                         "business_date": d_str,
-                        "stored_net_sales": round(stored_val, 2),
-                        "fresh_net_sales": round(fresh_val, 2),
-                        "diff": round(diff, 2),
-                        "pct_diff": round(pct * 100, 2),
+                        "status": "ok",
+                        "locations_checked": len(all_locs),
+                        "stored_total": round(stored_total, 2),
+                        "fresh_total": round(fresh_total, 2),
+                        "diff": round(stored_total - fresh_total, 2),
                     })
+                    completed += 1
+                    _flash_reconcile_progress["completed_days"] = completed
+                    d += timedelta(days=1)
 
-            chain_stored += stored_total
-            chain_fresh += fresh_total
-            chain_diff_abs += abs(stored_total - fresh_total)
-            per_date_summary.append({
-                "business_date": d_str,
-                "status": "ok",
-                "locations_checked": len(all_locs),
-                "stored_total": round(stored_total, 2),
-                "fresh_total": round(fresh_total, 2),
-                "diff": round(stored_total - fresh_total, 2),
+            discrepancies.sort(key=lambda r: abs(r["diff"]), reverse=True)
+
+            _flash_reconcile_progress.update({
+                "running": False,
+                "completed_at": datetime.now().isoformat(),
+                "result": {
+                    "start_date": start.isoformat(),
+                    "end_date": end.isoformat(),
+                    "thresholds": {
+                        "min_abs_diff_usd": round(min_abs, 2),
+                        "min_pct_diff": round(min_pct_pct, 4),
+                    },
+                    "chain_stored_total": round(chain_stored, 2),
+                    "chain_fresh_total": round(chain_fresh, 2),
+                    "chain_net_diff": round(chain_stored - chain_fresh, 2),
+                    "chain_abs_diff_sum_per_date": round(chain_diff_abs, 2),
+                    "discrepancy_count": len(discrepancies),
+                    "per_date": per_date_summary,
+                    "discrepancies": discrepancies,
+                },
             })
-            d += timedelta(days=1)
+        except Exception as exc:
+            logger.error("flash-reconcile job crashed: %s", exc, exc_info=True)
+            _flash_reconcile_progress.update({
+                "running": False,
+                "completed_at": datetime.now().isoformat(),
+                "error": str(exc),
+            })
 
-    discrepancies.sort(key=lambda r: abs(r["diff"]), reverse=True)
-
+    asyncio.create_task(_run_reconcile())
     return {
-        "start_date": start.isoformat(),
-        "end_date": end.isoformat(),
+        "status": "started",
+        "range": f"{start.isoformat()} to {end.isoformat()}",
+        "total_days": total_days,
         "thresholds": {
             "min_abs_diff_usd": round(min_abs, 2),
-            "min_pct_diff": round(min_pct * 100, 4),
+            "min_pct_diff": round(min_pct_pct, 4),
         },
-        "chain_stored_total": round(chain_stored, 2),
-        "chain_fresh_total": round(chain_fresh, 2),
-        "chain_net_diff": round(chain_stored - chain_fresh, 2),
-        "chain_abs_diff_sum_per_date": round(chain_diff_abs, 2),
-        "discrepancy_count": len(discrepancies),
-        "per_date": per_date_summary,
-        "discrepancies": discrepancies,
     }
+
+
+@app.get("/api/admin/flash-reconcile/status")
+async def admin_flash_reconcile_status(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Return live progress + final result for the most recent reconcile job."""
+    if not _flash_reconcile_progress:
+        return {"status": "never_run"}
+    return dict(_flash_reconcile_progress)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
