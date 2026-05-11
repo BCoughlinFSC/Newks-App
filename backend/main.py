@@ -9443,16 +9443,26 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
             logger.warning("precompute_cache: key build failed: %s", _exc)
             _menu_cache_key = None
         if _menu_cache_key and not force_refresh:
-            cached = precompute_cache.cache_get_fresh(_menu_cache_key)
-            if cached is not None:
+            # Try exact-match first, then fall back to the Consolidated-tags
+            # superset (and filter the result) if the user picked any subset.
+            hit = precompute_cache.lookup_with_superset_fallback(
+                report_config.dict(),
+                start_date.isoformat(),
+                end_date.isoformat(),
+            )
+            if hit is not None:
+                match_kind = hit.get("match", "exact")
                 if response is not None:
-                    response.headers["X-Menu-Cache"] = "hit"
-                    response.headers["X-Menu-Cache-Key"] = _menu_cache_key
+                    response.headers["X-Menu-Cache"] = (
+                        "hit" if match_kind == "exact" else "hit-superset"
+                    )
+                    response.headers["X-Menu-Cache-Key"] = hit.get("key") or _menu_cache_key
                 logger.info(
-                    "menu cache HIT key=%s range=%s..%s",
-                    _menu_cache_key, start_date.isoformat(), end_date.isoformat(),
+                    "menu cache HIT (%s) key=%s range=%s..%s",
+                    match_kind, hit.get("key"),
+                    start_date.isoformat(), end_date.isoformat(),
                 )
-                return cached
+                return hit["result"]
         if response is not None and _menu_cache_key:
             response.headers["X-Menu-Cache"] = "miss"
             response.headers["X-Menu-Cache-Key"] = _menu_cache_key

@@ -32,25 +32,12 @@ from typing import Any, Callable, Dict, List, Optional
 import httpx
 
 
-# ── Canonical "all Consolidated tags" list (mirrors legacy.html's typical
-# request). Edit this if Toast's tag taxonomy changes.
-CONSOLIDATED_TAGS = [
-    "* Consolidated  Soups",  # double-space is intentional — real Toast tag name
-    "* Consolidated 2oz 4oz Dressings",
-    "* Consolidated Bulk GnG",
-    "* Consolidated Catering",
-    "* Consolidated Desserts",
-    "* Consolidated Extras and Misc",
-    "* Consolidated Modifiers",
-    "* Consolidated NA Bev",
-    "* Consolidated Non Food",
-    "* Consolidated Pasta and Mac",
-    "* Consolidated Pizza",
-    "* Consolidated Salads",
-    "* Consolidated Sandwiches",
-    "* Consolidated Sides",
-    "* Consolidated Wraps",
-]
+from precompute_cache import CONSOLIDATED_TAGS_SUPERSET
+
+# Single source of truth for the Consolidated tag list lives in
+# precompute_cache (the cache layer needs it to do superset-fallback
+# lookups). Sort for stable cache-key bytes and stable log output.
+CONSOLIDATED_TAGS = sorted(CONSOLIDATED_TAGS_SUPERSET)
 
 
 def _shape(label: str, **overrides: Any) -> Dict[str, Any]:
