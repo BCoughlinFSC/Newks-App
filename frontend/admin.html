@@ -481,6 +481,52 @@
 
       <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
 
+      <!-- ─── Flash Reconcile Section ─────────────────────────── -->
+      <div>
+        <div class="section-header">
+          <div>
+            <h2>Flash Reconcile</h2>
+            <div class="user-count">Diff stored flash data vs a fresh Toast ERA pull &mdash; finds stale (store, date) rows so you know what to re-import.</div>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+          <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+              <input type="date" id="reconcileStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+              <input type="date" id="reconcileEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Flag if |Δ| &ge; $</label>
+              <input type="number" id="reconcileMinAbs" value="50" min="0" step="10" style="width:90px;padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">…or &ge; %</label>
+              <input type="number" id="reconcileMinPct" value="0.5" min="0" step="0.1" style="width:90px;padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <button class="btn-primary" id="reconcileRunBtn" style="background:#1E3A5F;">Run Reconcile</button>
+          </div>
+          <div id="reconcileMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;">
+            Tip: defaults to current week (Mon &rarr; today). Heads-up: a 7-day range can take 5&ndash;15 minutes (one Toast ERA call per date plus per-store service-charge walks).
+          </div>
+        </div>
+
+        <!-- Summary cards -->
+        <div id="reconcileSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1rem;"></div>
+
+        <!-- Per-date totals -->
+        <div id="reconcilePerDate" style="margin-bottom:1rem;"></div>
+
+        <!-- Discrepancy table -->
+        <div id="reconcileDiscrepancies"></div>
+      </div>
+
+      <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
+
       <!-- ─── Lubbock (Aloha POS) Upload ──────────────────────── -->
       <div>
         <div class="section-header">
@@ -1732,6 +1778,220 @@ ORDER BY DateOfBusiness</pre>
     }
 
     // ──────────────────────────────────────────────────────
+    // Flash Reconcile (diff stored vs fresh ERA)
+    // ──────────────────────────────────────────────────────
+
+    function setReconcileDefaults() {
+      const today = new Date();
+      // Default range: ISO Monday of current week through today
+      const dow = today.getDay();                  // 0=Sun..6=Sat
+      const daysSinceMon = (dow + 6) % 7;          // Mon=0, Sun=6
+      const mon = new Date(today); mon.setDate(today.getDate() - daysSinceMon);
+      const iso = d => d.toISOString().slice(0, 10);
+      const startEl = document.getElementById('reconcileStart');
+      const endEl = document.getElementById('reconcileEnd');
+      if (startEl && !startEl.value) startEl.value = iso(mon);
+      if (endEl   && !endEl.value)   endEl.value   = iso(today);
+    }
+
+    function _money(v) {
+      const n = Number(v || 0);
+      const sign = n < 0 ? '-' : '';
+      return sign + '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    async function reimportFlashDate(dateStr, btn) {
+      if (!confirm(`Re-import flash data for ${dateStr}? This will refresh all stores for that day from Toast.`)) return;
+      const origLabel = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Re-importing…'; }
+      try {
+        const resp = await fetch('/api/admin/flash-import/run', {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({ start_date: dateStr, end_date: dateStr })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        showStatus('success', `Flash re-import started for ${dateStr}. Watch the Flash Sales Import status above; re-run reconcile after it completes.`);
+        loadFlashImportStatus();
+        if (btn) btn.textContent = 'Queued';
+      } catch (err) {
+        showStatus('error', `Re-import failed for ${dateStr}: ${err.message}`);
+        if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+      }
+    }
+
+    async function runFlashReconcile() {
+      const start = document.getElementById('reconcileStart').value;
+      const end   = document.getElementById('reconcileEnd').value;
+      const minAbs = parseFloat(document.getElementById('reconcileMinAbs').value || '50');
+      const minPct = parseFloat(document.getElementById('reconcileMinPct').value || '0.5');
+
+      if (!start || !end) { showStatus('error', 'Pick a start and end date'); return; }
+      if (start > end)    { showStatus('error', 'Start date must be on or before end date'); return; }
+
+      const btn = document.getElementById('reconcileRunBtn');
+      const msgEl = document.getElementById('reconcileMsg');
+      const summaryEl = document.getElementById('reconcileSummary');
+      const perDateEl = document.getElementById('reconcilePerDate');
+      const discrepEl = document.getElementById('reconcileDiscrepancies');
+
+      btn.disabled = true;
+      const origLabel = btn.textContent;
+      btn.textContent = 'Running…';
+      msgEl.style.color = '#374151';
+      msgEl.textContent = `Reconciling ${start} → ${end}… please leave this tab open.`;
+      summaryEl.innerHTML = '';
+      perDateEl.innerHTML = '';
+      discrepEl.innerHTML = '';
+
+      const started = Date.now();
+      try {
+        const resp = await fetch('/api/admin/flash-reconcile', {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({
+            start_date: start, end_date: end,
+            min_abs_diff: minAbs, min_pct_diff: minPct,
+          }),
+        });
+        if (!resp.ok) {
+          let detail = `HTTP ${resp.status}`;
+          try { const j = await resp.json(); detail = j.detail || detail; } catch (_) {}
+          throw new Error(detail);
+        }
+        const result = await resp.json();
+        renderReconcileResult(result);
+        const secs = Math.round((Date.now() - started) / 1000);
+        msgEl.style.color = '#059669';
+        msgEl.textContent = `Done in ${secs}s. ${result.discrepancy_count} discrepancy row(s) at thresholds |Δ| ≥ $${minAbs} or ${minPct}%.`;
+      } catch (err) {
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'Reconcile failed: ' + err.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = origLabel;
+      }
+    }
+
+    function renderReconcileResult(r) {
+      // Summary cards
+      const card = (label, value, color) =>
+        `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1rem;text-align:center;">
+          <div style="font-size:0.78rem;color:#6B7280;margin-bottom:0.3rem;">${label}</div>
+          <div style="font-size:1.25rem;font-weight:700;color:${color||'#1E3A5F'};">${value}</div>
+        </div>`;
+      const netDiff = Number(r.chain_net_diff || 0);
+      const netColor = Math.abs(netDiff) < 50 ? '#059669' : (Math.abs(netDiff) < 5000 ? '#D97706' : '#DC2626');
+      document.getElementById('reconcileSummary').innerHTML =
+        card('Range', `${r.start_date} → ${r.end_date}`, '#374151') +
+        card('Stored Total', _money(r.chain_stored_total)) +
+        card('Fresh Total',  _money(r.chain_fresh_total)) +
+        card('Net Diff (stored − fresh)', _money(netDiff), netColor) +
+        card('Sum |daily diff|', _money(r.chain_abs_diff_sum_per_date), '#7C3AED') +
+        card('Discrepancy Rows', r.discrepancy_count || 0, (r.discrepancy_count || 0) === 0 ? '#059669' : '#D97706');
+
+      // Per-date table
+      const dates = r.per_date || [];
+      let perDateHtml = '';
+      if (dates.length) {
+        perDateHtml += `<h3 style="margin:0 0 0.5rem;color:#1E3A5F;font-size:1rem;">Per-date totals</h3>`;
+        perDateHtml += `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead style="background:#F3F4F6;">
+              <tr>
+                <th style="text-align:left;padding:0.5rem 0.75rem;">Date</th>
+                <th style="text-align:right;padding:0.5rem 0.75rem;">Stored</th>
+                <th style="text-align:right;padding:0.5rem 0.75rem;">Fresh</th>
+                <th style="text-align:right;padding:0.5rem 0.75rem;">Diff</th>
+                <th style="text-align:left;padding:0.5rem 0.75rem;">Status</th>
+                <th style="text-align:left;padding:0.5rem 0.75rem;">Action</th>
+              </tr>
+            </thead>
+            <tbody>`;
+        for (const d of dates) {
+          if (d.status !== 'ok') {
+            perDateHtml += `<tr style="border-top:1px solid #E5E7EB;">
+              <td style="padding:0.5rem 0.75rem;">${escHtml(d.business_date || '?')}</td>
+              <td colspan="3" style="padding:0.5rem 0.75rem;color:#991B1B;">${escHtml(d.error || d.status)}</td>
+              <td style="padding:0.5rem 0.75rem;color:#991B1B;">${escHtml(d.status)}</td>
+              <td style="padding:0.5rem 0.75rem;">
+                <button class="btn-secondary reconcile-reimport-btn" data-date="${escHtml(d.business_date)}"
+                  style="padding:0.3rem 0.7rem;font-size:0.8rem;">Re-import</button>
+              </td>
+            </tr>`;
+            continue;
+          }
+          const diff = Number(d.diff || 0);
+          const color = Math.abs(diff) < 50 ? '#059669' : (Math.abs(diff) < 1000 ? '#D97706' : '#DC2626');
+          perDateHtml += `<tr style="border-top:1px solid #E5E7EB;">
+            <td style="padding:0.5rem 0.75rem;font-weight:600;">${escHtml(d.business_date)}</td>
+            <td style="padding:0.5rem 0.75rem;text-align:right;">${_money(d.stored_total)}</td>
+            <td style="padding:0.5rem 0.75rem;text-align:right;">${_money(d.fresh_total)}</td>
+            <td style="padding:0.5rem 0.75rem;text-align:right;color:${color};font-weight:600;">${_money(diff)}</td>
+            <td style="padding:0.5rem 0.75rem;color:#6B7280;">${d.locations_checked || 0} locs</td>
+            <td style="padding:0.5rem 0.75rem;">
+              <button class="btn-secondary reconcile-reimport-btn" data-date="${escHtml(d.business_date)}"
+                style="padding:0.3rem 0.7rem;font-size:0.8rem;">Re-import</button>
+            </td>
+          </tr>`;
+        }
+        perDateHtml += `</tbody></table></div>`;
+      }
+      document.getElementById('reconcilePerDate').innerHTML = perDateHtml;
+
+      // Discrepancy table
+      const discreps = r.discrepancies || [];
+      let dHtml = '';
+      if (discreps.length === 0) {
+        dHtml = `<div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:10px;padding:1rem;color:#166534;">
+          No discrepancies above the threshold. Stored flash data matches a fresh ERA pull. ✓
+        </div>`;
+      } else {
+        const showMax = 200;
+        const shown = discreps.slice(0, showMax);
+        dHtml += `<h3 style="margin:0 0 0.5rem;color:#1E3A5F;font-size:1rem;">Top discrepancies (${discreps.length} total, showing ${shown.length})</h3>`;
+        dHtml += `<div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;max-height:480px;overflow-y:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead style="background:#F3F4F6;position:sticky;top:0;">
+              <tr>
+                <th style="text-align:left;padding:0.5rem 0.75rem;">Date</th>
+                <th style="text-align:left;padding:0.5rem 0.75rem;">Loc</th>
+                <th style="text-align:right;padding:0.5rem 0.75rem;">Stored</th>
+                <th style="text-align:right;padding:0.5rem 0.75rem;">Fresh</th>
+                <th style="text-align:right;padding:0.5rem 0.75rem;">Diff</th>
+                <th style="text-align:right;padding:0.5rem 0.75rem;">%</th>
+                <th style="text-align:left;padding:0.5rem 0.75rem;">Action</th>
+              </tr>
+            </thead>
+            <tbody>`;
+        for (const row of shown) {
+          const diff = Number(row.diff || 0);
+          const color = Math.abs(diff) < 100 ? '#D97706' : '#DC2626';
+          dHtml += `<tr style="border-top:1px solid #E5E7EB;">
+            <td style="padding:0.4rem 0.75rem;">${escHtml(row.business_date)}</td>
+            <td style="padding:0.4rem 0.75rem;font-weight:600;">${escHtml(String(row.location))}</td>
+            <td style="padding:0.4rem 0.75rem;text-align:right;">${_money(row.stored_net_sales)}</td>
+            <td style="padding:0.4rem 0.75rem;text-align:right;">${_money(row.fresh_net_sales)}</td>
+            <td style="padding:0.4rem 0.75rem;text-align:right;color:${color};font-weight:600;">${_money(diff)}</td>
+            <td style="padding:0.4rem 0.75rem;text-align:right;color:${color};">${Number(row.pct_diff || 0).toFixed(2)}%</td>
+            <td style="padding:0.4rem 0.75rem;">
+              <button class="btn-secondary reconcile-reimport-btn" data-date="${escHtml(row.business_date)}"
+                style="padding:0.25rem 0.6rem;font-size:0.78rem;">Re-import ${escHtml(row.business_date)}</button>
+            </td>
+          </tr>`;
+        }
+        dHtml += `</tbody></table></div>`;
+        if (discreps.length > showMax) {
+          dHtml += `<div style="margin-top:0.5rem;font-size:0.82rem;color:#6B7280;">…${discreps.length - showMax} more rows hidden. Tighten the thresholds or re-import the worst dates and re-run.</div>`;
+        }
+      }
+      document.getElementById('reconcileDiscrepancies').innerHTML = dHtml;
+
+      // Wire up the re-import buttons (delegate to single handler)
+      document.querySelectorAll('.reconcile-reimport-btn').forEach(b => {
+        b.addEventListener('click', () => reimportFlashDate(b.dataset.date, b));
+      });
+    }
+
+    // ──────────────────────────────────────────────────────
     // Lubbock (Aloha POS) CSV Upload
     // ──────────────────────────────────────────────────────
 
@@ -2243,6 +2503,10 @@ ORDER BY DateOfBusiness</pre>
       document.getElementById('runFlashImportBtn').addEventListener('click', runFlashImport);
       document.getElementById('flashBackfillBtn').addEventListener('click', startFlashBackfill);
       document.getElementById('lubbockUploadBtn').addEventListener('click', uploadLubbockCSV);
+
+      // Flash reconcile
+      document.getElementById('reconcileRunBtn').addEventListener('click', runFlashReconcile);
+      setReconcileDefaults();
 
       // Database health + toast config buttons
       document.getElementById('refreshDbHealthBtn').addEventListener('click', loadDbHealth);
