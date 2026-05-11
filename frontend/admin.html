@@ -527,6 +527,34 @@
 
       <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
 
+      <!-- ─── Menu Report Precompute ─────────────────────────── -->
+      <div>
+        <div class="section-header">
+          <div>
+            <h2>Menu Report Precompute</h2>
+            <div class="user-count">Warms the disk cache so users don't trigger the heavy ~1M-row menu pivot on demand. A nightly cron should run this around 6 AM &mdash; this button is for manual backfills.</div>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
+          <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+            <button class="btn-primary" id="precomputeRunBtn" style="background:#1E3A5F;">Run Precompute Now</button>
+            <button class="btn-primary" id="precomputeClearBtn" style="background:#DC2626;">Clear Cache</button>
+            <span id="precomputeCacheCount" style="font-size:0.8rem;color:#6B7280;"></span>
+          </div>
+          <div id="precomputeMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;">
+            Tip: each shape can take 1&ndash;3 minutes (full Toast Analytics fetch + pivot + YoY). Three shapes &asymp; 5&ndash;10 min total.
+          </div>
+        </div>
+
+        <div id="precomputeShapes" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1rem;margin-bottom:1.5rem;">
+          <div style="font-weight:600;color:#374151;font-size:0.9rem;margin-bottom:0.5rem;">Shapes</div>
+          <div id="precomputeShapesBody"></div>
+        </div>
+      </div>
+
+      <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
+
       <!-- ─── Lubbock (Aloha POS) Upload ──────────────────────── -->
       <div>
         <div class="section-header">
@@ -2065,6 +2093,169 @@ ORDER BY DateOfBusiness</pre>
     }
 
     // ──────────────────────────────────────────────────────
+    // Menu Report Precompute (warms the disk cache)
+    // ──────────────────────────────────────────────────────
+
+    let _precomputePollTimer = null;
+    let _precomputeStartedAt = null;
+
+    async function runMenuPrecompute() {
+      const btn = document.getElementById('precomputeRunBtn');
+      const msgEl = document.getElementById('precomputeMsg');
+      const shapesPanel = document.getElementById('precomputeShapes');
+
+      btn.disabled = true;
+      btn.textContent = 'Starting…';
+      msgEl.style.color = '#374151';
+      msgEl.textContent = 'Kicking off precompute…';
+
+      try {
+        const resp = await fetch('/api/admin/precompute-menu', {
+          method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({})
+        });
+        if (!resp.ok) {
+          let detail = `HTTP ${resp.status}`;
+          try { const j = await resp.json(); detail = j.detail || detail; } catch (_) {}
+          throw new Error(detail);
+        }
+        _precomputeStartedAt = Date.now();
+        btn.textContent = 'Running…';
+        shapesPanel.style.display = 'block';
+        if (_precomputePollTimer) clearInterval(_precomputePollTimer);
+        await pollMenuPrecomputeStatus();
+        _precomputePollTimer = setInterval(pollMenuPrecomputeStatus, 3000);
+      } catch (err) {
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'Precompute failed to start: ' + err.message;
+        btn.disabled = false;
+        btn.textContent = 'Run Precompute Now';
+      }
+    }
+
+    async function pollMenuPrecomputeStatus() {
+      try {
+        const resp = await fetch('/api/admin/precompute-menu/status', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        const msgEl = document.getElementById('precomputeMsg');
+        const btn = document.getElementById('precomputeRunBtn');
+        const shapesPanel = document.getElementById('precomputeShapes');
+
+        if (s.status === 'never_run' || !s.shapes) {
+          msgEl.textContent = 'No precompute run yet. Click Run Precompute Now to warm the cache.';
+          return;
+        }
+
+        shapesPanel.style.display = 'block';
+        renderPrecomputeShapes(s.shapes || []);
+
+        const total = s.total_shapes || 1;
+        const completed = s.completed_shapes || 0;
+        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        const elapsed = _precomputeStartedAt
+          ? Math.round((Date.now() - _precomputeStartedAt) / 1000)
+          : null;
+
+        if (s.running) {
+          msgEl.style.color = '#1E40AF';
+          msgEl.innerHTML =
+            `<div style="font-weight:600;margin-bottom:0.3rem;">Precomputing — shape ${completed} of ${total} (${pct}%)` +
+            (elapsed != null ? ` · ${elapsed}s elapsed` : '') + `</div>` +
+            `<div style="background:#DBEAFE;border-radius:6px;height:14px;overflow:hidden;">` +
+            `<div style="background:#2563EB;height:100%;width:${pct}%;transition:width 0.5s;border-radius:6px;"></div>` +
+            `</div>` +
+            (s.current_label ? `<div style="margin-top:0.35rem;font-size:0.82rem;color:#374151;">Currently running: <strong>${escHtml(s.current_label)}</strong></div>` : '');
+          btn.disabled = true;
+          btn.textContent = 'Running…';
+          return;
+        }
+
+        if (_precomputePollTimer) {
+          clearInterval(_precomputePollTimer);
+          _precomputePollTimer = null;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Run Precompute Now';
+
+        if (s.error) {
+          msgEl.style.color = '#DC2626';
+          msgEl.textContent = `Precompute failed: ${s.error}`;
+          return;
+        }
+        if (s.summary) {
+          const ok = s.summary.ok_count || 0;
+          const err = s.summary.error_count || 0;
+          const color = err === 0 ? '#059669' : '#D97706';
+          msgEl.style.color = color;
+          msgEl.textContent = `Done — ${ok} ok, ${err} failed.`;
+        }
+      } catch (err) {
+        const msgEl = document.getElementById('precomputeMsg');
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'Status poll failed: ' + err.message;
+      }
+      loadMenuPrecomputeCacheCount();
+    }
+
+    function renderPrecomputeShapes(shapes) {
+      const body = document.getElementById('precomputeShapesBody');
+      const dot = (color) => `<span style="display:inline-block;width:0.6rem;height:0.6rem;border-radius:50%;background:${color};margin-right:0.5rem;"></span>`;
+      let html = '';
+      for (const sh of shapes) {
+        let color = '#9CA3AF'; // pending grey
+        let suffix = '';
+        if (sh.status === 'running') { color = '#2563EB'; suffix = ' · running…'; }
+        else if (sh.status === 'ok') {
+          color = '#059669';
+          const d = sh.duration_s != null ? `${sh.duration_s}s` : '';
+          const c = sh.cache ? `cache=${sh.cache}` : '';
+          suffix = ` · ${d}${c ? ' · ' + c : ''}`;
+        }
+        else if (sh.status === 'error') {
+          color = '#DC2626';
+          suffix = ` · failed${sh.error ? ': ' + escHtml(String(sh.error).slice(0, 120)) : ''}`;
+        }
+        html += `<div style="padding:0.35rem 0;font-size:0.85rem;color:#374151;">${dot(color)}${escHtml(sh.label || ('shape ' + (sh.index + 1)))}<span style="color:#6B7280;">${suffix}</span></div>`;
+      }
+      body.innerHTML = html || '<div style="color:#6B7280;font-size:0.85rem;">No shapes.</div>';
+    }
+
+    async function loadMenuPrecomputeCacheCount() {
+      try {
+        const resp = await fetch('/api/admin/precompute-menu/cache', { headers: getAuthHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const entries = (data && data.entries) || {};
+        const n = Object.keys(entries).length;
+        let totalSize = 0;
+        for (const k in entries) { totalSize += Number(entries[k].file_size || 0); }
+        const mb = (totalSize / (1024 * 1024)).toFixed(1);
+        document.getElementById('precomputeCacheCount').textContent =
+          n === 0 ? 'cache: empty' : `cache: ${n} entr${n === 1 ? 'y' : 'ies'} · ${mb} MB on disk`;
+      } catch (_) { /* ignore */ }
+    }
+
+    async function clearMenuPrecomputeCache() {
+      if (!confirm('Delete every cached menu_*.json file? Next user request will fall through to a full live compute (1–3 min).')) return;
+      const btn = document.getElementById('precomputeClearBtn');
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Clearing…';
+      try {
+        const resp = await fetch('/api/admin/precompute-menu/cache', { method: 'DELETE', headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const j = await resp.json();
+        showStatus('success', `Deleted ${j.deleted || 0} cached entries.`);
+        loadMenuPrecomputeCacheCount();
+      } catch (err) {
+        showStatus('error', `Cache clear failed: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
     // Lubbock (Aloha POS) CSV Upload
     // ──────────────────────────────────────────────────────
 
@@ -2586,6 +2777,18 @@ ORDER BY DateOfBusiness</pre>
             document.getElementById('reconcileRunBtn').textContent === 'Running…') {
           // Job still running from a prior tab; resume polling
           _reconcilePollTimer = setInterval(pollReconcileStatus, 3000);
+        }
+      }).catch(() => { /* ignore — empty state is fine */ });
+
+      // Menu report precompute
+      document.getElementById('precomputeRunBtn').addEventListener('click', runMenuPrecompute);
+      document.getElementById('precomputeClearBtn').addEventListener('click', clearMenuPrecomputeCache);
+      loadMenuPrecomputeCacheCount();
+      // Pick up an in-flight precompute or show the last completed shapes on load
+      pollMenuPrecomputeStatus().then(() => {
+        if (_precomputePollTimer === null &&
+            document.getElementById('precomputeRunBtn').textContent === 'Running…') {
+          _precomputePollTimer = setInterval(pollMenuPrecomputeStatus, 3000);
         }
       }).catch(() => { /* ignore — empty state is fine */ });
 

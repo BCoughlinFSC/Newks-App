@@ -57,6 +57,7 @@ from olo_client import (
 )
 from email_service import send_invite_email, send_password_reset_email
 import toast_puller_db as repoll_db
+import precompute_cache
 from toast_puller import fetch_orders_with_retry, parse_orders
 
 # ------------------
@@ -4191,7 +4192,26 @@ def pivot_menu_items_by_tag(
     if selected_tags:
         for t in selected_tags:
             _canonical_tag(t)
-    
+
+    # Pre-compute once: normalized selected-tag set (was previously rebuilt
+    # per row, which was ~15 normalizations × 1M rows = ~15M wasted calls).
+    selected_tags_norm_set: set = (
+        {_normalize_tag_name(t) for t in selected_tags} if selected_tags else set()
+    )
+
+    # Per-item attribute cache. `_attr_for` is a pure function of (guid, name)
+    # but used to be called once per (row × matched-tag); with multi-tag items
+    # that's 3-5× per row, plus PLU range classification inside. Memoizing by
+    # guid collapses it to once per unique item.
+    _attr_cache: Dict[str, Tuple[str, float, str, float, int, str, str]] = {}
+
+    def _attr_for_cached(guid: str, name: str):
+        if guid in _attr_cache:
+            return _attr_cache[guid]
+        result_attrs = _attr_for(guid, name)
+        _attr_cache[guid] = result_attrs
+        return result_attrs
+
     for row in analytics_rows:
         restaurant_guid = row.get("restaurantGuid", "")
         restaurant_name = row.get("restaurantName", "Unknown")
@@ -4222,8 +4242,7 @@ def pivot_menu_items_by_tag(
         
         # Filter to only selected tags (if any selected) - use normalized so "* Consolidated Pizza" matches "Consolidated Pizza"
         if selected_tags:
-            selected_tags_norm_pivot = [_normalize_tag_name(t) for t in selected_tags]
-            item_tags = [t for t in item_tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm_pivot]
+            item_tags = [t for t in item_tags if _normalize_tag_name(t["tagName"]) in selected_tags_norm_set]
             if not item_tags:
                 continue
         else:
@@ -4264,10 +4283,10 @@ def pivot_menu_items_by_tag(
                 tag_totals[canonical] += quantity_sold
             
             # Look up the per-item attributes (consolidated category, EE tag,
-            # Guest Count tag, Toast PLU, Item Classification, Item Subclass)
-            # from the mapping table. Cheap O(1) dict lookup; falls back to
-            # empty/zero values on misses.
-            _cat, _ee, _recipe, _gct, _plu, _cls, _sub = _attr_for(menu_item_guid, menu_item_name)
+            # Guest Count tag, Toast PLU, Item Classification, Item Subclass).
+            # Memoized by guid — same guid hits the cache across all its tags
+            # and across all its sales rows.
+            _cat, _ee, _recipe, _gct, _plu, _cls, _sub = _attr_for_cached(menu_item_guid, menu_item_name)
 
             # Track item-level breakdown by tag (SAME for both menu items and modifiers)
             if canonical not in tag_item_breakdown:
@@ -4439,7 +4458,7 @@ def pivot_menu_items_by_tag(
                 if item_guid not in items_in_tag:
                     logger.info(f"  Adding zero-sales item: {item_name} (guid: {item_guid[:8]}...)")
                     items_in_tag.add(item_guid)
-                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub = _attr_for(item_guid, item_name)
+                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub = _attr_for_cached(item_guid, item_name)
                     item_breakdown_rows.append({
                         "itemTagName": tag_name,
                         "menuItemGuid": item_guid,
@@ -4477,7 +4496,7 @@ def pivot_menu_items_by_tag(
             for item_guid, item_name in sorted(all_items_per_tag[tag_name].items()):
                 if item_guid not in items_in_tag:
                     items_in_tag.add(item_guid)
-                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub = _attr_for(item_guid, item_name)
+                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub = _attr_for_cached(item_guid, item_name)
                     item_breakdown_rows.append({
                         "itemTagName": tag_name,
                         "menuItemGuid": item_guid,
@@ -9369,19 +9388,19 @@ async def build_menu_mix_report_fallback(
     return result
 
 @app.post("/api/reports/run")
-async def run_report(report_config: ReportConfig = Body(...), response: Response = None):
+async def run_report(report_config: ReportConfig = Body(...), response: Response = None, request: Request = None):
     """Run a report with the given configuration"""
-    
+
     if response is not None:
         response.headers["X-Backend-Version"] = "menu-mix-v3"
         response.headers["X-Report-Type-Received"] = str(report_config.reportType)
         response.headers["X-ItemTags-Count"] = str(len(report_config.itemTags or []))
-    
+
     report_type = (report_config.reportType or "").strip().lower()
     if "menu" in report_type:
         report_type = "menu"
     report_config.reportType = report_type
-    
+
     # Calculate date range
     if report_config.dateRangeType == "custom":
         if not report_config.customStartDate or not report_config.customEndDate:
@@ -9399,9 +9418,62 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
         start_date = end_date - timedelta(days=89)
     else:
         raise HTTPException(status_code=400, detail="Invalid date range type")
-    
+
     if end_date < start_date:
         raise HTTPException(status_code=400, detail="End date must be on or after start date")
+
+    # ── Precomputed menu-report cache (read-through) ──────────────────────────
+    # Heavy menu reports (full month × all stores × modifier pivot) regularly
+    # blow past nginx's ~60s timeout and crash the worker. A nightly precompute
+    # job warms a disk cache for common shapes; we check it here before doing
+    # the heavy work. Bypass via X-Force-Refresh header (the precompute job
+    # itself uses this to actually do the work).
+    _menu_cache_key: Optional[str] = None
+    if report_config.reportType == "menu" and not report_config.debug:
+        force_refresh = False
+        if request is not None:
+            force_refresh = str(request.headers.get("X-Force-Refresh", "")).strip() in ("1", "true", "yes")
+        try:
+            _menu_cache_key = precompute_cache.cache_key(
+                report_config.dict(),
+                start_date.isoformat(),
+                end_date.isoformat(),
+            )
+        except Exception as _exc:
+            logger.warning("precompute_cache: key build failed: %s", _exc)
+            _menu_cache_key = None
+        if _menu_cache_key and not force_refresh:
+            cached = precompute_cache.cache_get_fresh(_menu_cache_key)
+            if cached is not None:
+                if response is not None:
+                    response.headers["X-Menu-Cache"] = "hit"
+                    response.headers["X-Menu-Cache-Key"] = _menu_cache_key
+                logger.info(
+                    "menu cache HIT key=%s range=%s..%s",
+                    _menu_cache_key, start_date.isoformat(), end_date.isoformat(),
+                )
+                return cached
+        if response is not None and _menu_cache_key:
+            response.headers["X-Menu-Cache"] = "miss"
+            response.headers["X-Menu-Cache-Key"] = _menu_cache_key
+
+    def _cache_write_menu(result_to_cache):
+        """Write a freshly-computed menu result back to the cache. Best-effort."""
+        if not _menu_cache_key or not isinstance(result_to_cache, dict):
+            return result_to_cache
+        try:
+            precompute_cache.cache_set(
+                _menu_cache_key,
+                result_to_cache,
+                label=f"{report_config.dateRangeType or 'custom'} {start_date.isoformat()}..{end_date.isoformat()}",
+            )
+            logger.info(
+                "menu cache WRITE key=%s range=%s..%s",
+                _menu_cache_key, start_date.isoformat(), end_date.isoformat(),
+            )
+        except Exception as _exc:
+            logger.warning("precompute_cache: write failed: %s", _exc)
+        return result_to_cache
     
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -10239,7 +10311,7 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     result["debugInfo"]["tagMappingDebug"] = debug_info_extra
                 result = await apply_yoy_aloha_quantities(result, report_config, start_date, end_date)
                 result = await apply_yoy_toast_quantities(result, report_config, start_date, end_date)
-                return result
+                return _cache_write_menu(result)
 
             # Default: Use ERA reporting API
             report_guid = await request_toast_report(
@@ -10344,7 +10416,7 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 return compute_royalty_by_location(raw_rows)
 
             if report_config.reportType == "menu":
-                return await build_menu_mix_report_fallback(
+                _menu_fb_result = await build_menu_mix_report_fallback(
                     client,
                     report_config,
                     restaurant_ids,
@@ -10352,6 +10424,7 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     end_date,
                     response,
                 )
+                return _cache_write_menu(_menu_fb_result)
             
             if response is not None:
                 if report_config.reportType == "menu":
@@ -10884,6 +10957,158 @@ async def admin_flash_reconcile_status(
     if not _flash_reconcile_progress:
         return {"status": "never_run"}
     return dict(_flash_reconcile_progress)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Precompute menu-report cache (admin-triggered backfill)
+# ──────────────────────────────────────────────────────────────────────────────
+# Mirrors the flash-reconcile pattern: POST kicks off a background asyncio
+# task that warms the menu-report cache for the canonical shapes (see
+# precompute_menu_report.DEFAULT_SHAPES). UI polls GET .../status until
+# `running` flips False.
+
+_precompute_menu_progress: Dict[str, Any] = {}
+
+
+@app.post("/api/admin/precompute-menu")
+async def admin_precompute_menu(
+    payload: dict = Body(default={}),
+    request: Request = None,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Kick off the menu-report precompute job. Returns immediately; poll
+    GET /api/admin/precompute-menu/status for progress.
+
+    Payload (all optional):
+        {
+            "base_url":   "http://127.0.0.1:8000",   # default: same-origin via request
+            "timeout_s":  600                          # per-shape HTTP timeout
+        }
+    """
+    import precompute_menu_report
+
+    if _precompute_menu_progress.get("running"):
+        raise HTTPException(status_code=409, detail="A precompute job is already running. Wait for it to finish.")
+
+    # Default to same-origin so the precompute job hits the same process
+    # it was started from. Allow override (e.g. point at a staging URL).
+    base_url = payload.get("base_url")
+    if not base_url and request is not None:
+        scheme = request.url.scheme
+        host = request.url.netloc
+        base_url = f"{scheme}://{host}"
+    if not base_url:
+        base_url = "http://127.0.0.1:8000"
+
+    timeout_s = float(payload.get("timeout_s", 600.0))
+
+    auth_header: Optional[str] = None
+    if request is not None:
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+
+    shapes = precompute_menu_report.DEFAULT_SHAPES
+    total = len(shapes)
+
+    _precompute_menu_progress.clear()
+    _precompute_menu_progress.update({
+        "running":         True,
+        "started_at":      datetime.now().isoformat(),
+        "completed_at":    None,
+        "base_url":        base_url,
+        "total_shapes":    total,
+        "completed_shapes": 0,
+        "current_label":   None,
+        "shapes":          [
+            {"index": i, "label": s.get("label", f"shape #{i+1}"), "status": "pending"}
+            for i, s in enumerate(shapes)
+        ],
+        "error":           None,
+        "summary":         None,
+    })
+
+    def _on_progress(entry: Dict[str, Any]) -> None:
+        idx = entry.get("index")
+        if idx is None or idx >= total:
+            return
+        slot = _precompute_menu_progress["shapes"][idx]
+        slot.update({
+            "label":       entry.get("label", slot.get("label")),
+            "status":      entry.get("status", slot.get("status")),
+            "duration_s":  entry.get("duration_s"),
+            "cache":       entry.get("cache"),
+            "cache_key":   entry.get("cache_key"),
+            "http_status": entry.get("http_status"),
+            "error":       entry.get("error"),
+        })
+        if entry.get("status") == "running":
+            _precompute_menu_progress["current_label"] = entry.get("label")
+        else:
+            _precompute_menu_progress["completed_shapes"] = sum(
+                1 for s in _precompute_menu_progress["shapes"]
+                if s.get("status") in ("ok", "error")
+            )
+
+    async def _run_job():
+        try:
+            summary = await precompute_menu_report.run_default_shapes(
+                base_url=base_url,
+                auth_header=auth_header,
+                on_progress=_on_progress,
+                request_timeout_s=timeout_s,
+            )
+            _precompute_menu_progress.update({
+                "running":      False,
+                "completed_at": datetime.now().isoformat(),
+                "current_label": None,
+                "summary": {
+                    "total_shapes": summary.get("total_shapes"),
+                    "ok_count":     summary.get("ok_count"),
+                    "error_count":  summary.get("error_count"),
+                },
+            })
+        except Exception as exc:
+            logger.error("precompute-menu job crashed: %s", exc, exc_info=True)
+            _precompute_menu_progress.update({
+                "running":      False,
+                "completed_at": datetime.now().isoformat(),
+                "current_label": None,
+                "error":        str(exc),
+            })
+
+    asyncio.create_task(_run_job())
+    return {
+        "status":       "started",
+        "total_shapes": total,
+        "base_url":     base_url,
+    }
+
+
+@app.get("/api/admin/precompute-menu/status")
+async def admin_precompute_menu_status(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Return live progress + final summary for the most recent precompute run."""
+    if not _precompute_menu_progress:
+        return {"status": "never_run"}
+    return dict(_precompute_menu_progress)
+
+
+@app.get("/api/admin/precompute-menu/cache")
+async def admin_precompute_menu_cache_list(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """List the on-disk menu-report cache entries."""
+    return precompute_cache.list_index()
+
+
+@app.delete("/api/admin/precompute-menu/cache")
+async def admin_precompute_menu_cache_clear(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Delete every cached menu_*.json file. Next requests will recompute fresh."""
+    n = precompute_cache.clear_cache()
+    return {"deleted": n}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
