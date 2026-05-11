@@ -10690,6 +10690,134 @@ async def admin_flash_import_status(admin_user: User = Depends(get_current_admin
     return result
 
 
+@app.post("/api/admin/flash-reconcile")
+async def admin_flash_reconcile(
+    payload: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    For each (location, business_date) in the requested range, compute a fresh
+    flash value from Toast (same math as the nightly importer: ERA netSales
+    minus restaurant-destination service charges plus catering-leak
+    reclassification) and diff against the stored aloha_sales_data row.
+
+    Returns a punch list of (location, date) pairs whose stored value differs
+    from a fresh pull by more than the threshold — so you know which days to
+    re-import without guessing.
+
+    Payload:
+        {
+            "start_date": "YYYY-MM-DD",
+            "end_date":   "YYYY-MM-DD",
+            "min_abs_diff":  50.0,      # optional, dollars; default 50
+            "min_pct_diff":  0.5,       # optional, percent; default 0.5
+            "locations":     [...]      # optional Aloha loc-id allowlist
+        }
+    """
+    start_str = payload.get("start_date")
+    end_str = payload.get("end_date")
+    if not start_str or not end_str:
+        raise HTTPException(status_code=400, detail="start_date and end_date required (YYYY-MM-DD)")
+    try:
+        start = date.fromisoformat(start_str)
+        end = date.fromisoformat(end_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if end < start:
+        raise HTTPException(status_code=400, detail="end_date must be >= start_date")
+    if (end - start).days > 31:
+        raise HTTPException(status_code=400, detail="Range max 31 days")
+
+    min_abs = float(payload.get("min_abs_diff", 50.0))
+    min_pct = float(payload.get("min_pct_diff", 0.5)) / 100.0
+    loc_filter = set(str(x).strip() for x in payload.get("locations") or [])
+
+    discrepancies: List[dict] = []
+    chain_stored = 0.0
+    chain_fresh = 0.0
+    chain_diff_abs = 0.0
+    per_date_summary: List[dict] = []
+
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        d = start
+        while d <= end:
+            d_str = d.isoformat()
+            try:
+                fresh = await _compute_flash_loc_data(client, d)
+            except Exception as exc:
+                logger.error("flash-reconcile: compute failed for %s: %s", d_str, exc, exc_info=True)
+                per_date_summary.append({
+                    "business_date": d_str,
+                    "status": "compute_failed",
+                    "error": str(exc),
+                })
+                d += timedelta(days=1)
+                continue
+
+            df = aloha_sales_db.query_date_range(d_str, d_str, locations=list(loc_filter) if loc_filter else None)
+            stored_by_loc: Dict[str, float] = {}
+            if not df.empty:
+                for _, row in df.iterrows():
+                    lid = str(row["location"]).strip()
+                    if not lid:
+                        continue
+                    stored_by_loc[lid] = float(row.get("net_sales", 0) or 0)
+
+            fresh_total = 0.0
+            stored_total = 0.0
+            all_locs = set(fresh.keys()) | set(stored_by_loc.keys())
+            if loc_filter:
+                all_locs &= loc_filter
+            for lid in all_locs:
+                fresh_val = float(fresh.get(lid, {}).get("net_sales", 0.0))
+                stored_val = float(stored_by_loc.get(lid, 0.0))
+                fresh_total += fresh_val
+                stored_total += stored_val
+                diff = stored_val - fresh_val
+                denom = max(abs(fresh_val), abs(stored_val), 1e-9)
+                pct = diff / denom
+                if abs(diff) >= min_abs or abs(pct) >= min_pct:
+                    discrepancies.append({
+                        "location": lid,
+                        "business_date": d_str,
+                        "stored_net_sales": round(stored_val, 2),
+                        "fresh_net_sales": round(fresh_val, 2),
+                        "diff": round(diff, 2),
+                        "pct_diff": round(pct * 100, 2),
+                    })
+
+            chain_stored += stored_total
+            chain_fresh += fresh_total
+            chain_diff_abs += abs(stored_total - fresh_total)
+            per_date_summary.append({
+                "business_date": d_str,
+                "status": "ok",
+                "locations_checked": len(all_locs),
+                "stored_total": round(stored_total, 2),
+                "fresh_total": round(fresh_total, 2),
+                "diff": round(stored_total - fresh_total, 2),
+            })
+            d += timedelta(days=1)
+
+    discrepancies.sort(key=lambda r: abs(r["diff"]), reverse=True)
+
+    return {
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "thresholds": {
+            "min_abs_diff_usd": round(min_abs, 2),
+            "min_pct_diff": round(min_pct * 100, 4),
+        },
+        "chain_stored_total": round(chain_stored, 2),
+        "chain_fresh_total": round(chain_fresh, 2),
+        "chain_net_diff": round(chain_stored - chain_fresh, 2),
+        "chain_abs_diff_sum_per_date": round(chain_diff_abs, 2),
+        "discrepancy_count": len(discrepancies),
+        "per_date": per_date_summary,
+        "discrepancies": discrepancies,
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Toast Config DB admin endpoints
 # ──────────────────────────────────────────────────────────────────────────────
@@ -11260,107 +11388,130 @@ async def admin_validation_item_counts(
     }
 
 
+async def _compute_flash_loc_data(
+    client: httpx.AsyncClient,
+    target_date: date,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Compute per-location flash sales for one business date — the SAME math as
+    the nightly importer, just without writing to the DB.  Used by both the
+    importer ([_run_flash_import_for_date]) and the reconcile endpoint, so the
+    two cannot drift apart.
+
+    Steps:
+      1. Fetch ERA metrics with groupBy=DINING_OPTION for the date.
+      2. Bucket netSalesAmount by location and by channel db_col.
+      3. For each location: subtract restaurant-destination service charges
+         (per-channel where the SC name maps cleanly) and add GNG revenue;
+         reclassify catering-salesCategory items rung up under non-catering
+         dopts.
+
+    Returns: {loc_id: {net_sales, olo_net_sales, ..., check_count, ...}}.
+    """
+    target_yyyymmdd = target_date.strftime("%Y%m%d")
+
+    locations = await get_all_active_locations(client)
+    restaurant_ids = [loc.restaurantGuid for loc in locations]
+    restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
+    guid_to_loc = _get_flash_loc_mapping()
+
+    report_guid = await request_toast_report(
+        client, target_date, target_date, restaurant_ids,
+        report_type="metrics", group_by=["DINING_OPTION"],
+    )
+    era_rows = await fetch_toast_report(client, report_guid, report_type="metrics")
+    if not isinstance(era_rows, list):
+        era_rows = []
+
+    loc_data: Dict[str, Dict[str, float]] = {}
+    for row in era_rows:
+        guid = row.get("restaurantGuid", "")
+        loc_id = guid_to_loc.get(guid)
+        if not loc_id:
+            continue
+
+        dining_opt = str(row.get("diningOption", "") or "").strip()
+        net = float(row.get("netSalesAmount", 0) or 0)
+        orders = float(row.get("ordersCount", 0) or 0)
+
+        if loc_id not in loc_data:
+            loc_data[loc_id] = {
+                "net_sales": 0, "olo_net_sales": 0, "delivery_net_sales": 0,
+                "catering_net_sales": 0, "gng_net_sales": 0, "togo_net_sales": 0,
+                "curbside_net_sales": 0, "curbside_olo_net_sales": 0,
+                "dinein_net_sales": 0, "callin_net_sales": 0, "olo_callin_net_sales": 0,
+                "check_count": 0, "checks_minus_catering": 0,
+                "_guid": guid, "_catering_checks": 0,
+            }
+
+        loc_data[loc_id]["net_sales"] += net
+        loc_data[loc_id]["check_count"] += orders
+
+        db_col, is_catering = _classify_dining_option(dining_opt)
+        if db_col and db_col in loc_data[loc_id]:
+            loc_data[loc_id][db_col] += net
+
+        if is_catering:
+            loc_data[loc_id]["_catering_checks"] += orders
+
+    _SC_CHANNEL_TO_DB_COL = {
+        "Catering": "catering_net_sales",
+        "Delivery": "delivery_net_sales",
+        "ToGo": "togo_net_sales",
+        "OLO": "olo_net_sales",
+        "DineIn": "dinein_net_sales",
+        "CallIn": "callin_net_sales",
+    }
+    for loc_id, data in loc_data.items():
+        guid = data.pop("_guid", "")
+        cat_checks = data.pop("_catering_checks", 0)
+        data["checks_minus_catering"] = data["check_count"] - cat_checks
+
+        if guid:
+            try:
+                sc_amount, gng_amount, sc_by_dopt, cat_leak_by_dopt, cat_leak_checks = await _compute_sc_and_gng(
+                    client, guid, target_yyyymmdd
+                )
+                if sc_amount > 0:
+                    data["net_sales"] -= sc_amount
+                    for sc_channel, sc_val in sc_by_dopt.items():
+                        db_col = _SC_CHANNEL_TO_DB_COL.get(sc_channel)
+                        if db_col and db_col in data:
+                            data[db_col] -= sc_val
+                if gng_amount > 0:
+                    data["gng_net_sales"] = gng_amount
+                for src_dopt_guid, leak_amt in cat_leak_by_dopt.items():
+                    if leak_amt <= 0:
+                        continue
+                    src_col = _DINING_OPTION_GUID_TO_DB_COL.get(src_dopt_guid)
+                    if src_col and src_col in data:
+                        data[src_col] -= leak_amt
+                    data["catering_net_sales"] += leak_amt
+                if cat_leak_checks > 0:
+                    data["checks_minus_catering"] = max(
+                        0, data["checks_minus_catering"] - cat_leak_checks
+                    )
+                await asyncio.sleep(0.3)
+            except Exception as exc:
+                logger.warning("Flash SC/GNG for %s: %s", loc_id, exc)
+
+    return loc_data
+
+
 async def _run_flash_import_for_date(target_date: date):
     """Run the flash import for a specific date (used for backfill)."""
     target_str = target_date.isoformat()
-    target_yyyymmdd = target_date.strftime("%Y%m%d")
     logger.info("Flash import for %s", target_str)
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
+            loc_data = await _compute_flash_loc_data(client, target_date)
+
+            # guid_to_name for restaurant_name fallback (not in loc_data anymore)
             locations = await get_all_active_locations(client)
-            restaurant_ids = [loc.restaurantGuid for loc in locations]
-            restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
             guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
             guid_to_loc = _get_flash_loc_mapping()
-
-            report_guid = await request_toast_report(
-                client, target_date, target_date, restaurant_ids,
-                report_type="metrics", group_by=["DINING_OPTION"],
-            )
-            era_rows = await fetch_toast_report(client, report_guid, report_type="metrics")
-            if not isinstance(era_rows, list):
-                era_rows = []
-
-            loc_data: Dict[str, Dict[str, float]] = {}
-            for row in era_rows:
-                guid = row.get("restaurantGuid", "")
-                loc_id = guid_to_loc.get(guid)
-                if not loc_id:
-                    continue
-
-                dining_opt = str(row.get("diningOption", "") or "").strip()
-                net = float(row.get("netSalesAmount", 0) or 0)
-                orders = float(row.get("ordersCount", 0) or 0)
-
-                if loc_id not in loc_data:
-                    loc_data[loc_id] = {
-                        "net_sales": 0, "olo_net_sales": 0, "delivery_net_sales": 0,
-                        "catering_net_sales": 0, "gng_net_sales": 0, "togo_net_sales": 0,
-                        "curbside_net_sales": 0, "curbside_olo_net_sales": 0,
-                        "dinein_net_sales": 0, "callin_net_sales": 0, "olo_callin_net_sales": 0,
-                        "check_count": 0, "checks_minus_catering": 0,
-                        "_guid": guid, "_catering_checks": 0,
-                    }
-
-                loc_data[loc_id]["net_sales"] += net
-                loc_data[loc_id]["check_count"] += orders
-
-                db_col, is_catering = _classify_dining_option(dining_opt)
-                if db_col and db_col in loc_data[loc_id]:
-                    loc_data[loc_id][db_col] += net
-
-                if is_catering:
-                    loc_data[loc_id]["_catering_checks"] += orders
-
-            # Service charges + GNG from orders
-            for loc_id, data in loc_data.items():
-                guid = data.pop("_guid", "")
-                cat_checks = data.pop("_catering_checks", 0)
-                data["checks_minus_catering"] = data["check_count"] - cat_checks
-
-                if guid:
-                    try:
-                        sc_amount, gng_amount, sc_by_dopt, cat_leak_by_dopt, cat_leak_checks = await _compute_sc_and_gng(
-                            client, guid, target_yyyymmdd
-                        )
-                        # Toast ERA netSalesAmount INCLUDES restaurant-destination
-                        # service charges (delivery/catering fees).  Newk's pays these
-                        # out to providers, so they must be subtracted for Newk's Net Sales.
-                        _SC_CHANNEL_TO_DB_COL = {
-                            "Catering": "catering_net_sales",
-                            "Delivery": "delivery_net_sales",
-                            "ToGo": "togo_net_sales",
-                            "OLO": "olo_net_sales",
-                            "DineIn": "dinein_net_sales",
-                            "CallIn": "callin_net_sales",
-                        }
-                        if sc_amount > 0:
-                            data["net_sales"] -= sc_amount
-                            # Subtract SC from the specific channel it belongs to
-                            for sc_channel, sc_val in sc_by_dopt.items():
-                                db_col = _SC_CHANNEL_TO_DB_COL.get(sc_channel)
-                                if db_col and db_col in data:
-                                    data[db_col] -= sc_val
-                        if gng_amount > 0:
-                            data["gng_net_sales"] = gng_amount
-                        # Reclassify item-level catering leakage: subtract from
-                        # the source non-catering dopt column, add to catering.
-                        # Matches SSRS REF item-level attribution logic.
-                        for src_dopt_guid, leak_amt in cat_leak_by_dopt.items():
-                            if leak_amt <= 0:
-                                continue
-                            src_col = _DINING_OPTION_GUID_TO_DB_COL.get(src_dopt_guid)
-                            if src_col and src_col in data:
-                                data[src_col] -= leak_amt
-                            data["catering_net_sales"] += leak_amt
-                        if cat_leak_checks > 0:
-                            data["checks_minus_catering"] = max(
-                                0, data["checks_minus_catering"] - cat_leak_checks
-                            )
-                        await asyncio.sleep(0.3)
-                    except Exception as exc:
-                        logger.warning("Flash import SC/GNG for %s: %s", loc_id, exc)
+            loc_to_guid = {v: k for k, v in guid_to_loc.items()}
 
             store_info = aloha_sales_db.get_store_info()
             ownership = _load_store_ownership()
@@ -11371,7 +11522,7 @@ async def _run_flash_import_for_date(target_date: date):
                 rname = (
                     (si.get("restaurant_name") or "").strip()
                     or (own.get("restaurantName") or "").strip()
-                    or guid_to_name.get(data.get("_guid", ""), "")
+                    or guid_to_name.get(loc_to_guid.get(loc_id, ""), "")
                 )
                 rows_for_df.append({
                     "RestaurantID": loc_id,
