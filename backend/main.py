@@ -13730,9 +13730,27 @@ async def toast_pricing_debug(
 # Menu Items & Tags API
 # ------------------
 
+# In-memory cache for the /api/menu-items endpoint. The Toast Menus v2
+# endpoint is slow (returns the whole menu hierarchy) and the response
+# rarely changes — caching for an hour cuts the "Filter By: Item Tags"
+# loading time from many seconds to milliseconds for all users after the
+# first hit. Keyed by restaurant_guid ("__default__" when caller didn't
+# specify one).
+_menu_items_cache: Dict[str, Dict[str, Any]] = {}
+_MENU_ITEMS_CACHE_TTL_S = 3600.0  # 1 hour — bump if menu tag edits feel stale
+
+
 @app.get("/api/menu-items")
 async def get_menu_items(restaurant_guid: Optional[str] = Query(None)):
     """Get all menu items, modifiers, and nested modifiers with their tags"""
+    cache_key = restaurant_guid or "__default__"
+    cached = _menu_items_cache.get(cache_key)
+    if cached:
+        age = time.time() - cached.get("_cached_at", 0)
+        if age < _MENU_ITEMS_CACHE_TTL_S:
+            # Strip the internal _cached_at field before returning.
+            return {k: v for k, v in cached.items() if not k.startswith("_")}
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             if not restaurant_guid:
@@ -13740,32 +13758,32 @@ async def get_menu_items(restaurant_guid: Optional[str] = Query(None)):
                 if not locations:
                     raise HTTPException(status_code=404, detail="No active locations found")
                 restaurant_guid = locations[0].restaurantGuid
-            
+
             standard_headers = await get_standard_api_auth_headers()
             menus_v2_url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus"
             headers_with_guid = {
                 **standard_headers,
                 "Toast-Restaurant-External-ID": restaurant_guid
             }
-            
+
             resp = await client.get(menus_v2_url, headers=headers_with_guid)
-            
+
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Error fetching menu data")
-            
+
             menu_data = resp.json()
-            
+
             items_with_tags = []
             all_tags = set()
-            
+
             mod_group_refs = menu_data.get("modifierGroupReferences", {})
             mod_option_refs = menu_data.get("modifierOptionReferences", {})
-            
+
             for menu in menu_data.get("menus", []):
                 for group in menu.get("menuGroups", []):
                     for item in group.get("menuItems", []):
                         item_tags = [tag.get("name") for tag in item.get("itemTags", []) if tag.get("name")]
-                        
+
                         if item_tags:
                             all_tags.update(item_tags)
                             items_with_tags.append({
@@ -13774,12 +13792,14 @@ async def get_menu_items(restaurant_guid: Optional[str] = Query(None)):
                                 "type": "item",
                                 "tags": item_tags
                             })
-            
-            return {
+
+            result = {
                 "items": items_with_tags,
                 "allTags": sorted(list(all_tags))
             }
-            
+            _menu_items_cache[cache_key] = {**result, "_cached_at": time.time()}
+            return result
+
         except HTTPException:
             raise
         except Exception as e:
