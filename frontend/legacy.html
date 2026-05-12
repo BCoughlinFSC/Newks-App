@@ -4713,8 +4713,99 @@
     // ──────────────────────────────────────────────────────────
     // Init
     // ──────────────────────────────────────────────────────────
+    // Map (report, preset) → page title shown in the card header.
+    // Keep these labels in sync with REPORT_GROUPS in shared-nav.js.
+    const REPORT_TITLES = {
+      sales_summary:    'Sales Summary',
+      metrics:          'Net Sales',
+      menu:             'Menu Performance',
+      guest_count:      'Guest Count',
+      royalty:          'Royalty Report',
+      tip_pool:         'Payroll Report',
+    };
+    const PRESET_TITLES = {
+      netsales_weekly: 'Net Sales by Location – Weekly',
+    };
+
+    // Drive the form state from the current URL (?report=…&preset=…).
+    // Called once on initial page load AND on every in-page sidebar click
+    // (since we now intercept those instead of reloading the page).
+    function applyReportFromUrl() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const reportParam = urlParams.get('report') || 'sales_summary';
+      const presetParam = urlParams.get('preset');
+
+      const reportSelect = document.getElementById('reportType');
+      if (reportSelect) {
+        reportSelect.value = reportParam;
+        reportSelect.dispatchEvent(new Event('change'));
+      }
+
+      const titleEl = document.getElementById('builderTitle');
+      if (titleEl) {
+        titleEl.textContent =
+          (presetParam && PRESET_TITLES[presetParam]) ||
+          REPORT_TITLES[reportParam] ||
+          'Report';
+      }
+
+      // The "Net Sales by Location – Weekly" preset is a metrics report
+      // with last_7_days locked in so the page matches its name.
+      if (presetParam === 'netsales_weekly') {
+        const dateRange = document.getElementById('dateRangeType');
+        if (dateRange) {
+          dateRange.value = 'last_7_days';
+          dateRange.dispatchEvent(new Event('change'));
+        }
+      }
+
+      // Saved-report deep links (?loadReport=ID from other pages).
+      const loadReportParam = urlParams.get('loadReport');
+      if (loadReportParam && typeof window.loadReport === 'function') {
+        window.loadReport(loadReportParam);
+      }
+    }
+
+    // Intercept sidebar clicks on /legacy.html links so they don't trigger
+    // a full page reload. We just pushState + re-apply form state. Cuts
+    // sidebar-click latency from "full page load + 3 base-data fetches"
+    // down to "swap a few DOM bits". Links to OTHER pages (pick3.html,
+    // menu-mix-report.html, etc.) fall through to default navigation.
+    function setupInPageNav() {
+      document.addEventListener('click', (e) => {
+        // Respect modifier keys — let the user open in new tab/window.
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const link = e.target.closest('a.snav-link');
+        if (!link) return;
+        const href = link.getAttribute('href') || '';
+        // Only intercept intra-legacy navigation.
+        if (!href.startsWith('/legacy.html')) return;
+        e.preventDefault();
+        const url = new URL(href, window.location.origin);
+        // No-op if we're already on this exact URL.
+        if (url.pathname + url.search === window.location.pathname + window.location.search) return;
+        history.pushState(null, '', url.pathname + url.search);
+        applyReportFromUrl();
+        if (typeof window.rebuildSharedNav === 'function') {
+          // Re-renders the sidebar so the active-link highlight follows the
+          // navigation. Sidebar is small so the rebuild is cheap.
+          window.rebuildSharedNav();
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+
+      // Back/forward buttons — re-apply the new URL's state.
+      window.addEventListener('popstate', () => {
+        applyReportFromUrl();
+        if (typeof window.rebuildSharedNav === 'function') {
+          window.rebuildSharedNav();
+        }
+      });
+    }
+
     async function init() {
       setupEventListeners();
+      setupInPageNav();
       // Auth check FIRST — sets authToken + currentUser so loadLocations
       // can send auth headers and receive the user's filtered location list.
       let isAuth = false;
@@ -4750,55 +4841,8 @@
       }
       await Promise.all(baseLoaders);
 
-      // Handle ?report= and ?preset= params from shared nav links.
-      // The reportType <select> stays in the DOM (hidden) because lots of
-      // downstream form logic reads its .value — we just drive it via URL.
-      const urlParams = new URLSearchParams(window.location.search);
-      const reportParam = urlParams.get('report') || 'sales_summary';
-      const presetParam = urlParams.get('preset');
-      const reportSelect = document.getElementById('reportType');
-      if (reportSelect) {
-        reportSelect.value = reportParam;
-        reportSelect.dispatchEvent(new Event('change'));
-      }
-
-      // Map (report, preset) → page title shown in the card header.
-      // Keep these labels in sync with REPORT_GROUPS in shared-nav.js.
-      const REPORT_TITLES = {
-        sales_summary:    'Sales Summary',
-        metrics:          'Net Sales',
-        menu:             'Menu Performance',
-        guest_count:      'Guest Count',
-        royalty:          'Royalty Report',
-        tip_pool:         'Payroll Report',
-      };
-      const PRESET_TITLES = {
-        netsales_weekly: 'Net Sales by Location – Weekly',
-      };
-      const titleEl = document.getElementById('builderTitle');
-      if (titleEl) {
-        titleEl.textContent =
-          (presetParam && PRESET_TITLES[presetParam]) ||
-          REPORT_TITLES[reportParam] ||
-          'Report';
-      }
-
-      // The "Net Sales by Location – Weekly" preset is functionally a
-      // metrics report with last_7_days range. Lock the date range so
-      // the page matches its name out of the box.
-      if (presetParam === 'netsales_weekly') {
-        const dateRange = document.getElementById('dateRangeType');
-        if (dateRange) {
-          dateRange.value = 'last_7_days';
-          dateRange.dispatchEvent(new Event('change'));
-        }
-      }
-
-      // Handle ?loadReport= param from saved report links on other pages
-      const loadReportParam = urlParams.get('loadReport');
-      if (loadReportParam && typeof window.loadReport === 'function') {
-        window.loadReport(loadReportParam);
-      }
+      // Drive the form state from the URL after base data is loaded.
+      applyReportFromUrl();
     }
 
     init();
