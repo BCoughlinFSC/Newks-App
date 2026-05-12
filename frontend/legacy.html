@@ -805,6 +805,7 @@
   <div id="loadingOverlay" class="loading-overlay hidden">
     <div class="loading-spinner"></div>
     <div class="loading-text">Running report…<br><span style="font-size:0.85rem;font-weight:normal;opacity:0.8;">This may take a moment</span></div>
+    <button id="cancelReportBtn" type="button" style="margin-top:1.5rem;padding:0.6rem 1.5rem;background:#B91C1C;color:white;border:none;border-radius:6px;font-size:0.9rem;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button>
   </div>
 
   <!-- ─── Excel Download Options Modal (menu performance reports) ───── -->
@@ -1674,11 +1675,27 @@
       document.getElementById('loadingOverlay').classList.remove('hidden');
       showStatus('info', 'Running report…');
       document.getElementById('runReportBtn').disabled = true;
+
+      // AbortController lets the Cancel button stop us waiting on the fetch.
+      // The server keeps running its work for a bit (no /api/reports/run
+      // cancellation endpoint exists), but the user gets immediate UI relief.
+      const reportAbort = new AbortController();
+      const cancelBtn = document.getElementById('cancelReportBtn');
+      const onCancelClick = () => {
+        reportAbort.abort();
+      };
+      if (cancelBtn) {
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', onCancelClick, { once: true });
+      }
+
       try {
         const resp = await fetch('/api/reports/run', {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify(config)
+          body: JSON.stringify(config),
+          signal: reportAbort.signal,
         });
         const backendVersion = resp.headers.get('X-Backend-Version');
         const reportTypeReceived = resp.headers.get('X-Report-Type-Received');
@@ -1693,8 +1710,15 @@
           : (currentResults.pivotTable?.length || 0) + (currentResults.totals?.length || 0);
         showStatus('success', `Report complete: ${rowCount} rows`);
       } catch (err) {
-        showStatus('error', `Error: ${err.message}`);
+        if (err.name === 'AbortError') {
+          showStatus('warning', 'Report cancelled. Server may still be finishing its work in the background.');
+        } else {
+          showStatus('error', `Error: ${err.message}`);
+        }
       } finally {
+        if (cancelBtn) {
+          cancelBtn.removeEventListener('click', onCancelClick);
+        }
         document.getElementById('loadingOverlay').classList.add('hidden');
         document.getElementById('runReportBtn').disabled = false;
       }
