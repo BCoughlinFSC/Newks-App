@@ -537,13 +537,29 @@
         </div>
 
         <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
+          <!-- Row 1: defaults + cache controls -->
           <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
-            <button class="btn-primary" id="precomputeRunBtn" style="background:#1E3A5F;">Run Precompute Now</button>
+            <button class="btn-primary" id="precomputeRunBtn" style="background:#1E3A5F;">Run Defaults (rolling 7d &amp; 30d)</button>
             <button class="btn-primary" id="precomputeClearBtn" style="background:#DC2626;">Clear Cache</button>
             <span id="precomputeCacheCount" style="font-size:0.8rem;color:#6B7280;"></span>
           </div>
+
+          <!-- Row 2: custom date range -->
+          <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;margin-top:1rem;padding-top:1rem;border-top:1px solid #F3F4F6;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Custom Start</label>
+              <input type="date" id="precomputeStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Custom End</label>
+              <input type="date" id="precomputeEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <button class="btn-primary" id="precomputeCustomBtn" style="background:#0E7490;">Run for Custom Range</button>
+            <span style="font-size:0.75rem;color:#6B7280;">All 15 consolidated tags &middot; YoY fiscal &middot; all stores. Any subset hits the cache after.</span>
+          </div>
+
           <div id="precomputeMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;">
-            Tip: each shape can take 1&ndash;3 minutes (full Toast Analytics fetch + pivot + YoY). Three shapes &asymp; 5&ndash;10 min total.
+            Tip: each shape takes 1&ndash;5 minutes depending on date range (full Toast Analytics fetch + pivot + YoY).
           </div>
         </div>
 
@@ -2099,19 +2115,20 @@ ORDER BY DateOfBusiness</pre>
     let _precomputePollTimer = null;
     let _precomputeStartedAt = null;
 
-    async function runMenuPrecompute() {
-      const btn = document.getElementById('precomputeRunBtn');
+    async function _kickPrecompute(body, originBtn, originLabel) {
       const msgEl = document.getElementById('precomputeMsg');
       const shapesPanel = document.getElementById('precomputeShapes');
+      const defaultsBtn = document.getElementById('precomputeRunBtn');
+      const customBtn = document.getElementById('precomputeCustomBtn');
 
-      btn.disabled = true;
-      btn.textContent = 'Starting…';
+      originBtn.disabled = true;
+      originBtn.textContent = 'Starting…';
       msgEl.style.color = '#374151';
       msgEl.textContent = 'Kicking off precompute…';
 
       try {
         const resp = await fetch('/api/admin/precompute-menu', {
-          method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({})
+          method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(body || {})
         });
         if (!resp.ok) {
           let detail = `HTTP ${resp.status}`;
@@ -2119,7 +2136,9 @@ ORDER BY DateOfBusiness</pre>
           throw new Error(detail);
         }
         _precomputeStartedAt = Date.now();
-        btn.textContent = 'Running…';
+        defaultsBtn.disabled = true;
+        customBtn.disabled = true;
+        originBtn.textContent = 'Running…';
         shapesPanel.style.display = 'block';
         if (_precomputePollTimer) clearInterval(_precomputePollTimer);
         await pollMenuPrecomputeStatus();
@@ -2127,9 +2146,33 @@ ORDER BY DateOfBusiness</pre>
       } catch (err) {
         msgEl.style.color = '#DC2626';
         msgEl.textContent = 'Precompute failed to start: ' + err.message;
-        btn.disabled = false;
-        btn.textContent = 'Run Precompute Now';
+        originBtn.disabled = false;
+        originBtn.textContent = originLabel;
       }
+    }
+
+    async function runMenuPrecompute() {
+      const btn = document.getElementById('precomputeRunBtn');
+      await _kickPrecompute({}, btn, 'Run Defaults (rolling 7d & 30d)');
+    }
+
+    async function runMenuPrecomputeCustomRange() {
+      const start = document.getElementById('precomputeStart').value;
+      const end   = document.getElementById('precomputeEnd').value;
+      if (!start || !end) {
+        const msgEl = document.getElementById('precomputeMsg');
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'Pick a start and end date for the custom range.';
+        return;
+      }
+      if (start > end) {
+        const msgEl = document.getElementById('precomputeMsg');
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'End date must be on or after start date.';
+        return;
+      }
+      const btn = document.getElementById('precomputeCustomBtn');
+      await _kickPrecompute({ start_date: start, end_date: end }, btn, 'Run for Custom Range');
     }
 
     async function pollMenuPrecomputeStatus() {
@@ -2156,6 +2199,8 @@ ORDER BY DateOfBusiness</pre>
           ? Math.round((Date.now() - _precomputeStartedAt) / 1000)
           : null;
 
+        const customBtn = document.getElementById('precomputeCustomBtn');
+
         if (s.running) {
           msgEl.style.color = '#1E40AF';
           msgEl.innerHTML =
@@ -2166,7 +2211,8 @@ ORDER BY DateOfBusiness</pre>
             `</div>` +
             (s.current_label ? `<div style="margin-top:0.35rem;font-size:0.82rem;color:#374151;">Currently running: <strong>${escHtml(s.current_label)}</strong></div>` : '');
           btn.disabled = true;
-          btn.textContent = 'Running…';
+          if (customBtn) customBtn.disabled = true;
+          if (btn.textContent !== 'Running…') btn.textContent = 'Running…';
           return;
         }
 
@@ -2175,7 +2221,11 @@ ORDER BY DateOfBusiness</pre>
           _precomputePollTimer = null;
         }
         btn.disabled = false;
-        btn.textContent = 'Run Precompute Now';
+        btn.textContent = 'Run Defaults (rolling 7d & 30d)';
+        if (customBtn) {
+          customBtn.disabled = false;
+          customBtn.textContent = 'Run for Custom Range';
+        }
 
         if (s.error) {
           msgEl.style.color = '#DC2626';
@@ -2782,7 +2832,19 @@ ORDER BY DateOfBusiness</pre>
 
       // Menu report precompute
       document.getElementById('precomputeRunBtn').addEventListener('click', runMenuPrecompute);
+      document.getElementById('precomputeCustomBtn').addEventListener('click', runMenuPrecomputeCustomRange);
       document.getElementById('precomputeClearBtn').addEventListener('click', clearMenuPrecomputeCache);
+      // Sensible default: last 30 days
+      (function setPrecomputeDefaults() {
+        const today = new Date();
+        const end = new Date(today); end.setDate(today.getDate() - 1);
+        const start = new Date(end); start.setDate(end.getDate() - 29);
+        const iso = d => d.toISOString().slice(0, 10);
+        const s = document.getElementById('precomputeStart');
+        const e = document.getElementById('precomputeEnd');
+        if (s && !s.value) s.value = iso(start);
+        if (e && !e.value) e.value = iso(end);
+      })();
       loadMenuPrecomputeCacheCount();
       // Pick up an in-flight precompute or show the last completed shapes on load
       pollMenuPrecomputeStatus().then(() => {

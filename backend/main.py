@@ -11014,7 +11014,39 @@ async def admin_precompute_menu(
     if request is not None:
         auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
 
-    shapes = precompute_menu_report.DEFAULT_SHAPES
+    # If the caller supplied a custom date range, build a single ad-hoc shape
+    # using the canonical Consolidated tag superset (so any tag subset of that
+    # range still hits the cache instantly via the superset fallback).
+    custom_start_raw = (payload.get("start_date") or "").strip()
+    custom_end_raw = (payload.get("end_date") or "").strip()
+    if custom_start_raw and custom_end_raw:
+        try:
+            _sd = date.fromisoformat(custom_start_raw)
+            _ed = date.fromisoformat(custom_end_raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="start_date / end_date must be YYYY-MM-DD")
+        if _ed < _sd:
+            raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+        shapes = [{
+            "label": f"custom {_sd.isoformat()} → {_ed.isoformat()} · YoY fiscal · all stores · consolidated tags",
+            "config": {
+                "reportType":       "menu",
+                "dateRangeType":    "custom",
+                "customStartDate":  _sd.isoformat(),
+                "customEndDate":    _ed.isoformat(),
+                "restaurantIds":    [],
+                "groupBy":          [],
+                "itemTags":         sorted(precompute_cache.CONSOLIDATED_TAGS_SUPERSET),
+                "includeZeroSales": False,
+                "yoyEnabled":       True,
+                "yoyMode":          "fiscal",
+                "alohaDate":        None,
+                "orderModeFilter":  None,
+                "debug":            False,
+            },
+        }]
+    else:
+        shapes = precompute_menu_report.DEFAULT_SHAPES
     total = len(shapes)
 
     _precompute_menu_progress.clear()
