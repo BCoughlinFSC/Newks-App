@@ -93,6 +93,18 @@ def _connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # WAL mode lets a long-running write (e.g. mid-backfill insert) coexist
+    # with concurrent reads from menu-report requests. Without WAL, SQLite's
+    # default rollback journal serializes readers and writers, so a report
+    # request can stall waiting on the backfill's transaction to finish.
+    # PRAGMA is per-connection but the journal mode change is persistent on
+    # the DB file, so setting it on every connection is harmless after the
+    # first run.
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")  # safe under WAL, faster
+    except sqlite3.Error:
+        pass
     return conn
 
 

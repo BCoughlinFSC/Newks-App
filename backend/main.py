@@ -9094,17 +9094,21 @@ async def build_menu_mix_report_fallback(
     # ── Local DB short-circuit (same as main menu path) ──────────────────────
     _fb_use_local = False
     try:
-        if toast_menu_raw_db.has_full_coverage(start_date.isoformat(), end_date.isoformat()):
-            all_rows = list(toast_menu_raw_db.query_rows_for_report(
+        _fb_has_coverage = await asyncio.to_thread(
+            toast_menu_raw_db.has_full_coverage,
+            start_date.isoformat(), end_date.isoformat(),
+        )
+        if _fb_has_coverage:
+            all_rows = await asyncio.to_thread(
+                toast_menu_raw_db.query_rows_for_report,
                 start_date.isoformat(), end_date.isoformat(),
-                restaurant_guids=restaurant_ids,
-                group_by_kind="MENU_ITEM",
-            ))
-            modifier_rows = list(toast_menu_raw_db.query_rows_for_report(
+                restaurant_ids, "MENU_ITEM",
+            )
+            modifier_rows = await asyncio.to_thread(
+                toast_menu_raw_db.query_rows_for_report,
                 start_date.isoformat(), end_date.isoformat(),
-                restaurant_guids=restaurant_ids,
-                group_by_kind="MODIFIER",
-            ))
+                restaurant_ids, "MODIFIER",
+            )
             _fb_use_local = True
             logger.info(
                 "menu fallback: using local DB (%d menu items + %d modifiers) — skipping Toast Analytics",
@@ -9702,16 +9706,24 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # pipeline (dedup, name fixups, pivot, YoY) is unchanged.
                 _use_local_menu = False
                 try:
-                    if toast_menu_raw_db.has_full_coverage(start_date.isoformat(), end_date.isoformat()):
-                        _local_mi_rows = toast_menu_raw_db.query_rows_for_report(
+                    # Run the SQLite queries off the event loop — a multi-week
+                    # query can return ~1M rows and the row-building takes real
+                    # CPU. Without to_thread, this blocks every other request
+                    # (page loads, Item Tags, etc.) for the duration.
+                    _has_coverage = await asyncio.to_thread(
+                        toast_menu_raw_db.has_full_coverage,
+                        start_date.isoformat(), end_date.isoformat(),
+                    )
+                    if _has_coverage:
+                        _local_mi_rows = await asyncio.to_thread(
+                            toast_menu_raw_db.query_rows_for_report,
                             start_date.isoformat(), end_date.isoformat(),
-                            restaurant_guids=restaurant_ids,
-                            group_by_kind="MENU_ITEM",
+                            restaurant_ids, "MENU_ITEM",
                         )
-                        _local_mod_rows = toast_menu_raw_db.query_rows_for_report(
+                        _local_mod_rows = await asyncio.to_thread(
+                            toast_menu_raw_db.query_rows_for_report,
                             start_date.isoformat(), end_date.isoformat(),
-                            restaurant_guids=restaurant_ids,
-                            group_by_kind="MODIFIER",
+                            restaurant_ids, "MODIFIER",
                         )
                         all_analytics_rows = list(_local_mi_rows)
                         menu_item_count = len(all_analytics_rows)
@@ -11397,8 +11409,12 @@ async def admin_menu_backfill(
                         g = r.get("menuItemGuid") or r.get("modifierGuid")
                         if g:
                             menu_item_guid_set.add(g)
-                    chunk_total_rows += toast_menu_raw_db.insert_rows(
-                        mi_rows, "MENU_ITEM", menu_item_guid_set
+                    # SQLite insert of 60k+ rows is synchronous and blocks the
+                    # event loop — page loads / API polls stall while it runs.
+                    # asyncio.to_thread keeps uvicorn responsive during backfill.
+                    chunk_total_rows += await asyncio.to_thread(
+                        toast_menu_raw_db.insert_rows,
+                        mi_rows, "MENU_ITEM", menu_item_guid_set,
                     )
 
                     # Pass 2: MODIFIER
@@ -11407,11 +11423,14 @@ async def admin_menu_backfill(
                         report_type="menu", group_by=["MODIFIER"],
                     )
                     mod_rows = await fetch_toast_report(client, guid_mod, "menu")
-                    chunk_total_rows += toast_menu_raw_db.insert_rows(
-                        mod_rows, "MODIFIER", menu_item_guid_set
+                    chunk_total_rows += await asyncio.to_thread(
+                        toast_menu_raw_db.insert_rows,
+                        mod_rows, "MODIFIER", menu_item_guid_set,
                     )
 
-                    days_logged = toast_menu_raw_db.mark_dates_backfilled(chunk_dates)
+                    days_logged = await asyncio.to_thread(
+                        toast_menu_raw_db.mark_dates_backfilled, chunk_dates,
+                    )
                     _menu_backfill_progress["days_logged"] = (
                         _menu_backfill_progress.get("days_logged", 0) + days_logged
                     )
