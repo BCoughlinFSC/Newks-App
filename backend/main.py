@@ -58,6 +58,7 @@ from olo_client import (
 from email_service import send_invite_email, send_password_reset_email
 import toast_puller_db as repoll_db
 import precompute_cache
+import toast_menu_raw_db
 from toast_puller import fetch_orders_with_retry, parse_orders
 
 # ------------------
@@ -11177,6 +11178,236 @@ async def admin_precompute_menu_cache_clear(
     """Delete every cached menu_*.json file. Next requests will recompute fresh."""
     n = precompute_cache.clear_cache()
     return {"deleted": n}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Toast menu raw-data backfill (admin-triggered)
+# ──────────────────────────────────────────────────────────────────────────────
+# Backfills `toast_menu_raw.db` by week-chunked Toast Analytics calls (both
+# MENU_ITEM and MODIFIER groupBy). Once a date range is in, ANY menu report
+# for any sub-range / store filter / tag selection can be served from local
+# SQLite instead of round-tripping to Toast — that's the slow part of a
+# menu report (~30s+ per Toast call). Immutable semantics: days already in
+# the backfill_log are skipped unless force=True.
+
+_menu_backfill_progress: Dict[str, Any] = {}
+_menu_backfill_task: Optional[asyncio.Task] = None
+
+
+def _menu_backfill_week_chunks(start: date, end: date, days_per_chunk: int = 7) -> List[Tuple[date, date]]:
+    """Inclusive [start, end] split into chunks of at most days_per_chunk days."""
+    out: List[Tuple[date, date]] = []
+    cur = start
+    while cur <= end:
+        last = min(cur + timedelta(days=days_per_chunk - 1), end)
+        out.append((cur, last))
+        cur = last + timedelta(days=1)
+    return out
+
+
+@app.post("/api/admin/menu-backfill")
+async def admin_menu_backfill(
+    payload: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Kick off a Toast menu-raw-data backfill for [start_date, end_date].
+    Returns immediately; poll GET /api/admin/menu-backfill/status for progress.
+
+    Payload:
+      {
+        "start_date":  "YYYY-MM-DD",
+        "end_date":    "YYYY-MM-DD",
+        "force":       false,                # re-fetch days already in backfill_log
+        "stores":      []                    # optional restaurantGuid filter; empty = all
+      }
+    """
+    global _menu_backfill_task
+
+    start_str = (payload.get("start_date") or "").strip()
+    end_str = (payload.get("end_date") or "").strip()
+    if not start_str or not end_str:
+        raise HTTPException(status_code=400, detail="start_date + end_date required (YYYY-MM-DD)")
+    try:
+        bf_start = date.fromisoformat(start_str)
+        bf_end = date.fromisoformat(end_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if bf_end < bf_start:
+        raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+    if (bf_end - bf_start).days > 400:
+        raise HTTPException(status_code=400, detail="Backfill range capped at 400 days per run")
+
+    if _menu_backfill_progress.get("running"):
+        raise HTTPException(status_code=409, detail="A menu backfill is already running. Wait or cancel it first.")
+
+    force = bool(payload.get("force", False))
+    requested_stores = list(payload.get("stores") or [])
+
+    chunks = _menu_backfill_week_chunks(bf_start, bf_end, days_per_chunk=7)
+    total_days = (bf_end - bf_start).days + 1
+
+    _menu_backfill_progress.clear()
+    _menu_backfill_progress.update({
+        "running":          True,
+        "started_at":       datetime.now().isoformat(),
+        "completed_at":     None,
+        "range":            f"{bf_start.isoformat()} to {bf_end.isoformat()}",
+        "force":            force,
+        "total_days":       total_days,
+        "total_chunks":     len(chunks),
+        "completed_chunks": 0,
+        "current_chunk":    None,
+        "rows_inserted":    0,
+        "days_logged":      0,
+        "skipped_days":     0,
+        "error":            None,
+        "cancelled":        False,
+    })
+
+    async def _run_backfill():
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                if requested_stores:
+                    restaurant_ids = requested_stores
+                else:
+                    locations = await get_all_active_locations(client)
+                    restaurant_ids = [loc.restaurantGuid for loc in locations]
+
+                for chunk_idx, (chunk_start, chunk_end) in enumerate(chunks):
+                    chunk_label = f"{chunk_start.isoformat()} → {chunk_end.isoformat()}"
+                    _menu_backfill_progress["current_chunk"] = chunk_label
+
+                    # Build the list of dates in this chunk once.
+                    chunk_dates: List[str] = []
+                    d = chunk_start
+                    while d <= chunk_end:
+                        chunk_dates.append(d.isoformat())
+                        d += timedelta(days=1)
+
+                    # Skip the whole chunk if every day is already backfilled and not force.
+                    if not force:
+                        already = set(toast_menu_raw_db.dates_covered(
+                            chunk_start.isoformat(), chunk_end.isoformat()
+                        ))
+                        if set(chunk_dates).issubset(already):
+                            _menu_backfill_progress["skipped_days"] = (
+                                _menu_backfill_progress.get("skipped_days", 0) + len(chunk_dates)
+                            )
+                            _menu_backfill_progress["completed_chunks"] = chunk_idx + 1
+                            continue
+
+                    chunk_total_rows = 0
+                    menu_item_guid_set: set = set()
+
+                    # Pass 1: MENU_ITEM (also gives us the guid set for modifier flagging).
+                    guid_mi = await request_toast_report(
+                        client, chunk_start, chunk_end, restaurant_ids,
+                        report_type="menu", group_by=["MENU_ITEM"],
+                    )
+                    mi_rows = await fetch_toast_report(client, guid_mi, "menu")
+                    for r in mi_rows:
+                        g = r.get("menuItemGuid") or r.get("modifierGuid")
+                        if g:
+                            menu_item_guid_set.add(g)
+                    chunk_total_rows += toast_menu_raw_db.insert_rows(
+                        mi_rows, "MENU_ITEM", menu_item_guid_set
+                    )
+
+                    # Pass 2: MODIFIER
+                    guid_mod = await request_toast_report(
+                        client, chunk_start, chunk_end, restaurant_ids,
+                        report_type="menu", group_by=["MODIFIER"],
+                    )
+                    mod_rows = await fetch_toast_report(client, guid_mod, "menu")
+                    chunk_total_rows += toast_menu_raw_db.insert_rows(
+                        mod_rows, "MODIFIER", menu_item_guid_set
+                    )
+
+                    days_logged = toast_menu_raw_db.mark_dates_backfilled(chunk_dates)
+                    _menu_backfill_progress["days_logged"] = (
+                        _menu_backfill_progress.get("days_logged", 0) + days_logged
+                    )
+                    _menu_backfill_progress["rows_inserted"] = (
+                        _menu_backfill_progress.get("rows_inserted", 0) + chunk_total_rows
+                    )
+                    _menu_backfill_progress["completed_chunks"] = chunk_idx + 1
+
+            _menu_backfill_progress.update({
+                "running":      False,
+                "completed_at": datetime.now().isoformat(),
+                "current_chunk": None,
+            })
+        except asyncio.CancelledError:
+            logger.info("menu-backfill cancelled by admin")
+            _menu_backfill_progress.update({
+                "running":      False,
+                "completed_at": datetime.now().isoformat(),
+                "current_chunk": None,
+                "cancelled":    True,
+            })
+            raise
+        except Exception as exc:
+            logger.error("menu-backfill crashed: %s", exc, exc_info=True)
+            _menu_backfill_progress.update({
+                "running":      False,
+                "completed_at": datetime.now().isoformat(),
+                "current_chunk": None,
+                "error":        str(exc),
+            })
+
+    _menu_backfill_task = asyncio.create_task(_run_backfill())
+    return {
+        "status":       "started",
+        "range":        f"{bf_start.isoformat()} to {bf_end.isoformat()}",
+        "total_chunks": len(chunks),
+        "total_days":   total_days,
+    }
+
+
+@app.get("/api/admin/menu-backfill/status")
+async def admin_menu_backfill_status(admin_user: User = Depends(get_current_admin_user)):
+    """Live progress + final state for the most recent backfill run."""
+    if not _menu_backfill_progress:
+        return {"status": "never_run"}
+    return dict(_menu_backfill_progress)
+
+
+@app.delete("/api/admin/menu-backfill")
+async def admin_menu_backfill_cancel(admin_user: User = Depends(get_current_admin_user)):
+    """Cancel the in-flight backfill. Idempotent."""
+    global _menu_backfill_task
+    if _menu_backfill_task is None or _menu_backfill_task.done():
+        return {"status": "not_running"}
+    _menu_backfill_task.cancel()
+    return {"status": "cancel_requested"}
+
+
+@app.get("/api/admin/menu-backfill/stats")
+async def admin_menu_backfill_stats(admin_user: User = Depends(get_current_admin_user)):
+    """Top-line stats: row count, date range covered, db size."""
+    return toast_menu_raw_db.get_stats()
+
+
+@app.get("/api/admin/menu-backfill/coverage")
+async def admin_menu_backfill_coverage(
+    start_date: str,
+    end_date: str,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Per-day backfill log entries within [start, end]."""
+    return toast_menu_raw_db.coverage_summary(start_date, end_date)
+
+
+@app.delete("/api/admin/menu-backfill/range")
+async def admin_menu_backfill_clear(
+    start_date: str,
+    end_date: str,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Wipe raw rows + log entries within [start, end]. Use before a force-refresh."""
+    deleted = toast_menu_raw_db.clear_range(start_date, end_date)
+    return {"deleted_rows": deleted}
 
 
 # ──────────────────────────────────────────────────────────────────────────────

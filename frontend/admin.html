@@ -572,6 +572,63 @@
 
       <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
 
+      <!-- ─── Menu Data Backfill ────────────────────────────── -->
+      <div>
+        <div class="section-header">
+          <div>
+            <h2>Menu Data Backfill</h2>
+            <div class="user-count">Pulls Toast raw menu rows for a date range into a local SQLite cache. After backfilling, menu reports for ANY sub-range / tag combo / store filter inside that range run locally without hitting Toast — much faster than the precompute approach which only helps exact-match shapes.</div>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
+          <!-- Stats line -->
+          <div id="menuBackfillStats" style="font-size:0.85rem;color:#374151;margin-bottom:0.75rem;padding-bottom:0.75rem;border-bottom:1px solid #F3F4F6;">
+            Loading stats…
+          </div>
+
+          <!-- Run controls -->
+          <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+              <input type="date" id="menuBackfillStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+              <input type="date" id="menuBackfillEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:#374151;padding-bottom:0.55rem;">
+              <input type="checkbox" id="menuBackfillForce" />
+              Force (re-fetch already-backfilled days)
+            </label>
+            <button class="btn-primary" id="menuBackfillRunBtn" style="background:#0E7490;">Run Backfill</button>
+            <button class="btn-primary" id="menuBackfillCancelBtn" style="background:#B91C1C;display:none;">Cancel Backfill</button>
+          </div>
+          <div id="menuBackfillMsg" style="margin-top:0.75rem;font-size:0.85rem;color:#6B7280;">
+            Tip: a 30-day range pulls ~8 weekly chunks &asymp; 4&ndash;8 min total. Backfill is immutable — re-running for the same dates is a no-op unless you check Force.
+          </div>
+        </div>
+
+        <!-- Coverage check -->
+        <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1rem;">
+          <div style="font-weight:600;color:#374151;font-size:0.9rem;margin-bottom:0.5rem;">Check Coverage</div>
+          <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start</label>
+              <input type="date" id="menuCoverageStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End</label>
+              <input type="date" id="menuCoverageEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+            </div>
+            <button class="btn-primary" id="menuCoverageBtn" style="background:#374151;">Check Coverage</button>
+          </div>
+          <div id="menuCoverageBody" style="margin-top:0.75rem;"></div>
+        </div>
+      </div>
+
+      <hr style="border:none;border-top:2px solid #E5E7EB;margin:2rem 0;" />
+
       <!-- ─── Lubbock (Aloha POS) Upload ──────────────────────── -->
       <div>
         <div class="section-header">
@@ -2342,6 +2399,197 @@ ORDER BY DateOfBusiness</pre>
     }
 
     // ──────────────────────────────────────────────────────
+    // Menu Data Backfill (raw Toast rows → local SQLite)
+    // ──────────────────────────────────────────────────────
+
+    let _menuBackfillPollTimer = null;
+    let _menuBackfillStartedAt = null;
+
+    async function loadMenuBackfillStats() {
+      try {
+        const resp = await fetch('/api/admin/menu-backfill/stats', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        const el = document.getElementById('menuBackfillStats');
+        if (!s.available || (s.row_count || 0) === 0) {
+          el.innerHTML = '<span style="color:#6B7280;">No backfilled data yet.</span>';
+          return;
+        }
+        const range = s.date_range
+          ? `${s.date_range.min} → ${s.date_range.max}`
+          : '—';
+        el.innerHTML =
+          `<strong>${(s.row_count || 0).toLocaleString()}</strong> rows · ` +
+          `<strong>${s.backfilled_days || 0}</strong> days logged · ` +
+          `range ${escHtml(range)} · ` +
+          `${(s.db_size_mb || 0).toFixed(1)} MB on disk`;
+      } catch (err) {
+        const el = document.getElementById('menuBackfillStats');
+        el.innerHTML = `<span style="color:#DC2626;">Stats load failed: ${escHtml(err.message)}</span>`;
+      }
+    }
+
+    async function runMenuBackfill() {
+      const start = document.getElementById('menuBackfillStart').value;
+      const end   = document.getElementById('menuBackfillEnd').value;
+      const force = document.getElementById('menuBackfillForce').checked;
+      const btn = document.getElementById('menuBackfillRunBtn');
+      const cancelBtn = document.getElementById('menuBackfillCancelBtn');
+      const msgEl = document.getElementById('menuBackfillMsg');
+
+      if (!start || !end) { msgEl.style.color = '#DC2626'; msgEl.textContent = 'Pick a start and end date.'; return; }
+      if (start > end)    { msgEl.style.color = '#DC2626'; msgEl.textContent = 'End date must be on or after start date.'; return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Starting…';
+      msgEl.style.color = '#374151';
+      msgEl.textContent = `Kicking off backfill for ${start} → ${end}…`;
+
+      try {
+        const resp = await fetch('/api/admin/menu-backfill', {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({ start_date: start, end_date: end, force })
+        });
+        if (!resp.ok) {
+          let detail = `HTTP ${resp.status}`;
+          try { const j = await resp.json(); detail = j.detail || detail; } catch (_) {}
+          throw new Error(detail);
+        }
+        _menuBackfillStartedAt = Date.now();
+        btn.textContent = 'Running…';
+        cancelBtn.style.display = '';
+        if (_menuBackfillPollTimer) clearInterval(_menuBackfillPollTimer);
+        await pollMenuBackfillStatus();
+        _menuBackfillPollTimer = setInterval(pollMenuBackfillStatus, 3000);
+      } catch (err) {
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'Backfill failed to start: ' + err.message;
+        btn.disabled = false;
+        btn.textContent = 'Run Backfill';
+      }
+    }
+
+    async function cancelMenuBackfill() {
+      if (!confirm('Cancel the running menu data backfill?')) return;
+      const btn = document.getElementById('menuBackfillCancelBtn');
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Cancelling…';
+      try {
+        const resp = await fetch('/api/admin/menu-backfill', { method: 'DELETE', headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        await pollMenuBackfillStatus();
+      } catch (err) {
+        showStatus('error', `Cancel failed: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    }
+
+    async function pollMenuBackfillStatus() {
+      try {
+        const resp = await fetch('/api/admin/menu-backfill/status', { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
+        const msgEl = document.getElementById('menuBackfillMsg');
+        const btn = document.getElementById('menuBackfillRunBtn');
+        const cancelBtn = document.getElementById('menuBackfillCancelBtn');
+
+        if (s.status === 'never_run') {
+          msgEl.textContent = 'No backfill has run yet.';
+          return;
+        }
+
+        const total = s.total_chunks || 1;
+        const completed = s.completed_chunks || 0;
+        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        const elapsed = _menuBackfillStartedAt
+          ? Math.round((Date.now() - _menuBackfillStartedAt) / 1000)
+          : null;
+
+        if (s.running) {
+          msgEl.style.color = '#1E40AF';
+          msgEl.innerHTML =
+            `<div style="font-weight:600;margin-bottom:0.3rem;">Backfilling ${escHtml(s.range || '')}` +
+            ` — chunk ${completed} of ${total} (${pct}%)` +
+            (elapsed != null ? ` · ${elapsed}s elapsed` : '') + `</div>` +
+            `<div style="background:#DBEAFE;border-radius:6px;height:14px;overflow:hidden;">` +
+            `<div style="background:#0E7490;height:100%;width:${pct}%;transition:width 0.5s;border-radius:6px;"></div>` +
+            `</div>` +
+            (s.current_chunk ? `<div style="margin-top:0.35rem;font-size:0.82rem;color:#374151;">Current chunk: <strong>${escHtml(s.current_chunk)}</strong> — Toast Analytics calls take 30s+ per chunk.</div>` : '') +
+            `<div style="margin-top:0.25rem;font-size:0.78rem;color:#6B7280;">${(s.rows_inserted || 0).toLocaleString()} rows inserted · ${s.days_logged || 0} days logged · ${s.skipped_days || 0} skipped</div>`;
+          btn.disabled = true;
+          btn.textContent = 'Running…';
+          cancelBtn.style.display = '';
+          cancelBtn.disabled = false;
+          cancelBtn.textContent = 'Cancel Backfill';
+          return;
+        }
+
+        // Terminal state
+        if (_menuBackfillPollTimer) { clearInterval(_menuBackfillPollTimer); _menuBackfillPollTimer = null; }
+        btn.disabled = false;
+        btn.textContent = 'Run Backfill';
+        cancelBtn.style.display = 'none';
+
+        if (s.cancelled) {
+          msgEl.style.color = '#B91C1C';
+          msgEl.textContent = `Cancelled. ${(s.rows_inserted || 0).toLocaleString()} rows inserted before cancel · ${s.days_logged || 0} days logged.`;
+        } else if (s.error) {
+          msgEl.style.color = '#DC2626';
+          msgEl.textContent = `Backfill failed: ${s.error}`;
+        } else {
+          msgEl.style.color = '#059669';
+          msgEl.textContent = `Done — ${(s.rows_inserted || 0).toLocaleString()} rows inserted · ${s.days_logged || 0} days logged · ${s.skipped_days || 0} skipped.`;
+        }
+        loadMenuBackfillStats();
+      } catch (err) {
+        const msgEl = document.getElementById('menuBackfillMsg');
+        msgEl.style.color = '#DC2626';
+        msgEl.textContent = 'Status poll failed: ' + err.message;
+      }
+    }
+
+    async function checkMenuCoverage() {
+      const start = document.getElementById('menuCoverageStart').value;
+      const end   = document.getElementById('menuCoverageEnd').value;
+      const body  = document.getElementById('menuCoverageBody');
+      if (!start || !end) { body.innerHTML = '<span style="color:#DC2626;">Pick both dates.</span>'; return; }
+      body.innerHTML = '<span style="color:#6B7280;">Checking…</span>';
+      try {
+        const resp = await fetch(`/api/admin/menu-backfill/coverage?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}`, { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const days = data.days || [];
+        if (days.length === 0) {
+          body.innerHTML = `<div style="color:#B91C1C;font-size:0.85rem;">No backfilled days in this range. Reports for it will go to Toast live.</div>`;
+          return;
+        }
+        let html = `<div style="color:#059669;font-size:0.85rem;margin-bottom:0.5rem;"><strong>${days.length}</strong> day(s) backfilled · <strong>${(data.total_rows || 0).toLocaleString()}</strong> rows total</div>`;
+        html += `<div style="max-height:220px;overflow:auto;border:1px solid #E5E7EB;border-radius:6px;">`;
+        html += `<table style="width:100%;border-collapse:collapse;font-size:0.78rem;">`;
+        html += `<thead style="position:sticky;top:0;background:#F9FAFB;"><tr>` +
+          `<th style="text-align:left;padding:0.35rem 0.6rem;color:#374151;">Date</th>` +
+          `<th style="text-align:right;padding:0.35rem 0.6rem;color:#374151;">Rows</th>` +
+          `<th style="text-align:right;padding:0.35rem 0.6rem;color:#374151;">Stores</th>` +
+          `<th style="text-align:left;padding:0.35rem 0.6rem;color:#374151;">Backfilled At</th>` +
+          `</tr></thead><tbody>`;
+        for (const d of days) {
+          html += `<tr style="border-top:1px solid #F3F4F6;">` +
+            `<td style="padding:0.3rem 0.6rem;font-weight:500;">${escHtml(d.business_date || '')}</td>` +
+            `<td style="padding:0.3rem 0.6rem;text-align:right;">${(d.row_count || 0).toLocaleString()}</td>` +
+            `<td style="padding:0.3rem 0.6rem;text-align:right;">${d.stores_count || 0}</td>` +
+            `<td style="padding:0.3rem 0.6rem;color:#6B7280;">${escHtml((d.backfilled_at || '').slice(0, 19).replace('T', ' '))}</td>` +
+            `</tr>`;
+        }
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+      } catch (err) {
+        body.innerHTML = `<span style="color:#DC2626;">Coverage check failed: ${escHtml(err.message)}</span>`;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────
     // Lubbock (Aloha POS) CSV Upload
     // ──────────────────────────────────────────────────────
 
@@ -2871,6 +3119,33 @@ ORDER BY DateOfBusiness</pre>
       document.getElementById('precomputeCustomBtn').addEventListener('click', runMenuPrecomputeCustomRange);
       document.getElementById('precomputeCancelBtn').addEventListener('click', cancelMenuPrecompute);
       document.getElementById('precomputeClearBtn').addEventListener('click', clearMenuPrecomputeCache);
+
+      // Menu data backfill
+      document.getElementById('menuBackfillRunBtn').addEventListener('click', runMenuBackfill);
+      document.getElementById('menuBackfillCancelBtn').addEventListener('click', cancelMenuBackfill);
+      document.getElementById('menuCoverageBtn').addEventListener('click', checkMenuCoverage);
+      (function setMenuBackfillDefaults() {
+        const today = new Date();
+        const end = new Date(today); end.setDate(today.getDate() - 1);
+        const start = new Date(end); start.setDate(end.getDate() - 29);
+        const iso = d => d.toISOString().slice(0, 10);
+        const s = document.getElementById('menuBackfillStart');
+        const e = document.getElementById('menuBackfillEnd');
+        if (s && !s.value) s.value = iso(start);
+        if (e && !e.value) e.value = iso(end);
+        const cs = document.getElementById('menuCoverageStart');
+        const ce = document.getElementById('menuCoverageEnd');
+        if (cs && !cs.value) cs.value = iso(start);
+        if (ce && !ce.value) ce.value = iso(end);
+      })();
+      loadMenuBackfillStats();
+      // Pick up an in-flight backfill if the page was reloaded mid-run.
+      pollMenuBackfillStatus().then(() => {
+        if (_menuBackfillPollTimer === null &&
+            document.getElementById('menuBackfillRunBtn').textContent === 'Running…') {
+          _menuBackfillPollTimer = setInterval(pollMenuBackfillStatus, 3000);
+        }
+      }).catch(() => { /* ignore — empty state is fine */ });
       // Sensible default: last 30 days
       (function setPrecomputeDefaults() {
         const today = new Date();
