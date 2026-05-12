@@ -11439,10 +11439,61 @@ async def admin_menu_backfill(
                     )
                     _menu_backfill_progress["completed_chunks"] = chunk_idx + 1
 
+            # ── Phase 2: warm the precompute cache for the backfilled range
+            # The pivot + YoY work over a month of data exceeds nginx's 60s
+            # timeout, which breaks the "Include All Consolidated Categories"
+            # Excel export path. Trigger /api/reports/run via loopback HTTP
+            # (no nginx, no 60s limit) with all 15 consolidated tags so the
+            # cache is warm when the user goes to export.
+            try:
+                import precompute_menu_report
+                custom_shape = {
+                    "label": f"auto-warm {bf_start.isoformat()} → {bf_end.isoformat()} · YoY fiscal · all stores · consolidated tags",
+                    "config": {
+                        "reportType":       "menu",
+                        "dateRangeType":    "custom",
+                        "customStartDate":  bf_start.isoformat(),
+                        "customEndDate":    bf_end.isoformat(),
+                        "restaurantIds":    [],
+                        "groupBy":          [],
+                        "itemTags":         sorted(precompute_cache.CONSOLIDATED_TAGS_SUPERSET),
+                        "includeZeroSales": False,
+                        "yoyEnabled":       True,
+                        "yoyMode":          "fiscal",
+                        "alohaDate":        None,
+                        "orderModeFilter":  None,
+                        "debug":            False,
+                    },
+                }
+                _menu_backfill_progress["phase"] = "warming_cache"
+                _menu_backfill_progress["current_chunk"] = f"Warming menu-report cache for {bf_start.isoformat()} → {bf_end.isoformat()}"
+                logger.info(
+                    "menu-backfill: warming precompute cache for %s → %s",
+                    bf_start.isoformat(), bf_end.isoformat(),
+                )
+                warm_summary = await precompute_menu_report.run_default_shapes(
+                    base_url="http://127.0.0.1:8000",
+                    auth_header=None,
+                    shapes=[custom_shape],
+                    on_progress=None,
+                    request_timeout_s=1800.0,
+                )
+                _menu_backfill_progress["cache_warm"] = {
+                    "ok_count":    warm_summary.get("ok_count", 0),
+                    "error_count": warm_summary.get("error_count", 0),
+                }
+            except Exception as _warm_exc:
+                # The backfill itself succeeded — don't fail the whole job
+                # just because warming the cache hit a problem. Log it and
+                # let the user retry via the precompute UI if they need to.
+                logger.warning("menu-backfill: cache warm step failed: %s", _warm_exc)
+                _menu_backfill_progress["cache_warm_error"] = str(_warm_exc)
+
             _menu_backfill_progress.update({
                 "running":      False,
                 "completed_at": datetime.now().isoformat(),
                 "current_chunk": None,
+                "phase":         "done",
             })
         except asyncio.CancelledError:
             logger.info("menu-backfill cancelled by admin")
