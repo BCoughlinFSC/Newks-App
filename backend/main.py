@@ -11094,6 +11094,7 @@ async def admin_precompute_menu(
             summary = await precompute_menu_report.run_default_shapes(
                 base_url=base_url,
                 auth_header=auth_header,
+                shapes=shapes,
                 on_progress=_on_progress,
                 request_timeout_s=timeout_s,
             )
