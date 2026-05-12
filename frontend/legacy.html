@@ -4716,32 +4716,39 @@
     async function init() {
       setupEventListeners();
       // Auth check FIRST — sets authToken + currentUser so loadLocations
-      // can send auth headers and receive the user's filtered location list
+      // can send auth headers and receive the user's filtered location list.
       let isAuth = false;
       try {
         isAuth = await checkAuth();
       } catch (err) {
         console.error('Error during auth check:', err);
       }
-      // Now load locations (with auth token in place) and report types
-      try {
-        await loadLocations();
-        await loadReportTypes();
-      } catch (err) {
-        console.error('Error loading base data:', err);
-        showStatus('warning', 'Could not load locations or report types. You can still try running a report after logging in.');
+
+      // Parallelize the three independent base-data loads. Before this they
+      // ran serially in init(), so a slow locations call would block report
+      // types + saved reports from even starting. Page-load felt like the
+      // sum of all three; now it's the max. Each call has its own try/catch
+      // so a single failure doesn't tank the others.
+      const baseLoaders = [
+        loadLocations().catch(err => {
+          console.error('Error loading locations:', err);
+          showStatus('warning', 'Could not load locations. Some filters may be empty.');
+        }),
+        loadReportTypes().catch(err => {
+          console.error('Error loading report types:', err);
+        }),
+      ];
+      if (isAuth) {
+        baseLoaders.push(
+          loadSavedReports().catch(err => {
+            console.error('Error loading saved reports:', err);
+          })
+        );
+      } else {
+        const list = document.getElementById('savedReportsList');
+        if (list) list.innerHTML = '<div class="empty-state">Login to view your saved reports</div>';
       }
-      // Load saved reports if authenticated
-      try {
-        if (isAuth) {
-          await loadSavedReports();
-        } else {
-          const list = document.getElementById('savedReportsList');
-          if (list) list.innerHTML = '<div class="empty-state">Login to view your saved reports</div>';
-        }
-      } catch (err) {
-        console.error('Error loading saved reports:', err);
-      }
+      await Promise.all(baseLoaders);
 
       // Handle ?report= and ?preset= params from shared nav links.
       // The reportType <select> stays in the DOM (hidden) because lots of
