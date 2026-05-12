@@ -9089,7 +9089,38 @@ async def build_menu_mix_report_fallback(
     # Fetch MENU_ITEM analytics (week chunks if needed)
     days_diff = (end_date - start_date).days + 1
     all_rows: List[Dict] = []
-    if days_diff > 7:
+    modifier_rows: List[Dict] = []
+
+    # ── Local DB short-circuit (same as main menu path) ──────────────────────
+    _fb_use_local = False
+    try:
+        if toast_menu_raw_db.has_full_coverage(start_date.isoformat(), end_date.isoformat()):
+            all_rows = list(toast_menu_raw_db.query_rows_for_report(
+                start_date.isoformat(), end_date.isoformat(),
+                restaurant_guids=restaurant_ids,
+                group_by_kind="MENU_ITEM",
+            ))
+            modifier_rows = list(toast_menu_raw_db.query_rows_for_report(
+                start_date.isoformat(), end_date.isoformat(),
+                restaurant_guids=restaurant_ids,
+                group_by_kind="MODIFIER",
+            ))
+            _fb_use_local = True
+            logger.info(
+                "menu fallback: using local DB (%d menu items + %d modifiers) — skipping Toast Analytics",
+                len(all_rows), len(modifier_rows),
+            )
+            if response is not None:
+                response.headers["X-Menu-Source"] = "local-db"
+    except Exception as _exc:
+        logger.warning("local DB short-circuit failed in fallback, falling back to Toast: %s", _exc)
+        _fb_use_local = False
+        all_rows = []
+        modifier_rows = []
+
+    if _fb_use_local:
+        pass  # all_rows + modifier_rows populated above
+    elif days_diff > 7:
         current_start = start_date
         while current_start <= end_date:
             chunk_end = min(current_start + timedelta(days=6), end_date)
@@ -9115,12 +9146,13 @@ async def build_menu_mix_report_fallback(
             ["MENU_ITEM"]
         )
         all_rows = await fetch_toast_report(client, report_guid, "menu")
-    
+
     menu_item_count = len(all_rows)
-    
-    # Fetch MODIFIER analytics and merge
-    modifier_rows: List[Dict] = []
-    if days_diff > 7:
+
+    # Fetch MODIFIER analytics and merge (or use local-DB rows from above)
+    if _fb_use_local:
+        pass  # modifier_rows already loaded — skip Toast fetch
+    elif days_diff > 7:
         current_start = start_date
         while current_start <= end_date:
             chunk_end = min(current_start + timedelta(days=6), end_date)
@@ -9661,15 +9693,52 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # Split date range into week-sized chunks if needed (groupBy only works for day/week)
                 days_diff = (end_date - start_date).days + 1
                 all_analytics_rows = []
-                
-                if days_diff > 7:
+
+                # ── Local DB short-circuit ──────────────────────────────────────
+                # If toast_menu_raw has full coverage for [start_date, end_date],
+                # load MENU_ITEM + MODIFIER rows from local SQLite instead of
+                # round-tripping to Toast Analytics (the slow part). The data
+                # is shaped to match Toast's response, so the rest of the
+                # pipeline (dedup, name fixups, pivot, YoY) is unchanged.
+                _use_local_menu = False
+                try:
+                    if toast_menu_raw_db.has_full_coverage(start_date.isoformat(), end_date.isoformat()):
+                        _local_mi_rows = toast_menu_raw_db.query_rows_for_report(
+                            start_date.isoformat(), end_date.isoformat(),
+                            restaurant_guids=restaurant_ids,
+                            group_by_kind="MENU_ITEM",
+                        )
+                        _local_mod_rows = toast_menu_raw_db.query_rows_for_report(
+                            start_date.isoformat(), end_date.isoformat(),
+                            restaurant_guids=restaurant_ids,
+                            group_by_kind="MODIFIER",
+                        )
+                        all_analytics_rows = list(_local_mi_rows)
+                        menu_item_count = len(all_analytics_rows)
+                        # Stash modifier rows for the next block to pick up.
+                        _local_modifier_rows_to_merge = _local_mod_rows
+                        _use_local_menu = True
+                        logger.info(
+                            "menu report: using local DB (%d menu items + %d modifiers) — skipping Toast Analytics",
+                            len(_local_mi_rows), len(_local_mod_rows),
+                        )
+                        if response is not None:
+                            response.headers["X-Menu-Source"] = "local-db"
+                except Exception as _exc:
+                    logger.warning("local DB short-circuit failed, falling back to Toast: %s", _exc)
+                    _use_local_menu = False
+                    all_analytics_rows = []
+
+                if _use_local_menu:
+                    pass  # all_analytics_rows + menu_item_count already populated
+                elif days_diff > 7:
                     # Split into week-sized chunks
                     logger.info(f"Splitting {days_diff} day range into week-sized chunks for groupBy support")
                     current_start = start_date
                     while current_start <= end_date:
                         # Calculate chunk end (max 7 days)
                         chunk_end = min(current_start + timedelta(days=6), end_date)
-                        
+
                         logger.info(f"Requesting chunk: {current_start} to {chunk_end}")
                         report_guid = await request_toast_report(
                             client,
@@ -9679,12 +9748,12 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                             "menu",
                             ["MENU_ITEM"]
                         )
-                        
+
                         logger.info(f"Fetching report for chunk {current_start} to {chunk_end} (guid: {report_guid})")
                         chunk_rows = await fetch_toast_report(client, report_guid, "menu")
                         if chunk_rows:
                             all_analytics_rows.extend(chunk_rows)
-                        
+
                         # Move to next chunk
                         current_start = chunk_end + timedelta(days=1)
                 else:
@@ -9697,11 +9766,12 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                         "menu",
                         ["MENU_ITEM"]
                     )
-                    
+
                     all_analytics_rows = await fetch_toast_report(client, report_guid, "menu")
-                
-                # Track count before adding modifiers
-                menu_item_count = len(all_analytics_rows)
+
+                # Track count before adding modifiers (skip if we already set it from local DB)
+                if not _use_local_menu:
+                    menu_item_count = len(all_analytics_rows)
                 
                 # Also request modifier-level data
                 logger.info("Requesting Analytics menu report with MODIFIER groupBy...")
@@ -9746,20 +9816,37 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                         return all_rows
                     raise
                 
-                if days_diff > 7:
+                if _use_local_menu:
+                    # Local-DB short-circuit: modifier rows already loaded above
+                    # in _local_modifier_rows_to_merge. They've already got
+                    # menuItemGuid set (no rename needed) but we still dedup
+                    # against the menu-item section to match the live path's
+                    # behavior.
+                    menu_item_guids_set = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
+                    deduplicated_local_mods = [
+                        r for r in _local_modifier_rows_to_merge
+                        if r.get("menuItemGuid") not in menu_item_guids_set
+                    ]
+                    if len(deduplicated_local_mods) < len(_local_modifier_rows_to_merge):
+                        logger.info(
+                            "Removed %d duplicate modifiers from local DB merge",
+                            len(_local_modifier_rows_to_merge) - len(deduplicated_local_mods),
+                        )
+                    all_analytics_rows.extend(deduplicated_local_mods)
+                elif days_diff > 7:
                     # Split into week-sized chunks for modifiers too
                     logger.info(f"Splitting modifier data into week-sized chunks")
                     current_start = start_date
                     while current_start <= end_date:
                         chunk_end = min(current_start + timedelta(days=6), end_date)
-                        
+
                         logger.info(f"Requesting MODIFIER chunk: {current_start} to {chunk_end}")
                         modifier_chunk_rows = await fetch_modifier_rows_for_chunk(current_start, chunk_end)
                         if modifier_chunk_rows:
                             # Log sample row to see what fields are returned
                             if len(modifier_chunk_rows) > 0:
                                 logger.info(f"Sample MODIFIER row keys: {list(modifier_chunk_rows[0].keys())}")
-                            
+
                             # Rename the field from modifierGuid to menuItemGuid for consistency
                             for row in modifier_chunk_rows:
                                 # Handle different possible field names
@@ -9767,22 +9854,22 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                                     row["menuItemGuid"] = row.pop("modifierGuid")
                                 elif "modifierOptionGuid" in row:
                                     row["menuItemGuid"] = row.pop("modifierOptionGuid")
-                                
+
                                 if "modifierName" in row:
                                     row["menuItemName"] = row.pop("modifierName")
                                 elif "modifierOptionName" in row:
                                     row["menuItemName"] = row.pop("modifierOptionName")
-                            
+
                             # Before adding, check for duplicates with menu items
                             menu_item_guids_set = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
                             deduplicated_chunk = [
-                                r for r in modifier_chunk_rows 
+                                r for r in modifier_chunk_rows
                                 if r.get("menuItemGuid") not in menu_item_guids_set
                             ]
                             if len(deduplicated_chunk) < len(modifier_chunk_rows):
                                 logger.info(f"Removed {len(modifier_chunk_rows) - len(deduplicated_chunk)} duplicate modifiers from chunk {current_start} to {chunk_end}")
                             all_analytics_rows.extend(deduplicated_chunk)
-                        
+
                         current_start = chunk_end + timedelta(days=1)
                 else:
                     # Single request for ranges <= 7 days
