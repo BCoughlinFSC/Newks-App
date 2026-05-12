@@ -10978,6 +10978,7 @@ async def admin_flash_reconcile_status(
 # `running` flips False.
 
 _precompute_menu_progress: Dict[str, Any] = {}
+_precompute_menu_task: Optional[asyncio.Task] = None
 
 
 @app.post("/api/admin/precompute-menu")
@@ -11106,6 +11107,20 @@ async def admin_precompute_menu(
                     "error_count":  summary.get("error_count"),
                 },
             })
+        except asyncio.CancelledError:
+            logger.info("precompute-menu job cancelled by admin")
+            # Mark any not-yet-finished shapes as cancelled so the UI clears.
+            for _s in _precompute_menu_progress.get("shapes", []):
+                if _s.get("status") in ("pending", "running"):
+                    _s["status"] = "cancelled"
+            _precompute_menu_progress.update({
+                "running":      False,
+                "completed_at": datetime.now().isoformat(),
+                "current_label": None,
+                "cancelled":    True,
+            })
+            # Re-raise so the asyncio runtime can finalize the task properly.
+            raise
         except Exception as exc:
             logger.error("precompute-menu job crashed: %s", exc, exc_info=True)
             _precompute_menu_progress.update({
@@ -11115,12 +11130,25 @@ async def admin_precompute_menu(
                 "error":        str(exc),
             })
 
-    asyncio.create_task(_run_job())
+    global _precompute_menu_task
+    _precompute_menu_task = asyncio.create_task(_run_job())
     return {
         "status":       "started",
         "total_shapes": total,
         "base_url":     base_url,
     }
+
+
+@app.delete("/api/admin/precompute-menu")
+async def admin_precompute_menu_cancel(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Cancel the currently-running precompute job. Idempotent."""
+    global _precompute_menu_task
+    if _precompute_menu_task is None or _precompute_menu_task.done():
+        return {"status": "not_running"}
+    _precompute_menu_task.cancel()
+    return {"status": "cancel_requested"}
 
 
 @app.get("/api/admin/precompute-menu/status")

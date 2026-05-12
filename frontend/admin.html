@@ -540,6 +540,7 @@
           <!-- Row 1: defaults + cache controls -->
           <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
             <button class="btn-primary" id="precomputeRunBtn" style="background:#1E3A5F;">Run Defaults (rolling 7d &amp; 30d)</button>
+            <button class="btn-primary" id="precomputeCancelBtn" style="background:#B91C1C;display:none;">Cancel Running Job</button>
             <button class="btn-primary" id="precomputeClearBtn" style="background:#DC2626;">Clear Cache</button>
             <span id="precomputeCacheCount" style="font-size:0.8rem;color:#6B7280;"></span>
           </div>
@@ -2156,6 +2157,24 @@ ORDER BY DateOfBusiness</pre>
       await _kickPrecompute({}, btn, 'Run Defaults (rolling 7d & 30d)');
     }
 
+    async function cancelMenuPrecompute() {
+      if (!confirm('Cancel the running precompute job? Any shape currently in progress will not write to cache.')) return;
+      const btn = document.getElementById('precomputeCancelBtn');
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Cancelling…';
+      try {
+        const resp = await fetch('/api/admin/precompute-menu', { method: 'DELETE', headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        // Status poll will pick up the cancelled state and re-enable buttons.
+        await pollMenuPrecomputeStatus();
+      } catch (err) {
+        showStatus('error', `Cancel failed: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    }
+
     async function runMenuPrecomputeCustomRange() {
       const start = document.getElementById('precomputeStart').value;
       const end   = document.getElementById('precomputeEnd').value;
@@ -2200,6 +2219,7 @@ ORDER BY DateOfBusiness</pre>
           : null;
 
         const customBtn = document.getElementById('precomputeCustomBtn');
+        const cancelBtn = document.getElementById('precomputeCancelBtn');
 
         if (s.running) {
           msgEl.style.color = '#1E40AF';
@@ -2213,6 +2233,11 @@ ORDER BY DateOfBusiness</pre>
           btn.disabled = true;
           if (customBtn) customBtn.disabled = true;
           if (btn.textContent !== 'Running…') btn.textContent = 'Running…';
+          if (cancelBtn) {
+            cancelBtn.style.display = '';
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel Running Job';
+          }
           return;
         }
 
@@ -2225,6 +2250,13 @@ ORDER BY DateOfBusiness</pre>
         if (customBtn) {
           customBtn.disabled = false;
           customBtn.textContent = 'Run for Custom Range';
+        }
+        if (cancelBtn) cancelBtn.style.display = 'none';
+
+        if (s.cancelled) {
+          msgEl.style.color = '#B91C1C';
+          msgEl.textContent = 'Cancelled. No cache entries written for the in-progress shape.';
+          return;
         }
 
         if (s.error) {
@@ -2264,6 +2296,10 @@ ORDER BY DateOfBusiness</pre>
         else if (sh.status === 'error') {
           color = '#DC2626';
           suffix = ` · failed${sh.error ? ': ' + escHtml(String(sh.error).slice(0, 120)) : ''}`;
+        }
+        else if (sh.status === 'cancelled') {
+          color = '#9CA3AF';
+          suffix = ' · cancelled';
         }
         html += `<div style="padding:0.35rem 0;font-size:0.85rem;color:#374151;">${dot(color)}${escHtml(sh.label || ('shape ' + (sh.index + 1)))}<span style="color:#6B7280;">${suffix}</span></div>`;
       }
@@ -2833,6 +2869,7 @@ ORDER BY DateOfBusiness</pre>
       // Menu report precompute
       document.getElementById('precomputeRunBtn').addEventListener('click', runMenuPrecompute);
       document.getElementById('precomputeCustomBtn').addEventListener('click', runMenuPrecomputeCustomRange);
+      document.getElementById('precomputeCancelBtn').addEventListener('click', cancelMenuPrecompute);
       document.getElementById('precomputeClearBtn').addEventListener('click', clearMenuPrecomputeCache);
       // Sensible default: last 30 days
       (function setPrecomputeDefaults() {
