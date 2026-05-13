@@ -2026,12 +2026,10 @@ async def _fetch_orders_for_restaurant_day(
                     restaurant_guid[:8], business_date_yyyymmdd, time.perf_counter() - _t0, len(result))
         return result
 
-    # Check cache (sync SQLite — offload to thread so event loop isn't blocked)
-    if await asyncio.to_thread(toast_orders_db.is_date_cached, restaurant_guid, business_date_yyyymmdd):
+    # Check cache
+    if toast_orders_db.is_date_cached(restaurant_guid, business_date_yyyymmdd):
         _t0 = time.perf_counter()
-        cached = await asyncio.to_thread(
-            toast_orders_db.get_cached_orders, restaurant_guid, business_date_yyyymmdd
-        )
+        cached = toast_orders_db.get_cached_orders(restaurant_guid, business_date_yyyymmdd)
         if cached:
             logger.info("PROFILE day src=cache rguid=%s bd=%s secs=%.3f orders=%d",
                         restaurant_guid[:8], business_date_yyyymmdd, time.perf_counter() - _t0, len(cached))
@@ -2045,11 +2043,9 @@ async def _fetch_orders_for_restaurant_day(
     logger.info("PROFILE day src=api_miss rguid=%s bd=%s secs=%.3f orders=%d",
                 restaurant_guid[:8], business_date_yyyymmdd, time.perf_counter() - _t0, len(orders))
 
-    # Opportunistically cache the result (historical date) — also off-thread
+    # Opportunistically cache the result (historical date)
     try:
-        await asyncio.to_thread(
-            toast_orders_db.store_orders, restaurant_guid, business_date_yyyymmdd, orders
-        )
+        toast_orders_db.store_orders(restaurant_guid, business_date_yyyymmdd, orders)
     except Exception as exc:
         logger.warning("Failed to cache orders for %s|%s: %s",
                        restaurant_guid[:8], business_date_yyyymmdd, exc)
