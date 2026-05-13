@@ -20,14 +20,17 @@ import io
 import logging
 import re
 import time
+import uuid
 import asyncio
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+import pick_export_jobs
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -963,24 +966,8 @@ async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = 
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/reports/picks/drill-down-all-stores-multi")
-async def picks_drill_down_all_stores_multi(request: PickMultiDrillDownAllStoresRequest = Body(...)):
-    """
-    Multi-report drill-down: fetch orders ONCE per store and run the aggregation
-    for each requested report_type (pick3 / pick2 / full_pairings) on the same
-    orders pass. Cuts work ~3x vs three separate single-type calls.
-
-    Response shape:
-      {
-        "pairingSource": "orders",
-        "results": {
-          "pick3":         { "stores": [ ... ] },
-          "pick2":         { "stores": [ ... ] },
-          "full_pairings": { "stores": [ ... ] }
-        }
-      }
-    Only requested types appear in `results`.
-    """
+def _validate_multi_request(request: "PickMultiDrillDownAllStoresRequest") -> Tuple[date, date, List[str], str]:
+    """Validate and normalize the request. Raises HTTPException on error."""
     try:
         start_date = datetime.strptime(request.start_date, "%Y-%m-%d").date()
         end_date   = datetime.strptime(request.end_date,   "%Y-%m-%d").date()
@@ -995,97 +982,221 @@ async def picks_drill_down_all_stores_multi(request: PickMultiDrillDownAllStores
             status_code=400,
             detail=f"report_types must contain at least one of: {list(REPORT_CONFIGS.keys())}",
         )
+    variant = _normalize_variant(request.variant, ("pos", "olo", "all"))
+    return start_date, end_date, requested_types, variant
 
-    variant     = _normalize_variant(request.variant, ("pos", "olo", "all"))
+
+async def _run_picks_multi_core(
+    start_date: date,
+    end_date: date,
+    restaurant_ids: Optional[List[str]],
+    variant: str,
+    requested_types: List[str],
+    progress_cb: Optional[Callable[[int, int], Awaitable[None]]] = None,
+) -> Dict:
+    """
+    Core multi-pick computation. Fetches orders once per store and aggregates
+    each requested report_type from the same orders pass.
+
+    progress_cb is an optional async callable invoked as `await progress_cb(done, total)`
+    once after the store list is known (done=0) and once after each store completes.
+    Used by the async-job endpoint to update SQLite-backed progress.
+    """
     start_bdate = int(to_business_date(start_date))
     end_bdate   = int(to_business_date(end_date))
 
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            locs = await get_all_active_locations(client)
-            if not locs:
-                return {"pairingSource": "orders", "results": {t: {"stores": []} for t in requested_types}}
-            if request.restaurant_ids:
-                wanted = {g.strip() for g in request.restaurant_ids if g.strip()}
-                locs   = [l for l in locs if l.restaurantGuid in wanted]
-            if not locs:
-                return {"pairingSource": "orders", "results": {t: {"stores": []} for t in requested_types}}
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        locs = await get_all_active_locations(client)
+        if not locs:
+            return {"pairingSource": "orders", "results": {t: {"stores": []} for t in requested_types}}
+        if restaurant_ids:
+            wanted = {g.strip() for g in restaurant_ids if g.strip()}
+            locs   = [l for l in locs if l.restaurantGuid in wanted]
+        if not locs:
+            return {"pairingSource": "orders", "results": {t: {"stores": []} for t in requested_types}}
 
-            store_name = {l.restaurantGuid: format_location_display_name(l) for l in locs}
+        store_name = {l.restaurantGuid: format_location_display_name(l) for l in locs}
+        total_stores = len(store_name)
+        if progress_cb is not None:
+            try:
+                await progress_cb(0, total_stores)
+            except Exception:
+                pass
 
-            # Prefetch menu tags in parallel — same pattern as single-type endpoint
-            pre_sem = asyncio.Semaphore(10)
-            async def prefetch(g: str):
-                async with pre_sem:
-                    await get_menu_tags_mapping(client, g)
-            await asyncio.gather(*[prefetch(g) for g in store_name], return_exceptions=True)
+        # Prefetch menu tags in parallel — same pattern as single-type endpoint
+        pre_sem = asyncio.Semaphore(10)
+        async def prefetch(g: str):
+            async with pre_sem:
+                await get_menu_tags_mapping(client, g)
+        await asyncio.gather(*[prefetch(g) for g in store_name], return_exceptions=True)
 
-            sem = asyncio.Semaphore(8)
-            async def one_store(rguid: str):
-                """Fetch orders once, run aggregator for each requested report_type."""
-                async with sem:
-                    _t_store_start = time.perf_counter()
-                    per_type: Dict[str, Dict] = {}
-                    try:
-                        await get_menu_tags_mapping(client, rguid)
-                        mod_guid_to_name = _get_modifier_guid_to_name(rguid)
-                        _t_fetch_start = time.perf_counter()
-                        orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
-                        _t_fetch = time.perf_counter() - _t_fetch_start
+        done_count = {"n": 0}
+        progress_lock = asyncio.Lock()
+        sem = asyncio.Semaphore(8)
 
-                        _t_compute_start = time.perf_counter()
-                        for rt in requested_types:
-                            cfg = _get_config(rt)
-                            per_type[rt] = _aggregate_pick_from_orders(
-                                rguid, orders, start_bdate, end_bdate, variant, cfg, mod_guid_to_name
-                            )
-                        _t_compute = time.perf_counter() - _t_compute_start
-                        logger.info(
-                            "PROFILE multi store=%s orders=%d fetch=%.2fs compute=%.2fs types=%s",
-                            rguid[:8], len(orders), _t_fetch, _t_compute, ",".join(requested_types),
+        async def one_store(rguid: str):
+            """Fetch orders once, run aggregator for each requested report_type."""
+            async with sem:
+                _t_store_start = time.perf_counter()
+                per_type: Dict[str, Dict] = {}
+                try:
+                    await get_menu_tags_mapping(client, rguid)
+                    mod_guid_to_name = _get_modifier_guid_to_name(rguid)
+                    _t_fetch_start = time.perf_counter()
+                    orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
+                    _t_fetch = time.perf_counter() - _t_fetch_start
+
+                    _t_compute_start = time.perf_counter()
+                    for rt in requested_types:
+                        cfg = _get_config(rt)
+                        per_type[rt] = _aggregate_pick_from_orders(
+                            rguid, orders, start_bdate, end_bdate, variant, cfg, mod_guid_to_name
                         )
-                    except Exception as e:
-                        logger.warning("Picks multi all-stores: %s: %s", rguid[:8], e)
-                        for rt in requested_types:
-                            per_type[rt] = {
-                                "restaurantGuid": rguid, "totalPick3Quantity": 0,
-                                "parentItems": [], "selections": [], "topCombos": [],
-                            }
-                    return rguid, per_type, time.perf_counter() - _t_store_start
+                    _t_compute = time.perf_counter() - _t_compute_start
+                    logger.info(
+                        "PROFILE multi store=%s orders=%d fetch=%.2fs compute=%.2fs types=%s",
+                        rguid[:8], len(orders), _t_fetch, _t_compute, ",".join(requested_types),
+                    )
+                except Exception as e:
+                    logger.warning("Picks multi all-stores: %s: %s", rguid[:8], e)
+                    for rt in requested_types:
+                        per_type[rt] = {
+                            "restaurantGuid": rguid, "totalPick3Quantity": 0,
+                            "parentItems": [], "selections": [], "topCombos": [],
+                        }
+                if progress_cb is not None:
+                    async with progress_lock:
+                        done_count["n"] += 1
+                        n = done_count["n"]
+                    try:
+                        await progress_cb(n, total_stores)
+                    except Exception:
+                        pass
+                return rguid, per_type, time.perf_counter() - _t_store_start
 
-            _t_gather_start = time.perf_counter()
-            results = await asyncio.gather(*[one_store(g) for g in store_name])
-            _t_gather = time.perf_counter() - _t_gather_start
-            _t_store_sum = sum(secs for _, _, secs in results)
-            logger.info(
-                "PROFILE multi all-stores wall=%.2fs sum_per_store=%.2fs stores=%d range=%s..%s variant=%s types=%s parallelism=%.1fx",
-                _t_gather, _t_store_sum, len(store_name), request.start_date, request.end_date,
-                variant, ",".join(requested_types),
-                (_t_store_sum / _t_gather) if _t_gather > 0 else 0.0,
-            )
+        _t_gather_start = time.perf_counter()
+        results = await asyncio.gather(*[one_store(g) for g in store_name])
+        _t_gather = time.perf_counter() - _t_gather_start
+        _t_store_sum = sum(secs for _, _, secs in results)
+        logger.info(
+            "PROFILE multi all-stores wall=%.2fs sum_per_store=%.2fs stores=%d range=%s..%s variant=%s types=%s parallelism=%.1fx",
+            _t_gather, _t_store_sum, total_stores, start_date.isoformat(), end_date.isoformat(),
+            variant, ",".join(requested_types),
+            (_t_store_sum / _t_gather) if _t_gather > 0 else 0.0,
+        )
 
-            # Reshape: per-type list of stores
-            out: Dict[str, Dict] = {t: {"stores": []} for t in requested_types}
-            for rguid, per_type, _secs in results:
-                rname = store_name.get(rguid, "Unknown")
-                for rt in requested_types:
-                    r = per_type.get(rt) or {}
-                    out[rt]["stores"].append({
-                        "restaurantGuid":     rguid,
-                        "restaurantName":     rname,
-                        "totalPick3Quantity": r.get("totalPick3Quantity", 0),
-                        "parentItems":        r.get("parentItems", []),
-                        "selections":         r.get("selections", []),
-                        "topCombos":          r.get("topCombos", []),
-                    })
+        out: Dict[str, Dict] = {t: {"stores": []} for t in requested_types}
+        for rguid, per_type, _secs in results:
+            rname = store_name.get(rguid, "Unknown")
+            for rt in requested_types:
+                r = per_type.get(rt) or {}
+                out[rt]["stores"].append({
+                    "restaurantGuid":     rguid,
+                    "restaurantName":     rname,
+                    "totalPick3Quantity": r.get("totalPick3Quantity", 0),
+                    "parentItems":        r.get("parentItems", []),
+                    "selections":         r.get("selections", []),
+                    "topCombos":          r.get("topCombos", []),
+                })
 
-            return {"pairingSource": "orders", "results": out}
+        return {"pairingSource": "orders", "results": out}
 
+
+@router.post("/api/reports/picks/drill-down-all-stores-multi")
+async def picks_drill_down_all_stores_multi(request: PickMultiDrillDownAllStoresRequest = Body(...)):
+    """
+    SYNC multi-report drill-down (blocking HTTP). Use the /start + /status
+    pair instead for large requests that may exceed nginx's proxy_read_timeout.
+
+    Response shape:
+      {
+        "pairingSource": "orders",
+        "results": {
+          "pick3":         { "stores": [ ... ] },
+          "pick2":         { "stores": [ ... ] },
+          "full_pairings": { "stores": [ ... ] }
+        }
+      }
+    """
+    start_date, end_date, requested_types, variant = _validate_multi_request(request)
+    try:
+        return await _run_picks_multi_core(
+            start_date, end_date, request.restaurant_ids, variant, requested_types, progress_cb=None,
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Picks multi drill-down-all-stores: %s: %s", type(e).__name__, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Async job endpoints — start + poll. Use these from the Menu Performance
+# export flow so the HTTP request doesn't have to stay open for ~10+ minutes
+# (which Cloudways' default nginx proxy_read_timeout of 60s would kill).
+# ---------------------------------------------------------------------------
+
+async def _run_picks_multi_job(job_id: str, request: PickMultiDrillDownAllStoresRequest) -> None:
+    """Background task body. Updates pick_export_jobs SQLite as it progresses."""
+    try:
+        start_date, end_date, requested_types, variant = _validate_multi_request(request)
+    except HTTPException as he:
+        pick_export_jobs.finish_error(job_id, f"invalid request: {he.detail}")
+        return
+    except Exception as e:
+        pick_export_jobs.finish_error(job_id, f"invalid request: {e}")
+        return
+
+    async def progress_cb(done: int, total: int) -> None:
+        # SQLite writes are sync — offload so we don't block the event loop.
+        await asyncio.to_thread(pick_export_jobs.update_progress, job_id, done, total)
+
+    try:
+        result = await _run_picks_multi_core(
+            start_date, end_date, request.restaurant_ids, variant, requested_types, progress_cb=progress_cb,
+        )
+        await asyncio.to_thread(pick_export_jobs.finish_done, job_id, result)
+    except Exception as e:
+        logger.error("Picks multi job %s failed: %s", job_id, e, exc_info=True)
+        try:
+            await asyncio.to_thread(pick_export_jobs.finish_error, job_id, str(e))
+        except Exception:
+            pass
+
+
+@router.post("/api/reports/picks/drill-down-all-stores-multi/start")
+async def picks_drill_down_all_stores_multi_start(request: PickMultiDrillDownAllStoresRequest = Body(...)):
+    """Kick off a multi-pick export as a background task. Returns {job_id}."""
+    # Validate up front so callers get a sync 400 instead of a useless job_id.
+    _validate_multi_request(request)
+    job_id = uuid.uuid4().hex
+    await asyncio.to_thread(pick_export_jobs.create, job_id)
+    # Fire-and-forget on the current worker's event loop. With --workers 2, the
+    # status poll may land on the other worker — that's fine because state lives
+    # in SQLite, not in this process's memory.
+    asyncio.create_task(_run_picks_multi_job(job_id, request))
+    logger.info("Picks multi job %s started range=%s..%s types=%s stores=%d",
+                job_id, request.start_date, request.end_date,
+                ",".join(request.report_types or []),
+                len(request.restaurant_ids or []))
+    return {"job_id": job_id, "status": "running"}
+
+
+@router.get("/api/reports/picks/drill-down-all-stores-multi/status/{job_id}")
+async def picks_drill_down_all_stores_multi_status(job_id: str):
+    """Poll a multi-pick export job. Returns full result when status=='done'."""
+    # Best-effort cleanup of jobs older than 1 hour every time we poll.
+    await asyncio.to_thread(pick_export_jobs.purge_old, 3600.0)
+    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found (may have expired)")
+    return {
+        "job_id":   job_id,
+        "status":   job["status"],
+        "progress": job.get("progress"),
+        "result":   job.get("result") if job["status"] == "done" else None,
+        "error":    job.get("error"),
+    }
 
 
 @router.post("/api/reports/pick3/from-csv")
