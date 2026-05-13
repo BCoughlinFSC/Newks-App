@@ -3283,8 +3283,10 @@
             }
           }
         }
-        // Pick 3 / Pick 2 / Full Pairings — opt-in. Three sequential calls
-        // against the same date range + stores as the menu performance run.
+        // Pick 3 / Pick 2 / Full Pairings — opt-in. One call to the multi
+        // endpoint: backend fetches orders ONCE per store and aggregates all
+        // requested types in the same pass (~3x faster than three sequential
+        // single-type calls against /pick3/drill-down-all-stores).
         if (currentExcelOptions.includePicks && currentReportConfig) {
           const cfg = currentReportConfig;
           const drType = document.getElementById('dateRangeType')?.value;
@@ -3316,45 +3318,38 @@
               { key: 'full_pairings', label: 'Full Pairings' },
             ];
             const out = {};
-            for (const t of types) {
-              // Bail early if user already cancelled — don't start the next
-              // fetch in the sequence after an abort.
-              if (picksSignal.aborted) {
-                out[t.key] = { label: t.label, error: 'cancelled' };
-                continue;
-              }
-              try {
-                // Use the SAME endpoint the standalone Pick 3 / Pick 2 / Full
-                // Pairings pages use — drill-down-all-stores returns per-store
-                // parentItems + selections derived from order-level parsing.
-                // The /api/reports/pick3 menu-aggregate endpoint is faster but
-                // its modifier filter rejects rows for some report shapes,
-                // producing empty Pairing Choices columns.
-                const r = await fetch('/api/reports/pick3/drill-down-all-stores', {
-                  method: 'POST',
-                  headers: getAuthHeaders(),
-                  body: JSON.stringify({
-                    start_date:     pickStart,
-                    end_date:       pickEnd,
-                    restaurant_ids: cfg.restaurantIds || [],
-                    variant:        'all',   // POS + OLO combined
-                    report_type:    t.key,
-                  }),
-                  signal: picksSignal,
-                });
-                if (r.ok) {
-                  out[t.key] = { label: t.label, data: await r.json() };
-                } else {
-                  out[t.key] = { label: t.label, error: await r.text() };
+            try {
+              const r = await fetch('/api/reports/picks/drill-down-all-stores-multi', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                  start_date:     pickStart,
+                  end_date:       pickEnd,
+                  restaurant_ids: cfg.restaurantIds || [],
+                  variant:        'all',   // POS + OLO combined
+                  report_types:   types.map(t => t.key),
+                }),
+                signal: picksSignal,
+              });
+              if (r.ok) {
+                const payload    = await r.json();
+                const perType    = payload?.results || {};
+                const srcLabel   = payload?.pairingSource || 'orders';
+                for (const t of types) {
+                  const block = perType[t.key];
+                  if (block && Array.isArray(block.stores)) {
+                    out[t.key] = { label: t.label, data: { stores: block.stores, pairingSource: srcLabel } };
+                  } else {
+                    out[t.key] = { label: t.label, error: `No data returned for ${t.key}` };
+                  }
                 }
-              } catch (err) {
-                if (err.name === 'AbortError') {
-                  out[t.key] = { label: t.label, error: 'cancelled' };
-                  // Stop the loop on cancel so we don't kick off the next type.
-                  break;
-                }
-                out[t.key] = { label: t.label, error: String(err) };
+              } else {
+                const errText = await r.text();
+                for (const t of types) out[t.key] = { label: t.label, error: errText };
               }
+            } catch (err) {
+              const msg = err.name === 'AbortError' ? 'cancelled' : String(err);
+              for (const t of types) out[t.key] = { label: t.label, error: msg };
             }
             pickPairingResults = out;
           }
