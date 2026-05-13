@@ -139,16 +139,6 @@ class Pick3DrillDownAllStoresRequest(BaseModel):
     report_type: str = "pick3"
 
 
-class PickMultiDrillDownAllStoresRequest(BaseModel):
-    start_date: str
-    end_date: str
-    restaurant_ids: Optional[List[str]] = None
-    variant: str = "pos"
-    # One or more of: "pick3", "pick2", "full_pairings". Fetches orders once
-    # per store and aggregates each requested type from the same orders pass.
-    report_types: List[str] = ["pick3", "pick2", "full_pairings"]
-
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -366,25 +356,31 @@ def _parse_selected_levels_csv(raw: bytes, variant: str, cfg: Optional[Dict] = N
     }
 
 
-def _aggregate_pick_from_orders(
+async def _compute_pick3_drill_down_for_store(
+    client: httpx.AsyncClient,
     rguid: str,
-    orders: List[Dict],
-    start_bdate: int,
-    end_bdate: int,
-    variant: str,
-    cfg: Dict,
-    guid_to_name: Dict[str, str],
+    start_date: date,
+    end_date: date,
+    variant: str = "pos",
+    cfg: Optional[Dict] = None,
 ) -> Dict:
-    """
-    Aggregate pairing entree + pairing selection counts from a pre-fetched orders list.
-    Pure compute — does NOT fetch orders, menu tags, or modifiers. Designed so callers
-    can fetch orders once per store and call this multiple times with different cfgs
-    (e.g. one orders pass → pick3 + pick2 + full_pairings outputs).
-    """
+    """Fetch orders for one store, aggregate pairing entree counts and pairing selections."""
+    if cfg is None:
+        cfg = REPORT_CONFIGS["pick3"]
+    variant = _normalize_variant(variant, ("pos", "olo", "all"))
+    start_bdate = int(to_business_date(start_date))
+    end_bdate = int(to_business_date(end_date))
+    await get_menu_tags_mapping(client, rguid)
+    guid_to_name = _get_modifier_guid_to_name(rguid)
+    _t_fetch_start = time.perf_counter()
+    orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
+    _t_fetch = time.perf_counter() - _t_fetch_start
+
     parent_totals: Dict[str, int] = {}
     pairing_totals: Dict[str, int] = {}
-    combo_counts: Dict[Tuple[str, ...], int] = {}
+    combo_counts: Dict[Tuple[str, ...], int] = {}   # sorted tuple of pairing names → count
 
+    _t_compute_start = time.perf_counter()
     for order in orders:
         if order.get("voided") or order.get("deleted"):
             continue
@@ -443,6 +439,8 @@ def _aggregate_pick_from_orders(
                     for mn, mq in sel_pairings:
                         pairing_totals[mn] = pairing_totals.get(mn, 0) + mq
 
+                # Track combo (sorted list of pairing names, preserving duplicates)
+                # Only count combos with the expected number of pairings
                 if sel_pairings:
                     combo_names = sorted(mn for mn, _ in sel_pairings)
                     if len(combo_names) == cfg["max_pairings_per_entree"]:
@@ -450,10 +448,18 @@ def _aggregate_pick_from_orders(
                         combo_counts[combo_key] = combo_counts.get(combo_key, 0) + sel_qty
 
     total_pick3 = sum(parent_totals.values()) or 0
+    _t_compute = time.perf_counter() - _t_compute_start
+    logger.info(
+        "PROFILE store=%s orders=%d fetch=%.2fs compute=%.2fs total_qty=%d",
+        rguid[:8], len(orders), _t_fetch, _t_compute, total_pick3,
+    )
+
+    # Build top combos list (top 3 most popular pairing combinations)
     top_combos = [
         {"items": list(combo), "count": cnt}
         for combo, cnt in sorted(combo_counts.items(), key=lambda x: -x[1])[:3]
     ]
+
     return {
         "restaurantGuid": rguid,
         "totalPick3Quantity": total_pick3,
@@ -467,36 +473,6 @@ def _aggregate_pick_from_orders(
         ],
         "topCombos": top_combos,
     }
-
-
-async def _compute_pick3_drill_down_for_store(
-    client: httpx.AsyncClient,
-    rguid: str,
-    start_date: date,
-    end_date: date,
-    variant: str = "pos",
-    cfg: Optional[Dict] = None,
-) -> Dict:
-    """Fetch orders for one store, aggregate pairing entree counts and pairing selections."""
-    if cfg is None:
-        cfg = REPORT_CONFIGS["pick3"]
-    variant = _normalize_variant(variant, ("pos", "olo", "all"))
-    start_bdate = int(to_business_date(start_date))
-    end_bdate = int(to_business_date(end_date))
-    await get_menu_tags_mapping(client, rguid)
-    guid_to_name = _get_modifier_guid_to_name(rguid)
-    _t_fetch_start = time.perf_counter()
-    orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
-    _t_fetch = time.perf_counter() - _t_fetch_start
-
-    _t_compute_start = time.perf_counter()
-    result = _aggregate_pick_from_orders(rguid, orders, start_bdate, end_bdate, variant, cfg, guid_to_name)
-    _t_compute = time.perf_counter() - _t_compute_start
-    logger.info(
-        "PROFILE store=%s orders=%d fetch=%.2fs compute=%.2fs total_qty=%d",
-        rguid[:8], len(orders), _t_fetch, _t_compute, result["totalPick3Quantity"],
-    )
-    return result
 
 
 def _build_pick3_excel(parent_items: List[Dict], selections: List[Dict], variant: str, cfg: Optional[Dict] = None) -> bytes:
@@ -960,131 +936,6 @@ async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = 
         raise
     except Exception as e:
         logger.error("Pick3 drill-down-all-stores: %s: %s", type(e).__name__, e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/reports/picks/drill-down-all-stores-multi")
-async def picks_drill_down_all_stores_multi(request: PickMultiDrillDownAllStoresRequest = Body(...)):
-    """
-    Multi-report drill-down: fetch orders ONCE per store and run the aggregation
-    for each requested report_type (pick3 / pick2 / full_pairings) on the same
-    orders pass. Cuts work ~3x vs three separate single-type calls.
-
-    Response shape:
-      {
-        "pairingSource": "orders",
-        "results": {
-          "pick3":         { "stores": [ ... ] },
-          "pick2":         { "stores": [ ... ] },
-          "full_pairings": { "stores": [ ... ] }
-        }
-      }
-    Only requested types appear in `results`.
-    """
-    try:
-        start_date = datetime.strptime(request.start_date, "%Y-%m-%d").date()
-        end_date   = datetime.strptime(request.end_date,   "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
-    if start_date > end_date:
-        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
-
-    requested_types = [t for t in (request.report_types or []) if t in REPORT_CONFIGS]
-    if not requested_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"report_types must contain at least one of: {list(REPORT_CONFIGS.keys())}",
-        )
-
-    variant     = _normalize_variant(request.variant, ("pos", "olo", "all"))
-    start_bdate = int(to_business_date(start_date))
-    end_bdate   = int(to_business_date(end_date))
-
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            locs = await get_all_active_locations(client)
-            if not locs:
-                return {"pairingSource": "orders", "results": {t: {"stores": []} for t in requested_types}}
-            if request.restaurant_ids:
-                wanted = {g.strip() for g in request.restaurant_ids if g.strip()}
-                locs   = [l for l in locs if l.restaurantGuid in wanted]
-            if not locs:
-                return {"pairingSource": "orders", "results": {t: {"stores": []} for t in requested_types}}
-
-            store_name = {l.restaurantGuid: format_location_display_name(l) for l in locs}
-
-            # Prefetch menu tags in parallel — same pattern as single-type endpoint
-            pre_sem = asyncio.Semaphore(10)
-            async def prefetch(g: str):
-                async with pre_sem:
-                    await get_menu_tags_mapping(client, g)
-            await asyncio.gather(*[prefetch(g) for g in store_name], return_exceptions=True)
-
-            sem = asyncio.Semaphore(8)
-            async def one_store(rguid: str):
-                """Fetch orders once, run aggregator for each requested report_type."""
-                async with sem:
-                    _t_store_start = time.perf_counter()
-                    per_type: Dict[str, Dict] = {}
-                    try:
-                        await get_menu_tags_mapping(client, rguid)
-                        mod_guid_to_name = _get_modifier_guid_to_name(rguid)
-                        _t_fetch_start = time.perf_counter()
-                        orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
-                        _t_fetch = time.perf_counter() - _t_fetch_start
-
-                        _t_compute_start = time.perf_counter()
-                        for rt in requested_types:
-                            cfg = _get_config(rt)
-                            per_type[rt] = _aggregate_pick_from_orders(
-                                rguid, orders, start_bdate, end_bdate, variant, cfg, mod_guid_to_name
-                            )
-                        _t_compute = time.perf_counter() - _t_compute_start
-                        logger.info(
-                            "PROFILE multi store=%s orders=%d fetch=%.2fs compute=%.2fs types=%s",
-                            rguid[:8], len(orders), _t_fetch, _t_compute, ",".join(requested_types),
-                        )
-                    except Exception as e:
-                        logger.warning("Picks multi all-stores: %s: %s", rguid[:8], e)
-                        for rt in requested_types:
-                            per_type[rt] = {
-                                "restaurantGuid": rguid, "totalPick3Quantity": 0,
-                                "parentItems": [], "selections": [], "topCombos": [],
-                            }
-                    return rguid, per_type, time.perf_counter() - _t_store_start
-
-            _t_gather_start = time.perf_counter()
-            results = await asyncio.gather(*[one_store(g) for g in store_name])
-            _t_gather = time.perf_counter() - _t_gather_start
-            _t_store_sum = sum(secs for _, _, secs in results)
-            logger.info(
-                "PROFILE multi all-stores wall=%.2fs sum_per_store=%.2fs stores=%d range=%s..%s variant=%s types=%s parallelism=%.1fx",
-                _t_gather, _t_store_sum, len(store_name), request.start_date, request.end_date,
-                variant, ",".join(requested_types),
-                (_t_store_sum / _t_gather) if _t_gather > 0 else 0.0,
-            )
-
-            # Reshape: per-type list of stores
-            out: Dict[str, Dict] = {t: {"stores": []} for t in requested_types}
-            for rguid, per_type, _secs in results:
-                rname = store_name.get(rguid, "Unknown")
-                for rt in requested_types:
-                    r = per_type.get(rt) or {}
-                    out[rt]["stores"].append({
-                        "restaurantGuid":     rguid,
-                        "restaurantName":     rname,
-                        "totalPick3Quantity": r.get("totalPick3Quantity", 0),
-                        "parentItems":        r.get("parentItems", []),
-                        "selections":         r.get("selections", []),
-                        "topCombos":          r.get("topCombos", []),
-                    })
-
-            return {"pairingSource": "orders", "results": out}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Picks multi drill-down-all-stores: %s: %s", type(e).__name__, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
