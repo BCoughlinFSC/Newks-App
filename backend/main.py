@@ -2020,20 +2020,28 @@ async def _fetch_orders_for_restaurant_day(
 
     # Today's data always live
     if business_date_yyyymmdd == today_yyyymmdd:
-        return await _fetch_orders_from_toast_api(client, restaurant_guid, business_date_yyyymmdd)
+        _t0 = time.perf_counter()
+        result = await _fetch_orders_from_toast_api(client, restaurant_guid, business_date_yyyymmdd)
+        logger.info("PROFILE day src=live_today rguid=%s bd=%s secs=%.3f orders=%d",
+                    restaurant_guid[:8], business_date_yyyymmdd, time.perf_counter() - _t0, len(result))
+        return result
 
     # Check cache
     if toast_orders_db.is_date_cached(restaurant_guid, business_date_yyyymmdd):
+        _t0 = time.perf_counter()
         cached = toast_orders_db.get_cached_orders(restaurant_guid, business_date_yyyymmdd)
         if cached:
-            logger.debug("Orders cache HIT: %s|%s (%d orders)",
-                         restaurant_guid[:8], business_date_yyyymmdd, len(cached))
+            logger.info("PROFILE day src=cache rguid=%s bd=%s secs=%.3f orders=%d",
+                        restaurant_guid[:8], business_date_yyyymmdd, time.perf_counter() - _t0, len(cached))
             return cached
 
     # Cache miss — fetch from API
     logger.debug("Orders cache MISS: %s|%s — fetching from Toast API",
                  restaurant_guid[:8], business_date_yyyymmdd)
+    _t0 = time.perf_counter()
     orders = await _fetch_orders_from_toast_api(client, restaurant_guid, business_date_yyyymmdd)
+    logger.info("PROFILE day src=api_miss rguid=%s bd=%s secs=%.3f orders=%d",
+                restaurant_guid[:8], business_date_yyyymmdd, time.perf_counter() - _t0, len(orders))
 
     # Opportunistically cache the result (historical date)
     try:

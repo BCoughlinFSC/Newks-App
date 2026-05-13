@@ -19,6 +19,7 @@ import csv
 import io
 import logging
 import re
+import time
 import asyncio
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -371,12 +372,15 @@ async def _compute_pick3_drill_down_for_store(
     end_bdate = int(to_business_date(end_date))
     await get_menu_tags_mapping(client, rguid)
     guid_to_name = _get_modifier_guid_to_name(rguid)
+    _t_fetch_start = time.perf_counter()
     orders = await _fetch_orders_for_restaurant_date_range(client, rguid, start_date, end_date)
+    _t_fetch = time.perf_counter() - _t_fetch_start
 
     parent_totals: Dict[str, int] = {}
     pairing_totals: Dict[str, int] = {}
     combo_counts: Dict[Tuple[str, ...], int] = {}   # sorted tuple of pairing names → count
 
+    _t_compute_start = time.perf_counter()
     for order in orders:
         if order.get("voided") or order.get("deleted"):
             continue
@@ -444,6 +448,11 @@ async def _compute_pick3_drill_down_for_store(
                         combo_counts[combo_key] = combo_counts.get(combo_key, 0) + sel_qty
 
     total_pick3 = sum(parent_totals.values()) or 0
+    _t_compute = time.perf_counter() - _t_compute_start
+    logger.info(
+        "PROFILE store=%s orders=%d fetch=%.2fs compute=%.2fs total_qty=%d",
+        rguid[:8], len(orders), _t_fetch, _t_compute, total_pick3,
+    )
 
     # Build top combos list (top 3 most popular pairing combinations)
     top_combos = [
@@ -890,13 +899,24 @@ async def pick3_drill_down_all_stores(request: Pick3DrillDownAllStoresRequest = 
             sem = asyncio.Semaphore(8)
             async def one_store(rguid: str):
                 async with sem:
+                    _t_store_start = time.perf_counter()
                     try:
-                        return await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant, cfg)
+                        r = await _compute_pick3_drill_down_for_store(client, rguid, start_date, end_date, variant, cfg)
+                        r["_profileSeconds"] = time.perf_counter() - _t_store_start
+                        return r
                     except Exception as e:
                         logger.warning("Pick3 all-stores: %s: %s", rguid[:8], e)
-                        return {"restaurantGuid": rguid, "totalPick3Quantity": 0, "parentItems": [], "selections": [], "topCombos": []}
+                        return {"restaurantGuid": rguid, "totalPick3Quantity": 0, "parentItems": [], "selections": [], "topCombos": [], "_profileSeconds": time.perf_counter() - _t_store_start}
 
+            _t_gather_start = time.perf_counter()
             results = await asyncio.gather(*[one_store(g) for g in guid_to_name])
+            _t_gather = time.perf_counter() - _t_gather_start
+            _t_store_sum = sum(r.get("_profileSeconds", 0.0) for r in results)
+            logger.info(
+                "PROFILE all-stores wall=%.2fs sum_per_store=%.2fs stores=%d range=%s..%s variant=%s report=%s parallelism=%.1fx",
+                _t_gather, _t_store_sum, len(guid_to_name), request.start_date, request.end_date,
+                variant, request.report_type, (_t_store_sum / _t_gather) if _t_gather > 0 else 0.0,
+            )
             stores = [
                 {
                     "restaurantGuid":    r["restaurantGuid"],
