@@ -3310,7 +3310,7 @@
             pickEnd   = _toIso(sd[sd.length - 1]);
           }
           if (pickStart && pickEnd) {
-            showStatus('info', 'Starting pick reports…');
+            showStatus('info', 'Fetching Pick 3 / Pick 2 / Full Pairings (live API)…');
             const picksSignal = showLoadingOverlay();
             const types = [
               { key: 'pick3',         label: 'Pick 3' },
@@ -3318,19 +3318,8 @@
               { key: 'full_pairings', label: 'Full Pairings' },
             ];
             const out = {};
-
-            // Abortable sleep — so cancellation interrupts the poll interval.
-            const sleepAbortable = (ms, signal) => new Promise((resolve, reject) => {
-              const t = setTimeout(resolve, ms);
-              const onAbort = () => { clearTimeout(t); reject(new DOMException('cancelled', 'AbortError')); };
-              if (signal.aborted) onAbort();
-              else signal.addEventListener('abort', onAbort, { once: true });
-            });
-
             try {
-              // 1. Kick off the job — server returns instantly with a job_id and
-              //    runs the actual fetch+aggregate work as a background task.
-              const startRes = await fetch('/api/reports/picks/drill-down-all-stores-multi/start', {
+              const r = await fetch('/api/reports/picks/drill-down-all-stores-multi', {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
@@ -3342,61 +3331,21 @@
                 }),
                 signal: picksSignal,
               });
-              if (!startRes.ok) {
-                const errText = await startRes.text();
-                for (const t of types) out[t.key] = { label: t.label, error: errText };
+              if (r.ok) {
+                const payload    = await r.json();
+                const perType    = payload?.results || {};
+                const srcLabel   = payload?.pairingSource || 'orders';
+                for (const t of types) {
+                  const block = perType[t.key];
+                  if (block && Array.isArray(block.stores)) {
+                    out[t.key] = { label: t.label, data: { stores: block.stores, pairingSource: srcLabel } };
+                  } else {
+                    out[t.key] = { label: t.label, error: `No data returned for ${t.key}` };
+                  }
+                }
               } else {
-                const { job_id } = await startRes.json();
-                // 2. Poll for completion. Server-side job state is in SQLite so
-                //    polls land safely even with multiple uvicorn workers.
-                let payload = null;
-                let lastDone = -1;
-                while (true) {
-                  const pollRes = await fetch(
-                    `/api/reports/picks/drill-down-all-stores-multi/status/${encodeURIComponent(job_id)}`,
-                    { headers: getAuthHeaders(), signal: picksSignal },
-                  );
-                  if (!pollRes.ok) {
-                    const errText = await pollRes.text();
-                    for (const t of types) out[t.key] = { label: t.label, error: errText };
-                    break;
-                  }
-                  const job = await pollRes.json();
-                  if (job.status === 'running') {
-                    const p = job.progress || {};
-                    if (p.total) {
-                      const done = p.done || 0;
-                      if (done !== lastDone) {
-                        showStatus('info', `Fetching pick reports… ${done} / ${p.total} stores`);
-                        lastDone = done;
-                      }
-                    } else {
-                      showStatus('info', 'Fetching pick reports…');
-                    }
-                    await sleepAbortable(5000, picksSignal);
-                    continue;
-                  }
-                  if (job.status === 'error') {
-                    const msg = job.error || 'job failed';
-                    for (const t of types) out[t.key] = { label: t.label, error: msg };
-                    break;
-                  }
-                  // status === 'done'
-                  payload = job.result;
-                  break;
-                }
-                if (payload) {
-                  const perType  = payload?.results || {};
-                  const srcLabel = payload?.pairingSource || 'orders';
-                  for (const t of types) {
-                    const block = perType[t.key];
-                    if (block && Array.isArray(block.stores)) {
-                      out[t.key] = { label: t.label, data: { stores: block.stores, pairingSource: srcLabel } };
-                    } else {
-                      out[t.key] = { label: t.label, error: `No data returned for ${t.key}` };
-                    }
-                  }
-                }
+                const errText = await r.text();
+                for (const t of types) out[t.key] = { label: t.label, error: errText };
               }
             } catch (err) {
               const msg = err.name === 'AbortError' ? 'cancelled' : String(err);
