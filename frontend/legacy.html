@@ -1673,22 +1673,78 @@
       currentMenuMixSortColumn = 'qty';
       currentMenuMixSortDirection = 'desc';
       const signal = showLoadingOverlay();
-      showStatus('info', 'Running report…');
+      showStatus('info', 'Starting report…');
       document.getElementById('runReportBtn').disabled = true;
 
+      // Abortable sleep — so cancel interrupts the inter-poll wait immediately.
+      const sleepAbortable = (ms, sig) => new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        const onAbort = () => { clearTimeout(t); reject(new DOMException('cancelled', 'AbortError')); };
+        if (sig.aborted) onAbort();
+        else sig.addEventListener('abort', onAbort, { once: true });
+      });
+
+      // When the user clicks Cancel, also tell the SERVER to stop work.
+      // Fire-and-forget — we don't wait for the cancel call to return.
+      let activeJobId = null;
+      const onAbortSendCancel = () => {
+        if (activeJobId) {
+          fetch(`/api/reports/run/cancel/${encodeURIComponent(activeJobId)}`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          }).catch(() => {});
+        }
+      };
+      signal.addEventListener('abort', onAbortSendCancel, { once: true });
+
       try {
-        const resp = await fetch('/api/reports/run', {
+        // 1. Kick off the job. Returns instantly with { job_id, status: "running" }.
+        //    Server runs /api/reports/run via internal loopback so it doesn't sit
+        //    on the long-lived browser↔nginx HTTP connection (no 5-min edge timeout).
+        const startRes = await fetch('/api/reports/run/start', {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify(config),
           signal,
         });
-        const backendVersion = resp.headers.get('X-Backend-Version');
-        const reportTypeReceived = resp.headers.get('X-Report-Type-Received');
-        const itemTagsCount = resp.headers.get('X-ItemTags-Count');
-        const menuPath = resp.headers.get('X-Menu-Path');
-        if (!resp.ok) { const error = await resp.text(); throw new Error(error); }
-        currentResults = await resp.json();
+        if (!startRes.ok) {
+          const error = await startRes.text();
+          throw new Error(error);
+        }
+        const startBody = await startRes.json();
+        activeJobId = startBody.job_id;
+
+        // 2. Poll until done / error / cancelled. State lives in SQLite server-side
+        //    so polls are tiny and fast (no edge timeout risk).
+        let pollResult = null;
+        while (true) {
+          await sleepAbortable(3000, signal);
+          const pollRes = await fetch(`/api/reports/run/status/${encodeURIComponent(activeJobId)}`, {
+            headers: getAuthHeaders(),
+            signal,
+          });
+          if (!pollRes.ok) {
+            const error = await pollRes.text();
+            throw new Error(error);
+          }
+          const job = await pollRes.json();
+          if (job.status === 'running') {
+            showStatus('info', 'Running report…');
+            continue;
+          }
+          if (job.status === 'cancelled') {
+            showStatus('warning', 'Report cancelled.');
+            return;
+          }
+          if (job.status === 'error') {
+            throw new Error(job.error || 'report job failed');
+          }
+          // status === 'done'
+          pollResult = job.result;
+          break;
+        }
+
+        currentResults = pollResult;
         lastReportConfig = config;   // store for labor KPI panel
         renderResults(currentResults, config);
         const rowCount = Array.isArray(currentResults)
@@ -1697,7 +1753,7 @@
         showStatus('success', `Report complete: ${rowCount} rows`);
       } catch (err) {
         if (err.name === 'AbortError') {
-          showStatus('warning', 'Report cancelled. Server may still be finishing its work in the background.');
+          showStatus('warning', 'Report cancelled.');
         } else {
           showStatus('error', `Error: ${err.message}`);
         }
@@ -3327,6 +3383,18 @@
               else signal.addEventListener('abort', onAbort, { once: true });
             });
 
+            // When the user cancels, also tell the server to stop work — fire-and-forget.
+            let picksActiveJobId = null;
+            const picksCancelOnAbort = () => {
+              if (picksActiveJobId) {
+                fetch(`/api/reports/picks/drill-down-all-stores-multi/cancel/${encodeURIComponent(picksActiveJobId)}`, {
+                  method: 'POST',
+                  headers: getAuthHeaders(),
+                }).catch(() => {});
+              }
+            };
+            picksSignal.addEventListener('abort', picksCancelOnAbort, { once: true });
+
             try {
               // 1. Kick off the job — server returns instantly with a job_id and
               //    runs the actual fetch+aggregate work as a background task.
@@ -3347,6 +3415,7 @@
                 for (const t of types) out[t.key] = { label: t.label, error: errText };
               } else {
                 const { job_id } = await startRes.json();
+                picksActiveJobId = job_id;
                 // 2. Poll for completion. Server-side job state is in SQLite so
                 //    polls land safely even with multiple uvicorn workers.
                 let payload = null;
@@ -3379,6 +3448,10 @@
                   if (job.status === 'error') {
                     const msg = job.error || 'job failed';
                     for (const t of types) out[t.key] = { label: t.label, error: msg };
+                    break;
+                  }
+                  if (job.status === 'cancelled') {
+                    for (const t of types) out[t.key] = { label: t.label, error: 'cancelled' };
                     break;
                   }
                   // status === 'done'

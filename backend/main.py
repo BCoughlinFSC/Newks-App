@@ -28,6 +28,7 @@ import pandas as pd
 load_dotenv()
 
 from pick3_reports import router as pick3_router, Pick3ReportRequest, Pick3DrillDownOrdersRequest, Pick3DrillDownAllStoresRequest
+import pick_export_jobs  # also used as backing store for /api/reports/run/start async jobs
 
 # Allow importing root-level modules (sales_consolidator, hierarchical_reports)
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -6335,6 +6336,52 @@ async def _on_startup():
     logger.info("APScheduler started — nightly jobs scheduled (orders@3AM, flash@4AM, monkey@4:30AM)")
 
 
+@app.on_event("startup")
+async def _on_startup_warm_menu_tags():
+    """
+    Pre-fetch V2 menu tag mappings for every active store on uvicorn boot so
+    the first user request (Menu Performance / pick reports) doesn't pay the
+    per-store Toast Menus API cost. Adds ~30-60s to startup; eliminates the
+    "first run after restart is slow" surprise.
+
+    Wrapped in try/except so a warmup failure (e.g. Toast 403, network blip)
+    can't prevent uvicorn from coming up. Stores that fail warmup stay cold
+    and are populated lazily on first real request, same as before.
+    """
+    logger.info("Menu tags warmup: starting")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                locs = await get_all_active_locations(client)
+            except Exception as e:
+                logger.warning("Menu tags warmup: get_all_active_locations failed (%s) — skipping", e)
+                return
+            if not locs:
+                logger.warning("Menu tags warmup: no active locations returned — skipping")
+                return
+
+            sem = asyncio.Semaphore(10)
+            async def warm_one(rguid: str):
+                async with sem:
+                    try:
+                        await get_menu_tags_mapping(client, rguid)
+                    except Exception as e:
+                        logger.warning("Menu tags warmup miss rguid=%s: %s", rguid[:8], e)
+
+            t0 = time.perf_counter()
+            await asyncio.gather(
+                *[warm_one(l.restaurantGuid) for l in locs],
+                return_exceptions=True,
+            )
+            logger.info(
+                "Menu tags warmup: done in %.1fs (%d stores attempted, %d cached)",
+                time.perf_counter() - t0, len(locs), len(_menu_tags_cache),
+            )
+    except Exception as e:
+        # Defense in depth — never crash startup on a warmup failure.
+        logger.error("Menu tags warmup: unexpected failure: %s", e, exc_info=True)
+
+
 @app.on_event("shutdown")
 async def _on_shutdown():
     _scheduler.shutdown(wait=False)
@@ -10556,6 +10603,130 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
     except Exception as e:
         logger.error(f"Error running report: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error running report: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Async job wrapper for /api/reports/run
+#
+# Large Menu Performance runs (90 stores × 30 days × modifier pivot) routinely
+# exceed an edge-layer 300s timeout we have not been able to fully eliminate
+# (Cloudways nginx is 900s but something upstream still cuts at 300s; see
+# 2026-05-15 incident log). The original endpoint above is left untouched —
+# these endpoints offer the start/poll pattern as an alternative for clients
+# that need to outrun the edge timeout.
+#
+#   POST /api/reports/run/start         → returns { job_id, status: "running" }
+#   GET  /api/reports/run/status/{id}   → returns { status, progress, result?, error? }
+#   POST /api/reports/run/cancel/{id}   → marks the job cancelled
+#
+# Implementation: the background task makes a single loopback HTTPS-free call
+# to 127.0.0.1:8000/api/reports/run with the same body. No nginx in the path,
+# no edge timeout possible. Job state lives in the shared pick_export_jobs
+# SQLite registry (renamed conceptually to "async_jobs" — it is generic).
+# ---------------------------------------------------------------------------
+
+async def _run_report_job(job_id: str, body: Dict[str, Any]) -> None:
+    """Background task body — runs /api/reports/run via loopback and stores result in SQLite."""
+    try:
+        await asyncio.to_thread(pick_export_jobs.update_progress, job_id, 0, 1)
+        # No timeout on the loopback client — the inner endpoint will take as long as it takes.
+        async with httpx.AsyncClient(timeout=None) as client:
+            # Spawn the loopback call as a task so we can poll for client-initiated cancellation
+            # while waiting. The inner endpoint doesn't know about cancellation, but at least the
+            # browser stops polling and the job ends in 'cancelled' state.
+            inner_task = asyncio.create_task(
+                client.post("http://127.0.0.1:8000/api/reports/run", json=body)
+            )
+            while not inner_task.done():
+                if await asyncio.to_thread(pick_export_jobs.is_cancelled, job_id):
+                    inner_task.cancel()
+                    try:
+                        await inner_task
+                    except Exception:
+                        pass
+                    logger.info("Run-report job %s cancelled by client", job_id)
+                    return  # status already 'cancelled' in DB
+                await asyncio.sleep(2.0)
+            r = inner_task.result()
+            if r.status_code != 200:
+                await asyncio.to_thread(
+                    pick_export_jobs.finish_error,
+                    job_id,
+                    f"upstream {r.status_code}: {r.text[:500]}",
+                )
+                return
+            try:
+                result = r.json()
+            except Exception as e:
+                await asyncio.to_thread(
+                    pick_export_jobs.finish_error,
+                    job_id,
+                    f"invalid JSON from upstream: {e}",
+                )
+                return
+        # Don't overwrite cancelled status with done if user cancelled mid-flight.
+        if await asyncio.to_thread(pick_export_jobs.is_cancelled, job_id):
+            logger.info("Run-report job %s finished but already cancelled, result discarded", job_id)
+            return
+        await asyncio.to_thread(pick_export_jobs.finish_done, job_id, result)
+    except Exception as e:
+        logger.error("Run-report job %s failed: %s", job_id, e, exc_info=True)
+        try:
+            await asyncio.to_thread(pick_export_jobs.finish_error, job_id, str(e))
+        except Exception:
+            pass
+
+
+@app.post("/api/reports/run/start")
+async def run_report_start(body: Dict[str, Any] = Body(...)):
+    """
+    Kick off a /api/reports/run call as a background job. Returns immediately
+    with {job_id} so the client can poll for completion. The request body is
+    forwarded verbatim to /api/reports/run — same shape as the sync endpoint.
+    """
+    job_id = uuid.uuid4().hex
+    await asyncio.to_thread(pick_export_jobs.create, job_id)
+    asyncio.create_task(_run_report_job(job_id, body))
+    logger.info(
+        "Run-report job %s started reportType=%s dateRangeType=%s",
+        job_id, body.get("reportType"), body.get("dateRangeType"),
+    )
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/reports/run/status/{job_id}")
+async def run_report_status(job_id: str):
+    """Poll a run-report job. Returns full result when status=='done'."""
+    await asyncio.to_thread(pick_export_jobs.purge_old, 3600.0)
+    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found (may have expired)")
+    return {
+        "job_id":   job_id,
+        "status":   job["status"],
+        "progress": job.get("progress"),
+        "result":   job.get("result") if job["status"] == "done" else None,
+        "error":    job.get("error"),
+    }
+
+
+@app.post("/api/reports/run/cancel/{job_id}")
+async def run_report_cancel(job_id: str):
+    """
+    Mark a run-report job as cancelled. The background task polls is_cancelled
+    every 2s and bails out of the inner loopback fetch when it sees True.
+    NOTE: the inner /api/reports/run task continues server-side (the inner
+    endpoint doesn't know about cancellation yet) but its response is discarded
+    and never written to the job result.
+    """
+    was_running = await asyncio.to_thread(pick_export_jobs.cancel, job_id)
+    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found (may have expired)")
+    logger.info("Run-report job %s cancel requested (was_running=%s, status now=%s)",
+                job_id, was_running, job["status"])
+    return {"job_id": job_id, "status": job["status"], "was_running": was_running}
+
 
 @app.get("/api/debug/service-charges")
 async def debug_service_charges(

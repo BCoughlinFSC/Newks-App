@@ -993,6 +993,7 @@ async def _run_picks_multi_core(
     variant: str,
     requested_types: List[str],
     progress_cb: Optional[Callable[[int, int], Awaitable[None]]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Dict:
     """
     Core multi-pick computation. Fetches orders once per store and aggregates
@@ -1001,6 +1002,10 @@ async def _run_picks_multi_core(
     progress_cb is an optional async callable invoked as `await progress_cb(done, total)`
     once after the store list is known (done=0) and once after each store completes.
     Used by the async-job endpoint to update SQLite-backed progress.
+
+    cancel_check is an optional sync callable that returns True if the work
+    should bail out (e.g. user clicked Cancel). Polled before each store; if
+    True, the function raises asyncio.CancelledError so the caller can clean up.
     """
     start_bdate = int(to_business_date(start_date))
     end_bdate   = int(to_business_date(end_date))
@@ -1037,6 +1042,15 @@ async def _run_picks_multi_core(
         async def one_store(rguid: str):
             """Fetch orders once, run aggregator for each requested report_type."""
             async with sem:
+                # Bail early if user cancelled while this store was waiting for
+                # the semaphore. We return empty data instead of raising so the
+                # outer gather completes cleanly; the caller checks is_cancelled
+                # after gather and decides whether to publish the result.
+                if cancel_check is not None and cancel_check():
+                    empty = {rt: {"restaurantGuid": rguid, "totalPick3Quantity": 0,
+                                  "parentItems": [], "selections": [], "topCombos": []}
+                             for rt in requested_types}
+                    return rguid, empty, 0.0
                 _t_store_start = time.perf_counter()
                 per_type: Dict[str, Dict] = {}
                 try:
@@ -1151,10 +1165,20 @@ async def _run_picks_multi_job(job_id: str, request: PickMultiDrillDownAllStores
         # SQLite writes are sync — offload so we don't block the event loop.
         await asyncio.to_thread(pick_export_jobs.update_progress, job_id, done, total)
 
+    # Cancel check polled by the core between stores. Sync read from SQLite,
+    # called frequently so we keep it lightweight.
+    def cancel_check() -> bool:
+        return pick_export_jobs.is_cancelled(job_id)
+
     try:
         result = await _run_picks_multi_core(
-            start_date, end_date, request.restaurant_ids, variant, requested_types, progress_cb=progress_cb,
+            start_date, end_date, request.restaurant_ids, variant, requested_types,
+            progress_cb=progress_cb, cancel_check=cancel_check,
         )
+        # Don't overwrite cancelled status with done if user cancelled mid-flight.
+        if await asyncio.to_thread(pick_export_jobs.is_cancelled, job_id):
+            logger.info("Picks multi job %s ended in cancelled state, result discarded", job_id)
+            return
         await asyncio.to_thread(pick_export_jobs.finish_done, job_id, result)
     except Exception as e:
         logger.error("Picks multi job %s failed: %s", job_id, e, exc_info=True)
@@ -1197,6 +1221,24 @@ async def picks_drill_down_all_stores_multi_status(job_id: str):
         "result":   job.get("result") if job["status"] == "done" else None,
         "error":    job.get("error"),
     }
+
+
+@router.post("/api/reports/picks/drill-down-all-stores-multi/cancel/{job_id}")
+async def picks_drill_down_all_stores_multi_cancel(job_id: str):
+    """
+    Request cancellation of a running multi-pick job. The background task polls
+    the cancelled flag between stores and stops doing new work as soon as it sees
+    True. Stores already in-flight (those that have passed the semaphore and are
+    fetching data) will finish their current work but their results are
+    discarded. Idempotent — safe to call multiple times.
+    """
+    was_running = await asyncio.to_thread(pick_export_jobs.cancel, job_id)
+    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found (may have expired)")
+    logger.info("Picks multi job %s cancel requested (was_running=%s, current status=%s)",
+                job_id, was_running, job["status"])
+    return {"job_id": job_id, "status": job["status"], "was_running": was_running}
 
 
 @router.post("/api/reports/pick3/from-csv")

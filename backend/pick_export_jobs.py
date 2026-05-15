@@ -1,21 +1,21 @@
 """
-pick_export_jobs.py — SQLite-backed job registry for async pick export jobs.
+pick_export_jobs.py — SQLite-backed job registry for async long-running jobs.
 
-Used by the Menu Performance Excel export to kick off long-running pick
-report computation as a background task and poll for status. Backed by
-SQLite (not in-memory) so it works correctly across multiple uvicorn
-workers — `start.sh` runs `--workers 2`, and in-process dicts would not
-be shared across worker processes.
+Originally built for the pick export, now generic — used by any endpoint that
+needs the start/poll/cancel pattern (pick export AND /api/reports/run).
+
+Backed by SQLite (not in-memory) so it works correctly across multiple uvicorn
+workers if the deployment ever moves off --workers 1.
 
 Schema:
     jobs(
         id            TEXT PRIMARY KEY,         -- uuid hex
-        status        TEXT NOT NULL,            -- running | done | error
+        status        TEXT NOT NULL,            -- running | done | error | cancelled
         progress_json TEXT,                     -- {"done": N, "total": M}
         result_json   TEXT,                     -- final payload (status=done only)
-        error         TEXT,                     -- error message (status=error only)
+        error         TEXT,                     -- error message (status=error/cancelled)
         created_at    REAL NOT NULL,            -- unix seconds
-        finished_at   REAL                      -- unix seconds (done/error only)
+        finished_at   REAL                      -- unix seconds (done/error/cancelled only)
     )
 
 Usage:
@@ -23,6 +23,8 @@ Usage:
     update_progress(job_id, done, total)
     finish_done(job_id, result_dict)
     finish_error(job_id, "message")
+    cancel(job_id)               # mark cancelled; running task should bail
+    is_cancelled(job_id) -> bool # cheap check for running task to call between units of work
     get(job_id) -> dict | None
     purge_old(retention_seconds=3600)
 """
@@ -106,6 +108,45 @@ def finish_error(job_id: str, error: str) -> None:
         )
 
 
+def cancel(job_id: str) -> bool:
+    """
+    Mark a running job as cancelled. The running task is expected to poll
+    is_cancelled() between units of work and bail when it sees True.
+    Returns True if the job was running and got marked cancelled, False otherwise.
+    """
+    if not os.path.exists(JOBS_DB_PATH):
+        return False
+    try:
+        with _conn() as c:
+            cur = c.execute(
+                "UPDATE jobs SET status = 'cancelled', error = ?, finished_at = ?"
+                " WHERE id = ? AND status = 'running'",
+                ("cancelled by client", time.time(), job_id),
+            )
+            return (cur.rowcount or 0) > 0
+    except Exception:
+        return False
+
+
+def is_cancelled(job_id: str) -> bool:
+    """
+    Cheap synchronous check for the running task to see whether it should
+    bail out early. Returns True only if the job exists AND status='cancelled'.
+    Safe to call frequently; the SQLite read is fast (single row by primary key).
+    """
+    if not os.path.exists(JOBS_DB_PATH):
+        return False
+    try:
+        with _conn() as c:
+            row = c.execute(
+                "SELECT status FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+        return bool(row and row[0] == "cancelled")
+    except Exception:
+        return False
+
+
 def get(job_id: str) -> Optional[Dict[str, Any]]:
     """Return the job row as a dict, or None if no such job."""
     if not os.path.exists(JOBS_DB_PATH):
@@ -145,14 +186,15 @@ def get(job_id: str) -> Optional[Dict[str, Any]]:
 
 
 def purge_old(retention_seconds: float = 3600.0) -> int:
-    """Delete done/error jobs older than retention_seconds. Returns rows deleted."""
+    """Delete done/error/cancelled jobs older than retention_seconds. Returns rows deleted."""
     if not os.path.exists(JOBS_DB_PATH):
         return 0
     cutoff = time.time() - retention_seconds
     try:
         with _conn() as c:
             cur = c.execute(
-                "DELETE FROM jobs WHERE status IN ('done', 'error') AND finished_at IS NOT NULL AND finished_at < ?",
+                "DELETE FROM jobs WHERE status IN ('done', 'error', 'cancelled')"
+                " AND finished_at IS NOT NULL AND finished_at < ?",
                 (cutoff,),
             )
             return cur.rowcount or 0
