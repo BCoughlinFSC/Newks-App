@@ -3324,18 +3324,70 @@
               showStatus('info', 'Generating Excel — fetching all categories…');
               const signal = showLoadingOverlay();
               const expandedConfig = { ...currentReportConfig, itemTags: allCats };
-              const resp = await fetch('/api/reports/run', {
+
+              // Use the /start + /status job pattern (same as runReport) so we
+              // bypass the edge-layer 300s timeout that intercepts long sync
+              // /api/reports/run calls as 200/154-byte responses (which then
+              // fail JSON.parse on the client).
+              const sleepAbortable = (ms, sig) => new Promise((resolve, reject) => {
+                const t = setTimeout(resolve, ms);
+                const onAbort = () => { clearTimeout(t); reject(new DOMException('cancelled', 'AbortError')); };
+                if (sig.aborted) onAbort();
+                else sig.addEventListener('abort', onAbort, { once: true });
+              });
+
+              let allCatsJobId = null;
+              const onAbortSendCancel = () => {
+                if (allCatsJobId) {
+                  fetch(`/api/reports/run/cancel/${encodeURIComponent(allCatsJobId)}`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                  }).catch(() => {});
+                }
+              };
+              signal.addEventListener('abort', onAbortSendCancel, { once: true });
+
+              const startRes = await fetch('/api/reports/run/start', {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify(expandedConfig),
                 signal,
               });
-              if (!resp.ok) {
-                const errText = await resp.text();
-                throw new Error('Failed to fetch all-category data: ' + errText);
+              if (!startRes.ok) {
+                const errText = await startRes.text();
+                throw new Error('Failed to start all-category fetch: ' + errText);
+              }
+              const startBody = await startRes.json();
+              allCatsJobId = startBody.job_id;
+
+              let allCatsResult = null;
+              while (true) {
+                await sleepAbortable(3000, signal);
+                const pollRes = await fetch(`/api/reports/run/status/${encodeURIComponent(allCatsJobId)}`, {
+                  headers: getAuthHeaders(),
+                  signal,
+                });
+                if (!pollRes.ok) {
+                  const errText = await pollRes.text();
+                  throw new Error('Failed to poll all-category job: ' + errText);
+                }
+                const job = await pollRes.json();
+                if (job.status === 'running') {
+                  showStatus('info', 'Generating Excel — fetching all categories…');
+                  continue;
+                }
+                if (job.status === 'cancelled') {
+                  throw new DOMException('cancelled', 'AbortError');
+                }
+                if (job.status === 'error') {
+                  throw new Error('All-category fetch failed: ' + (job.error || 'unknown error'));
+                }
+                // status === 'done'
+                allCatsResult = job.result;
+                break;
               }
               stashedResults = currentResults;
-              currentResults = await resp.json();
+              currentResults = allCatsResult;
             }
           }
         }
