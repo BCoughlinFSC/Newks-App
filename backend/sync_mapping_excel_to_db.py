@@ -134,7 +134,13 @@ def _to_int(v) -> int:
 def main() -> int:
     xlsx_path = _find_mapping_xlsx()
     print(f"Reading {xlsx_path}")
-    df = pd.read_excel(xlsx_path)
+    # Force MultiLocationId / item_guid to string so 19-digit integer IDs
+    # don't get rounded through float64 by pandas. Toast MLIs exceed float53
+    # precision; reading as default dtype silently loses the last 2-3 digits.
+    df = pd.read_excel(xlsx_path, dtype={
+        "MultiLocationId": str,
+        "item_guid": str,
+    })
 
     required = {
         "MultiLocationId", "ToastPLU", "AlohaPLU", "Toast_Item_Name",
@@ -145,28 +151,55 @@ def main() -> int:
     if missing:
         raise SystemExit(f"Excel is missing columns: {sorted(missing)}")
 
-    # mli_plu_attribute_map has a UNIQUE INDEX on (multi_location_id, item_guid).
-    # The Excel has many rows missing one or both — without a unique placeholder
-    # those rows would collide on ('','') and silently disappear during INSERT OR
-    # REPLACE. Use the normalized Toast_Item_Name as a synthetic item_guid prefixed
-    # with "x:" so real UUID-based guid lookups can't accidentally hit it.
+    # Strategy for item_guid resolution (3-level fallback):
+    #   1. Use the xlsx item_guid cell if it's a real UUID.
+    #   2. Else look up the real Toast UUID by (MultiLocationId, ToastPLU) in
+    #      cfg_menu_items. Most xlsx rows have a usable MLI + PLU but a blank
+    #      item_guid — this promotes them to the real UUID so they share a
+    #      key with rows that Toast sync (--step attribute-map) produces.
+    #   3. Else fall back to a synthetic placeholder ("x:<name>"). These end
+    #      up reported as "orphan" rows — items in the xlsx that Toast
+    #      doesn't currently know about. Worth surfacing for cleanup.
+    guid_lookup = toast_config_db.get_real_guid_lookup()
     rows: List[Dict] = []
     skipped = 0
+    real_guid_from_xlsx = 0
+    real_guid_from_lookup = 0
     synthetic_guids = 0
+    orphans: List[Dict] = []
     for _, r in df.iterrows():
         toast_name = _to_str(r["Toast_Item_Name"])
         if not toast_name:
             skipped += 1
             continue
         recipe, gc, ee, lto = _parse_tags(r["Tags"], r["GuestCountTag"], r["EntreEquivTag"])
+        mli = _to_str(r["MultiLocationId"])
+        toast_plu = _to_int(r["ToastPLU"])
         item_guid = _to_str(r["item_guid"])
-        if not item_guid:
-            item_guid = "x:" + " ".join(toast_name.lower().split())
-            synthetic_guids += 1
+        if item_guid:
+            real_guid_from_xlsx += 1
+        else:
+            norm = toast_config_db._normalize_mli(mli)
+            looked = guid_lookup.get((norm, toast_plu)) if norm and toast_plu else None
+            if looked:
+                # Promote BOTH mli and item_guid to the cfg-side canonical
+                # versions, otherwise build_attribute_map (which uses cfg's
+                # full-precision MLI) would create a duplicate sibling row.
+                mli, item_guid = looked
+                real_guid_from_lookup += 1
+            else:
+                item_guid = "x:" + " ".join(toast_name.lower().split())
+                synthetic_guids += 1
+                orphans.append({
+                    "MLI": mli,
+                    "ToastPLU": toast_plu,
+                    "Toast_Item_Name": toast_name,
+                    "AlohaItemName": _to_str(r["AlohaItemName"]),
+                })
         rows.append({
-            "multi_location_id": _to_str(r["MultiLocationId"]),
+            "multi_location_id": mli,
             "item_guid":         item_guid,
-            "toast_plu":         _to_int(r["ToastPLU"]),
+            "toast_plu":         toast_plu,
             "aloha_plu":         _to_int(r["AlohaPLU"]),
             "toast_item_name":   toast_name,
             "aloha_item_name":   _to_str(r["AlohaItemName"]),
@@ -200,11 +233,27 @@ def main() -> int:
     aloha_after = _count_table(db_path, "mli_aloha_mapping")
 
     print(f"Rows in Excel: {len(df)}   parsed: {len(rows)}   blank-name skipped: {skipped}")
-    print(f"Synthetic placeholder item_guids assigned (real guid was blank): {synthetic_guids}")
+    print()
+    print("item_guid resolution:")
+    print(f"  from xlsx cell directly       : {real_guid_from_xlsx}")
+    print(f"  looked up via (MLI, ToastPLU) : {real_guid_from_lookup}")
+    print(f"  synthetic 'x:...' fallback    : {synthetic_guids}  (Toast doesn't know these items)")
+    print()
     print(f"Duplicate rows dropped (same MLI+item_guid): {duplicates_dropped}")
     print(f"mli_aloha_mapping     : {aloha_before} -> {aloha_after}  (authoritative aloha)")
     print(f"mli_plu_attribute_map : {attr_before} -> {attr_after}  (placeholders added for new MLIs)")
     print(f"Payload rows: {written}")
+
+    if orphans:
+        print()
+        print(f"=== ORPHAN ROWS ({len(orphans)}) ===")
+        print("xlsx rows where (MLI, ToastPLU) didn't match anything in cfg_menu_items.")
+        print("These got synthetic 'x:...' guids. Likely items removed from Toast or never")
+        print("added there. Worth reviewing in the Mapping Table UI.")
+        for o in orphans[:25]:
+            print(f"  MLI={o['MLI']}  ToastPLU={o['ToastPLU']}  '{o['Toast_Item_Name']}' -> '{o['AlohaItemName']}'")
+        if len(orphans) > 25:
+            print(f"  ... and {len(orphans) - 25} more.")
     print()
     print("Done. Restart uvicorn so the in-process cache reloads.")
     print("Toast-sourced columns (consolidated_cat, EE tags, etc.) were NOT changed —")
