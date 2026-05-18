@@ -78,6 +78,9 @@ response.txt
 # Exception: Toast→Aloha mapping table (source of truth for menu performance YoY)
 !Updated Mapping Table.xlsx
 
+# Exception: canonical Aloha items master (drives the Mapping Table UI dropdown)
+!Items by Category.xlsx
+
 # Exception: PLU range source file (loaded into plu_ranges via import_plu_ranges.py)
 !backend/Item PLU Ranges.xlsx
 
