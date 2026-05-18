@@ -1,23 +1,14 @@
 """
 sync_mapping_excel_to_db.py — Sync Updated Mapping Table.xlsx → toast_config.db.
 
-The Toast→Aloha mapping is split across two SQLite tables:
-  - mli_aloha_mapping       — authoritative store for the two USER-managed
-                              columns: aloha_plu, aloha_item_name.
-  - mli_plu_attribute_map   — Toast-sourced columns (consolidated_cat, EE tags,
-                              etc.) rebuilt by sync_toast_config --step
-                              attribute-map. Mirrors the two aloha columns
-                              so existing report queries keep working.
+The Toast→Aloha mapping table has two homes:
+  - Updated Mapping Table.xlsx (project root) — tracked in git, the source of truth
+  - mli_plu_attribute_map in backend/data/toast_config/toast_config.db — what the
+    running app actually reads at request time
 
-The xlsx (`Updated Mapping Table.xlsx` in the project root) is the
-git-tracked source of truth for the user-managed Aloha columns ONLY. Toast
-columns in the xlsx are informational and may be stale relative to the
-latest Toast sync — this script no longer overwrites Toast-sourced columns
-in mli_plu_attribute_map.
-
-Run after `git pull` brings in a new xlsx, or run sync_toast_config.py
---step attribute-map after editing tags in Toastweb. Either order is safe;
-neither destroys the other's data.
+The admin UI's PUT /api/mapping-table writes to SQLite; this script does the
+opposite direction (Excel → SQLite) and is meant to run on the production server
+after `git pull` brings in a new Excel.
 
 Usage (from project root or backend/):
     python backend/sync_mapping_excel_to_db.py
@@ -192,35 +183,19 @@ def main() -> int:
 
     db_path = toast_config_db.TOAST_CONFIG_DB_PATH
     print(f"Target DB: {db_path}")
-    attr_before = toast_config_db.get_stats(db_path).get("attribute_map", 0)
-    aloha_before = _count_table(db_path, "mli_aloha_mapping")
+    before = toast_config_db.get_stats(db_path).get("attribute_map", 0)
 
     written = toast_config_db.update_mapping_table_rows(deduped, db_path)
-    attr_after = toast_config_db.get_stats(db_path).get("attribute_map", 0)
-    aloha_after = _count_table(db_path, "mli_aloha_mapping")
+    after = toast_config_db.get_stats(db_path).get("attribute_map", 0)
 
     print(f"Rows in Excel: {len(df)}   parsed: {len(rows)}   blank-name skipped: {skipped}")
     print(f"Synthetic placeholder item_guids assigned (real guid was blank): {synthetic_guids}")
     print(f"Duplicate rows dropped (same MLI+item_guid): {duplicates_dropped}")
-    print(f"mli_aloha_mapping     : {aloha_before} -> {aloha_after}  (authoritative aloha)")
-    print(f"mli_plu_attribute_map : {attr_before} -> {attr_after}  (placeholders added for new MLIs)")
-    print(f"Payload rows: {written}")
-    print()
+    print(f"mli_plu_attribute_map: {before} -> {after} (wrote {written})")
+    if after != len(deduped):
+        print(f"WARNING: post-write row count {after} != deduped {len(deduped)}")
     print("Done. Restart uvicorn so the in-process cache reloads.")
-    print("Toast-sourced columns (consolidated_cat, EE tags, etc.) were NOT changed —")
-    print("run `python sync_toast_config.py --step attribute-map` if you also need")
-    print("those refreshed.")
     return 0
-
-
-def _count_table(db_path: str, table: str) -> int:
-    import sqlite3
-    try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
-            return row[0] if row else 0
-    except sqlite3.OperationalError:
-        return 0
 
 
 if __name__ == "__main__":
