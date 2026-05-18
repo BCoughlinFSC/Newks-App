@@ -222,8 +222,9 @@ def build_attribute_map(
         logger.warning("build_attribute_map: no menu items in toast_config.db")
         return 0
 
-    # Load PLU cross-reference
-    plu_map = _load_plu_crossref(db_path)
+    # NOTE: aloha_plu / aloha_item_name are user-managed in mli_aloha_mapping.
+    # We do NOT compute them here. upsert_attribute_map will look them up and
+    # mirror them into mli_plu_attribute_map so prior values survive this rebuild.
 
     rows: List[dict] = []
     seen = set()
@@ -291,16 +292,13 @@ def build_attribute_map(
             if not recipe:
                 recipe = name
 
-        # PLU cross-reference
-        aloha_plu = plu_map.get(mli, 0)
-
+        # aloha_plu / aloha_item_name are intentionally omitted here.
+        # upsert_attribute_map looks them up in mli_aloha_mapping.
         rows.append({
             "multi_location_id": mli,
             "item_guid": item_guid,
             "toast_plu": toast_plu,
-            "aloha_plu": aloha_plu,
             "toast_item_name": toast_item_name,
-            "aloha_item_name": "",  # Populated later if Aloha item master available
             "consolidated_cat": consolidated_cat,
             "recipe": recipe,
             "guest_count_tag": guest_count_tag,

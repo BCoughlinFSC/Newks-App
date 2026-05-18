@@ -175,6 +175,29 @@ CREATE INDEX IF NOT EXISTS idx_mli_consol
     ON mli_plu_attribute_map(consolidated_cat);
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- mli_aloha_mapping  —  user-managed Toast→Aloha PLU/name mapping.
+--
+-- The ONLY persistent home for the two columns the user edits. Toast-sourced
+-- attributes live in mli_plu_attribute_map, where build_attribute_map can
+-- safely rebuild them without trampling manual Aloha edits.
+--
+-- mli_plu_attribute_map still has aloha_plu and aloha_item_name columns, but
+-- those are a derived mirror: upsert_attribute_map populates them from THIS
+-- table on every write so existing report queries keep working. Once all
+-- consumers read from this table directly, the mirror columns can be dropped.
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS mli_aloha_mapping (
+    multi_location_id TEXT NOT NULL,
+    item_guid         TEXT NOT NULL DEFAULT '',
+    aloha_plu         INTEGER NOT NULL DEFAULT 0,
+    aloha_item_name   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (multi_location_id, item_guid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aloha_mapping_name
+    ON mli_aloha_mapping(aloha_item_name);
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- plu_ranges  —  Aloha & Toast PLU range → "Range Name" lookup table
 -- Sourced from the "Item PLU Ranges.xlsx" export (Newk's master ranges file).
 -- Used to stamp every menu performance row with an "Item Classification"
@@ -492,6 +515,108 @@ def upsert_plu_crossref(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Writes/reads — mli_aloha_mapping (user-managed Aloha columns)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_aloha_mapping(
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> Dict[tuple, dict]:
+    """
+    Load the full user-managed Aloha mapping as a dict keyed by (mli, item_guid).
+    Used by upsert_attribute_map to mirror values into mli_plu_attribute_map so
+    --step attribute-map no longer wipes manual edits.
+    """
+    if not os.path.exists(db_path):
+        return {}
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute(
+                "SELECT multi_location_id, item_guid, aloha_plu, aloha_item_name "
+                "FROM mli_aloha_mapping"
+            ).fetchall()
+        return {
+            (r[0], r[1]): {"aloha_plu": r[2] or 0, "aloha_item_name": r[3] or ""}
+            for r in rows
+        }
+    except sqlite3.OperationalError:
+        # Table may not exist yet on a pre-migration database.
+        return {}
+
+
+def upsert_aloha_mapping(
+    rows_in: List[dict],
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """
+    Upsert rows into mli_aloha_mapping. Only the user-managed columns
+    (aloha_plu, aloha_item_name) are written here.
+    """
+    if not rows_in:
+        return 0
+    initialize_db(db_path)
+    rows = []
+    for r in rows_in:
+        mli = r.get("multi_location_id", "")
+        guid = r.get("item_guid", "")
+        if not mli:
+            continue
+        rows.append((
+            mli,
+            guid,
+            int(r.get("aloha_plu", 0) or 0),
+            r.get("aloha_item_name", "") or "",
+        ))
+    if not rows:
+        return 0
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO mli_aloha_mapping (
+                multi_location_id, item_guid, aloha_plu, aloha_item_name
+            ) VALUES (?,?,?,?)
+            ON CONFLICT(multi_location_id, item_guid)
+            DO UPDATE SET
+                aloha_plu=excluded.aloha_plu,
+                aloha_item_name=excluded.aloha_item_name
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+def replace_aloha_mapping(
+    rows_in: List[dict],
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """
+    Replace the entire mli_aloha_mapping table from the given rows. Used by
+    callers that send a complete picture (UI PUT, xlsx sync). Rows missing
+    multi_location_id are skipped.
+    """
+    initialize_db(db_path)
+    cleaned = []
+    for r in rows_in:
+        mli = r.get("multi_location_id", "")
+        if not mli:
+            continue
+        cleaned.append((
+            mli,
+            r.get("item_guid", ""),
+            int(r.get("aloha_plu", 0) or 0),
+            r.get("aloha_item_name", "") or "",
+        ))
+    with get_connection(db_path) as conn:
+        conn.execute("DELETE FROM mli_aloha_mapping")
+        if cleaned:
+            conn.executemany(
+                """INSERT OR REPLACE INTO mli_aloha_mapping (
+                    multi_location_id, item_guid, aloha_plu, aloha_item_name
+                ) VALUES (?,?,?,?)""",
+                cleaned,
+            )
+    return len(cleaned)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Writes — mli_plu_attribute_map
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -499,19 +624,32 @@ def upsert_attribute_map(
     rows_in: List[dict],
     db_path: str = TOAST_CONFIG_DB_PATH,
 ) -> int:
-    """Upsert rows into the master attribute map."""
+    """
+    Upsert rows into the master attribute map.
+
+    The aloha_plu / aloha_item_name columns are user-managed and live in
+    mli_aloha_mapping. We mirror them here so existing report queries that
+    SELECT from mli_plu_attribute_map keep working. Any aloha_plu /
+    aloha_item_name values in `rows_in` are IGNORED — the source of truth is
+    mli_aloha_mapping. This makes --step attribute-map safe to run without
+    wiping manual Aloha edits.
+    """
     if not rows_in:
         return 0
     initialize_db(db_path)
+    aloha_lookup = get_aloha_mapping(db_path)
     rows = []
     for r in rows_in:
+        mli = r.get("multi_location_id", "")
+        guid = r.get("item_guid", "")
+        aloha = aloha_lookup.get((mli, guid), {})
         rows.append((
-            r.get("multi_location_id", ""),
-            r.get("item_guid", ""),
+            mli,
+            guid,
             r.get("toast_plu", 0),
-            r.get("aloha_plu", 0),
+            int(aloha.get("aloha_plu", 0) or 0),
             r.get("toast_item_name", ""),
-            r.get("aloha_item_name", ""),
+            aloha.get("aloha_item_name", "") or "",
             r.get("consolidated_cat", ""),
             r.get("recipe", ""),
             r.get("guest_count_tag", 0),
@@ -697,39 +835,79 @@ def update_mapping_table_rows(
     db_path: str = TOAST_CONFIG_DB_PATH,
 ) -> int:
     """
-    Replace all rows in mli_plu_attribute_map with the provided list.
-    Used by PUT /api/mapping-table to save user edits from the UI.
-    Returns the number of rows written.
+    Persist a complete user-supplied mapping table snapshot.
+
+    Called by PUT /api/mapping-table (UI save) and by sync_mapping_excel_to_db
+    (xlsx sync). The user only owns aloha_plu / aloha_item_name — all other
+    columns belong to Toast and are owned by build_attribute_map.
+
+    Steps:
+      1. Refresh mli_aloha_mapping (the authoritative store for the two
+         user-managed columns) by full replace.
+      2. Mirror those two columns into mli_plu_attribute_map without touching
+         any Toast-sourced columns (consolidated_cat, recipe, entree_equiv_tag,
+         guest_count_tag, lto_tag, toast_item_name, toast_plu). If a row is
+         not yet in mli_plu_attribute_map, a minimal placeholder is inserted so
+         existing report queries can still join against it; the next
+         build_attribute_map run will fill in Toast cols.
+
+    Returns the number of rows received.
     """
     if not rows:
         return 0
     initialize_db(db_path)
+
+    # 1. Refresh the user-managed Aloha mapping (authoritative source).
+    replace_aloha_mapping(rows, db_path)
+
+    # 2. Mirror aloha cols into mli_plu_attribute_map without trampling
+    #    Toast-sourced cols on existing rows.
+    placeholder_inserts = []
+    aloha_updates = []
+    for r in rows:
+        mli = r.get("multi_location_id", "")
+        guid = r.get("item_guid", "")
+        if not mli:
+            continue
+        aplu = int(r.get("aloha_plu", 0) or 0)
+        aname = r.get("aloha_item_name", "") or ""
+        # For rows not yet in the table, insert a minimal placeholder using
+        # whatever payload columns were provided. Existing rows are untouched.
+        placeholder_inserts.append((
+            mli,
+            guid,
+            int(r.get("toast_plu", 0) or 0),
+            aplu,
+            r.get("toast_item_name", ""),
+            aname,
+            r.get("consolidated_cat", ""),
+            r.get("recipe", ""),
+            r.get("guest_count_tag", 0),
+            r.get("entree_equiv_tag", 0),
+            r.get("lto_tag", ""),
+        ))
+        aloha_updates.append((aplu, aname, mli, guid))
+
     with get_connection(db_path) as conn:
-        conn.execute("DELETE FROM mli_plu_attribute_map")
-        insert_rows = []
-        for r in rows:
-            insert_rows.append((
-                r.get("multi_location_id", ""),
-                r.get("item_guid", ""),
-                r.get("toast_plu", 0),
-                r.get("aloha_plu", 0),
-                r.get("toast_item_name", ""),
-                r.get("aloha_item_name", ""),
-                r.get("consolidated_cat", ""),
-                r.get("recipe", ""),
-                r.get("guest_count_tag", 0),
-                r.get("entree_equiv_tag", 0),
-                r.get("lto_tag", ""),
-            ))
+        # INSERT OR IGNORE so existing rows keep their Toast cols intact.
         conn.executemany(
-            """INSERT OR REPLACE INTO mli_plu_attribute_map (
+            """INSERT OR IGNORE INTO mli_plu_attribute_map (
                 multi_location_id, item_guid, toast_plu, aloha_plu,
                 toast_item_name, aloha_item_name, consolidated_cat,
                 recipe, guest_count_tag, entree_equiv_tag, lto_tag
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            insert_rows,
+            placeholder_inserts,
         )
-    return len(insert_rows)
+        # Then UPDATE the aloha mirror columns on every row (including the
+        # ones we just inserted) so the latest user value wins regardless of
+        # whether the row was new or already existed.
+        conn.executemany(
+            """UPDATE mli_plu_attribute_map
+                  SET aloha_plu = ?, aloha_item_name = ?
+                WHERE multi_location_id = ? AND item_guid = ?""",
+            aloha_updates,
+        )
+    return len(rows)
 
 
 def get_toast_items_with_tags(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, dict]:
