@@ -41,6 +41,71 @@ IPA_COLUMNS = [
 ]
 
 
+# Toast dining-option name -> (IPA SEGMENT_NAME, IPA ORDER_CHANNEL).
+# Multiple Toast names intentionally collapse onto the same IPA segment
+# (e.g. kiosk / OLO variants of "Dine In" all become "Eat In") — TY/LY net
+# sales and check counts get summed across the collapse.
+#
+# Unknown Toast names fall through: SEGMENT_NAME is passed raw, ORDER_CHANNEL
+# is left blank. Watch for blank channel rows in the CSV — they flag new
+# dining options that need to be added here.
+_IPA_SEGMENT_MAP: Dict[str, tuple] = {
+    # Retail
+    "Dine In":              ("Eat In",            "Retail"),
+    "X-Dine-In (K)":        ("Eat In",            "Retail"),
+    "X-Dine-In-OLO":        ("Eat In",            "Retail"),
+    "ToGo":                 ("Carry Out",         "Retail"),
+    "X-To Go (K)":          ("Carry Out",         "Retail"),
+    "Call-In":              ("Phone In Tender",   "Retail"),
+    "X-Call In-OLO":        ("Phone In Tender",   "Retail"),
+    # Catering
+    "Catering":             ("Catering - Pickup", "Catering"),
+    # 1PD (1st-party delivery / online / curbside / dispatch)
+    "X-ToGo-OLO":           ("Online Ordering",   "1PD"),
+    "X-Curbside-OLO":       ("Curbside",          "1PD"),
+    "X-Dispatch DD":        ("Dispatch",          "1PD"),
+    "X-Dispatch DL":        ("Dispatch",          "1PD"),
+    "X-Dispatch PM":        ("Dispatch",          "1PD"),
+    "X-Dispatch (Generic)": ("Dispatch",          "1PD"),
+    # 3PD (3rd-party marketplaces)
+    "X-Doordash (R)":       ("Door Dash",         "3PD"),
+    "X-UberEats (R)":       ("Uber Eats",         "3PD"),
+    "X-GrubHub (R)":        ("Grub Hub",          "3PD"),
+    "X-Rails (Generic)":    ("Rails",             "3PD"),
+    # Employee
+    "Employee Meal":        ("Employee Meal",     "Employee Meal"),
+}
+
+
+def _map_segment(toast_dining_option: str) -> tuple:
+    """Map a Toast dining-option name to (IPA SEGMENT_NAME, IPA ORDER_CHANNEL).
+    Unknown names pass through with raw name + blank channel."""
+    return _IPA_SEGMENT_MAP.get(toast_dining_option, (toast_dining_option, ""))
+
+
+def _aggregate_to_ipa(era_rows: list) -> Dict[tuple, dict]:
+    """
+    Collapse ERA rows (one per Toast dining-option) onto IPA's grain by
+    summing net_sales + orders for every Toast name that maps to the same
+    (ipa_segment, ipa_channel) pair.
+
+    Returns: {(ipa_segment, ipa_channel): {"net_sales": float, "orders": float}}
+    """
+    out: Dict[tuple, dict] = {}
+    for row in era_rows:
+        if not isinstance(row, dict):
+            continue
+        toast_seg = str(row.get("diningOption", "") or "").strip()
+        if not toast_seg:
+            continue
+        ipa_seg, ipa_ch = _map_segment(toast_seg)
+        key = (ipa_seg, ipa_ch)
+        bucket = out.setdefault(key, {"net_sales": 0.0, "orders": 0.0})
+        bucket["net_sales"] += float(row.get("netSalesAmount", 0) or 0)
+        bucket["orders"]    += float(row.get("ordersCount",    0) or 0)
+    return out
+
+
 def _build_fiscal_index(start: date, end: date) -> Dict[str, dict]:
     """
     For each date in [start, end] present in fiscal_calendar, return
@@ -132,7 +197,6 @@ async def build_ipa_rows(
     end_date: date,
     store_guids: List[str],
     *,
-    dining_option_to_channel: Dict[str, str],
     request_toast_report: Callable,
     fetch_toast_report: Callable,
     guid_to_location: Dict[str, str],
@@ -223,11 +287,10 @@ async def build_ipa_rows(
                         logger.warning("IPA export: LY Toast fetch failed (date=%s, store=%s): %s", d_iso, guid, exc)
                         ly_rows = []
 
-                ly_by_segment = {
-                    str(r.get("diningOption", "") or "").strip(): r
-                    for r in ly_rows
-                    if isinstance(r, dict)
-                }
+                # Roll Toast's per-dining-option rows up to IPA segment grain
+                # (e.g. Dine In + X-Dine-In (K) + X-Dine-In-OLO all sum into "Eat In").
+                ty_by_ipa = _aggregate_to_ipa(ty_rows)
+                ly_by_ipa = _aggregate_to_ipa(ly_rows)
 
                 sm = store_meta[guid]
                 base_row = {
@@ -240,48 +303,22 @@ async def build_ipa_rows(
                     "SHIFTPART":       "",
                     "COMP_FLAG":       sm["comp_flag"],
                 }
-                used_ly_segments = set()
 
-                # TY rows (with LY joined where we have it)
-                for ty in ty_rows:
-                    if not isinstance(ty, dict):
-                        continue
-                    segment = str(ty.get("diningOption", "") or "").strip()
-                    if not segment:
-                        continue
-                    ly = ly_by_segment.get(segment)
-                    if ly is not None:
-                        used_ly_segments.add(segment)
-                    net_ty   = float(ty.get("netSalesAmount", 0) or 0)
-                    trans_ty = float(ty.get("ordersCount",    0) or 0)
-                    net_ly   = float(ly.get("netSalesAmount", 0) or 0) if ly else 0.0
-                    trans_ly = float(ly.get("ordersCount",    0) or 0) if ly else 0.0
+                # Union of IPA-segment keys across TY and LY for this (date, store)
+                for key in set(ty_by_ipa.keys()) | set(ly_by_ipa.keys()):
+                    ipa_seg, ipa_ch = key
+                    ty = ty_by_ipa.get(key, {"net_sales": 0.0, "orders": 0.0})
+                    ly = ly_by_ipa.get(key, {"net_sales": 0.0, "orders": 0.0})
+                    net_ty, trans_ty = ty["net_sales"], ty["orders"]
+                    net_ly, trans_ly = ly["net_sales"], ly["orders"]
                     if not (net_ty or trans_ty or net_ly or trans_ly):
                         continue
                     all_rows.append({
                         **base_row,
-                        "SEGMENT_NAME":  segment,
-                        "ORDER_CHANNEL": dining_option_to_channel.get(segment, ""),
+                        "SEGMENT_NAME":  ipa_seg,
+                        "ORDER_CHANNEL": ipa_ch,
                         "NetSalesTY":    net_ty,
                         "TransTY":       trans_ty,
-                        "NetSalesLY":    net_ly,
-                        "TransLY":       trans_ly,
-                    })
-
-                # Toast-LY-only segments (no matching TY this year)
-                for segment, ly in ly_by_segment.items():
-                    if segment in used_ly_segments:
-                        continue
-                    net_ly   = float(ly.get("netSalesAmount", 0) or 0)
-                    trans_ly = float(ly.get("ordersCount",    0) or 0)
-                    if not (net_ly or trans_ly):
-                        continue
-                    all_rows.append({
-                        **base_row,
-                        "SEGMENT_NAME":  segment,
-                        "ORDER_CHANNEL": dining_option_to_channel.get(segment, ""),
-                        "NetSalesTY":    0.0,
-                        "TransTY":       0.0,
                         "NetSalesLY":    net_ly,
                         "TransLY":       trans_ly,
                     })

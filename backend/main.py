@@ -10801,12 +10801,11 @@ async def _run_ipa_export_job(job_id: str, req: IpaExportRequest) -> None:
 
         rows = await ipa_export.build_ipa_rows(
             start_date, end_date, req.store_guids,
-            dining_option_to_channel = _DINING_OPTION_TO_CHANNEL,
-            request_toast_report     = request_toast_report,
-            fetch_toast_report       = fetch_toast_report,
-            guid_to_location         = guid_to_location,
-            progress_cb              = _progress,
-            is_cancelled_cb          = _cancelled,
+            request_toast_report = request_toast_report,
+            fetch_toast_report   = fetch_toast_report,
+            guid_to_location     = guid_to_location,
+            progress_cb          = _progress,
+            is_cancelled_cb      = _cancelled,
         )
 
         if _cancelled():
