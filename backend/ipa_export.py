@@ -24,10 +24,13 @@ non-catering check count on one trailing 'Unallocated Checks (Non-Catering)'
 row. NetSalesLY sums exactly to Aloha's daily net_sales (excluding GNG, an
 item-level category that sits inside the channel cols).
 
-Aloha's `delivery_net_sales` is a single bucket — Door Dash / Uber Eats /
-Grub Hub / Dispatch / Rails are not separable on the LY side. Emitted as
-SEGMENT_NAME="Delivery", ORDER_CHANNEL="3PD". `gng_net_sales` is intentionally
-skipped to avoid double-counting.
+When the daypart-grain enrichment table `aloha_sales_daypart` has data for
+the LY date (loaded from dev_aloha.dbo.tbl_SalesDataByDayPart via the SSMS
+export), per-shift SHIFTPART, per-3PD segment splits, and per-shift
+check counts all become available. When that table has no rows for the
+date, we fall back to the day-level aloha_sales_data path (one row per
+channel, SHIFTPART blank). `gng_net_sales` is intentionally skipped to
+avoid double-counting (item-level category, not a channel).
 
 Rows with TY=0 AND LY=0 are dropped.
 """
@@ -42,6 +45,7 @@ from typing import Callable, Dict, List, Optional
 import httpx
 
 import aloha_sales_db
+import aloha_daypart_db
 import toast_config_db
 
 logger = logging.getLogger(__name__)
@@ -196,29 +200,134 @@ _ALOHA_TO_IPA_SEGMENT: List[tuple] = [
 ]
 
 
-def _aloha_ly_rows(location: str, biz_date: str) -> List[dict]:
+# Richer mapping used when daypart-grain rows exist in aloha_sales_daypart.
+# Source has per-3PD splits (DoorDash, UberEats, GrubHub, Postmates, etc.)
+# AND per-shift granularity, so we can fill SHIFTPART and break delivery out.
+#
+# `delivery_net_sales` is the LEGACY combined column in the source — newer rows
+# put the real 3PD revenue in the named columns and leave delivery_net_sales=0.
+# Including it here is safe (zero values produce no rows) and protects against
+# any older rows where the per-3PD split wasn't populated.
+_ALOHA_DAYPART_TO_IPA_SEGMENT: List[tuple] = [
+    # Retail
+    ("dinein_net_sales",         "Eat In",            "Retail"),
+    ("olo_dinein_net_sales",     "Eat In",            "Retail"),
+    ("togo_net_sales",           "Carry Out",         "Retail"),
+    ("drivethru_net_sales",      "Carry Out",         "Retail"),
+    ("olo_drivethru_net_sales",  "Carry Out",         "Retail"),
+    ("callin_net_sales",         "Phone In Tender",   "Retail"),
+    ("olo_callin_net_sales",     "Phone In Tender",   "Retail"),
+    # Catering
+    ("catering_net_sales",       "Catering - Pickup", "Catering"),
+    ("ezcater_net_sales",        "Catering - Pickup", "Catering"),
+    # 1PD (online / curbside / Newk's-own delivery)
+    ("olo_net_sales",            "Online Ordering",   "1PD"),
+    ("curbside_net_sales",       "Curbside",          "1PD"),
+    ("curbside_olo_net_sales",   "Curbside",          "1PD"),
+    ("nwk_delivery_net_sales",   "Dispatch",          "1PD"),
+    ("dispatch_olo_net_sales",   "Dispatch",          "1PD"),
+    # 3PD splits (the new wins)
+    ("doordash_net_sales",       "Door Dash",         "3PD"),
+    ("ubereats_net_sales",       "Uber Eats",         "3PD"),
+    ("grubhub_net_sales",        "Grub Hub",          "3PD"),
+    ("postmates_net_sales",      "Postmates",         "3PD"),
+    ("bitesquad_net_sales",      "Bite Squad",        "3PD"),
+    ("favor_net_sales",          "Favor",             "3PD"),
+    ("foodsby_net_sales",        "Foodsby",           "3PD"),
+    ("google_net_sales",         "Google",            "3PD"),
+    ("deliverclub_net_sales",    "DeliverClub",       "3PD"),
+    ("rails_olo_net_sales",      "Rails",             "3PD"),
+    ("waitr_net_sales",          "Waitr",             "3PD"),
+    ("delivery_net_sales",       "Delivery",          "3PD"),  # legacy combined; usually 0
+    # gng_net_sales intentionally skipped (item-category cross-cut)
+]
+
+
+def _normalize_shiftpart(daypart: str) -> str:
+    """Aloha daypart label -> IPA SHIFTPART label. Empty/'NULL' becomes blank."""
+    if not daypart or str(daypart).strip().upper() == "NULL":
+        return ""
+    return str(daypart).strip()
+
+
+def _emit_buckets_with_check_split(
+    buckets: dict,
+    total_checks: float,
+    noncat_checks: float,
+    shiftpart: str,
+) -> List[dict]:
     """
-    Return per-channel Aloha LY rows for (location, business_date), already
-    collapsed to IPA's (segment, channel) grain.
+    Convert a (segment, channel) -> net_sales dict into IPA rows, attaching
+    the real catering check count to the Catering - Pickup row, residual
+    non-catering checks to one 'Unallocated Checks (Non-Catering)' row, and
+    SHIFTPART to every emitted row. TransLY on all non-catering channel rows
+    is 0 — Aloha never tracked per-channel check counts.
+    """
+    catering_checks = max(total_checks - noncat_checks, 0.0)
+    out: List[dict] = []
+    for (ipa_seg, ipa_ch), revenue in buckets.items():
+        trans = catering_checks if ipa_seg == "Catering - Pickup" else 0.0
+        out.append({
+            "ipa_segment": ipa_seg,
+            "ipa_channel": ipa_ch,
+            "shiftpart":   shiftpart,
+            "net_sales":   revenue,
+            "trans":       trans,
+        })
+    if noncat_checks:
+        out.append({
+            "ipa_segment": "Unallocated Checks (Non-Catering)",
+            "ipa_channel": "",
+            "shiftpart":   shiftpart,
+            "net_sales":   0.0,
+            "trans":       noncat_checks,
+        })
+    return out
 
-    Aloha tracks net sales per channel but check_count only at the daily level
-    (plus a separate `checks_minus_catering` which lets us back out the
-    catering check count). We honor that:
 
-      * Per-channel rows carry real NetSalesLY, with TransLY=0 — we don't
-        invent per-channel check counts that the source never tracked.
-      * The Catering - Pickup row gets TransLY = check_count - checks_minus_catering,
-        which is the real catering check count.
-      * One trailing row, SEGMENT_NAME='Unallocated Checks (Non-Catering)',
-        carries the residual non-catering check count (checks_minus_catering)
-        with NetSalesLY=0 — clearly labeled so it's obvious in BI.
+def _aloha_ly_rows_from_daypart(location: str, biz_date: str) -> List[dict]:
+    """
+    Build LY rows from the daypart-grain enrichment table (aloha_sales_daypart).
+    Returns one row per (daypart, ipa_segment, ipa_channel), with SHIFTPART
+    filled from the daypart label. Per-3PD revenue lands in real Door Dash /
+    Uber Eats / Grub Hub rows. Each daypart contributes its own catering and
+    unallocated-non-catering check rows so per-shift check totals are real.
 
-    Sum of NetSalesLY across the per-channel rows reconciles to the disjoint
-    Aloha channel total (i.e. day net sales minus GNG, which is an item-level
-    cross-cut already inside the channel cols). Sum of TransLY reconciles to
-    Aloha's daily check_count exactly.
+    Returns [] when no rows in the table — caller falls back to day-level.
+    """
+    daypart_rows = aloha_daypart_db.get_daypart_rows(location, biz_date)
+    if not daypart_rows:
+        return []
 
-    Returns [{ipa_segment, ipa_channel, net_sales, trans}, ...].
+    out: List[dict] = []
+    for dp_row in daypart_rows:
+        shiftpart    = _normalize_shiftpart(dp_row.get("daypart", ""))
+        total_checks = float(dp_row.get("check_count")            or 0)
+        noncat_chks  = float(dp_row.get("checks_minus_catering")  or 0)
+
+        buckets: Dict[tuple, float] = {}
+        for (col, ipa_seg, ipa_ch) in _ALOHA_DAYPART_TO_IPA_SEGMENT:
+            val = float(dp_row.get(col) or 0)
+            if val == 0:
+                continue
+            key = (ipa_seg, ipa_ch)
+            buckets[key] = buckets.get(key, 0.0) + val
+
+        # If this daypart has zero revenue AND zero checks, skip it entirely.
+        if not buckets and not total_checks:
+            continue
+
+        out.extend(_emit_buckets_with_check_split(
+            buckets, total_checks, noncat_chks, shiftpart,
+        ))
+    return out
+
+
+def _aloha_ly_rows_from_day_level(location: str, biz_date: str) -> List[dict]:
+    """
+    Fallback: build LY rows from the day-level aloha_sales_data when the
+    daypart-grain table has no rows for this (location, date). SHIFTPART is
+    blank, per-3PD splits aren't available (one combined 'Delivery' row).
     """
     cols = [a for (a, _s, _c) in _ALOHA_TO_IPA_SEGMENT]
     select = ", ".join(cols + ["check_count", "checks_minus_catering"])
@@ -233,13 +342,10 @@ def _aloha_ly_rows(location: str, biz_date: str) -> List[dict]:
         conn.close()
     if not row:
         return []
-    values         = [float(v or 0) for v in row[:len(cols)]]
-    total_checks   = float(row[len(cols)]     or 0)
-    noncat_checks  = float(row[len(cols) + 1] or 0)
-    catering_checks = max(total_checks - noncat_checks, 0.0)
+    values        = [float(v or 0) for v in row[:len(cols)]]
+    total_checks  = float(row[len(cols)]     or 0)
+    noncat_checks = float(row[len(cols) + 1] or 0)
 
-    # Sum revenue by IPA (segment, channel) — collapsing callin+olo_callin,
-    # curbside+curbside_olo per the existing flash mapping.
     buckets: Dict[tuple, float] = {}
     for (col, ipa_seg, ipa_ch), val in zip(_ALOHA_TO_IPA_SEGMENT, values):
         if val == 0:
@@ -247,27 +353,23 @@ def _aloha_ly_rows(location: str, biz_date: str) -> List[dict]:
         key = (ipa_seg, ipa_ch)
         buckets[key] = buckets.get(key, 0.0) + val
 
-    out: List[dict] = []
-    for (ipa_seg, ipa_ch), revenue in buckets.items():
-        trans = catering_checks if ipa_seg == "Catering - Pickup" else 0.0
-        out.append({
-            "ipa_segment": ipa_seg,
-            "ipa_channel": ipa_ch,
-            "net_sales":   revenue,
-            "trans":       trans,
-        })
+    return _emit_buckets_with_check_split(buckets, total_checks, noncat_checks, "")
 
-    # Residual non-catering check count — emitted as a clearly-labeled row so
-    # BI sees the daily total without us pretending to know per-channel split.
-    if noncat_checks:
-        out.append({
-            "ipa_segment": "Unallocated Checks (Non-Catering)",
-            "ipa_channel": "",
-            "net_sales":   0.0,
-            "trans":       noncat_checks,
-        })
 
-    return out
+def _aloha_ly_rows(location: str, biz_date: str) -> List[dict]:
+    """
+    Build IPA LY rows for stores that were on Aloha on the LY date.
+
+    Prefers the daypart-grain enrichment table (real SHIFTPART, per-3PD splits,
+    per-shift check counts). Falls back to the day-level aloha_sales_data
+    table when daypart-grain rows aren't available for (location, biz_date).
+
+    Returns [{ipa_segment, ipa_channel, shiftpart, net_sales, trans}, ...].
+    """
+    rows = _aloha_ly_rows_from_daypart(location, biz_date)
+    if rows:
+        return rows
+    return _aloha_ly_rows_from_day_level(location, biz_date)
 
 
 async def _era_dining_option_day(
@@ -385,16 +487,6 @@ async def build_ipa_rows(
                 # (e.g. Dine In + X-Dine-In (K) + X-Dine-In-OLO all sum into "Eat In").
                 ty_by_ipa = _aggregate_to_ipa(ty_rows)
 
-                # LY: from Toast ERA if the store was on Toast for the LY date,
-                # otherwise from Aloha channel cols mapped to IPA segments.
-                ly_by_ipa: Dict[tuple, dict] = {}
-                if guid in ly_tasks:
-                    ly_by_ipa = _aggregate_to_ipa(ly_rows)
-                elif ly_d_iso and store_meta[guid]["location"]:
-                    for ly in _aloha_ly_rows(store_meta[guid]["location"], ly_d_iso):
-                        key = (ly["ipa_segment"], ly["ipa_channel"])
-                        ly_by_ipa[key] = {"net_sales": ly["net_sales"], "orders": ly["trans"]}
-
                 sm = store_meta[guid]
                 base_row = {
                     "DAYDATE":         d_iso,
@@ -403,29 +495,62 @@ async def build_ipa_rows(
                     "FiscalYear":      meta["fiscal_year"],
                     "FISCALWEEKKEY":   meta["week_start"],
                     "FISCALPERIODKEY": meta["period_start"],
-                    "SHIFTPART":       "",
                     "COMP_FLAG":       sm["comp_flag"],
                 }
 
-                # Union of IPA-segment keys across TY and LY — emit one row per
-                # unique (segment, channel) so each store-day-segment appears once.
-                for key in set(ty_by_ipa.keys()) | set(ly_by_ipa.keys()):
-                    ipa_seg, ipa_ch = key
-                    ty = ty_by_ipa.get(key, {"net_sales": 0.0, "orders": 0.0})
-                    ly = ly_by_ipa.get(key, {"net_sales": 0.0, "orders": 0.0})
-                    net_ty, trans_ty = ty["net_sales"], ty["orders"]
-                    net_ly, trans_ly = ly["net_sales"], ly["orders"]
-                    if not (net_ty or trans_ty or net_ly or trans_ly):
-                        continue
-                    all_rows.append({
-                        **base_row,
-                        "SEGMENT_NAME":  ipa_seg,
-                        "ORDER_CHANNEL": ipa_ch,
-                        "NetSalesTY":    net_ty,
-                        "TransTY":       trans_ty,
-                        "NetSalesLY":    net_ly,
-                        "TransLY":       trans_ly,
-                    })
+                if guid in ly_tasks:
+                    # Toast-LY-eligible: TY and LY both from ERA, both at
+                    # (segment, channel) grain with SHIFTPART="". Union by key
+                    # so each store-day-segment is one row carrying both TY+LY.
+                    ly_by_ipa = _aggregate_to_ipa(ly_rows)
+                    for key in set(ty_by_ipa.keys()) | set(ly_by_ipa.keys()):
+                        ipa_seg, ipa_ch = key
+                        ty = ty_by_ipa.get(key, {"net_sales": 0.0, "orders": 0.0})
+                        ly = ly_by_ipa.get(key, {"net_sales": 0.0, "orders": 0.0})
+                        net_ty, trans_ty = ty["net_sales"], ty["orders"]
+                        net_ly, trans_ly = ly["net_sales"], ly["orders"]
+                        if not (net_ty or trans_ty or net_ly or trans_ly):
+                            continue
+                        all_rows.append({
+                            **base_row,
+                            "SEGMENT_NAME":  ipa_seg,
+                            "ORDER_CHANNEL": ipa_ch,
+                            "SHIFTPART":     "",
+                            "NetSalesTY":    net_ty,
+                            "TransTY":       trans_ty,
+                            "NetSalesLY":    net_ly,
+                            "TransLY":       trans_ly,
+                        })
+                else:
+                    # Aloha-LY: TY grain (segment, channel, SHIFTPART="") and
+                    # LY grain (segment, channel, daypart) are different — emit
+                    # as separate row blocks rather than merging.
+                    for (ipa_seg, ipa_ch), ty in ty_by_ipa.items():
+                        net_ty, trans_ty = ty["net_sales"], ty["orders"]
+                        if not (net_ty or trans_ty):
+                            continue
+                        all_rows.append({
+                            **base_row,
+                            "SEGMENT_NAME":  ipa_seg,
+                            "ORDER_CHANNEL": ipa_ch,
+                            "SHIFTPART":     "",
+                            "NetSalesTY":    net_ty,
+                            "TransTY":       trans_ty,
+                            "NetSalesLY":    0.0,
+                            "TransLY":       0.0,
+                        })
+                    if ly_d_iso and sm["location"]:
+                        for ly in _aloha_ly_rows(sm["location"], ly_d_iso):
+                            all_rows.append({
+                                **base_row,
+                                "SEGMENT_NAME":  ly["ipa_segment"],
+                                "ORDER_CHANNEL": ly["ipa_channel"],
+                                "SHIFTPART":     ly["shiftpart"],
+                                "NetSalesTY":    0.0,
+                                "TransTY":       0.0,
+                                "NetSalesLY":    ly["net_sales"],
+                                "TransLY":       ly["trans"],
+                            })
 
                 done_units += 1
                 if progress_cb:
