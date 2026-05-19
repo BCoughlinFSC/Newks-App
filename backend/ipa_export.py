@@ -406,20 +406,60 @@ def _aloha_ly_rows(location: str, biz_date: str) -> List[dict]:
     return _aloha_ly_rows_from_day_level(location, biz_date)
 
 
-async def _era_dining_option_day(
+async def _era_dining_option_day_batch(
     client: httpx.AsyncClient,
     biz_date: date,
-    store_guid: str,
+    store_guids: List[str],
     *,
     request_toast_report,
     fetch_toast_report,
-) -> List[dict]:
-    """Fetch ERA metrics for one (date, store) grouped by DINING_OPTION."""
-    report_guid = await request_toast_report(
-        client, biz_date, biz_date, [store_guid],
-        report_type="metrics", group_by=["DINING_OPTION"],
-    )
-    return await fetch_toast_report(client, report_guid, report_type="metrics") or []
+    max_attempts: int = 4,
+) -> Dict[str, List[dict]]:
+    """
+    One ERA call covers all `store_guids` for `biz_date` (groupBy=DINING_OPTION),
+    split back into {store_guid: [rows...]} on the way out. This collapses the
+    93 stores * 18 days = ~1700 per-store fan-out into one call per date — well
+    under Toast's rate limits and a fraction of the wall-clock time.
+
+    Retries on 429 (rate limit) with exponential backoff. Other transient
+    failures (502/503/504) are already retried inside request_toast_report.
+    """
+    if not store_guids:
+        return {}
+
+    delay = 5.0
+    for attempt in range(max_attempts):
+        try:
+            report_guid = await request_toast_report(
+                client, biz_date, biz_date, list(store_guids),
+                report_type="metrics", group_by=["DINING_OPTION"],
+            )
+            all_rows = await fetch_toast_report(
+                client, report_guid, report_type="metrics",
+            ) or []
+            break
+        except Exception as exc:
+            is_429 = "429" in str(exc) or "rate limit" in str(exc).lower()
+            if is_429 and attempt < max_attempts - 1:
+                logger.warning(
+                    "IPA export: ERA 429 on %s (batch of %d stores), backing off %.1fs (attempt %d/%d)",
+                    biz_date, len(store_guids), delay, attempt + 1, max_attempts,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+                continue
+            raise
+
+    # Split the response by restaurantGuid. Rows for guids not in the request
+    # (defensive) get dropped; guids with no rows return an empty list.
+    out: Dict[str, List[dict]] = {g: [] for g in store_guids}
+    for row in all_rows:
+        if not isinstance(row, dict):
+            continue
+        rg = str(row.get("restaurantGuid", "") or "")
+        if rg in out:
+            out[rg].append(row)
+    return out
 
 
 async def build_ipa_rows(
@@ -480,42 +520,44 @@ async def build_ipa_rows(
             ly_d_iso = meta["ly_date"]
             ly_d = date.fromisoformat(ly_d_iso) if ly_d_iso else None
 
-            # Fan out TY (and Toast-LY where eligible) for all stores on this date.
-            ty_tasks = {
-                guid: asyncio.create_task(_era_dining_option_day(
-                    client, d, guid,
+            # One batched ERA call per date — all stores at once — avoids
+            # rate-limit rejections that a per-store fan-out triggers at chain scale.
+            try:
+                ty_by_store = await _era_dining_option_day_batch(
+                    client, d, store_guids,
                     request_toast_report=request_toast_report,
                     fetch_toast_report=fetch_toast_report,
-                ))
-                for guid in store_guids
-            }
-            ly_tasks: Dict[str, asyncio.Task] = {}
-            for guid in store_guids:
-                sd = store_meta[guid]["switchover"]
-                if ly_d and sd and sd <= ly_d_iso:
-                    ly_tasks[guid] = asyncio.create_task(_era_dining_option_day(
-                        client, ly_d, guid,
+                )
+            except Exception as exc:
+                logger.warning("IPA export: TY batch fetch failed (date=%s, stores=%d): %s",
+                               d_iso, len(store_guids), exc)
+                ty_by_store = {g: [] for g in store_guids}
+
+            # LY batch — only for stores whose Toast switchover predates ly_date.
+            ly_eligible = [
+                g for g in store_guids
+                if ly_d and store_meta[g]["switchover"]
+                and store_meta[g]["switchover"] <= ly_d_iso
+            ]
+            ly_by_store: Dict[str, List[dict]] = {}
+            if ly_eligible:
+                try:
+                    ly_by_store = await _era_dining_option_day_batch(
+                        client, ly_d, ly_eligible,
                         request_toast_report=request_toast_report,
                         fetch_toast_report=fetch_toast_report,
-                    ))
+                    )
+                except Exception as exc:
+                    logger.warning("IPA export: LY batch fetch failed (date=%s, stores=%d): %s",
+                                   ly_d_iso, len(ly_eligible), exc)
+                    ly_by_store = {}
 
             for guid in store_guids:
                 if is_cancelled_cb and is_cancelled_cb():
                     return all_rows
 
-                try:
-                    ty_rows = await ty_tasks[guid]
-                except Exception as exc:
-                    logger.warning("IPA export: TY fetch failed (date=%s, store=%s): %s", d_iso, guid, exc)
-                    ty_rows = []
-
-                ly_rows: List[dict] = []
-                if guid in ly_tasks:
-                    try:
-                        ly_rows = await ly_tasks[guid]
-                    except Exception as exc:
-                        logger.warning("IPA export: LY Toast fetch failed (date=%s, store=%s): %s", d_iso, guid, exc)
-                        ly_rows = []
+                ty_rows = ty_by_store.get(guid, [])
+                ly_rows = ly_by_store.get(guid, [])
 
                 # Roll Toast's per-dining-option rows up to IPA segment grain
                 # (e.g. Dine In + X-Dine-In (K) + X-Dine-In-OLO all sum into "Eat In").
@@ -528,7 +570,7 @@ async def build_ipa_rows(
                 ly_by_ipa: Dict[tuple, dict] = {}
                 ly_extra_rows: List[dict] = []
 
-                if guid in ly_tasks:
+                if guid in ly_by_store:
                     # Toast-LY-eligible: ERA gives us per-dining-option grain.
                     ly_by_ipa = _aggregate_to_ipa(ly_rows)
                 elif ly_d_iso and store_meta[guid]["location"]:
