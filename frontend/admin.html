@@ -359,6 +359,7 @@
     <button class="admin-tab" data-tab="toastconfig">Toast Config</button>
     <button class="admin-tab" data-tab="validation">Validation</button>
     <button class="admin-tab" data-tab="repoll" id="repollTab">&#x21BB; Repoll</button>
+    <button class="admin-tab" data-tab="ipa">IPA Export</button>
   </nav>
 
   <!-- ─── Status toast ─────────────────────────────────── -->
@@ -861,6 +862,66 @@ ORDER BY DateOfBusiness</pre>
 
     </div><!-- /tab-repoll -->
 
+    <!-- ─── IPA Export Tab ─────────────────────────────────────────── -->
+    <div class="tab-panel" id="tab-ipa">
+      <div class="section-header">
+        <div>
+          <h2>IPA Sales Export</h2>
+          <div class="user-count">Per-store, per-day, per-segment CSV matching the IPA Sample Sales File template. SHIFTPART is left blank — Toast ERA does not expose daypart grouping.</div>
+        </div>
+      </div>
+
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem;">
+        <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;margin-bottom:1rem;">
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+            <input type="date" id="ipaStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+            <input type="date" id="ipaEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <div style="margin-left:auto;display:flex;gap:0.5rem;">
+            <button class="btn-primary" id="ipaSelectAllBtn" style="background:#6B7280;">All Stores</button>
+            <button class="btn-primary" id="ipaSelectCompBtn" style="background:#6B7280;">Comp Stores</button>
+            <button class="btn-primary" id="ipaClearBtn" style="background:#9CA3AF;">Clear</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom:0.75rem;">
+          <input type="text" id="ipaStoreSearch" placeholder="Filter stores by name or number..."
+                 style="width:100%;padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+        </div>
+
+        <div id="ipaStoreList"
+             style="max-height:320px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:0.5rem;background:#F9FAFB;font-size:0.82rem;">
+          <div style="color:#6B7280;padding:0.5rem;">Loading stores…</div>
+        </div>
+
+        <div style="margin-top:1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+          <div id="ipaSelectedCount" style="color:#6B7280;font-size:0.85rem;">0 stores selected</div>
+          <button class="btn-primary" id="ipaRunBtn" style="background:#1E3A5F;">Run Export</button>
+        </div>
+
+        <div id="ipaFormMsg" style="margin-top:0.5rem;color:#991B1B;font-size:0.85rem;"></div>
+      </div>
+
+      <div id="ipaJobCard" style="display:none;background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+          <div id="ipaJobMeta" style="font-size:0.85rem;color:#374151;font-weight:600;"></div>
+          <div id="ipaJobStatus" style="font-size:0.85rem;font-weight:600;"></div>
+        </div>
+        <div style="background:#E5E7EB;border-radius:4px;height:8px;overflow:hidden;margin-bottom:0.75rem;">
+          <div id="ipaProgressBar" style="height:100%;background:#1E3A5F;width:0%;transition:width 0.3s;"></div>
+        </div>
+        <div id="ipaProgressText" style="font-size:0.78rem;color:#6B7280;"></div>
+        <div id="ipaDownloadRow" style="margin-top:1rem;display:none;">
+          <a id="ipaDownloadLink" href="#" class="btn-primary" style="background:#059669;text-decoration:none;display:inline-block;">Download CSV</a>
+          <span id="ipaDownloadInfo" style="margin-left:0.75rem;color:#6B7280;font-size:0.85rem;"></span>
+        </div>
+      </div>
+    </div><!-- /tab-ipa -->
+
   </main>
 
   <!-- ─── Auth Modal ───────────────────────────────────── -->
@@ -1032,6 +1093,9 @@ ORDER BY DateOfBusiness</pre>
           break;
         case 'repoll':
           loadRepollStores();
+          break;
+        case 'ipa':
+          loadIpaStores();
           break;
       }
     }
@@ -3317,6 +3381,208 @@ ORDER BY DateOfBusiness</pre>
         el.style.color        = '#991B1B';
       }
     }
+
+    // ──────────────────────────────────────────────────────
+    // IPA Export tab
+    // ──────────────────────────────────────────────────────
+    let _ipaStores = [];              // [{guid, name, store_num, comping}, ...]
+    let _ipaCompGuids = new Set();
+    let _ipaSelected = new Set();     // guids
+    let _ipaPollTimer = null;
+    let _ipaJobId = null;
+
+    async function loadIpaStores() {
+      if (_ipaStores.length) { _renderIpaStoreList(); return; }
+      const listEl = document.getElementById('ipaStoreList');
+      try {
+        const [locResp, compResp] = await Promise.all([
+          fetch('/locations',                 { headers: getAuthHeaders() }),
+          fetch('/api/locations/comping',     { headers: getAuthHeaders() }).catch(() => null),
+        ]);
+        if (!locResp.ok) throw new Error(`/locations HTTP ${locResp.status}`);
+        const locs = await locResp.json();
+
+        if (compResp && compResp.ok) {
+          const compData = await compResp.json();
+          (compData.guids || []).forEach(g => _ipaCompGuids.add(g));
+        }
+
+        _ipaStores = locs
+          .map(l => ({
+            guid: l.restaurantGuid,
+            name: l.restaurantName || '',
+            store_num: l.externalId || l.locationCode || '',
+            comping: _ipaCompGuids.has(l.restaurantGuid),
+          }))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        _renderIpaStoreList();
+      } catch (e) {
+        listEl.innerHTML = `<div style="color:#991B1B;padding:0.5rem;">Failed to load stores: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    function _renderIpaStoreList() {
+      const listEl = document.getElementById('ipaStoreList');
+      const filter = (document.getElementById('ipaStoreSearch').value || '').toLowerCase().trim();
+      const visible = _ipaStores.filter(s => {
+        if (!filter) return true;
+        return (s.name.toLowerCase().includes(filter)
+                || String(s.store_num).includes(filter));
+      });
+      if (!visible.length) {
+        listEl.innerHTML = `<div style="color:#6B7280;padding:0.5rem;">No matching stores.</div>`;
+        return;
+      }
+      listEl.innerHTML = visible.map(s => `
+        <label style="display:flex;align-items:center;gap:0.5rem;padding:0.25rem 0.4rem;border-radius:4px;cursor:pointer;${_ipaSelected.has(s.guid) ? 'background:#E0E7FF;' : ''}">
+          <input type="checkbox" data-guid="${escHtml(s.guid)}" ${_ipaSelected.has(s.guid) ? 'checked' : ''} />
+          <span style="flex:1;">${escHtml(s.store_num ? s.store_num + ' – ' : '')}${escHtml(s.name)}</span>
+          ${s.comping ? '<span style="font-size:0.7rem;color:#059669;font-weight:600;">COMP</span>' : ''}
+        </label>
+      `).join('');
+      listEl.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.addEventListener('change', e => {
+          const g = e.target.dataset.guid;
+          if (e.target.checked) _ipaSelected.add(g);
+          else                  _ipaSelected.delete(g);
+          _updateIpaSelectedCount();
+          // Toggle row highlight
+          e.target.closest('label').style.background = e.target.checked ? '#E0E7FF' : '';
+        });
+      });
+      _updateIpaSelectedCount();
+    }
+
+    function _updateIpaSelectedCount() {
+      document.getElementById('ipaSelectedCount').textContent =
+        `${_ipaSelected.size} store${_ipaSelected.size === 1 ? '' : 's'} selected`;
+    }
+
+    async function _startIpaExport() {
+      const startDate = document.getElementById('ipaStart').value;
+      const endDate   = document.getElementById('ipaEnd').value;
+      const msg       = document.getElementById('ipaFormMsg');
+      msg.textContent = '';
+
+      if (!startDate || !endDate) { msg.textContent = 'Please select a start and end date.'; return; }
+      if (endDate < startDate)    { msg.textContent = 'End date must be on or after start date.'; return; }
+      if (!_ipaSelected.size)     { msg.textContent = 'Please select at least one store.'; return; }
+
+      const runBtn = document.getElementById('ipaRunBtn');
+      runBtn.disabled = true;
+      runBtn.textContent = 'Starting…';
+
+      try {
+        const resp = await fetch('/api/exports/ipa-sales/start', {
+          method:  'POST',
+          headers: getAuthHeaders(),
+          body:    JSON.stringify({
+            start_date:  startDate,
+            end_date:    endDate,
+            store_guids: Array.from(_ipaSelected),
+          }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        _ipaJobId = data.job_id;
+
+        document.getElementById('ipaJobCard').style.display = 'block';
+        document.getElementById('ipaDownloadRow').style.display = 'none';
+        document.getElementById('ipaJobMeta').textContent =
+          `Job ${_ipaJobId} · ${_ipaSelected.size} store${_ipaSelected.size === 1 ? '' : 's'} · ${startDate}${startDate !== endDate ? ' → ' + endDate : ''}`;
+        document.getElementById('ipaJobStatus').textContent = 'Running';
+        document.getElementById('ipaJobStatus').style.color = '#1E3A5F';
+        document.getElementById('ipaProgressBar').style.width = '0%';
+        document.getElementById('ipaProgressText').textContent = 'Starting…';
+
+        if (_ipaPollTimer) clearInterval(_ipaPollTimer);
+        _ipaPollTimer = setInterval(_pollIpaStatus, 2500);
+      } catch (e) {
+        msg.textContent = 'Failed to start export: ' + e.message;
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = 'Run Export';
+      }
+    }
+
+    async function _pollIpaStatus() {
+      if (!_ipaJobId) return;
+      try {
+        const resp = await fetch(`/api/exports/ipa-sales/status/${_ipaJobId}`, { headers: getAuthHeaders() });
+        if (!resp.ok) {
+          if (resp.status === 404) {
+            _setIpaStatus('Expired', '#991B1B');
+            clearInterval(_ipaPollTimer);
+          }
+          return;
+        }
+        const job = await resp.json();
+        const prog = job.progress || {};
+        const done = prog.done || 0;
+        const total = prog.total || 0;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        document.getElementById('ipaProgressBar').style.width = pct + '%';
+        document.getElementById('ipaProgressText').textContent =
+          total ? `${done} / ${total} (${pct}%) date·store units fetched`
+                : 'Preparing…';
+
+        if (job.status === 'done') {
+          clearInterval(_ipaPollTimer);
+          _setIpaStatus('Complete', '#065F46');
+          const r = job.result || {};
+          const link = document.getElementById('ipaDownloadLink');
+          link.href = `/api/exports/ipa-sales/download/${_ipaJobId}`;
+          link.download = r.filename || `ipa_sales_${_ipaJobId}.csv`;
+          document.getElementById('ipaDownloadInfo').textContent =
+            `${(r.row_count || 0).toLocaleString()} rows`;
+          document.getElementById('ipaDownloadRow').style.display = 'block';
+        } else if (job.status === 'error') {
+          clearInterval(_ipaPollTimer);
+          _setIpaStatus('Failed', '#991B1B');
+          document.getElementById('ipaProgressText').textContent = job.error || 'Unknown error';
+        } else if (job.status === 'cancelled') {
+          clearInterval(_ipaPollTimer);
+          _setIpaStatus('Cancelled', '#92400E');
+        }
+      } catch (e) {
+        // transient — keep polling
+      }
+    }
+
+    function _setIpaStatus(text, color) {
+      const el = document.getElementById('ipaJobStatus');
+      el.textContent = text;
+      el.style.color = color || '#374151';
+    }
+
+    // Wire-up after DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+      const search = document.getElementById('ipaStoreSearch');
+      if (search) search.addEventListener('input', _renderIpaStoreList);
+
+      const selAll  = document.getElementById('ipaSelectAllBtn');
+      const selComp = document.getElementById('ipaSelectCompBtn');
+      const clr     = document.getElementById('ipaClearBtn');
+      const runBtn  = document.getElementById('ipaRunBtn');
+
+      if (selAll)  selAll.addEventListener('click', () => {
+        _ipaStores.forEach(s => _ipaSelected.add(s.guid));
+        _renderIpaStoreList();
+      });
+      if (selComp) selComp.addEventListener('click', () => {
+        _ipaSelected.clear();
+        _ipaStores.forEach(s => { if (s.comping) _ipaSelected.add(s.guid); });
+        _renderIpaStoreList();
+      });
+      if (clr)     clr.addEventListener('click', () => {
+        _ipaSelected.clear();
+        _renderIpaStoreList();
+      });
+      if (runBtn)  runBtn.addEventListener('click', _startIpaExport);
+    });
 
   </script>
 </body>

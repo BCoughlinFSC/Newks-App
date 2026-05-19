@@ -29,6 +29,7 @@ load_dotenv()
 
 from pick3_reports import router as pick3_router, Pick3ReportRequest, Pick3DrillDownOrdersRequest, Pick3DrillDownAllStoresRequest
 import pick_export_jobs  # also used as backing store for /api/reports/run/start async jobs
+import ipa_export
 
 # Allow importing root-level modules (sales_consolidator, hierarchical_reports)
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10726,6 +10727,167 @@ async def run_report_cancel(job_id: str):
     logger.info("Run-report job %s cancel requested (was_running=%s, status now=%s)",
                 job_id, was_running, job["status"])
     return {"job_id": job_id, "status": job["status"], "was_running": was_running}
+
+
+# ---------------------------------------------------------------------------
+# IPA Sales Export — async job pattern.
+#
+#   POST /api/exports/ipa-sales/start         → { job_id }
+#   GET  /api/exports/ipa-sales/status/{id}   → { status, progress, result?, error? }
+#   GET  /api/exports/ipa-sales/download/{id} → streams the CSV
+#   POST /api/exports/ipa-sales/cancel/{id}   → marks cancelled
+#
+# The CSV is written to backend/data/ipa_exports/{job_id}.csv and the path is
+# stored in the job result. The download endpoint streams that file.
+# ---------------------------------------------------------------------------
+
+IPA_EXPORT_DIR = os.path.join(os.path.dirname(__file__), "data", "ipa_exports")
+IPA_EXPORT_RETENTION_SECONDS = 3600.0  # 1 hour — matches pick_export_jobs.purge_old default
+
+
+def _ipa_purge_old_csvs(retention_seconds: float = IPA_EXPORT_RETENTION_SECONDS) -> int:
+    """Best-effort: delete CSV files in IPA_EXPORT_DIR older than retention_seconds."""
+    if not os.path.isdir(IPA_EXPORT_DIR):
+        return 0
+    cutoff = time.time() - retention_seconds
+    removed = 0
+    try:
+        for name in os.listdir(IPA_EXPORT_DIR):
+            if not name.endswith(".csv"):
+                continue
+            path = os.path.join(IPA_EXPORT_DIR, name)
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+                    removed += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return removed
+
+
+class IpaExportRequest(BaseModel):
+    start_date:  str             # YYYY-MM-DD inclusive
+    end_date:    str             # YYYY-MM-DD inclusive
+    store_guids: List[str]       # Toast restaurant GUIDs to include
+
+
+async def _run_ipa_export_job(job_id: str, req: IpaExportRequest) -> None:
+    """Background task: build rows, write CSV to disk, mark job done."""
+    try:
+        start_date = date.fromisoformat(req.start_date)
+        end_date   = date.fromisoformat(req.end_date)
+    except ValueError as exc:
+        await asyncio.to_thread(pick_export_jobs.finish_error, job_id, f"invalid date: {exc}")
+        return
+
+    def _progress(done: int, total: int) -> None:
+        # Best-effort progress write from inside the row builder.
+        try:
+            pick_export_jobs.update_progress(job_id, done, total)
+        except Exception:
+            pass
+
+    def _cancelled() -> bool:
+        try:
+            return pick_export_jobs.is_cancelled(job_id)
+        except Exception:
+            return False
+
+    try:
+        # toast_guid -> aloha_id  (used as the IPA "Location" column)
+        guid_to_location = get_aloha_location_mapping()
+
+        rows = await ipa_export.build_ipa_rows(
+            start_date, end_date, req.store_guids,
+            dining_option_to_channel = _DINING_OPTION_TO_CHANNEL,
+            request_toast_report     = request_toast_report,
+            fetch_toast_report       = fetch_toast_report,
+            guid_to_location         = guid_to_location,
+            progress_cb              = _progress,
+            is_cancelled_cb          = _cancelled,
+        )
+
+        if _cancelled():
+            logger.info("IPA export job %s cancelled before write", job_id)
+            return
+
+        os.makedirs(IPA_EXPORT_DIR, exist_ok=True)
+        csv_path = os.path.join(IPA_EXPORT_DIR, f"{job_id}.csv")
+        with open(csv_path, "wb") as f:
+            f.write(ipa_export.rows_to_csv(rows))
+
+        filename = f"ipa_sales_{req.start_date}_{req.end_date}.csv"
+        await asyncio.to_thread(pick_export_jobs.finish_done, job_id, {
+            "csv_path":  csv_path,
+            "filename":  filename,
+            "row_count": len(rows),
+        })
+        logger.info("IPA export job %s done: %d rows -> %s", job_id, len(rows), csv_path)
+    except Exception as exc:
+        logger.error("IPA export job %s failed: %s", job_id, exc, exc_info=True)
+        try:
+            await asyncio.to_thread(pick_export_jobs.finish_error, job_id, str(exc))
+        except Exception:
+            pass
+
+
+@app.post("/api/exports/ipa-sales/start")
+async def ipa_export_start(req: IpaExportRequest):
+    """Kick off an IPA sales-export job. Returns {job_id} immediately."""
+    if not req.store_guids:
+        raise HTTPException(status_code=400, detail="store_guids must not be empty")
+    # Reap stale CSVs (>1h old) so disk usage stays bounded.
+    await asyncio.to_thread(_ipa_purge_old_csvs)
+    job_id = uuid.uuid4().hex
+    await asyncio.to_thread(pick_export_jobs.create, job_id)
+    asyncio.create_task(_run_ipa_export_job(job_id, req))
+    logger.info("IPA export job %s started: %s..%s, %d stores",
+                job_id, req.start_date, req.end_date, len(req.store_guids))
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/exports/ipa-sales/status/{job_id}")
+async def ipa_export_status(job_id: str):
+    """Poll an IPA export job. Returns row_count + filename when done."""
+    await asyncio.to_thread(pick_export_jobs.purge_old, 3600.0)
+    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found (may have expired)")
+    return {
+        "job_id":   job_id,
+        "status":   job["status"],
+        "progress": job.get("progress"),
+        "result":   job.get("result") if job["status"] == "done" else None,
+        "error":    job.get("error"),
+    }
+
+
+@app.post("/api/exports/ipa-sales/cancel/{job_id}")
+async def ipa_export_cancel(job_id: str):
+    was_running = await asyncio.to_thread(pick_export_jobs.cancel, job_id)
+    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"job_id": job_id, "status": job["status"], "was_running": was_running}
+
+
+@app.get("/api/exports/ipa-sales/download/{job_id}")
+async def ipa_export_download(job_id: str):
+    """Stream the CSV produced by a completed IPA export job."""
+    from starlette.responses import FileResponse as _FileResponse
+    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found (may have expired)")
+    if job["status"] != "done":
+        raise HTTPException(status_code=409, detail=f"job not done (status={job['status']})")
+    result = job.get("result") or {}
+    csv_path = result.get("csv_path")
+    filename = result.get("filename") or f"ipa_sales_{job_id}.csv"
+    if not csv_path or not os.path.exists(csv_path):
+        raise HTTPException(status_code=410, detail="csv file gone (job result expired)")
+    return _FileResponse(csv_path, media_type="text/csv", filename=filename)
 
 
 @app.get("/api/debug/service-charges")
