@@ -282,9 +282,9 @@ Share `https://your-cloudways-domain.com/` with colleagues. They log in with the
 
 ```bash
 # SSH into server, then:
-cd /home/master/applications/newks
+cd /home/master/applications/wpftndhcuj/public_html
 git pull                              # if using Git
-sudo supervisorctl restart newks_app  # restart the app
+./restart.sh                          # restart the app
 ```
 
 ### ⚠️ Known limitation: Year-Over-Year (YOY) comparisons
