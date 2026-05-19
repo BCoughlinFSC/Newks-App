@@ -225,6 +225,12 @@ def build_attribute_map(
     # Load PLU cross-reference
     plu_map = _load_plu_crossref(db_path)
 
+    # Preserve user-edited Aloha columns across rebuild — without this lookup,
+    # build_attribute_map would write aloha_item_name="" and clobber every
+    # manual edit made via the Mapping Table UI or sync_mapping_excel_to_db.py.
+    # Only used as a fallback for (mli, item_guid) keys that already have a row.
+    existing_aloha = _load_existing_aloha_overrides(db_path)
+
     rows: List[dict] = []
     seen = set()
 
@@ -291,8 +297,17 @@ def build_attribute_map(
             if not recipe:
                 recipe = name
 
-        # PLU cross-reference
-        aloha_plu = plu_map.get(mli, 0)
+        # Aloha columns: prefer the existing values in mli_plu_attribute_map
+        # (set by user edits via PUT /api/mapping-table or sync_mapping_excel_to_db).
+        # Fall back to the PLU cross-reference / empty string only for genuinely
+        # new (mli, item_guid) keys that don't have a row yet.
+        prior = existing_aloha.get(key)
+        if prior is not None:
+            aloha_plu = prior["aloha_plu"] or plu_map.get(mli, 0)
+            aloha_item_name = prior["aloha_item_name"]
+        else:
+            aloha_plu = plu_map.get(mli, 0)
+            aloha_item_name = ""
 
         rows.append({
             "multi_location_id": mli,
@@ -300,7 +315,7 @@ def build_attribute_map(
             "toast_plu": toast_plu,
             "aloha_plu": aloha_plu,
             "toast_item_name": toast_item_name,
-            "aloha_item_name": "",  # Populated later if Aloha item master available
+            "aloha_item_name": aloha_item_name,
             "consolidated_cat": consolidated_cat,
             "recipe": recipe,
             "guest_count_tag": guest_count_tag,
@@ -311,6 +326,31 @@ def build_attribute_map(
     count = toast_config_db.upsert_attribute_map(rows, db_path)
     logger.info(f"build_attribute_map: {count} rows upserted into mli_plu_attribute_map")
     return count
+
+
+def _load_existing_aloha_overrides(db_path: str) -> Dict[tuple, dict]:
+    """
+    Snapshot the user-managed Aloha columns from mli_plu_attribute_map keyed by
+    (multi_location_id, item_guid). Used by build_attribute_map to preserve
+    UI / xlsx-sync edits when rebuilding from Toast menu data.
+
+    Empty dict on first run (table not yet created) or any read error.
+    """
+    try:
+        with toast_config_db.get_connection(db_path) as conn:
+            rows = conn.execute(
+                "SELECT multi_location_id, item_guid, aloha_plu, aloha_item_name"
+                "  FROM mli_plu_attribute_map"
+            ).fetchall()
+        return {
+            (str(r[0]), str(r[1])): {
+                "aloha_plu":       int(r[2] or 0),
+                "aloha_item_name": str(r[3] or ""),
+            }
+            for r in rows
+        }
+    except Exception:
+        return {}
 
 
 def _load_plu_crossref(db_path: str) -> Dict[str, int]:
