@@ -413,7 +413,7 @@ async def _era_dining_option_day_batch(
     *,
     request_toast_report,
     fetch_toast_report,
-    max_attempts: int = 4,
+    max_attempts: int = 6,
 ) -> Dict[str, List[dict]]:
     """
     One ERA call covers all `store_guids` for `biz_date` (groupBy=DINING_OPTION),
@@ -421,13 +421,16 @@ async def _era_dining_option_day_batch(
     93 stores * 18 days = ~1700 per-store fan-out into one call per date — well
     under Toast's rate limits and a fraction of the wall-clock time.
 
-    Retries on 429 (rate limit) with exponential backoff. Other transient
-    failures (502/503/504) are already retried inside request_toast_report.
+    Retries on 429 (rate limit) with exponential backoff. Total max wait of
+    ~3 minutes (10s, 20s, 40s, 60s, 60s) — Toast's rate-limit windows are
+    typically 60s so 6 attempts virtually guarantees recovery from a
+    transient throttle. Other transient failures (502/503/504) are already
+    retried inside request_toast_report.
     """
     if not store_guids:
         return {}
 
-    delay = 5.0
+    delay = 10.0
     for attempt in range(max_attempts):
         try:
             report_guid = await request_toast_report(
@@ -446,7 +449,7 @@ async def _era_dining_option_day_batch(
                     biz_date, len(store_guids), delay, attempt + 1, max_attempts,
                 )
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 30.0)
+                delay = min(delay * 2, 60.0)
                 continue
             raise
 
