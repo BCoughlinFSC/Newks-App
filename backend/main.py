@@ -2432,7 +2432,7 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
     modifier_group_refs = menus_data.get("modifierGroupReferences", {})
     modifier_option_refs = menus_data.get("modifierOptionReferences", {})
     
-    logger.info(f"DEBUG (V3): Found {len(modifier_group_refs)} modifier groups and {len(modifier_option_refs)} modifier option references")
+    logger.debug(f"DEBUG (V3): Found {len(modifier_group_refs)} modifier groups and {len(modifier_option_refs)} modifier option references")
     
     all_modifier_guids_from_menus = set()
     # Process modifier groups
@@ -2448,7 +2448,7 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
             
             # Debug: Check for target modifier
             if mod_option_guid == "6d02e1aa-41c4-489e-bd72-90d12d79edf2" or (mod_option_name and "half black" in mod_option_name.lower()):
-                logger.info(f"DEBUG (V3): Found target modifier in modifierGroupReferences - guid={mod_option_guid}, name='{mod_option_name}', group_guid={mod_group_guid}")
+                logger.debug(f"DEBUG (V3): Found target modifier in modifierGroupReferences - guid={mod_option_guid}, name='{mod_option_name}', group_guid={mod_group_guid}")
             
             tags = []
             for tag in mod_option.get("itemTags", []):
@@ -2478,11 +2478,11 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
         
         # Debug: Log structure for target modifier
         if mod_option_name and "half black" in mod_option_name.lower() and "bleu" in mod_option_name.lower():
-            logger.info(f"DEBUG (V3): Modifier option structure - id={mod_option_id}, keys={list(mod_option.keys())}, guid={mod_option_guid}")
+            logger.debug(f"DEBUG (V3): Modifier option structure - id={mod_option_id}, keys={list(mod_option.keys())}, guid={mod_option_guid}")
             # Check for alternative GUID fields
             for key in ["guid", "modifierOptionGuid", "modifierGuid", "id"]:
                 if key in mod_option:
-                    logger.info(f"DEBUG (V3):   {key}={mod_option.get(key)}")
+                    logger.debug(f"DEBUG (V3):   {key}={mod_option.get(key)}")
         
         if not mod_option_guid:
             # If no guid field, use the key as fallback (might be numeric ID)
@@ -2492,7 +2492,7 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
         
         # Debug: Check for target modifier
         if mod_option_guid == "6d02e1aa-41c4-489e-bd72-90d12d79edf2" or (mod_option_name and "half black" in mod_option_name.lower()):
-            logger.info(f"DEBUG (V3): Found target modifier in modifierOptionReferences - id={mod_option_id}, guid={mod_option_guid}, name='{mod_option_name}'")
+            logger.debug(f"DEBUG (V3): Found target modifier in modifierOptionReferences - id={mod_option_id}, guid={mod_option_guid}, name='{mod_option_name}'")
 
         tags = []
         for tag in mod_option.get("itemTags", []):
@@ -2518,12 +2518,12 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
     # Debug: Check if target GUID is in our mapping
     target_guid = "6d02e1aa-41c4-489e-bd72-90d12d79edf2"
     if target_guid in mapping:
-        logger.info(f"DEBUG (V3): Target GUID {target_guid} IS in mapping with {len(mapping[target_guid])} tags")
+        logger.debug(f"DEBUG (V3): Target GUID {target_guid} IS in mapping with {len(mapping[target_guid])} tags")
     else:
-        logger.warning(f"DEBUG (V3): Target GUID {target_guid} NOT in mapping. Total modifier GUIDs from Menus API: {len(all_modifier_guids_from_menus)}")
+        logger.debug(f"DEBUG (V3): Target GUID {target_guid} NOT in mapping. Total modifier GUIDs from Menus API: {len(all_modifier_guids_from_menus)}")
         # Show some sample GUIDs
         sample_guids = list(all_modifier_guids_from_menus)[:10]
-        logger.info(f"DEBUG (V3): Sample modifier GUIDs from Menus API: {sample_guids}")
+        logger.debug(f"DEBUG (V3): Sample modifier GUIDs from Menus API: {sample_guids}")
     
     # Cache it
     _menu_tags_cache[restaurant_guid] = {
@@ -2618,7 +2618,25 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
     return mapping
 
 async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: str) -> Dict[str, List[Dict]]:
-    """Fallback to V2 menus API if V3 not available"""
+    """Fallback to V2 menus API if V3 not available.
+
+    Cached per-restaurant in _menu_tags_cache with a TTL. V2 has no hash/version
+    to invalidate on, so we use a wall-clock TTL of 1 hour — long enough that
+    typical report sessions hit cache, short enough that Toastweb tag edits
+    propagate without a restart. Force invalidation by restarting uvicorn (the
+    cache is in-process only).
+    """
+    global _menu_tags_cache
+
+    # Cache check — V2 entries use a separate key from the V3 hash so a future
+    # V3-entitled response wouldn't conflict with stale V2 data.
+    _V2_TTL_SECONDS = 60 * 60  # 1 hour
+    cached = _menu_tags_cache.get(restaurant_guid)
+    if cached and "v2_mapping" in cached:
+        age = time.time() - cached.get("v2_fetched_at", 0)
+        if age < _V2_TTL_SECONDS:
+            return cached["v2_mapping"]
+
     logger.info(f"MENU TAGS PATH=V2  restaurant={restaurant_guid}  (V3 not entitled or errored)")
     standard_headers = await get_standard_api_auth_headers()
     headers_with_guid = {
@@ -2628,10 +2646,10 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
 
     menus_url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v2/menus"
     menus_resp = await client.get(menus_url, headers=headers_with_guid)
-    
+
     if menus_resp.status_code != 200:
         raise HTTPException(status_code=menus_resp.status_code, detail="Failed to fetch menu data")
-    
+
     menus_data = menus_resp.json()
     
     mapping = {}
@@ -2661,7 +2679,7 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
     modifier_group_refs = menus_data.get("modifierGroupReferences", {})
     modifier_option_refs = menus_data.get("modifierOptionReferences", {})
     
-    logger.info(f"DEBUG (V2): Found {len(modifier_group_refs)} modifier groups and {len(modifier_option_refs)} modifier option references")
+    logger.debug(f"DEBUG (V2): Found {len(modifier_group_refs)} modifier groups and {len(modifier_option_refs)} modifier option references")
     
     all_modifier_guids_from_menus = set()
     # Process modifier groups
@@ -2693,11 +2711,11 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
         
         # Debug: Log structure for target modifier
         if mod_option_name and "half black" in mod_option_name.lower() and "bleu" in mod_option_name.lower():
-            logger.info(f"DEBUG (V2): Modifier option structure - id={mod_option_id}, keys={list(mod_option.keys())}, guid={mod_option_guid}")
+            logger.debug(f"DEBUG (V2): Modifier option structure - id={mod_option_id}, keys={list(mod_option.keys())}, guid={mod_option_guid}")
             # Check for alternative GUID fields
             for key in ["guid", "modifierOptionGuid", "modifierGuid", "id", "externalId"]:
                 if key in mod_option:
-                    logger.info(f"DEBUG (V2):   {key}={mod_option.get(key)}")
+                    logger.debug(f"DEBUG (V2):   {key}={mod_option.get(key)}")
         
         if not mod_option_guid:
             # If no guid field, use the key as fallback (might be numeric ID)
@@ -2707,7 +2725,7 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
         
         # Debug: Check for target modifier
         if mod_option_guid == "6d02e1aa-41c4-489e-bd72-90d12d79edf2" or (mod_option_name and "half black" in mod_option_name.lower()):
-            logger.info(f"DEBUG (V2): Found target modifier in modifierOptionReferences - id={mod_option_id}, guid={mod_option_guid}, name='{mod_option_name}'")
+            logger.debug(f"DEBUG (V2): Found target modifier in modifierOptionReferences - id={mod_option_id}, guid={mod_option_guid}, name='{mod_option_name}'")
         
         tags = []
         for tag in mod_option.get("itemTags", []):
@@ -2729,12 +2747,12 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
     # Debug: Check if target GUID is in our mapping
     target_guid = "6d02e1aa-41c4-489e-bd72-90d12d79edf2"
     if target_guid in mapping:
-        logger.info(f"DEBUG (V2): Target GUID {target_guid} IS in mapping with {len(mapping[target_guid])} tags")
+        logger.debug(f"DEBUG (V2): Target GUID {target_guid} IS in mapping with {len(mapping[target_guid])} tags")
     else:
-        logger.warning(f"DEBUG (V2): Target GUID {target_guid} NOT in mapping. Total modifier GUIDs from Menus API: {len(all_modifier_guids_from_menus)}")
+        logger.debug(f"DEBUG (V2): Target GUID {target_guid} NOT in mapping. Total modifier GUIDs from Menus API: {len(all_modifier_guids_from_menus)}")
         # Show some sample GUIDs
         sample_guids = list(all_modifier_guids_from_menus)[:10]
-        logger.info(f"DEBUG (V2): Sample modifier GUIDs from Menus API: {sample_guids}")
+        logger.debug(f"DEBUG (V2): Sample modifier GUIDs from Menus API: {sample_guids}")
     
     # Also build a name-to-GUID mapping for modifiers (fallback matching)
     modifier_name_to_guid = {}
@@ -2752,10 +2770,10 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
         
         # Debug: Log full structure for target modifier to find UUID
         if mod_option_name and "half black" in mod_option_name.lower() and "bleu" in mod_option_name.lower():
-            logger.info(f"DEBUG (V2 name mapping): Modifier option full structure - id={mod_option_id}")
-            logger.info(f"DEBUG (V2 name mapping):   All keys: {list(mod_option.keys())}")
+            logger.debug(f"DEBUG (V2 name mapping): Modifier option full structure - id={mod_option_id}")
+            logger.debug(f"DEBUG (V2 name mapping):   All keys: {list(mod_option.keys())}")
             for key in mod_option.keys():
-                logger.info(f"DEBUG (V2 name mapping):   {key}={mod_option.get(key)}")
+                logger.debug(f"DEBUG (V2 name mapping):   {key}={mod_option.get(key)}")
         
         if not mod_option_guid:
             mod_option_guid = str(mod_option_id)  # Fallback to ID if no guid
@@ -2765,7 +2783,7 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
             modifier_name_to_guid[name_key] = mod_option_guid
             # Debug: log if this is our target modifier
             if "half black" in name_key and "bleu" in name_key:
-                logger.info(f"DEBUG (V2 name mapping): Added to name mapping - name='{mod_option_name}', normalized='{name_key}', guid={mod_option_guid}")
+                logger.debug(f"DEBUG (V2 name mapping): Added to name mapping - name='{mod_option_name}', normalized='{name_key}', guid={mod_option_guid}")
     
     logger.info(f"Built modifier name mapping (V2): {len(modifier_name_to_guid)} modifier names")
     
@@ -2801,7 +2819,11 @@ async def get_menu_tags_mapping_v2(client: httpx.AsyncClient, restaurant_guid: s
         _menu_tags_cache[restaurant_guid] = {}
     _menu_tags_cache[restaurant_guid]["name_mapping"] = modifier_name_to_guid  # Keep reverse mapping for fuzzy matching
     _menu_tags_cache[restaurant_guid]["guid_to_name"] = guid_to_name  # Add GUID -> name mapping
-    
+    # Cache the tag mapping itself so subsequent reports skip the V2 API call.
+    # See cache check at the top of this function for TTL details.
+    _menu_tags_cache[restaurant_guid]["v2_mapping"] = mapping
+    _menu_tags_cache[restaurant_guid]["v2_fetched_at"] = time.time()
+
     return mapping
 
 
