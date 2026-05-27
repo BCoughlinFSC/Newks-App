@@ -794,10 +794,14 @@
         datalist.id = listId;
         candidates.forEach(function(it) {
           const opt = document.createElement('option');
-          opt.value = it.aloha_item_name;
-          // Show the PLU as the option label/hint so the user can
-          // disambiguate same-name items (e.g., "Fountain Drink" at multiple PLUs).
-          opt.label = 'PLU ' + it.aloha_plu + (it.item_range ? ' \u00B7 ' + it.item_range : '');
+          // Embed the PLU into the option VALUE so duplicate-name items become
+          // distinct picks (e.g., "Fountain Drink" exists at PLUs 7699 AND 9755).
+          // Without this, picking the second "Fountain Drink" wouldn't change the
+          // input value vs the first one, so no input/change event fires, and
+          // the picked PLU is lost. We parse this format back into name + plu
+          // in commit() below.
+          opt.value = it.aloha_item_name + ' \u2014 PLU ' + it.aloha_plu;
+          opt.label = it.item_range || (it.consol_cat ? it.consol_cat.replace(/^\* Consolidated /, '') : '');
           datalist.appendChild(opt);
         });
 
@@ -812,10 +816,24 @@
         input.placeholder = candidates.length + ' Aloha item' + (candidates.length === 1 ? '' : 's')
           + (showAllAlohaItems || !rowCat ? '' : ' in ' + rowCat);
 
+        // Regex matching the "Name — PLU NNNN" format we use for option values.
+        // The em-dash is unlikely to appear in real item names; if it ever does,
+        // we still fall back gracefully via the unique-name lookup below.
+        const PLU_SUFFIX_RE = /^(.+?)\s+—\s+PLU\s+(\d+)\s*$/;
+
         let committed = false;
         function commit() {
           if (committed) return; committed = true;
-          const newName = input.value;
+          // Parse "name — PLU N" if the user picked from the dropdown; else
+          // treat the raw text as a free-typed name.
+          let rawVal = input.value;
+          let newName = rawVal;
+          let pluFromPick = null;
+          const m = rawVal.match(PLU_SUFFIX_RE);
+          if (m) {
+            newName = m[1].trim();
+            pluFromPick = parseInt(m[2], 10);
+          }
           let pluChanged = false;
           if (row && row[colKey] !== newName) {
             row[colKey] = newName;
@@ -823,12 +841,20 @@
             btnSave.disabled = false;
             el.closest('tr').classList.add('edited');
           }
-          // If the entered value exactly matches a master item, auto-fill the PLU.
-          const match = alohaItemsMaster.find(function(it) { return it.aloha_item_name === newName; });
-          if (match) {
+          // PLU priority:
+          //   1. The PLU embedded in the picked option's value (unambiguous).
+          //   2. Fallback: if the typed name has exactly ONE matching master
+          //      item, use its PLU. (Duplicate names → no auto-fill; user can
+          //      still hand-edit AlohaPLU in its own cell.)
+          let resolvedPlu = pluFromPick;
+          if (resolvedPlu == null) {
+            const matches = alohaItemsMaster.filter(function(it) { return it.aloha_item_name === newName; });
+            if (matches.length === 1) resolvedPlu = matches[0].aloha_plu;
+          }
+          if (resolvedPlu != null) {
             const pluRowKey = _findRowKey(row, ALOHA_PLU_KEYS);
             if (pluRowKey) {
-              const newPlu = String(match.aloha_plu);
+              const newPlu = String(resolvedPlu);
               if (String(row[pluRowKey] || '') !== newPlu) {
                 row[pluRowKey] = newPlu;
                 pluChanged = true;
@@ -869,14 +895,13 @@
         }
         input.addEventListener('blur', commit);
         input.addEventListener('change', commit);
-        // The 'input' event fires reliably across browsers when the user
-        // picks an option from the datalist (not all browsers fire 'change'
-        // on the pick). If the new value exactly matches a known Aloha item,
-        // commit immediately so the PLU auto-fills without needing a blur.
-        // The `committed` flag in commit() prevents double-fire.
+        // 'input' fires reliably across browsers when a datalist option is
+        // picked. Auto-commit if the new value matches our "Name — PLU N"
+        // pattern (a pick) — that's the unambiguous signal that the user
+        // chose a specific item. The `committed` flag prevents double-fire
+        // when blur or change also lands.
         input.addEventListener('input', function() {
-          const newVal = input.value;
-          if (newVal && alohaItemsMaster.some(function(it) { return it.aloha_item_name === newVal; })) {
+          if (PLU_SUFFIX_RE.test(input.value)) {
             commit();
           }
         });
