@@ -868,6 +868,11 @@
           }
         }
         input.addEventListener('blur', commit);
+        // 'change' fires when the user picks an option from the datalist
+        // dropdown (clicking an option doesn't blur the input, so blur alone
+        // isn't enough). The `committed` flag prevents double-commit if both
+        // change and blur fire.
+        input.addEventListener('change', commit);
         input.addEventListener('keydown', function(e) {
           if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
           if (e.key === 'Escape') { input.value = val; committed = true; commit(); }
