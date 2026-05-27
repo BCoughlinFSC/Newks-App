@@ -8328,7 +8328,17 @@ async def update_mapping_table(body: MappingTableUpdate):
     # Invalidate consolidated category cache so next read uses new data
     global _consolidated_cat_cache
     _consolidated_cat_cache = {}
-    return {"success": True, "saved_to": saved_to, "rows": count}
+    # Also clear the precomputed menu-report cache. The cache key doesn't
+    # include mapping-table state, so a stale entry would mask this save's
+    # effect on the next identical report run. Best-effort: never block the
+    # save on a cache-clear failure.
+    menu_cache_cleared = 0
+    try:
+        menu_cache_cleared = precompute_cache.clear_cache()
+        logger.info("Mapping table saved — cleared %d precomputed menu cache entries", menu_cache_cleared)
+    except Exception as exc:
+        logger.warning("precompute_cache clear failed after mapping save: %s", exc)
+    return {"success": True, "saved_to": saved_to, "rows": count, "menu_cache_cleared": menu_cache_cleared}
 
 
 @app.get("/api/aloha-items")
