@@ -421,6 +421,10 @@
           <button type="button" class="btn btn-secondary" id="btnAddRow" title="Add a new row to the mapping table" disabled>➕ Add row</button>
           <button type="button" class="btn btn-secondary" id="btnExport" title="Export mapping table as CSV" disabled>📥 Export CSV</button>
           <button type="button" class="btn btn-primary" id="btnSave" title="Save changes to file" disabled>💾 Save changes</button>
+          <label class="aloha-toggle" style="margin-left:0.5rem;font-size:0.85rem;color:#64748B;display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;" title="When editing AlohaItemName, show items from ALL consolidated categories instead of filtering to the row's own category.">
+            <input type="checkbox" id="toggleShowAllAloha" />
+            Show all Aloha categories
+          </label>
           <span class="save-status hidden" id="saveStatus"></span>
           <span class="mapping-meta">
             Source: <span id="sourcePath">—</span> · <span class="row-count" id="rowCount">0 rows</span>
@@ -595,6 +599,26 @@
       let dirty = false;
       let sortColumn = null;
       let sortDir = 1;
+      // Aloha items dropdown state (lazy-loaded once on init).
+      // Used by the aloha_item_name cell editor: shows a searchable datalist
+      // filtered to the row's consolidated_cat, and auto-fills aloha_plu when
+      // the user picks an item. Falls back to plain text input if the master
+      // list isn't available (endpoint down or table empty).
+      let alohaItemsMaster = [];   // [{aloha_plu, aloha_item_name, consol_cat, item_range, consol_id}]
+      let alohaItemsLoaded = false;
+      let showAllAlohaItems = false;
+      // The mapping table API uses snake_case column names (from SQLite); the
+      // xlsx fallback uses CamelCase. Match case-insensitively so both work.
+      const ALOHA_NAME_KEYS  = new Set(['aloha_item_name', 'alohaitemname']);
+      const ALOHA_PLU_KEYS   = new Set(['aloha_plu', 'alohaplu']);
+      const CONSOL_CAT_KEYS  = new Set(['consolidated_cat', 'consolidatedcat']);
+      function _matchKey(colKey, set) {
+        return set.has(String(colKey || '').toLowerCase());
+      }
+      function _findRowKey(row, set) {
+        for (const k in row) if (set.has(k.toLowerCase())) return k;
+        return null;
+      }
       const searchInput = document.getElementById('searchInput');
       const btnRefresh = document.getElementById('btnRefresh');
       const btnAddRow = document.getElementById('btnAddRow');
@@ -706,6 +730,12 @@
       function cellEdit(rowIndex, colKey, value, el) {
         // Don't allow editing of Toast-synced columns
         if (READONLY_COLS.has(colKey)) return;
+        // aloha_item_name is special: replace plain text input with a
+        // searchable datalist dropdown of canonical Aloha items, and
+        // auto-fill aloha_plu when the user picks a match.
+        if (_matchKey(colKey, ALOHA_NAME_KEYS) && alohaItemsLoaded) {
+          return cellEditAlohaName(rowIndex, colKey, value, el);
+        }
         const val = value == null ? '' : String(value);
         const input = document.createElement('input');
         input.type = 'text';
@@ -734,6 +764,116 @@
           if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
           if (e.key === 'Escape') { input.value = val; input.blur(); }
         });
+        el.parentNode.replaceChild(input, el);
+        input.focus();
+        input.select();
+      }
+
+      // Datalist-id counter so each editor gets its own list (avoids
+      // duplicate-id warnings when several cells are edited rapidly).
+      let _datalistCounter = 0;
+
+      function cellEditAlohaName(rowIndex, colKey, value, el) {
+        const val = value == null ? '' : String(value);
+        const row = rows[rowIndex];
+        const consolKey = _findRowKey(row, CONSOL_CAT_KEYS);
+        const rowCat = consolKey ? String(row[consolKey] || '').trim() : '';
+
+        // Filter the master list by the row's consolidated_cat unless the
+        // user toggled "Show all categories" on. If the row's cat has zero
+        // matching items (rare), fall back to showing everything \u2014 better
+        // than offering an empty list.
+        let candidates = alohaItemsMaster;
+        if (!showAllAlohaItems && rowCat) {
+          const inCat = alohaItemsMaster.filter(function(it) { return it.consol_cat === rowCat; });
+          if (inCat.length) candidates = inCat;
+        }
+
+        const listId = 'aloha-datalist-' + (++_datalistCounter);
+        const datalist = document.createElement('datalist');
+        datalist.id = listId;
+        candidates.forEach(function(it) {
+          const opt = document.createElement('option');
+          opt.value = it.aloha_item_name;
+          // Show the PLU as the option label/hint so the user can
+          // disambiguate same-name items (e.g., "Fountain Drink" at multiple PLUs).
+          opt.label = 'PLU ' + it.aloha_plu + (it.item_range ? ' \u00B7 ' + it.item_range : '');
+          datalist.appendChild(opt);
+        });
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'cell-edit';
+        input.value = val;
+        input.dataset.row = String(rowIndex);
+        input.dataset.col = colKey;
+        input.setAttribute('list', listId);
+        input.setAttribute('autocomplete', 'off');
+        input.placeholder = candidates.length + ' Aloha item' + (candidates.length === 1 ? '' : 's')
+          + (showAllAlohaItems || !rowCat ? '' : ' in ' + rowCat);
+
+        let committed = false;
+        function commit() {
+          if (committed) return; committed = true;
+          const newName = input.value;
+          let pluChanged = false;
+          if (row && row[colKey] !== newName) {
+            row[colKey] = newName;
+            dirty = true;
+            btnSave.disabled = false;
+            el.closest('tr').classList.add('edited');
+          }
+          // If the entered value exactly matches a master item, auto-fill the PLU.
+          const match = alohaItemsMaster.find(function(it) { return it.aloha_item_name === newName; });
+          if (match) {
+            const pluRowKey = _findRowKey(row, ALOHA_PLU_KEYS);
+            if (pluRowKey) {
+              const newPlu = String(match.aloha_plu);
+              if (String(row[pluRowKey] || '') !== newPlu) {
+                row[pluRowKey] = newPlu;
+                pluChanged = true;
+                dirty = true;
+                btnSave.disabled = false;
+              }
+            }
+          }
+
+          // Replace the input with a static cell-display.
+          const display = document.createElement('div');
+          display.className = 'cell-display';
+          display.textContent = newName || '\u00A0';
+          display.dataset.value = newName;
+          el.parentNode.replaceChild(display, input);
+          display.addEventListener('click', onCellClick);
+          if (datalist.parentNode) datalist.parentNode.removeChild(datalist);
+
+          // If the PLU column changed, refresh its display in the same row.
+          if (pluChanged) {
+            const tr = display.closest('tr');
+            const pluRowKey = _findRowKey(row, ALOHA_PLU_KEYS) || 'aloha_plu';
+            if (tr) {
+              const pluTd = tr.querySelector('td[data-col="' + pluRowKey + '"]');
+              if (pluTd) {
+                const pluDisplay = pluTd.querySelector('.cell-display');
+                const pluInput = pluTd.querySelector('input');
+                const newPluText = String(row[pluRowKey] || '');
+                if (pluDisplay) {
+                  pluDisplay.textContent = newPluText || '\u00A0';
+                  pluDisplay.dataset.value = newPluText;
+                } else if (pluInput) {
+                  pluInput.value = newPluText;
+                }
+              }
+            }
+          }
+        }
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+          if (e.key === 'Escape') { input.value = val; committed = true; commit(); }
+        });
+        // datalist must be in the DOM for the browser to use it
+        el.parentNode.appendChild(datalist);
         el.parentNode.replaceChild(input, el);
         input.focus();
         input.select();
@@ -869,7 +1009,31 @@
       });
       btnSave.addEventListener('click', saveTable);
 
+      // Show-all toggle for the Aloha-items dropdown
+      const toggleShowAllAloha = document.getElementById('toggleShowAllAloha');
+      if (toggleShowAllAloha) {
+        toggleShowAllAloha.addEventListener('change', function() {
+          showAllAlohaItems = toggleShowAllAloha.checked;
+        });
+      }
+
+      // Lazy-load the canonical Aloha items list (used by the dropdown when
+      // editing aloha_item_name). Failure is non-fatal — cellEdit falls back
+      // to plain text input if the master list isn't available.
+      function loadAlohaItems() {
+        fetch(API_BASE + '/api/aloha-items')
+          .then(function(res) { return res.ok ? res.json() : { items: [] }; })
+          .then(function(data) {
+            alohaItemsMaster = (data && data.items) || [];
+            alohaItemsLoaded = alohaItemsMaster.length > 0;
+          })
+          .catch(function() {
+            alohaItemsLoaded = false;
+          });
+      }
+
       loadTable();
+      loadAlohaItems();
 
       // ── Tab switching ───────────────────────────────────────────────────
       var ctabMapping = document.getElementById('ctabMapping');

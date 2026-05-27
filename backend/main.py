@@ -8331,6 +8331,22 @@ async def update_mapping_table(body: MappingTableUpdate):
     return {"success": True, "saved_to": saved_to, "rows": count}
 
 
+@app.get("/api/aloha-items")
+async def get_aloha_items_endpoint(consol_cat: Optional[str] = None):
+    """
+    Return the canonical Aloha item list for the Mapping Table UI dropdown.
+
+    Optional query param `consol_cat` (e.g. "* Consolidated NA Bev") scopes
+    the result to one category. Without it, returns the full list — used
+    when the UI's "Show all categories" toggle is on.
+
+    Source: aloha_items_master in toast_config.db, populated from
+    "Items by Category.xlsx" by backend/import_aloha_items.py.
+    """
+    items = toast_config_db.get_aloha_items(consol_cat=consol_cat)
+    return {"count": len(items), "items": items}
+
+
 # ------------------
 # Mapping Audit API
 # ------------------

@@ -209,6 +209,31 @@ CREATE TABLE IF NOT EXISTS toast_switchover_dates (
 
 CREATE INDEX IF NOT EXISTS idx_switchover_lookup
     ON toast_switchover_dates(store_guid);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- aloha_items_master  —  Canonical Aloha item list (PLU + name + category).
+--
+-- Source: "Items by Category.xlsx" in the project root. One row per Aloha
+-- PLU. Populated by backend/import_aloha_items.py; refreshed by dropping
+-- in a new file and re-running the script.
+--
+-- Used by the Mapping Table UI to drive a searchable dropdown when picking
+-- aloha_item_name. Selecting a name auto-fills aloha_plu so the two stay
+-- consistent and the user can't typo into a non-existent item.
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS aloha_items_master (
+    aloha_plu       INTEGER PRIMARY KEY,
+    aloha_item_name TEXT NOT NULL,
+    consol_id       INTEGER,
+    consol_cat      TEXT NOT NULL DEFAULT '',
+    item_range      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_aloha_items_consol
+    ON aloha_items_master(consol_cat);
+
+CREATE INDEX IF NOT EXISTS idx_aloha_items_name
+    ON aloha_items_master(aloha_item_name);
 """
 
 
@@ -730,6 +755,82 @@ def update_mapping_table_rows(
             insert_rows,
         )
     return len(insert_rows)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Writes/reads — aloha_items_master (canonical Aloha item list for UI dropdown)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_aloha_items(
+    consol_cat: Optional[str] = None,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> List[dict]:
+    """
+    Return the canonical Aloha items list. Optionally filter by consol_cat
+    (e.g. "* Consolidated NA Bev") to scope the dropdown to a single
+    consolidated category in the Mapping Table UI.
+
+    Returns rows ordered by aloha_item_name for stable display.
+    """
+    if not os.path.exists(db_path):
+        return []
+    try:
+        with get_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if consol_cat:
+                rows = conn.execute(
+                    "SELECT aloha_plu, aloha_item_name, consol_id, consol_cat, item_range "
+                    "  FROM aloha_items_master WHERE consol_cat = ? "
+                    " ORDER BY aloha_item_name",
+                    (consol_cat,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT aloha_plu, aloha_item_name, consol_id, consol_cat, item_range "
+                    "  FROM aloha_items_master "
+                    " ORDER BY aloha_item_name"
+                ).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def replace_aloha_items_master(
+    rows_in: List[dict],
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """
+    Replace the full aloha_items_master table from a freshly-parsed xlsx.
+    Used by backend/import_aloha_items.py as a full snapshot reload.
+    """
+    initialize_db(db_path)
+    cleaned = []
+    for r in rows_in:
+        plu = r.get("aloha_plu")
+        name = r.get("aloha_item_name", "")
+        if plu is None or not name:
+            continue
+        try:
+            plu_int = int(plu)
+        except (ValueError, TypeError):
+            continue
+        cleaned.append((
+            plu_int,
+            str(name).strip(),
+            int(r.get("consol_id") or 0) or None,
+            (r.get("consol_cat") or "").strip(),
+            (r.get("item_range") or "").strip(),
+        ))
+    with get_connection(db_path) as conn:
+        conn.execute("DELETE FROM aloha_items_master")
+        if cleaned:
+            conn.executemany(
+                """INSERT INTO aloha_items_master (
+                    aloha_plu, aloha_item_name, consol_id, consol_cat, item_range
+                ) VALUES (?,?,?,?,?)""",
+                cleaned,
+            )
+    return len(cleaned)
 
 
 def get_toast_items_with_tags(db_path: str = TOAST_CONFIG_DB_PATH) -> Dict[str, dict]:
