@@ -868,11 +868,18 @@
           }
         }
         input.addEventListener('blur', commit);
-        // 'change' fires when the user picks an option from the datalist
-        // dropdown (clicking an option doesn't blur the input, so blur alone
-        // isn't enough). The `committed` flag prevents double-commit if both
-        // change and blur fire.
         input.addEventListener('change', commit);
+        // The 'input' event fires reliably across browsers when the user
+        // picks an option from the datalist (not all browsers fire 'change'
+        // on the pick). If the new value exactly matches a known Aloha item,
+        // commit immediately so the PLU auto-fills without needing a blur.
+        // The `committed` flag in commit() prevents double-fire.
+        input.addEventListener('input', function() {
+          const newVal = input.value;
+          if (newVal && alohaItemsMaster.some(function(it) { return it.aloha_item_name === newVal; })) {
+            commit();
+          }
+        });
         input.addEventListener('keydown', function(e) {
           if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
           if (e.key === 'Escape') { input.value = val; committed = true; commit(); }
