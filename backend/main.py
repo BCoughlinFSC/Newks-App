@@ -224,12 +224,22 @@ def _ensure_consolidated_maps() -> None:
 
     # ── Try SQLite attribute map first ──
     if toast_config_db.db_available():
+        # Freshness key: SQLite file mtime, not row count. Editing a cell in
+        # the Mapping Table UI updates SQLite values without changing the
+        # row count, so a row-count-based key would silently serve stale
+        # data on any uvicorn worker that already populated the cache
+        # before the save (the save handler only clears the cache on the
+        # one worker that handled the PUT). mtime bumps on every write,
+        # so all workers refresh automatically.
+        sqlite_key = "__sqlite_mtime__"
+        try:
+            db_mtime = os.path.getmtime(toast_config_db.TOAST_CONFIG_DB_PATH)
+        except OSError:
+            db_mtime = 0.0
+        if cache and cache.get("mtimes") == {sqlite_key: db_mtime}:
+            return
         attr_df = toast_config_db.get_attribute_map()
         if not attr_df.empty:
-            # Check if SQLite data is newer than cache
-            sqlite_key = "__sqlite__"
-            if cache and cache.get("mtimes") == {sqlite_key: len(attr_df)}:
-                return
             mapping: Dict[str, str] = {}
             report_tag_map: Dict[str, List[str]] = {}
             for _, row in attr_df.iterrows():
@@ -252,7 +262,7 @@ def _ensure_consolidated_maps() -> None:
                     if tag_list and key not in report_tag_map:
                         report_tag_map[key] = tag_list
             _consolidated_cat_cache["data"] = {
-                "mtimes": {sqlite_key: len(attr_df)},
+                "mtimes": {sqlite_key: db_mtime},
                 "map": mapping,
                 "report_tag_map": report_tag_map,
             }
