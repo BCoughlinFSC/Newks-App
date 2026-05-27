@@ -3347,9 +3347,13 @@
               };
               signal.addEventListener('abort', onAbortSendCancel, { once: true });
 
+              // X-Force-Refresh: the user explicitly opted into a fresh all-categories
+              // pull via the Excel modal — bypass the menu precompute cache so a mapping
+              // edit (or any other config change) is guaranteed to reflect in the
+              // export, even if a stale cache entry exists for this exact shape.
               const startRes = await fetch('/api/reports/run/start', {
                 method: 'POST',
-                headers: getAuthHeaders(),
+                headers: { ...getAuthHeaders(), 'X-Force-Refresh': '1' },
                 body: JSON.stringify(expandedConfig),
                 signal,
               });

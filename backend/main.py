@@ -10684,8 +10684,18 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
 # SQLite registry (renamed conceptually to "async_jobs" — it is generic).
 # ---------------------------------------------------------------------------
 
-async def _run_report_job(job_id: str, body: Dict[str, Any]) -> None:
-    """Background task body — runs /api/reports/run via loopback and stores result in SQLite."""
+async def _run_report_job(
+    job_id: str,
+    body: Dict[str, Any],
+    forward_headers: Optional[Dict[str, str]] = None,
+) -> None:
+    """Background task body — runs /api/reports/run via loopback and stores result in SQLite.
+
+    `forward_headers` is an optional dict of headers (e.g. X-Force-Refresh) to
+    propagate to the inner /api/reports/run call. The Excel export's all-cats
+    fetch uses this so the user-explicit "rebuild for export" path skips the
+    menu precompute cache even if a stale entry exists for this exact shape.
+    """
     try:
         await asyncio.to_thread(pick_export_jobs.update_progress, job_id, 0, 1)
         # No timeout on the loopback client — the inner endpoint will take as long as it takes.
@@ -10694,7 +10704,11 @@ async def _run_report_job(job_id: str, body: Dict[str, Any]) -> None:
             # while waiting. The inner endpoint doesn't know about cancellation, but at least the
             # browser stops polling and the job ends in 'cancelled' state.
             inner_task = asyncio.create_task(
-                client.post("http://127.0.0.1:8000/api/reports/run", json=body)
+                client.post(
+                    "http://127.0.0.1:8000/api/reports/run",
+                    json=body,
+                    headers=forward_headers or None,
+                )
             )
             while not inner_task.done():
                 if await asyncio.to_thread(pick_export_jobs.is_cancelled, job_id):
@@ -10737,18 +10751,29 @@ async def _run_report_job(job_id: str, body: Dict[str, Any]) -> None:
 
 
 @app.post("/api/reports/run/start")
-async def run_report_start(body: Dict[str, Any] = Body(...)):
+async def run_report_start(request: Request, body: Dict[str, Any] = Body(...)):
     """
     Kick off a /api/reports/run call as a background job. Returns immediately
     with {job_id} so the client can poll for completion. The request body is
     forwarded verbatim to /api/reports/run — same shape as the sync endpoint.
+
+    X-Force-Refresh on the incoming request is forwarded to the loopback call
+    so the menu precompute cache can be bypassed by clients that need a guaranteed
+    fresh recompute (e.g. the Excel export's "Include All Categories" reload).
     """
     job_id = uuid.uuid4().hex
     await asyncio.to_thread(pick_export_jobs.create, job_id)
-    asyncio.create_task(_run_report_job(job_id, body))
+
+    forward_headers: Optional[Dict[str, str]] = None
+    force_refresh = (request.headers.get("X-Force-Refresh") or "").strip()
+    if force_refresh:
+        forward_headers = {"X-Force-Refresh": force_refresh}
+
+    asyncio.create_task(_run_report_job(job_id, body, forward_headers))
     logger.info(
-        "Run-report job %s started reportType=%s dateRangeType=%s",
+        "Run-report job %s started reportType=%s dateRangeType=%s force_refresh=%s",
         job_id, body.get("reportType"), body.get("dateRangeType"),
+        bool(forward_headers),
     )
     return {"job_id": job_id, "status": "running"}
 
