@@ -3596,13 +3596,17 @@
               };
               signal.addEventListener('abort', onAbortSendCancel, { once: true });
 
-              // X-Force-Refresh: the user explicitly opted into a fresh all-categories
-              // pull via the Excel modal — bypass the menu precompute cache so a mapping
-              // edit (or any other config change) is guaranteed to reflect in the
-              // export, even if a stale cache entry exists for this exact shape.
+              // No X-Force-Refresh here: cache freshness is now guaranteed by
+              //   1) the mapping-table PUT handler clearing precompute_cache on save, and
+              //   2) the 5 AM nightly_menu_precompute_job warming the all-cats keys.
+              // So an all-cats cache HIT here is always fresh data — and serving it
+              // returns the export in ~1s instead of recomputing for ~30-60s. If we
+              // ever need to bypass the cache again, the backend still honors
+              // X-Force-Refresh on this endpoint (forwarded through the loopback in
+              // _run_report_job).
               const startRes = await fetch('/api/reports/run/start', {
                 method: 'POST',
-                headers: { ...getAuthHeaders(), 'X-Force-Refresh': '1' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(expandedConfig),
                 signal,
               });
