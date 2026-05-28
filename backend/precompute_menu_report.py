@@ -24,15 +24,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional
+from datetime import date, timedelta
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
 
 from precompute_cache import CONSOLIDATED_TAGS_SUPERSET
+
+logger = logging.getLogger(__name__)
 
 # Single source of truth for the Consolidated tag list lives in
 # precompute_cache (the cache layer needs it to do superset-fallback
@@ -72,6 +76,167 @@ DEFAULT_SHAPES: List[Dict[str, Any]] = [
     # users actually request 90-day windows; you'd also need to bump the
     # admin endpoint's default timeout to ~3600s.
 ]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Runtime shape builder — used by the APScheduler nightly job
+#
+# Unlike DEFAULT_SHAPES (which is a compile-time constant for the CLI), the
+# nightly job needs shapes that mirror the four most common Menu Performance
+# slices an analyst opens in the morning:
+#
+#   bases:  last_7_days · last_30_days · current_fiscal_period_MTD
+#   groups: all_stores  · Company · Franchise · Comping
+#
+# build_nightly_shapes() composes these into up to 12 shapes by reading the
+# live ownership + comp-set data via loopback HTTP (no main.py import → no
+# circular dep). Groups with no active stores are skipped; the fiscal-MTD
+# base is skipped if the fiscal calendar hasn't been imported yet.
+#
+# This is also the natural hook for future email-subscription jobs: a
+# subscription declares one of these shapes, the morning email task reads
+# the matching cache entry, builds the Excel, and sends. No second pivot.
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _discover_store_groups(base_url: str) -> Dict[str, List[str]]:
+    """
+    Build {group_name: [restaurant_guids]} for the four canonical groups.
+    Each list is restricted to currently-active locations (matches what the
+    frontend's location picker offers, so cache keys line up).
+    """
+    base = base_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        active_resp = await client.get(f"{base}/locations")
+        active_resp.raise_for_status()
+        active_set = {loc["restaurantGuid"] for loc in active_resp.json()}
+
+        own_resp = await client.get(f"{base}/api/location-ownership")
+        own_resp.raise_for_status()
+        by_guid: Dict[str, str] = (own_resp.json() or {}).get("byGuid", {}) or {}
+
+        comp_resp = await client.get(f"{base}/api/locations/comping")
+        comp_resp.raise_for_status()
+        comping_guids: List[str] = (comp_resp.json() or {}).get("guids", []) or []
+
+    company   = sorted(g for g, t in by_guid.items() if t == "Company"   and g in active_set)
+    franchise = sorted(g for g, t in by_guid.items() if t == "Franchise" and g in active_set)
+    comping   = sorted(g for g in comping_guids if g in active_set)
+    return {
+        # "all_stores" uses an empty list → backend resolves it to every active
+        # location at call time, which is what the frontend sends when "Select
+        # All Locations" is checked. Matches that cache key.
+        "all_stores": [],
+        "Company":    company,
+        "Franchise":  franchise,
+        "Comping":    comping,
+    }
+
+
+def _current_fiscal_period_range(today: date) -> Optional[Tuple[date, date]]:
+    """
+    Look up `today`'s fiscal year + period in the aloha_sales_db
+    fiscal_calendar table, then return (period_start_date, yesterday). The
+    "MTD" range ends on yesterday so the precompute matches the report a
+    user would run in the morning (Toast has fully settled yesterday's data
+    by 5 AM).
+
+    Returns None if the fiscal calendar table is missing, empty, has no row
+    for `today`, or yesterday is before the period start.
+    """
+    try:
+        # Lazy import — aloha_sales_db only needed for this one optional path,
+        # and importing it eagerly would pull SQLite init into every CLI call.
+        import aloha_sales_db as _adb  # noqa: WPS433
+    except Exception as exc:
+        logger.warning("fiscal_calendar unavailable (import failed): %s", exc)
+        return None
+
+    try:
+        if not _adb.fiscal_calendar_available():
+            return None
+        with _adb.get_connection() as conn:
+            row = conn.execute(
+                "SELECT fiscal_year, fiscal_period FROM fiscal_calendar WHERE date = ?",
+                (today.isoformat(),),
+            ).fetchone()
+            if not row:
+                return None
+            fy, fp = row
+            start_row = conn.execute(
+                "SELECT MIN(date) FROM fiscal_calendar"
+                " WHERE fiscal_year = ? AND fiscal_period = ?",
+                (fy, fp),
+            ).fetchone()
+        if not start_row or not start_row[0]:
+            return None
+        period_start = date.fromisoformat(start_row[0])
+    except Exception as exc:
+        logger.warning("fiscal_calendar query failed: %s", exc)
+        return None
+
+    end_date = today - timedelta(days=1)
+    if end_date < period_start:
+        # First day of the period — no completed-day window to precompute yet.
+        return None
+    return (period_start, end_date)
+
+
+async def build_nightly_shapes(
+    base_url: str,
+    today: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Compose the runtime list of Menu Performance shapes for the nightly job.
+
+    Returns up to 12 shapes (3 date bases × 4 store groups). Skips shapes
+    whose group has no active stores or whose base date range can't be
+    resolved (fiscal-MTD if the calendar isn't loaded).
+
+    Each shape's `config` matches the exact normalized cache key the
+    frontend produces when a user opens that view — so the morning
+    /api/reports/run hits a fresh disk cache.
+    """
+    today = today or date.today()
+
+    try:
+        groups = await _discover_store_groups(base_url)
+    except Exception as exc:
+        logger.error("Could not discover store groups: %s", exc)
+        # Still return all_stores variants — they don't depend on grouping.
+        groups = {"all_stores": []}
+
+    bases: List[Dict[str, Any]] = [
+        {"label": "last_7_days",  "dateRangeType": "last_7_days"},
+        {"label": "last_30_days", "dateRangeType": "last_30_days"},
+    ]
+    fp_range = _current_fiscal_period_range(today)
+    if fp_range is not None:
+        fp_start, fp_end = fp_range
+        bases.append({
+            "label":           f"fiscal_period_MTD ({fp_start.isoformat()}..{fp_end.isoformat()})",
+            "dateRangeType":   "custom",
+            "customStartDate": fp_start.isoformat(),
+            "customEndDate":   fp_end.isoformat(),
+        })
+    else:
+        logger.info("Nightly precompute: skipping fiscal_period_MTD (calendar not available for today)")
+
+    shapes: List[Dict[str, Any]] = []
+    for base in bases:
+        base_label = base.pop("label")
+        for group_name, guids in groups.items():
+            # all_stores uses [] (the frontend's "Select All" default); other
+            # groups MUST have at least one GUID to be meaningful.
+            if group_name != "all_stores" and not guids:
+                continue
+            shape_label = f"{base_label} · {group_name}"
+            shapes.append(_shape(
+                shape_label,
+                **base,
+                restaurantIds=list(guids),
+            ))
+
+    return shapes
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -6359,6 +6359,84 @@ _scheduler.add_job(nightly_monkey_sync_job, CronTrigger(hour=4, minute=30),
                    id="nightly_monkey_sync", replace_existing=True)
 
 
+# ------------------
+# Nightly Menu Performance precompute
+#
+# Warms the disk JSON cache (backend/data/precomputed/menu_*.json) for the
+# 12 most-common Menu Performance shapes — 3 date bases × 4 store groups.
+# When Kim opens the page in the morning, every "Run Report" click that
+# matches one of these shapes returns in <100ms instead of doing the full
+# ~1M-row pivot + YoY enrichment.
+#
+# Runs at 5:00 AM after the upstream nightly pulls have settled. Total job
+# typically finishes by ~6:30 AM (12 shapes × 5-10min each, sequential).
+# Foundation for emailed report subscriptions — a subscription declares
+# one of these shapes; the email job reads the same cache and ships the
+# Excel without a second pivot.
+# ------------------
+
+_nightly_menu_precompute_last_result: Dict[str, Any] = {}
+
+
+async def nightly_menu_precompute_job():
+    """Build + execute the nightly Menu Performance shapes via loopback HTTP."""
+    import precompute_menu_report
+    logger.info("Nightly menu precompute started")
+    started = time.time()
+    try:
+        base_url = "http://127.0.0.1:8000"
+        shapes = await precompute_menu_report.build_nightly_shapes(base_url)
+        if not shapes:
+            logger.warning(
+                "Nightly menu precompute: no shapes to warm "
+                "(fiscal calendar missing? no active stores?)"
+            )
+            _nightly_menu_precompute_last_result.update({
+                "status":  "skipped",
+                "reason":  "no shapes built",
+                "ran_at":  datetime.now().isoformat(),
+            })
+            return
+        logger.info("Nightly menu precompute: running %d shapes", len(shapes))
+        summary = await precompute_menu_report.run_default_shapes(
+            base_url=base_url,
+            auth_header=None,
+            shapes=shapes,
+            on_progress=None,
+            request_timeout_s=1800.0,
+        )
+        ok = summary.get("ok_count", 0)
+        err = summary.get("error_count", 0)
+        elapsed = round(time.time() - started, 1)
+        _nightly_menu_precompute_last_result.update({
+            "status":       "success" if err == 0 else "partial",
+            "ok_count":     ok,
+            "error_count":  err,
+            "total_shapes": summary.get("total_shapes", 0),
+            "elapsed_s":    elapsed,
+            "ran_at":       datetime.now().isoformat(),
+            "shapes":       summary.get("shapes", []),
+        })
+        logger.info(
+            "Nightly menu precompute complete: %d/%d ok in %ss",
+            ok, summary.get("total_shapes", 0), elapsed,
+        )
+    except Exception as exc:
+        logger.error("Nightly menu precompute failed: %s", exc, exc_info=True)
+        _nightly_menu_precompute_last_result.update({
+            "status":    "failed",
+            "error":     str(exc),
+            "ran_at":    datetime.now().isoformat(),
+            "elapsed_s": round(time.time() - started, 1),
+        })
+
+
+# Schedule: 5:00 AM daily, after monkey sync (4:30) finishes. Gives the
+# 12-shape pass ~4 hours of headroom before a 9 AM analyst arrives.
+_scheduler.add_job(nightly_menu_precompute_job, CronTrigger(hour=5, minute=0),
+                   id="nightly_menu_precompute", replace_existing=True)
+
+
 @app.on_event("startup")
 async def _on_startup():
     toast_orders_db.initialize_db()
@@ -6366,7 +6444,10 @@ async def _on_startup():
     toast_config_db.initialize_db()
     monkey_db.initialize_db()
     _scheduler.start()
-    logger.info("APScheduler started — nightly jobs scheduled (orders@3AM, flash@4AM, monkey@4:30AM)")
+    logger.info(
+        "APScheduler started — nightly jobs scheduled "
+        "(orders@3AM, flash@4AM, monkey@4:30AM, menu_precompute@5AM)"
+    )
 
 
 @app.on_event("startup")
@@ -18468,6 +18549,28 @@ async def monkey_sync_now(payload: dict = Body(default={})):
 async def monkey_sync_status():
     """Return the last Monkey sync result."""
     return _nightly_monkey_last_result if _nightly_monkey_last_result else {"status": "never_run"}
+
+
+@app.get("/api/admin/nightly-menu-precompute/status")
+async def nightly_menu_precompute_status():
+    """Last-run status of the nightly Menu Performance precompute job.
+
+    Shape: {status, ok_count, error_count, total_shapes, elapsed_s, ran_at, shapes[]}
+    Each shape entry has {label, status, duration_s, cache, cache_key, ...}.
+    """
+    return _nightly_menu_precompute_last_result if _nightly_menu_precompute_last_result else {"status": "never_run"}
+
+
+@app.post("/api/admin/nightly-menu-precompute/run-now")
+async def nightly_menu_precompute_run_now(admin_user: User = Depends(get_current_admin_user)):
+    """
+    Trigger the nightly menu-precompute job immediately (instead of waiting
+    for the 5:00 AM cron). Useful for testing / one-off warming after a
+    mapping-table edit. Returns immediately; poll the /status endpoint
+    above for completion.
+    """
+    asyncio.create_task(nightly_menu_precompute_job())
+    return {"status": "started", "started_at": datetime.now().isoformat()}
 
 
 @app.get("/api/monkey/alerts/not-accepted")
