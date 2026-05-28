@@ -1559,15 +1559,41 @@
       return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
     }
 
+    // True while /api/yoy/aloha-dates is in flight. Drives the warning text
+    // so the user sees "Checking…" instead of the misleading "No data imported"
+    // banner during the fetch window.
+    let _alohaDatesLoading = false;
+
     async function loadAlohaDates() {
+      const ALOHA_DATES_CACHE_KEY = 'toastAlohaDatesCache';
+      const ALOHA_DATES_TTL_MS = 6 * 60 * 60 * 1000; // 6h — Aloha imports are infrequent
+
+      _alohaDatesLoading = true;
+      setBaseLoading('Aloha dates', true);
+      updateAlohaRangeWarning(); // re-render now that we know we're loading
+
       try {
-        const resp = await fetch('/api/yoy/aloha-dates');
-        if (!resp.ok) throw new Error('Failed to load Aloha dates');
-        const data = await resp.json();
+        const data = await cachedFetchJSON(
+          ALOHA_DATES_CACHE_KEY, ALOHA_DATES_TTL_MS,
+          async () => {
+            const resp = await fetch('/api/yoy/aloha-dates');
+            if (!resp.ok) throw new Error('Failed to load Aloha dates');
+            return await resp.json();
+          },
+          (fresh) => {
+            // Background refresh discovered new imports — silently update.
+            availableAlohaDates = fresh.available_dates || [];
+            updateAlohaRangeWarning();
+          }
+        );
         availableAlohaDates = data.available_dates || [];
         updateAlohaRangeWarning();
       } catch (err) {
         console.error('Error loading Aloha dates:', err);
+      } finally {
+        _alohaDatesLoading = false;
+        setBaseLoading('Aloha dates', false);
+        updateAlohaRangeWarning();
       }
     }
 
@@ -1578,6 +1604,13 @@
       if (!enableYoY.checked) {
         warnEl.classList.add('hidden');
         warnEl.textContent = '';
+        return;
+      }
+      // Don't claim "no data imported" until we've actually finished checking.
+      // Otherwise the user sees a misleading scary banner during the fetch.
+      if (_alohaDatesLoading && availableAlohaDates.length === 0) {
+        warnEl.textContent = 'Checking Aloha data availability…';
+        warnEl.classList.remove('hidden');
         return;
       }
       if (availableAlohaDates.length === 0) {
@@ -5291,17 +5324,21 @@
         if (list) list.innerHTML = '<div class="empty-state">Login to view your saved reports</div>';
       }
 
-      // Prefetch item tags when landing on Menu Performance, so flipping the
-      // "Filter By → Item Tags" dropdown is instant instead of triggering a
-      // cold /api/menu-items hit then. Runs in parallel with the others; if
-      // it fails or the cache is stale we'll still recover when the user
-      // clicks the filter (loadMenuItems is idempotent + cache-aware).
+      // Prefetch item tags AND Aloha YoY dates when landing on Menu
+      // Performance. Both are needed by the Menu report form and were
+      // previously cold-loaded on first interaction. Runs in parallel
+      // with the others; failures are non-fatal because the same
+      // functions will run lazily on first click (both are idempotent
+      // and cache-aware).
       try {
         const urlParams = new URLSearchParams(window.location.search);
         const reportParam = urlParams.get('report');
         if (reportParam === 'menu') {
           baseLoaders.push(loadMenuItems().catch(err => {
             console.error('Prefetch of menu items failed (non-fatal):', err);
+          }));
+          baseLoaders.push(loadAlohaDates().catch(err => {
+            console.error('Prefetch of Aloha dates failed (non-fatal):', err);
           }));
         }
       } catch (e) { /* URL parse — non-fatal */ }
