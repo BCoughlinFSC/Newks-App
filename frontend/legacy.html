@@ -386,6 +386,41 @@
     .loading-text { color: #ffffff; font-size: 1rem; font-weight: 600; text-align: center; }
     @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
 
+    /* ─── Base-data loading bar (top of the Report Builder card) ───
+       Shown when locations / item tags / ownership are loading or
+       refreshing in the background. Indeterminate animation so it
+       reads as "still working" without claiming a known % done. */
+    .base-loading-bar {
+      position: relative;
+      height: 3px;
+      background: #f0e8db;
+      border-radius: 2px;
+      overflow: hidden;
+      margin: 0.25rem 0 0.75rem;
+    }
+    .base-loading-bar.hidden { display: none; }
+    .base-loading-bar::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: -40%;
+      height: 100%;
+      width: 40%;
+      background: linear-gradient(90deg, transparent, #C41E3A, transparent);
+      animation: base-loading-slide 1.2s ease-in-out infinite;
+    }
+    @keyframes base-loading-slide {
+      0%   { left: -40%; }
+      100% { left: 100%; }
+    }
+    .base-loading-text {
+      font-size: 0.78rem;
+      color: #6B7280;
+      margin: 0.15rem 0 0;
+      font-style: italic;
+    }
+    .base-loading-text.hidden { display: none; }
+
     /* ─── Modal overlay ─────────────────────────────── */
     .modal-overlay {
       position: fixed; inset: 0;
@@ -583,6 +618,12 @@
       <!-- Report Builder card -->
       <div class="card">
         <h2 id="builderTitle">Report Builder</h2>
+
+        <!-- Base-data loading indicator. Stays visible while ANY of locations,
+             ownership, comping, item tags, or saved reports are fetching/
+             refreshing in the background. Driven by setBaseLoading(). -->
+        <div id="baseLoadingBar" class="base-loading-bar hidden" aria-hidden="true"></div>
+        <p id="baseLoadingText" class="base-loading-text hidden" aria-live="polite"></p>
 
         <!-- Report Name / Description / Save Report were retired when the builder
              was simplified. The reportName + reportDescription inputs and the
@@ -1077,6 +1118,107 @@
     }
 
     // ──────────────────────────────────────────────────────────
+    // Base-data loading bar
+    //
+    // setBaseLoading('locations', true)  — labels accumulate
+    // setBaseLoading('locations', false) — drop label when done
+    // While any label is active the thin progress bar above the form
+    // is visible and the status text lists what's still loading. Gives
+    // the user a clear signal that the page is working — the browser
+    // tab favicon doesn't spin for JS-driven fetches.
+    // ──────────────────────────────────────────────────────────
+    const _baseLoadingLabels = new Set();
+    function setBaseLoading(label, active) {
+      if (active) _baseLoadingLabels.add(label);
+      else _baseLoadingLabels.delete(label);
+      const bar = document.getElementById('baseLoadingBar');
+      const txt = document.getElementById('baseLoadingText');
+      if (!bar || !txt) return;
+      if (_baseLoadingLabels.size === 0) {
+        bar.classList.add('hidden');
+        txt.classList.add('hidden');
+        txt.textContent = '';
+      } else {
+        bar.classList.remove('hidden');
+        txt.classList.remove('hidden');
+        txt.textContent = 'Loading ' + [..._baseLoadingLabels].join(' · ') + '…';
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // fetchWithRetry — fetch() that retries ONCE on network error
+    // or 5xx after a short backoff. Used for /locations so a single
+    // transient Toast API hiccup doesn't force the user to refresh.
+    // 4xx errors are returned as-is (no point retrying auth/validation).
+    // ──────────────────────────────────────────────────────────
+    async function fetchWithRetry(url, opts = {}, { retries = 1, backoffMs = 1500 } = {}) {
+      let lastErr;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const resp = await fetch(url, opts);
+          // Only retry 5xx (transient upstream). 2xx/3xx/4xx → return immediately.
+          if (resp.ok || attempt === retries || resp.status < 500) return resp;
+        } catch (err) {
+          lastErr = err;
+          if (attempt === retries) throw err;
+        }
+        await new Promise(r => setTimeout(r, backoffMs));
+      }
+      if (lastErr) throw lastErr;
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // cachedFetchJSON — stale-while-revalidate localStorage cache.
+    //
+    //   const data = await cachedFetchJSON(key, ttlMs, fetcher, onUpdate);
+    //
+    //   1) If a cached value exists AND is younger than ttlMs, return
+    //      it IMMEDIATELY. Then fire a background fetch; if the fresh
+    //      payload differs from cached, persist it and call onUpdate
+    //      so the caller can re-render in place.
+    //   2) Otherwise fetch fresh, persist, return.
+    //
+    // Pass ttlMs=0 to force a bypass (cache is treated as expired).
+    // ──────────────────────────────────────────────────────────
+    async function cachedFetchJSON(key, ttlMs, fetcher, onUpdate) {
+      let cached = null;
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.timestamp === 'number') {
+            const age = Date.now() - parsed.timestamp;
+            if (age >= 0 && age < ttlMs) cached = parsed.value;
+          }
+        }
+      } catch (e) { /* corrupt cache — ignore */ }
+
+      const persist = (value) => {
+        try {
+          window.localStorage.setItem(key, JSON.stringify({ value, timestamp: Date.now() }));
+        } catch (e) { /* localStorage may be full or disabled — non-fatal */ }
+      };
+
+      if (cached !== null) {
+        // Stale-while-revalidate: silently refresh in background.
+        (async () => {
+          try {
+            const fresh = await fetcher();
+            if (JSON.stringify(fresh) !== JSON.stringify(cached)) {
+              persist(fresh);
+              if (typeof onUpdate === 'function') onUpdate(fresh);
+            }
+          } catch (e) { /* keep showing cached value if refresh fails */ }
+        })();
+        return cached;
+      }
+
+      const fresh = await fetcher();
+      persist(fresh);
+      return fresh;
+    }
+
+    // ──────────────────────────────────────────────────────────
     // Locations
     // ──────────────────────────────────────────────────────────
     async function loadLocations(forceRefresh = false) {
@@ -1084,70 +1226,88 @@
       const diagEl = document.getElementById('locationsDiag');
       if (grid) grid.innerHTML = '<div style="padding: 0.25rem; color: #555c7b; font-size: 0.85rem;">Loading locations…</div>';
       if (diagEl) diagEl.classList.add('hidden');
-      const CACHE_KEY = 'toastLocationsCache';
-      const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-      // Always fetch ownership (lightweight, no cache) so filters work regardless of location cache
-      try {
-        const ownResp = await fetch('/api/location-ownership', { headers: authToken ? getAuthHeaders() : {} });
-        if (ownResp.ok) {
-          const ownData = await ownResp.json();
-          ownershipByGuid = ownData.byGuid || {};
-        }
-        // Comping set — Daily Sales Flash "comp store" group, used by the
-        // "All Comping" filter button. Lightweight, no cache.
-        try {
-          const compResp = await fetch('/api/locations/comping', { headers: authToken ? getAuthHeaders() : {} });
-          if (compResp.ok) {
-            const compData = await compResp.json();
-            compingGuidSet = new Set(compData.guids || []);
-          }
-        } catch {}
-      } catch (e) { /* non-fatal */ }
+      const LOC_CACHE_KEY       = 'toastLocationsCacheV2';
+      const OWNERSHIP_CACHE_KEY = 'toastOwnershipCache';
+      const COMPING_CACHE_KEY   = 'toastCompingCache';
+      const TTL_24H = 24 * 60 * 60 * 1000;
+      const locTtl  = forceRefresh ? 0 : TTL_24H;
 
-      if (!forceRefresh) {
-        try {
-          const raw = window.localStorage.getItem(CACHE_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed && Array.isArray(parsed.locations) && typeof parsed.timestamp === 'number') {
-              const age = Date.now() - parsed.timestamp;
-              if (age >= 0 && age < CACHE_TTL_MS) {
-                locations = parsed.locations;
-                renderLocations();
-                // Show a "filtered" note if the user has assigned restaurants
-                if (currentUser?.role !== 'admin' && currentUser?.assignedRestaurants?.length > 0) {
-                  const el = document.getElementById('locationCount');
-                  if (el) el.textContent = `${locations.length} location(s) — filtered`;
-                }
-                return;
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Failed to read cached locations; falling back to network.', e);
-        }
-      }
-      try {
-        const resp = await fetch('/locations', { headers: authToken ? getAuthHeaders() : {} });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
-        locations = await resp.json();
-        try {
-          window.localStorage.setItem(CACHE_KEY, JSON.stringify({ locations, timestamp: Date.now() }));
-        } catch (e) {
-          console.warn('Failed to cache locations in localStorage.', e);
-        }
-        renderLocations();
-        // Show a "filtered" note if the user has assigned restaurants
+      setBaseLoading('locations', true);
+
+      // Update the data-ownership / data-comping attrs on already-rendered
+      // checkboxes when a background refresh discovers new values. Re-attaches
+      // change handlers via renderLocations only when locations themselves change.
+      const reskinCheckboxes = () => {
+        document.querySelectorAll('.location-checkbox').forEach(cb => {
+          cb.dataset.ownership = ownershipByGuid[cb.value] || 'Franchise';
+          cb.dataset.comping = compingGuidSet.has(cb.value) ? 'true' : 'false';
+        });
+      };
+
+      // ── Ownership + Comping load in parallel (24h SWR localStorage cache).
+      // These almost never change so a long TTL is fine — background refresh
+      // catches changes silently. Old code re-fetched both on EVERY page load.
+      const ownershipPromise = cachedFetchJSON(
+        OWNERSHIP_CACHE_KEY, TTL_24H,
+        async () => {
+          const resp = await fetch('/api/location-ownership', { headers: authToken ? getAuthHeaders() : {} });
+          if (!resp.ok) throw new Error('ownership ' + resp.status);
+          const data = await resp.json();
+          return data.byGuid || {};
+        },
+        (fresh) => { ownershipByGuid = fresh; reskinCheckboxes(); }
+      ).then(v => { ownershipByGuid = v; }).catch(() => {});
+
+      const compingPromise = cachedFetchJSON(
+        COMPING_CACHE_KEY, TTL_24H,
+        async () => {
+          const resp = await fetch('/api/locations/comping', { headers: authToken ? getAuthHeaders() : {} });
+          if (!resp.ok) throw new Error('comping ' + resp.status);
+          const data = await resp.json();
+          return data.guids || [];
+        },
+        (fresh) => { compingGuidSet = new Set(fresh); reskinCheckboxes(); }
+      ).then(v => { compingGuidSet = new Set(v); }).catch(() => {});
+
+      await Promise.all([ownershipPromise, compingPromise]);
+
+      // ── Locations themselves (24h SWR cache + auto-retry on transient 5xx). ──
+      const setFilteredCountLabel = () => {
         if (currentUser?.role !== 'admin' && currentUser?.assignedRestaurants?.length > 0) {
           const el = document.getElementById('locationCount');
           if (el) el.textContent = `${locations.length} location(s) — filtered`;
         }
+      };
+
+      try {
+        locations = await cachedFetchJSON(
+          LOC_CACHE_KEY, locTtl,
+          async () => {
+            const resp = await fetchWithRetry(
+              '/locations',
+              { headers: authToken ? getAuthHeaders() : {} },
+              { retries: 1, backoffMs: 1500 }
+            );
+            if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+            return await resp.json();
+          },
+          (fresh) => {
+            // Background refresh discovered a new location list — swap & re-render.
+            locations = fresh;
+            renderLocations();
+            setFilteredCountLabel();
+          }
+        );
+        renderLocations();
+        setFilteredCountLabel();
       } catch (err) {
         console.error('Error loading locations:', err);
         if (grid) grid.innerHTML = `<div style="padding:0.35rem; color:#ff8080; font-size:0.82rem;">Failed to load locations: ${err.message}</div>`;
         if (diagEl) diagEl.classList.remove('hidden');
         showStatus('warning', `⚠ Locations could not be loaded (${err.message}). Check API health or retry.`);
+      } finally {
+        setBaseLoading('locations', false);
       }
     }
 
@@ -1287,12 +1447,24 @@
     // Report types
     // ──────────────────────────────────────────────────────────
     async function loadReportTypes() {
+      const REPORT_TYPES_CACHE_KEY = 'toastReportTypesCache';
+      const REPORT_TYPES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — basically static config
+      setBaseLoading('report types', true);
       try {
-        const resp = await fetch('/api/report-types');
-        reportTypeOptions = await resp.json();
+        reportTypeOptions = await cachedFetchJSON(
+          REPORT_TYPES_CACHE_KEY, REPORT_TYPES_TTL_MS,
+          async () => {
+            const resp = await fetch('/api/report-types');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return await resp.json();
+          },
+          (fresh) => { reportTypeOptions = fresh; updateFilterByOptions(); }
+        );
         updateFilterByOptions();
       } catch (err) {
         console.error('Error loading report types:', err);
+      } finally {
+        setBaseLoading('report types', false);
       }
     }
 
@@ -1306,6 +1478,7 @@
         return;
       }
       if (list) list.innerHTML = '<div style="padding: 0.5rem; color: #555c7b; font-size:0.85rem;">Loading…</div>';
+      setBaseLoading('saved reports', true);
       try {
         const resp = await fetch('/api/saved-reports', { headers: getAuthHeaders() });
         if (resp.status === 401) { clearAuth(); return; }
@@ -1316,6 +1489,8 @@
         console.error('Error loading saved reports:', err);
         if (list) list.innerHTML = `<div style="padding:0.4rem; color:#ff8080; font-size:0.82rem;">Error loading reports: ${err.message}</div>`;
         if (err.message.includes('401')) clearAuth();
+      } finally {
+        setBaseLoading('saved reports', false);
       }
     }
 
@@ -1463,20 +1638,61 @@
     // ──────────────────────────────────────────────────────────
     async function loadMenuItems() {
       const statusEl = document.getElementById('itemTagsLoadingStatus');
-      statusEl.textContent = 'Loading item tags…';
-      statusEl.classList.remove('hidden');
+      const sectionEl = document.getElementById('itemTagsSection');
+      const ITEM_TAGS_CACHE_KEY = 'toastItemTagsCache';
+      const ITEM_TAGS_TTL_MS = 60 * 60 * 1000; // 1 hour — matches backend _MENU_ITEMS_CACHE_TTL_S
+
+      if (statusEl) {
+        statusEl.textContent = 'Loading item tags…';
+        statusEl.classList.remove('hidden');
+        statusEl.style.color = '';
+      }
+      setBaseLoading('item tags', true);
+
       try {
-        const resp = await fetch('/api/menu-items');
-        if (!resp.ok) throw new Error('Failed to load menu items');
-        const data = await resp.json();
+        const data = await cachedFetchJSON(
+          ITEM_TAGS_CACHE_KEY, ITEM_TAGS_TTL_MS,
+          async () => {
+            const resp = await fetch('/api/menu-items');
+            if (!resp.ok) throw new Error('Failed to load menu items');
+            return await resp.json();
+          },
+          (fresh) => {
+            // Background refresh found new tags — repopulate the (possibly
+            // hidden) grid so any subsequent open shows the new set, and
+            // preserves the user's current checkbox selection if possible.
+            if (fresh && Array.isArray(fresh.allTags)) {
+              const prevChecked = new Set(
+                [...document.querySelectorAll('.itemtag-checkbox:checked')].map(cb => cb.value)
+              );
+              menuItems = fresh.items;
+              allItemTags = fresh.allTags;
+              renderItemTags();
+              if (prevChecked.size > 0) {
+                document.querySelectorAll('.itemtag-checkbox').forEach(cb => {
+                  if (prevChecked.has(cb.value)) cb.checked = true;
+                });
+                updateItemTagCount();
+              }
+            }
+          }
+        );
         menuItems = data.items;
         allItemTags = data.allTags;
+        // Populate the grid even when the parent section is hidden — the
+        // grid markup is fine to build offscreen, and pre-rendering means
+        // the first click on "Filter By → Item Tags" reveals fully-rendered
+        // content instead of an empty box.
         renderItemTags();
-        statusEl.classList.add('hidden');
+        if (statusEl) statusEl.classList.add('hidden');
       } catch (err) {
         console.error('Error loading menu items:', err);
-        statusEl.textContent = 'Error loading item tags. Please try again.';
-        statusEl.style.color = '#ff8080';
+        if (statusEl) {
+          statusEl.textContent = 'Error loading item tags. Please try again.';
+          statusEl.style.color = '#ff8080';
+        }
+      } finally {
+        setBaseLoading('item tags', false);
       }
     }
 
@@ -5074,6 +5290,22 @@
         const list = document.getElementById('savedReportsList');
         if (list) list.innerHTML = '<div class="empty-state">Login to view your saved reports</div>';
       }
+
+      // Prefetch item tags when landing on Menu Performance, so flipping the
+      // "Filter By → Item Tags" dropdown is instant instead of triggering a
+      // cold /api/menu-items hit then. Runs in parallel with the others; if
+      // it fails or the cache is stale we'll still recover when the user
+      // clicks the filter (loadMenuItems is idempotent + cache-aware).
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const reportParam = urlParams.get('report');
+        if (reportParam === 'menu') {
+          baseLoaders.push(loadMenuItems().catch(err => {
+            console.error('Prefetch of menu items failed (non-fatal):', err);
+          }));
+        }
+      } catch (e) { /* URL parse — non-fatal */ }
+
       await Promise.all(baseLoaders);
 
       // Drive the form state from the URL after base data is loaded.
