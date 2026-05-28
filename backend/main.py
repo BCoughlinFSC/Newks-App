@@ -5621,14 +5621,84 @@ _scheduler = AsyncIOScheduler()
 _nightly_job_last_result: Dict[str, Any] = {}  # Track last run result for admin visibility
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Reconciliation tunables (env-overridable, sane defaults)
+#
+# Toast lets restaurants amend/void orders for past business dates (a refund
+# issued 3 days late, an item added to a check after closeout, etc.). The
+# nightly pull used to skip already-cached dates, so those amendments never
+# made it into our local DB — historical reports drifted out of sync.
+#
+# The new behavior re-pulls the last N days on every nightly run. Each pull
+# computes an aggregate snapshot (net sales, check count, voided count) and
+# compares against the previous snapshot. If the delta crosses one of the
+# thresholds below, the change is collected and an email summary fires at
+# the end of the job.
+# ──────────────────────────────────────────────────────────────────────────────
+
+RECONCILE_WINDOW_DAYS = int(os.getenv("RECONCILE_WINDOW_DAYS", "7"))
+RECONCILE_NET_SALES_THRESHOLD_USD = float(os.getenv("RECONCILE_NET_SALES_THRESHOLD_USD", "50"))
+RECONCILE_CHECK_COUNT_THRESHOLD = int(os.getenv("RECONCILE_CHECK_COUNT_THRESHOLD", "2"))
+RECONCILE_ALERT_RECIPIENTS = [
+    addr.strip()
+    for addr in (os.getenv("RECONCILE_ALERT_RECIPIENTS", "") or "").split(",")
+    if addr.strip()
+]
+
+
+def _is_large_reconciliation_change(before: Dict[str, Any], after: Dict[str, Any]) -> bool:
+    """
+    Return True if the delta between two aggregate snapshots crosses any
+    configured reconciliation threshold (net-sales $ change OR check-count
+    change OR voided-check-count change).
+    """
+    if not before or not after:
+        return False
+    net_delta = abs((after.get("net_sales", 0) or 0) - (before.get("net_sales", 0) or 0))
+    if net_delta >= RECONCILE_NET_SALES_THRESHOLD_USD:
+        return True
+    check_delta = abs((after.get("check_count", 0) or 0) - (before.get("check_count", 0) or 0))
+    if check_delta >= RECONCILE_CHECK_COUNT_THRESHOLD:
+        return True
+    voided_delta = abs((after.get("voided_count", 0) or 0) - (before.get("voided_count", 0) or 0))
+    if voided_delta >= RECONCILE_CHECK_COUNT_THRESHOLD:
+        return True
+    return False
+
+
 async def nightly_orders_cache_job():
-    """Fetch yesterday's orders for all active restaurants and cache them."""
-    yesterday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
-    logger.info("Nightly orders cache job started for business_date=%s", yesterday)
+    """
+    Pull yesterday's orders + reconcile the prior RECONCILE_WINDOW_DAYS-1 days.
+
+    Reconciliation strategy:
+      - For yesterday: pull if not already cached (the day's first ingest).
+      - For day-2 through day-N: ALWAYS re-pull, even if the date is already
+        cached. The store_orders() function is delete-then-insert, so the
+        local DB ends up mirroring Toast's current state. Aggregate snapshots
+        before/after the re-pull surface "large change" amendments — those
+        get emailed as a batched summary at the end of the run.
+
+    Skipped dates (already cached + within window but pull failed earlier)
+    are NOT skipped by the reconcile loop — that's the whole point.
+    """
+    today = date.today()
+    yesterday_date = today - timedelta(days=1)
+    yesterday = yesterday_date.strftime("%Y%m%d")
+    window_dates: List[date] = [yesterday_date - timedelta(days=i) for i in range(RECONCILE_WINDOW_DAYS)]
+    window_str = (
+        f"{window_dates[-1].isoformat()}..{window_dates[0].isoformat()}"
+        if window_dates else "(empty)"
+    )
+    logger.info(
+        "Nightly orders cache + reconcile started · window=%s · thresholds: $%.2f net, %d checks/voids",
+        window_str, RECONCILE_NET_SALES_THRESHOLD_USD, RECONCILE_CHECK_COUNT_THRESHOLD,
+    )
 
     success_count = 0
     fail_count = 0
     skipped_count = 0
+    reconciled_count = 0
+    changes: List[Dict[str, Any]] = []
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -5637,33 +5707,115 @@ async def nightly_orders_cache_job():
 
             for i, loc in enumerate(locations, 1):
                 rguid = loc.restaurantGuid
-                if toast_orders_db.is_date_cached(rguid, yesterday):
-                    skipped_count += 1
-                    continue
-                try:
-                    toast_orders_db.mark_import_started(rguid, yesterday)
-                    orders = await _fetch_orders_from_toast_api(client, rguid, yesterday)
-                    toast_orders_db.store_orders(rguid, yesterday, orders)
-                    success_count += 1
-                    logger.info("Nightly cache: %s (%d/%d) — %d orders",
-                                rguid[:8], i, total, len(orders))
-                    await asyncio.sleep(0.5)  # Rate limit courtesy
-                except Exception as exc:
-                    fail_count += 1
-                    toast_orders_db.mark_import_failed(rguid, yesterday, str(exc))
-                    logger.error("Nightly cache failed for %s: %s", rguid[:8], exc)
+                rname = loc.restaurantName
+
+                for window_idx, bdate_dt in enumerate(window_dates):
+                    bdate = bdate_dt.strftime("%Y%m%d")
+                    is_yesterday = (window_idx == 0)
+
+                    # Yesterday: skip if already cached (idempotent across reruns).
+                    # Older dates: ALWAYS re-pull to capture amendments.
+                    if is_yesterday and toast_orders_db.is_date_cached(rguid, bdate):
+                        skipped_count += 1
+                        continue
+
+                    # Snapshot the existing aggregate before the re-pull so we
+                    # can diff against the post-pull aggregate. Yesterday's
+                    # first pull has no "before" — that's fine, no change to
+                    # detect.
+                    before_agg = (
+                        toast_orders_db.get_aggregate(rguid, bdate)
+                        if not is_yesterday else None
+                    )
+
+                    try:
+                        toast_orders_db.mark_import_started(rguid, bdate)
+                        orders = await _fetch_orders_from_toast_api(client, rguid, bdate)
+                        toast_orders_db.store_orders(rguid, bdate, orders)
+                        after_agg = toast_orders_db.compute_aggregates(orders)
+                        toast_orders_db.save_aggregate(rguid, bdate, after_agg)
+
+                        if is_yesterday:
+                            success_count += 1
+                            logger.info(
+                                "Nightly cache: %s %s (%d/%d) — %d orders",
+                                rguid[:8], bdate, i, total, len(orders),
+                            )
+                        else:
+                            reconciled_count += 1
+                            if before_agg and _is_large_reconciliation_change(before_agg, after_agg):
+                                changes.append({
+                                    "restaurant_name":     rname,
+                                    "restaurant_guid":     rguid,
+                                    "business_date":       bdate,
+                                    "net_sales_before":    before_agg.get("net_sales", 0),
+                                    "net_sales_after":     after_agg.get("net_sales", 0),
+                                    "net_sales_delta":     round(
+                                        after_agg.get("net_sales", 0) - before_agg.get("net_sales", 0), 2
+                                    ),
+                                    "check_count_before":  before_agg.get("check_count", 0),
+                                    "check_count_after":   after_agg.get("check_count", 0),
+                                    "voided_before":       before_agg.get("voided_count", 0),
+                                    "voided_after":        after_agg.get("voided_count", 0),
+                                    "voided_delta":        (
+                                        after_agg.get("voided_count", 0) - before_agg.get("voided_count", 0)
+                                    ),
+                                })
+                                logger.info(
+                                    "Reconcile change: %s %s · net $%.2f → $%.2f (Δ $%+.2f) · checks %d → %d",
+                                    rname, bdate,
+                                    before_agg.get("net_sales", 0), after_agg.get("net_sales", 0),
+                                    after_agg.get("net_sales", 0) - before_agg.get("net_sales", 0),
+                                    before_agg.get("check_count", 0), after_agg.get("check_count", 0),
+                                )
+                        await asyncio.sleep(0.3)  # Rate limit courtesy
+                    except Exception as exc:
+                        fail_count += 1
+                        toast_orders_db.mark_import_failed(rguid, bdate, str(exc))
+                        logger.error("Nightly pull failed for %s %s: %s", rguid[:8], bdate, exc)
     except Exception as exc:
         logger.error("Nightly orders cache job failed: %s", exc)
 
+    # Sort changes by absolute net-sales delta descending so the email
+    # surfaces the biggest amendments first.
+    changes.sort(key=lambda c: abs(c.get("net_sales_delta", 0)), reverse=True)
+
     _nightly_job_last_result.update({
-        "business_date": yesterday,
-        "success": success_count,
-        "failed": fail_count,
-        "skipped": skipped_count,
-        "completed_at": datetime.now().isoformat(),
+        "business_date":         yesterday,
+        "window_days":           RECONCILE_WINDOW_DAYS,
+        "window":                window_str,
+        "success":               success_count,    # yesterday's first-time imports
+        "failed":                fail_count,
+        "skipped":               skipped_count,    # yesterday already cached
+        "reconciled":            reconciled_count, # re-pulls of older days
+        "changes_detected":      len(changes),
+        "alert_sent":            False,
+        "completed_at":          datetime.now().isoformat(),
     })
-    logger.info("Nightly orders cache completed: %d success, %d failed, %d skipped",
-                success_count, fail_count, skipped_count)
+    logger.info(
+        "Nightly orders cache + reconcile completed: %d new, %d reconciled, %d failed, %d skipped, %d changes",
+        success_count, reconciled_count, fail_count, skipped_count, len(changes),
+    )
+
+    # ── Fire the large-change alert email (best-effort, never raise) ──
+    if changes and RECONCILE_ALERT_RECIPIENTS:
+        try:
+            from email_service import send_reconciliation_alert_email
+            sent = await asyncio.to_thread(
+                send_reconciliation_alert_email,
+                changes,
+                RECONCILE_ALERT_RECIPIENTS,
+                RECONCILE_WINDOW_DAYS,
+                window_str,
+            )
+            _nightly_job_last_result["alert_sent"] = bool(sent)
+        except Exception as exc:
+            logger.error("Failed to send reconciliation alert email: %s", exc, exc_info=True)
+    elif changes:
+        logger.warning(
+            "Reconcile detected %d large changes but RECONCILE_ALERT_RECIPIENTS is empty — no email sent",
+            len(changes),
+        )
 
     # ── Auto-retry previously failed imports ──
     try:
@@ -5684,6 +5836,11 @@ async def nightly_orders_cache_job():
                     try:
                         orders = await _fetch_orders_from_toast_api(retry_client, rguid, bdate)
                         toast_orders_db.store_orders(rguid, bdate, orders)
+                        # Snapshot the aggregate so future reconcile runs can
+                        # detect amendments on this date too.
+                        toast_orders_db.save_aggregate(
+                            rguid, bdate, toast_orders_db.compute_aggregates(orders),
+                        )
                         retry_success += 1
                         await asyncio.sleep(0.5)
                     except Exception as retry_exc:
@@ -5779,6 +5936,11 @@ async def nightly_historical_backfill():
                         toast_orders_db.mark_import_started(rguid, bdate)
                         orders = await _fetch_orders_from_toast_api(client, rguid, bdate)
                         toast_orders_db.store_orders(rguid, bdate, orders)
+                        # Snapshot the aggregate so reconciliation has a baseline
+                        # if the window is ever widened to include this date.
+                        toast_orders_db.save_aggregate(
+                            rguid, bdate, toast_orders_db.compute_aggregates(orders),
+                        )
                         day_success += 1
                         await asyncio.sleep(0.3)
                     except Exception as exc:
@@ -18570,6 +18732,41 @@ async def nightly_menu_precompute_run_now(admin_user: User = Depends(get_current
     above for completion.
     """
     asyncio.create_task(nightly_menu_precompute_job())
+    return {"status": "started", "started_at": datetime.now().isoformat()}
+
+
+@app.get("/api/admin/nightly-reconcile/status")
+async def nightly_reconcile_status():
+    """
+    Last-run status of the nightly orders cache + reconciliation job.
+
+    Shape:
+      {
+        business_date:   "20260527",
+        window_days:     7,
+        window:          "20260521..20260527",
+        success:         88,    # new yesterday pulls
+        reconciled:      560,   # re-pulls of older window days (6 × 88-ish)
+        failed:          2,
+        skipped:         0,
+        changes_detected: 3,    # large changes that crossed thresholds
+        alert_sent:      true,
+        completed_at:    "2026-05-28T03:48:12"
+      }
+    """
+    return _nightly_job_last_result if _nightly_job_last_result else {"status": "never_run"}
+
+
+@app.post("/api/admin/nightly-reconcile/run-now")
+async def nightly_reconcile_run_now(admin_user: User = Depends(get_current_admin_user)):
+    """
+    Trigger the nightly orders cache + reconciliation job immediately.
+    Useful for testing the reconciliation logic + alert email without
+    waiting for the 3:00 AM cron. Returns right away — poll the /status
+    endpoint above for completion. Takes ~5-15 minutes for a 7-day window
+    across ~90 stores.
+    """
+    asyncio.create_task(nightly_orders_cache_job())
     return {"status": "started", "started_at": datetime.now().isoformat()}
 
 

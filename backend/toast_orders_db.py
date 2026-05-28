@@ -72,6 +72,26 @@ CREATE TABLE IF NOT EXISTS import_status (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_import_status_unique
     ON import_status(restaurant_guid, business_date);
+
+-- Per-(store, business_date) aggregate snapshots. Recomputed every time
+-- store_orders() runs so we can detect "this day's net sales changed
+-- since the last pull" — the signal that a restaurant amended a past
+-- order (void, item add/remove, discount, etc.) since we last polled.
+-- The reconciliation job compares before vs after these values and
+-- fires an email alert when a change crosses configured thresholds.
+CREATE TABLE IF NOT EXISTS order_aggregates (
+    restaurant_guid  TEXT    NOT NULL,
+    business_date    TEXT    NOT NULL,        -- YYYYMMDD
+    net_sales        REAL    NOT NULL DEFAULT 0,   -- sum of check.amount for non-voided/non-deleted
+    gross_sales      REAL    NOT NULL DEFAULT 0,   -- sum of check.totalAmount (incl. tax)
+    tax_amount       REAL    NOT NULL DEFAULT 0,   -- sum of check.taxAmount
+    discount_amount  REAL    NOT NULL DEFAULT 0,   -- sum of check.appliedDiscounts[].discountAmount
+    order_count      INTEGER NOT NULL DEFAULT 0,
+    check_count      INTEGER NOT NULL DEFAULT 0,   -- non-voided/non-deleted only
+    voided_count     INTEGER NOT NULL DEFAULT 0,   -- voided OR deleted checks
+    computed_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (restaurant_guid, business_date)
+);
 """
 
 
@@ -171,6 +191,133 @@ def store_orders(
         )
 
     return len(records)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Aggregate snapshots — reconciliation support
+#
+# compute_aggregates() is a pure function so the same logic can run before
+# AND after a re-pull, giving us a clean "did anything change?" comparison.
+# save_aggregate() upserts into the order_aggregates table after store_orders
+# has committed. get_aggregate() reads the snapshot for change detection.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def compute_aggregates(orders: List[Dict]) -> Dict[str, float]:
+    """
+    Compute (order_count, check_count, voided_count, net_sales, gross_sales,
+    tax_amount, discount_amount) from a list of Toast order JSON dicts.
+
+    Voided OR deleted checks are EXCLUDED from sales totals + the live
+    check_count, but counted separately in voided_count so we can detect
+    "5 checks were voided since yesterday" as a notable change even if
+    the net-sales delta is small.
+    """
+    net_sales = 0.0
+    gross_sales = 0.0
+    tax_amount = 0.0
+    discount_amount = 0.0
+    order_count = 0
+    check_count = 0
+    voided_count = 0
+
+    for order in orders or []:
+        order_count += 1
+        for check in (order.get("checks") or []):
+            voided = bool(check.get("voided"))
+            deleted = bool(check.get("deleted"))
+            if voided or deleted:
+                voided_count += 1
+                continue
+            check_count += 1
+            try:
+                net_sales += float(check.get("amount") or 0)
+                gross_sales += float(check.get("totalAmount") or 0)
+                tax_amount += float(check.get("taxAmount") or 0)
+                for disc in (check.get("appliedDiscounts") or []):
+                    if isinstance(disc, dict):
+                        discount_amount += float(disc.get("discountAmount") or 0)
+            except (TypeError, ValueError):
+                # Bad number — keep the count, skip the amount add
+                pass
+
+    return {
+        "net_sales":       round(net_sales, 2),
+        "gross_sales":     round(gross_sales, 2),
+        "tax_amount":      round(tax_amount, 2),
+        "discount_amount": round(discount_amount, 2),
+        "order_count":     order_count,
+        "check_count":     check_count,
+        "voided_count":    voided_count,
+    }
+
+
+def save_aggregate(
+    restaurant_guid: str,
+    business_date: str,
+    agg: Dict[str, float],
+    db_path: str = ORDERS_DB_PATH,
+) -> None:
+    """Upsert a pre-computed aggregate dict for (restaurant, date)."""
+    initialize_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "INSERT INTO order_aggregates"
+            " (restaurant_guid, business_date, net_sales, gross_sales, tax_amount,"
+            "  discount_amount, order_count, check_count, voided_count, computed_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))"
+            " ON CONFLICT(restaurant_guid, business_date) DO UPDATE SET"
+            "   net_sales       = excluded.net_sales,"
+            "   gross_sales     = excluded.gross_sales,"
+            "   tax_amount      = excluded.tax_amount,"
+            "   discount_amount = excluded.discount_amount,"
+            "   order_count     = excluded.order_count,"
+            "   check_count     = excluded.check_count,"
+            "   voided_count    = excluded.voided_count,"
+            "   computed_at     = datetime('now')",
+            (
+                restaurant_guid, business_date,
+                agg.get("net_sales", 0.0),
+                agg.get("gross_sales", 0.0),
+                agg.get("tax_amount", 0.0),
+                agg.get("discount_amount", 0.0),
+                agg.get("order_count", 0),
+                agg.get("check_count", 0),
+                agg.get("voided_count", 0),
+            ),
+        )
+
+
+def get_aggregate(
+    restaurant_guid: str,
+    business_date: str,
+    db_path: str = ORDERS_DB_PATH,
+) -> Optional[Dict[str, float]]:
+    """Return the snapshot dict for (restaurant, date), or None if never computed."""
+    if not db_available(db_path):
+        return None
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT net_sales, gross_sales, tax_amount, discount_amount,"
+                "       order_count, check_count, voided_count, computed_at"
+                " FROM order_aggregates"
+                " WHERE restaurant_guid = ? AND business_date = ?",
+                (restaurant_guid, business_date),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "net_sales":       row[0],
+            "gross_sales":     row[1],
+            "tax_amount":      row[2],
+            "discount_amount": row[3],
+            "order_count":     row[4],
+            "check_count":     row[5],
+            "voided_count":    row[6],
+            "computed_at":     row[7],
+        }
+    except Exception:
+        return None
 
 
 def mark_import_failed(
