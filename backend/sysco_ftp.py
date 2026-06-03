@@ -33,6 +33,7 @@ import argparse
 import logging
 import os
 import re
+import shutil
 import smtplib
 import socket
 import sys
@@ -305,13 +306,13 @@ def run_invoices(args, log: logging.Logger) -> int:
         store_id = parse_store_id(local.name)
         if store_id and store_id in NOT_ON_CT_STORES:
             dst = INV_NOT_ON_CT / local.name
-            local.rename(dst)
+            shutil.move(str(local), str(dst))
             log.info("Filtering (not on CT, store %s): %s → %s",
                      store_id, local.name, dst)
             to_notct += 1
         else:
             dst = INV_DEST / local.name
-            local.rename(dst)
+            shutil.move(str(local), str(dst))
             log.info("Sending to CDP: %s → %s", local.name, dst)
             to_cdp += 1
 
