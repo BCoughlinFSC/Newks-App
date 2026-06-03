@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Contacts - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #F8FAFC;
+      color: #2c2c2c;
+    }
+    .header {
+      background: #C41E3A;
+      padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p  { margin: 0.5rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+    .home-btn {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+
+    main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+    .intro {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-left: 4px solid #1E3A5F;
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .intro h2 { margin: 0 0 0.5rem; color: #1E3A5F; font-size: 1.1rem; }
+    .intro p  { margin: 0.25rem 0; color: #4B5563; font-size: 0.9rem; line-height: 1.5; }
+
+    .group-label {
+      font-size: 0.8rem;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+      margin: 1.5rem 0 0.5rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 10px;
+      padding: 1.25rem;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+      transition: all 0.15s;
+    }
+    .card:hover {
+      border-color: #C41E3A;
+      box-shadow: 0 4px 12px rgba(196, 30, 58, 0.1);
+      transform: translateY(-1px);
+    }
+    .card-title {
+      color: #1E3A5F;
+      font-weight: 700;
+      font-size: 1.05rem;
+      margin: 0 0 0.4rem;
+    }
+    .card-desc {
+      color: #6B7280;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      margin: 0;
+    }
+    .badge-soon {
+      display: inline-block;
+      background: #F3F4F6;
+      color: #9CA3AF;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+    .card.soon { opacity: 0.55; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Contacts</h1>
+        <p>Replaces forms.nfc.local — Newk's internal directory + setup data</p>
+      </div>
+      <a href="/" class="home-btn">← Home</a>
+    </div>
+  </div>
+
+  <main>
+    <div class="intro">
+      <h2>What lives here</h2>
+      <p>This section is the in-app replacement for <code>forms.nfc.local</code>. Data still lives in
+        SQL-PROD's <code>contacts</code> database, so existing SSRS reports and scheduled jobs keep
+        working unchanged — we just put a cleaner UI on top.</p>
+      <p>All edits are audit-logged (who, what, when) in <code>contacts.dbo.AuditDataChanges</code>
+        via the existing SQL Server triggers. Only admins can create / update / delete.</p>
+    </div>
+
+    <div class="group-label">People & Leadership</div>
+    <div class="grid">
+      <a href="/contacts-areadir.html" class="card">
+        <div class="card-title">Area Directors</div>
+        <p class="card-desc">FBC names, emails, SMG distribution lists. 68 records.</p>
+      </a>
+      <div class="card soon">
+        <div class="card-title">Billing Contacts <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Accounts-payable contacts by company.</p>
+      </div>
+      <div class="card soon">
+        <div class="card-title">Catering Managers <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Per-store catering point of contact.</p>
+      </div>
+      <div class="card soon">
+        <div class="card-title">General Managers <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Store GM directory.</p>
+      </div>
+    </div>
+
+    <div class="group-label">Stores & Setup</div>
+    <div class="grid">
+      <div class="card soon">
+        <div class="card-title">Store Information <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Address, time zone, POS type, Toast GUID — the 24-column directory.</p>
+      </div>
+      <div class="card soon">
+        <div class="card-title">Store Technical Info <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Key #, IPs, software versions, oven, vendor refs.</p>
+      </div>
+      <div class="card soon">
+        <div class="card-title">Companies <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Corp / Franchisee designations.</p>
+      </div>
+    </div>
+
+    <div class="group-label">Vendors & Services</div>
+    <div class="grid">
+      <div class="card soon">
+        <div class="card-title">CC Processors <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Credit-card processor accounts.</p>
+      </div>
+      <div class="card soon">
+        <div class="card-title">Delivery Partners <span class="badge-soon">soon</span></div>
+        <p class="card-desc">DoorDash / UberEats / etc. + per-store mappings.</p>
+      </div>
+      <div class="card soon">
+        <div class="card-title">Phone / Firewall Vendors <span class="badge-soon">soon</span></div>
+        <p class="card-desc">Network + telecom vendor directory.</p>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

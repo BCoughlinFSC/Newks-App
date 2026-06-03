@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Area Directors - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0; padding: 0;
+      background: #F8FAFC; color: #2c2c2c;
+    }
+    .header {
+      background: #C41E3A; padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p  { margin: 0.4rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+    .header .nav-btns { display: flex; gap: 0.5rem; }
+    .nav-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.5rem 1rem; border-radius: 6px;
+      font-size: 0.9rem; cursor: pointer; text-decoration: none;
+    }
+    .nav-btn:hover { background: rgba(255,255,255,0.25); }
+
+    main { padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }
+
+    .toolbar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;
+    }
+    .search-wrap {
+      display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 200px;
+    }
+    .search-wrap input {
+      flex: 1; padding: 0.55rem 0.75rem;
+      border: 1px solid #D1D5DB; border-radius: 6px;
+      font-size: 0.95rem; background: #fff;
+    }
+    .count { color: #6B7280; font-size: 0.85rem; }
+
+    .btn {
+      padding: 0.55rem 1rem; border-radius: 6px;
+      font-size: 0.9rem; cursor: pointer;
+      border: none; font-weight: 600;
+    }
+    .btn-primary { background: #C41E3A; color: #fff; }
+    .btn-primary:hover { background: #A01A2E; }
+    .btn-secondary { background: #fff; color: #374151; border: 1px solid #D1D5DB; }
+    .btn-secondary:hover { background: #F3F4F6; }
+    .btn-danger { background: #DC2626; color: #fff; }
+    .btn-danger:hover { background: #B91C1C; }
+    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+    table {
+      width: 100%; border-collapse: collapse;
+      background: #fff; border: 1px solid #E5E7EB;
+      border-radius: 8px; overflow: hidden;
+      font-size: 0.9rem;
+    }
+    thead { background: #F9FAFB; }
+    th {
+      text-align: left; padding: 0.7rem 0.85rem;
+      font-weight: 600; color: #374151;
+      border-bottom: 2px solid #E5E7EB;
+      cursor: pointer; user-select: none;
+    }
+    th:hover { background: #F3F4F6; }
+    th .sort-indicator { color: #C41E3A; font-size: 0.7rem; margin-left: 0.25rem; }
+    td {
+      padding: 0.6rem 0.85rem; border-bottom: 1px solid #F3F4F6;
+      vertical-align: top;
+    }
+    tr.row { cursor: pointer; }
+    tr.row:hover { background: #FEF2F2; }
+    tr.row:last-child td { border-bottom: 0; }
+    .empty {
+      padding: 2rem; text-align: center; color: #9CA3AF; font-style: italic;
+    }
+    .loading { color: #6B7280; padding: 2rem; text-align: center; }
+    .error {
+      background: #FEE2E2; color: #991B1B;
+      padding: 0.75rem 1rem; border-radius: 6px;
+      margin-bottom: 1rem; border: 1px solid #FECACA;
+    }
+    .info {
+      background: #DBEAFE; color: #1E40AF;
+      padding: 0.75rem 1rem; border-radius: 6px;
+      margin-bottom: 1rem; border: 1px solid #BFDBFE;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal {
+      background: #fff; border-radius: 10px;
+      width: 560px; max-width: 92%; max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    }
+    .modal-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #E5E7EB;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .modal-header h2 { margin: 0; color: #1E3A5F; font-size: 1.2rem; }
+    .modal-close {
+      background: none; border: none; font-size: 1.5rem;
+      color: #9CA3AF; cursor: pointer; padding: 0; line-height: 1;
+    }
+    .modal-body { padding: 1.5rem; }
+    .modal-footer {
+      padding: 1rem 1.5rem; border-top: 1px solid #E5E7EB;
+      display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
+    }
+    .modal-footer .group { display: flex; gap: 0.5rem; }
+    .form-row { margin-bottom: 1rem; }
+    .form-row label {
+      display: block; font-size: 0.85rem; font-weight: 600;
+      color: #374151; margin-bottom: 0.3rem;
+    }
+    .form-row .help {
+      display: block; font-size: 0.75rem; color: #6B7280;
+      margin-top: 0.25rem;
+    }
+    .form-row input, .form-row select {
+      width: 100%; padding: 0.5rem 0.7rem;
+      border: 1px solid #D1D5DB; border-radius: 6px;
+      font-size: 0.92rem; background: #fff;
+    }
+    .form-row input:focus, .form-row select:focus {
+      outline: none; border-color: #C41E3A;
+      box-shadow: 0 0 0 2px rgba(196,30,58,0.1);
+    }
+    .form-row.readonly input { background: #F9FAFB; color: #6B7280; }
+    .auth-note {
+      background: #FEF3C7; color: #92400E;
+      font-size: 0.82rem; padding: 0.5rem 0.75rem;
+      border-radius: 6px; margin-bottom: 1rem;
+      border: 1px solid #FDE68A;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Area Directors</h1>
+        <p>Edit FBC area director records (replaces forms.nfc.local/contacts/areadir)</p>
+      </div>
+      <div class="nav-btns">
+        <a href="/contacts.html" class="nav-btn">← Contacts</a>
+        <a href="/" class="nav-btn">Home</a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div id="messages"></div>
+
+    <div class="toolbar">
+      <div class="search-wrap">
+        <input type="text" id="search" placeholder="Search by name or email…" />
+        <span class="count" id="count">—</span>
+      </div>
+      <button id="add-btn" class="btn btn-primary">+ Add Area Director</button>
+    </div>
+
+    <div id="table-wrap">
+      <div class="loading">Loading area directors…</div>
+    </div>
+  </main>
+
+  <!-- Edit / Add modal -->
+  <div id="modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">Edit Area Director</h2>
+        <button class="modal-close" id="modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-auth-note" class="auth-note" style="display:none;">
+          You're not logged in as an admin — viewing only. Sign in as an admin to edit.
+        </div>
+        <input type="hidden" id="f_AreaDirID" />
+        <div class="form-row">
+          <label for="f_AreaDirFirstName">First Name</label>
+          <input type="text" id="f_AreaDirFirstName" maxlength="30" />
+        </div>
+        <div class="form-row">
+          <label for="f_AreaDirLastName">Last Name</label>
+          <input type="text" id="f_AreaDirLastName" maxlength="30" />
+        </div>
+        <div class="form-row">
+          <label for="f_AreaDirName">Display Name</label>
+          <input type="text" id="f_AreaDirName" maxlength="30" placeholder="(auto: First Last)" />
+          <span class="help">Leave blank to auto-compose from First + Last.</span>
+        </div>
+        <div class="form-row">
+          <label for="f_AreaDirEmail">Primary Email</label>
+          <input type="email" id="f_AreaDirEmail" maxlength="300" />
+        </div>
+        <div class="form-row">
+          <label for="f_AreaDirSMGEmail">SMG Email(s)</label>
+          <input type="text" id="f_AreaDirSMGEmail" maxlength="300" />
+          <span class="help">Distribution list — separate multiple with semicolon + space.</span>
+        </div>
+        <div class="form-row">
+          <label for="f_CompanyID">Company</label>
+          <select id="f_CompanyID">
+            <option value="">(none)</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="f_AreaDirCFID">Catering Forms ID</label>
+          <input type="text" id="f_AreaDirCFID" maxlength="300" />
+        </div>
+        <div class="form-row">
+          <label for="f_AreaDirCFPW">Catering Forms Password</label>
+          <input type="text" id="f_AreaDirCFPW" maxlength="20" />
+        </div>
+        <div class="form-row readonly" id="last-updated-row" style="display:none;">
+          <label>Last updated</label>
+          <input type="text" id="f_LastUpdated" readonly />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="group">
+          <button id="delete-btn" class="btn btn-danger" style="display:none;">Delete</button>
+        </div>
+        <div class="group">
+          <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+          <button id="save-btn" class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ──────────────────────────────────────────────────────────────────────────
+    // Auth state
+    // ──────────────────────────────────────────────────────────────────────────
+    const authToken = localStorage.getItem('auth_token');
+    let currentUser = null;
+    try { currentUser = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    const isAdmin = currentUser && currentUser.role === 'admin';
+
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+      return h;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // State + DOM helpers
+    // ──────────────────────────────────────────────────────────────────────────
+    let allRows = [];
+    let companies = [];
+    let sortCol = 'AreaDirName';
+    let sortDir = 1;   // 1 asc, -1 desc
+
+    function showError(msg) {
+      const el = document.getElementById('messages');
+      el.innerHTML = `<div class="error">${msg}</div>`;
+      setTimeout(() => { el.innerHTML = ''; }, 6000);
+    }
+    function showInfo(msg) {
+      const el = document.getElementById('messages');
+      el.innerHTML = `<div class="info">${msg}</div>`;
+      setTimeout(() => { el.innerHTML = ''; }, 4000);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Data fetching
+    // ──────────────────────────────────────────────────────────────────────────
+    async function loadCompanies() {
+      try {
+        const r = await fetch('/api/contacts/companies', { headers: authHeaders() });
+        if (r.ok) companies = await r.json();
+      } catch (e) { /* dropdown will just show (none) */ }
+      const sel = document.getElementById('f_CompanyID');
+      sel.innerHTML = '<option value="">(none)</option>';
+      companies.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.CompanyID;
+        opt.textContent = c.CompanyName + ' (#' + c.CompanyID + ')';
+        sel.appendChild(opt);
+      });
+    }
+
+    async function loadList() {
+      const wrap = document.getElementById('table-wrap');
+      wrap.innerHTML = '<div class="loading">Loading area directors…</div>';
+      try {
+        const r = await fetch('/api/contacts/areadir', { headers: authHeaders() });
+        if (r.status === 401) {
+          wrap.innerHTML = '<div class="error">You need to be logged in. <a href="/">Sign in</a> first.</div>';
+          return;
+        }
+        if (!r.ok) {
+          const txt = await r.text();
+          wrap.innerHTML = `<div class="error">Failed to load: ${txt}</div>`;
+          return;
+        }
+        allRows = await r.json();
+        render();
+      } catch (e) {
+        wrap.innerHTML = `<div class="error">Network error: ${e.message}</div>`;
+      }
+    }
+
+    function render() {
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      let rows = allRows.filter(r => {
+        if (!q) return true;
+        const blob = [
+          r.AreaDirName, r.AreaDirFirstName, r.AreaDirLastName,
+          r.AreaDirEmail, r.AreaDirSMGEmail
+        ].filter(Boolean).join(' ').toLowerCase();
+        return blob.includes(q);
+      });
+
+      rows.sort((a, b) => {
+        const av = (a[sortCol] ?? '').toString().toLowerCase();
+        const bv = (b[sortCol] ?? '').toString().toLowerCase();
+        if (av < bv) return -1 * sortDir;
+        if (av > bv) return  1 * sortDir;
+        return 0;
+      });
+
+      document.getElementById('count').textContent =
+        `${rows.length}${rows.length !== allRows.length ? ' of ' + allRows.length : ''}`;
+
+      const wrap = document.getElementById('table-wrap');
+      if (rows.length === 0) {
+        wrap.innerHTML = `<div class="empty">${
+          allRows.length === 0
+            ? 'No area directors found.'
+            : 'No matches for your search.'
+        }</div>`;
+        return;
+      }
+
+      const headers = [
+        ['AreaDirName',  'Name'],
+        ['AreaDirEmail', 'Email'],
+        ['AreaDirSMGEmail', 'SMG Email'],
+        ['LastUpdatedBy', 'Last Updated By'],
+        ['LastUpdated',   'When'],
+      ];
+
+      let html = '<table><thead><tr>';
+      headers.forEach(([col, label]) => {
+        const ind = (sortCol === col) ? `<span class="sort-indicator">${sortDir>0?'▲':'▼'}</span>` : '';
+        html += `<th data-col="${col}">${label}${ind}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+      rows.forEach(r => {
+        const lastWhen = r.LastUpdated
+          ? new Date(r.LastUpdated).toLocaleDateString() + ' ' + new Date(r.LastUpdated).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+          : '';
+        html += `<tr class="row" data-id="${r.AreaDirID}">
+          <td><strong>${escapeHtml(r.AreaDirName || '')}</strong></td>
+          <td>${escapeHtml(r.AreaDirEmail || '')}</td>
+          <td>${escapeHtml(r.AreaDirSMGEmail || '')}</td>
+          <td>${escapeHtml(r.LastUpdatedBy || '')}</td>
+          <td>${escapeHtml(lastWhen)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
+
+      // Wire row clicks
+      wrap.querySelectorAll('tr.row').forEach(tr => {
+        tr.addEventListener('click', () => openEditModal(parseInt(tr.dataset.id, 10)));
+      });
+      // Wire sort
+      wrap.querySelectorAll('th[data-col]').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.col;
+          if (sortCol === col) sortDir *= -1;
+          else { sortCol = col; sortDir = 1; }
+          render();
+        });
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Modal — add / edit / delete
+    // ──────────────────────────────────────────────────────────────────────────
+    function openAddModal() {
+      document.getElementById('modal-title').textContent = 'Add Area Director';
+      document.getElementById('f_AreaDirID').value = '';
+      ['f_AreaDirFirstName','f_AreaDirLastName','f_AreaDirName',
+       'f_AreaDirEmail','f_AreaDirSMGEmail','f_AreaDirCFID','f_AreaDirCFPW',
+       'f_LastUpdated']
+        .forEach(id => { document.getElementById(id).value = ''; });
+      document.getElementById('f_CompanyID').value = '';
+      document.getElementById('delete-btn').style.display = 'none';
+      document.getElementById('last-updated-row').style.display = 'none';
+      setEditableState();
+      document.getElementById('modal').classList.add('visible');
+    }
+
+    function openEditModal(id) {
+      const row = allRows.find(r => r.AreaDirID === id);
+      if (!row) return;
+      document.getElementById('modal-title').textContent =
+        isAdmin ? `Edit: ${row.AreaDirName || '(no name)'}` : `View: ${row.AreaDirName || '(no name)'}`;
+      document.getElementById('f_AreaDirID').value = row.AreaDirID;
+      document.getElementById('f_AreaDirFirstName').value = row.AreaDirFirstName || '';
+      document.getElementById('f_AreaDirLastName').value  = row.AreaDirLastName || '';
+      document.getElementById('f_AreaDirName').value      = row.AreaDirName || '';
+      document.getElementById('f_AreaDirEmail').value     = row.AreaDirEmail || '';
+      document.getElementById('f_AreaDirSMGEmail').value  = row.AreaDirSMGEmail || '';
+      document.getElementById('f_AreaDirCFID').value      = row.AreaDirCFID || '';
+      document.getElementById('f_AreaDirCFPW').value      = row.AreaDirCFPW || '';
+      document.getElementById('f_CompanyID').value        = row.CompanyID || '';
+      const when = row.LastUpdated
+        ? new Date(row.LastUpdated).toLocaleString() + (row.LastUpdatedBy ? ` by ${row.LastUpdatedBy}` : '')
+        : '(never)';
+      document.getElementById('f_LastUpdated').value = when;
+      document.getElementById('last-updated-row').style.display = '';
+      document.getElementById('delete-btn').style.display = isAdmin ? '' : 'none';
+      setEditableState();
+      document.getElementById('modal').classList.add('visible');
+    }
+
+    function setEditableState() {
+      document.getElementById('modal-auth-note').style.display = isAdmin ? 'none' : '';
+      const inputs = document.querySelectorAll('.modal-body input:not([readonly]), .modal-body select');
+      inputs.forEach(el => { el.disabled = !isAdmin; });
+      document.getElementById('save-btn').style.display = isAdmin ? '' : 'none';
+    }
+
+    function closeModal() {
+      document.getElementById('modal').classList.remove('visible');
+    }
+
+    function readForm() {
+      const v = id => {
+        const el = document.getElementById(id);
+        const s = (el.value || '').trim();
+        return s === '' ? null : s;
+      };
+      const companyRaw = v('f_CompanyID');
+      return {
+        AreaDirFirstName: v('f_AreaDirFirstName'),
+        AreaDirLastName:  v('f_AreaDirLastName'),
+        AreaDirName:      v('f_AreaDirName'),
+        AreaDirEmail:     v('f_AreaDirEmail'),
+        AreaDirSMGEmail:  v('f_AreaDirSMGEmail'),
+        AreaDirCFID:      v('f_AreaDirCFID'),
+        AreaDirCFPW:      v('f_AreaDirCFPW'),
+        CompanyID:        companyRaw ? parseInt(companyRaw, 10) : null,
+      };
+    }
+
+    async function onSave() {
+      const id = document.getElementById('f_AreaDirID').value;
+      const payload = readForm();
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true;
+      try {
+        const url = id ? `/api/contacts/areadir/${id}` : '/api/contacts/areadir';
+        const method = id ? 'PUT' : 'POST';
+        const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+        if (r.status === 401) { showError('Sign in required.'); btn.disabled = false; return; }
+        if (r.status === 403) { showError('Admin role required.'); btn.disabled = false; return; }
+        if (!r.ok) {
+          const txt = await r.text();
+          showError(`Save failed: ${txt}`);
+          btn.disabled = false;
+          return;
+        }
+        closeModal();
+        showInfo(id ? 'Updated.' : 'Added.');
+        await loadList();
+      } catch (e) {
+        showError(`Network error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function onDelete() {
+      const id = document.getElementById('f_AreaDirID').value;
+      if (!id) return;
+      const row = allRows.find(r => r.AreaDirID === parseInt(id, 10));
+      const name = row ? (row.AreaDirName || `#${id}`) : `#${id}`;
+      if (!confirm(`Delete area director "${name}"? This cannot be undone.`)) return;
+      const btn = document.getElementById('delete-btn');
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/contacts/areadir/${id}`, { method: 'DELETE', headers: authHeaders() });
+        if (!r.ok) {
+          const txt = await r.text();
+          showError(`Delete failed: ${txt}`);
+          btn.disabled = false;
+          return;
+        }
+        closeModal();
+        showInfo('Deleted.');
+        await loadList();
+      } catch (e) {
+        showError(`Network error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Wire up + boot
+    // ──────────────────────────────────────────────────────────────────────────
+    document.getElementById('add-btn').addEventListener('click', () => {
+      if (!isAdmin) { showError('Admin role required to add records.'); return; }
+      openAddModal();
+    });
+    document.getElementById('cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    document.getElementById('save-btn').addEventListener('click', onSave);
+    document.getElementById('delete-btn').addEventListener('click', onDelete);
+    document.getElementById('search').addEventListener('input', () => render());
+    document.getElementById('modal').addEventListener('click', e => {
+      if (e.target.id === 'modal') closeModal();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    if (!isAdmin) {
+      document.getElementById('add-btn').style.opacity = 0.55;
+      document.getElementById('add-btn').title = 'Admin role required';
+    }
+
+    loadCompanies();
+    loadList();
+  </script>
+</body>
+</html>

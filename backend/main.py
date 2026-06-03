@@ -18770,6 +18770,120 @@ async def nightly_reconcile_run_now(admin_user: User = Depends(get_current_admin
     return {"status": "started", "started_at": datetime.now().isoformat()}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Contacts section — replaces the legacy forms.nfc.local PHP CRUD pages.
+#
+# Data lives in SQL-PROD's `contacts` DB (untouched by this app — we just
+# read/write through it). Audit triggers in SQL Server record every change
+# because we always stamp LastUpdatedBy with the authenticated user's name.
+#
+# Auth: any logged-in user can read; only admin role can create/update/
+# delete. Mirrors the spirit of Don's old AD-group restrictions but uses
+# our existing app user model instead of LDAP.
+#
+# v1: AreaDir (proof-of-concept). v2+ rolls the same pattern out to
+# BillingContacts, Company, CCProcessors, etc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+import contacts_db
+
+
+class AreaDirectorIn(BaseModel):
+    """Input shape for INSERT/UPDATE. All fields optional except names
+    aren't validated here — backend composes AreaDirName from First+Last
+    if not explicit (matches Don's legacy behavior)."""
+    AreaDirName:      Optional[str] = None
+    AreaDirFirstName: Optional[str] = None
+    AreaDirLastName:  Optional[str] = None
+    AreaDirEmail:     Optional[str] = None
+    AreaDirSMGEmail:  Optional[str] = None
+    AreaDirCFPW:      Optional[str] = None
+    AreaDirCFID:      Optional[str] = None
+    CompanyID:        Optional[int] = None
+
+
+@app.get("/api/contacts/health")
+async def contacts_health(_user: User = Depends(get_current_user)):
+    """Connectivity check for the contacts SQL Server connection."""
+    ok = contacts_db.db_available()
+    return {"available": ok, "database": contacts_db.SQL_DATABASE, "server": contacts_db.SQL_SERVER}
+
+
+@app.get("/api/contacts/companies")
+async def contacts_list_companies(_user: User = Depends(get_current_user)):
+    """Companies list — used to populate the CompanyID dropdown."""
+    return contacts_db.list_companies()
+
+
+@app.get("/api/contacts/areadir")
+async def contacts_list_areadir(_user: User = Depends(get_current_user)):
+    """List all Area Directors. Any logged-in user can view."""
+    try:
+        return contacts_db.list_area_directors()
+    except Exception as exc:
+        logger.error("contacts.list_area_directors failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.get("/api/contacts/areadir/{areadir_id}")
+async def contacts_get_areadir(areadir_id: int, _user: User = Depends(get_current_user)):
+    row = contacts_db.get_area_director(areadir_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"AreaDir {areadir_id} not found")
+    return row
+
+
+@app.post("/api/contacts/areadir")
+async def contacts_create_areadir(
+    body: AreaDirectorIn,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Create a new Area Director. Admin only."""
+    try:
+        new_id = contacts_db.insert_area_director(body.dict(), updated_by=admin_user.name)
+        logger.info("AreaDir created id=%s by %s", new_id, admin_user.email)
+        return {"AreaDirID": new_id, "success": True}
+    except Exception as exc:
+        logger.error("contacts.insert_area_director failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.put("/api/contacts/areadir/{areadir_id}")
+async def contacts_update_areadir(
+    areadir_id: int,
+    body: AreaDirectorIn,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Update an existing Area Director. Admin only."""
+    if not contacts_db.get_area_director(areadir_id):
+        raise HTTPException(status_code=404, detail=f"AreaDir {areadir_id} not found")
+    try:
+        ok = contacts_db.update_area_director(areadir_id, body.dict(), updated_by=admin_user.name)
+        logger.info("AreaDir updated id=%s by %s", areadir_id, admin_user.email)
+        return {"AreaDirID": areadir_id, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.update_area_director failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.delete("/api/contacts/areadir/{areadir_id}")
+async def contacts_delete_areadir(
+    areadir_id: int,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Delete an Area Director. Admin only. Stamps LastUpdatedBy first
+    so the audit trigger records who initiated the delete."""
+    if not contacts_db.get_area_director(areadir_id):
+        raise HTTPException(status_code=404, detail=f"AreaDir {areadir_id} not found")
+    try:
+        ok = contacts_db.delete_area_director(areadir_id, updated_by=admin_user.name)
+        logger.info("AreaDir deleted id=%s by %s", areadir_id, admin_user.email)
+        return {"AreaDirID": areadir_id, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.delete_area_director failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
 @app.get("/api/monkey/alerts/not-accepted")
 async def monkey_alert_not_accepted():
     """Orders due within 24 hours not yet accepted."""
