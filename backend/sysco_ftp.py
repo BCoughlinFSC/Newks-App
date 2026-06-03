@@ -139,17 +139,28 @@ def setup_logger(mode: str) -> logging.Logger:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def send_alert(subject: str, body: str) -> bool:
-    """Best-effort: never raises; logs to stdout if it can't send."""
+    """Best-effort: never raises; logs to stdout if it can't send.
+
+    Uses Gmail SMTP on port 587 with STARTTLS instead of 465 SMTPS.
+    Confirmed working from dev-jan02 → Gmail; port 465 hits 'Connection
+    reset by peer' from this network path (some appliance between
+    dev-jan02 and Gmail does SMTP inspection on 465).
+    """
     if not (GMAIL_ADDRESS and GMAIL_APP_PASSWORD and ALERT_TO):
         print(f"WARNING: alert email skipped (Gmail/recipient not configured): {subject}")
         return False
     try:
+        import ssl
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = f"Newk's Reports <{GMAIL_ADDRESS}>"
         msg["To"] = ALERT_TO
         msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+            server.ehlo()
+            server.starttls(context=ctx)
+            server.ehlo()
             server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
             server.sendmail(GMAIL_ADDRESS, [ALERT_TO], msg.as_string())
         return True
