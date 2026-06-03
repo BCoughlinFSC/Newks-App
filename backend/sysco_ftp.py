@@ -29,8 +29,6 @@ DEPLOYMENT (dev-jan02):
     See sysco_ftp_deploy.md in this directory.
 """
 
-from __future__ import annotations
-
 import argparse
 import logging
 import os
