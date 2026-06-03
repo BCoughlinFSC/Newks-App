@@ -41,7 +41,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Pattern
 
 import paramiko
 from dotenv import load_dotenv
@@ -202,7 +202,7 @@ class SyscoFetcher:
             except Exception:
                 pass
 
-    def list_files(self, pattern_regex: re.Pattern) -> List[str]:
+    def list_files(self, pattern_regex: Pattern) -> List[str]:
         """Return filenames in REMOTE_INBOX whose name matches pattern_regex."""
         assert self.sftp is not None
         entries = self.sftp.listdir(REMOTE_INBOX)
