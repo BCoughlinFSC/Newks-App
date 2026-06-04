@@ -49,12 +49,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 DEFAULT_TABLES = [
     "AreaDir",
     "Company",
+    "Store",                  # 62-col store master directory
     # Future:
-    # "Store", "StorePhysical", "StoreTechnical", "StoreClosure", "StoreSize",
+    # "StorePhysical", "StoreTechnical", "StoreClosure", "StoreSize",  -- satellite tables for joined view
     # "BillingContacts", "PrimaryContacts", "CateringMgr", "GeneralManagers",
     # "CCProcessors", "FireWallProvider", "DeliveryPartners", "DeliveryPartnersByStore",
     # "PhoneVendors", "OwnerShip", "CateringGoals", "CateringBudgeted",
-    # "POSType", "MenuType", "TimeZone",  -- lookups
+    # "POSType", "MenuType", "DMA",  -- lookups
 ]
 
 # SQL Server data type → SQLite affinity

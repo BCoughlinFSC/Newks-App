@@ -18889,6 +18889,67 @@ async def contacts_delete_areadir(
         raise HTTPException(status_code=500, detail=f"DB error: {exc}")
 
 
+# ─── Store master ─────────────────────────────────────────────────────────────
+
+@app.get("/api/contacts/stores")
+async def contacts_list_stores(_user: User = Depends(get_current_user)):
+    """List all stores. Returns every column from the SQLite Store table —
+    list view picks which to display, edit modal renders all."""
+    try:
+        return contacts_db.list_stores()
+    except Exception as exc:
+        logger.error("contacts.list_stores failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.get("/api/contacts/stores/{store_id}")
+async def contacts_get_store(store_id: int, _user: User = Depends(get_current_user)):
+    row = contacts_db.get_store(store_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    return row
+
+
+@app.put("/api/contacts/stores/{store_id}")
+async def contacts_update_store(
+    store_id: int,
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Update a store. Admin only. Body is a flat dict of column → value;
+    unknown/protected columns are silently dropped."""
+    if not contacts_db.get_store(store_id):
+        raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    try:
+        ok = contacts_db.update_store(store_id, body, updated_by=admin_user.name)
+        logger.info("Store updated id=%s by %s (%d fields touched)",
+                    store_id, admin_user.email, len(body))
+        return {"StoreID": store_id, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.update_store failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.post("/api/contacts/stores")
+async def contacts_create_store(
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Create a new store. Admin only. Caller must supply StoreID
+    (Newk's restaurant IDs are externally assigned, not auto-incremented)."""
+    if not body.get("StoreID"):
+        raise HTTPException(status_code=400, detail="StoreID is required for new stores")
+    if contacts_db.get_store(int(body["StoreID"])):
+        raise HTTPException(status_code=409, detail=f"Store {body['StoreID']} already exists")
+    try:
+        new_id = contacts_db.insert_store(body, updated_by=admin_user.name)
+        logger.info("Store created id=%s by %s", new_id, admin_user.email)
+        return {"StoreID": new_id, "success": True}
+    except Exception as exc:
+        logger.error("contacts.insert_store failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
 @app.get("/api/monkey/alerts/not-accepted")
 async def monkey_alert_not_accepted():
     """Orders due within 24 hours not yet accepted."""

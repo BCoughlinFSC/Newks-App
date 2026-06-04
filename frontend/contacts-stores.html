@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Stores - Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c;
+    }
+    .header {
+      background: #C41E3A; padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p  { margin: 0.4rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+    .nav-btns { display: flex; gap: 0.5rem; }
+    .nav-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.5rem 1rem; border-radius: 6px;
+      font-size: 0.9rem; cursor: pointer; text-decoration: none;
+    }
+    .nav-btn:hover { background: rgba(255,255,255,0.25); }
+
+    main { padding: 1.5rem 2rem; max-width: 1500px; margin: 0 auto; }
+
+    .toolbar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;
+    }
+    .toolbar-left {
+      display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 240px;
+    }
+    .toolbar-left input[type="text"] {
+      flex: 1; padding: 0.55rem 0.75rem;
+      border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.95rem;
+    }
+    .filter-pill {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.4rem 0.7rem; border: 1px solid #D1D5DB;
+      border-radius: 6px; background: #fff; font-size: 0.85rem;
+      cursor: pointer; user-select: none;
+    }
+    .filter-pill input { margin: 0; }
+    .count { color: #6B7280; font-size: 0.85rem; }
+
+    .btn {
+      padding: 0.55rem 1rem; border-radius: 6px; font-size: 0.9rem;
+      cursor: pointer; border: none; font-weight: 600;
+    }
+    .btn-primary { background: #C41E3A; color: #fff; }
+    .btn-primary:hover { background: #A01A2E; }
+    .btn-secondary { background: #fff; color: #374151; border: 1px solid #D1D5DB; }
+    .btn-secondary:hover { background: #F3F4F6; }
+    .btn-danger { background: #DC2626; color: #fff; }
+    .btn-danger:hover { background: #B91C1C; }
+    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+    table {
+      width: 100%; border-collapse: collapse;
+      background: #fff; border: 1px solid #E5E7EB;
+      border-radius: 8px; overflow: hidden; font-size: 0.88rem;
+    }
+    thead { background: #F9FAFB; }
+    th {
+      text-align: left; padding: 0.7rem 0.85rem;
+      font-weight: 600; color: #374151;
+      border-bottom: 2px solid #E5E7EB;
+      cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    th:hover { background: #F3F4F6; }
+    th .sort-indicator { color: #C41E3A; font-size: 0.7rem; margin-left: 0.25rem; }
+    td {
+      padding: 0.55rem 0.85rem;
+      border-bottom: 1px solid #F3F4F6;
+      vertical-align: top; white-space: nowrap;
+    }
+    tr.row { cursor: pointer; }
+    tr.row:hover { background: #FEF2F2; }
+    tr.row:last-child td { border-bottom: 0; }
+    .empty {
+      padding: 2rem; text-align: center; color: #9CA3AF; font-style: italic;
+    }
+    .loading { color: #6B7280; padding: 2rem; text-align: center; }
+    .error {
+      background: #FEE2E2; color: #991B1B;
+      padding: 0.75rem 1rem; border-radius: 6px;
+      margin-bottom: 1rem; border: 1px solid #FECACA;
+    }
+    .info {
+      background: #DBEAFE; color: #1E40AF;
+      padding: 0.75rem 1rem; border-radius: 6px;
+      margin-bottom: 1rem; border: 1px solid #BFDBFE;
+    }
+    .status-badge {
+      display: inline-block; padding: 0.15rem 0.55rem;
+      border-radius: 10px; font-size: 0.75rem; font-weight: 600;
+    }
+    .status-open    { background: #DCFCE7; color: #166534; }
+    .status-closed  { background: #FEE2E2; color: #991B1B; }
+    .status-unknown { background: #F3F4F6; color: #6B7280; }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal {
+      background: #fff; border-radius: 10px;
+      width: 760px; max-width: 95%; max-height: 92vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    }
+    .modal-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #E5E7EB;
+      display: flex; justify-content: space-between; align-items: center;
+      position: sticky; top: 0; background: #fff; z-index: 1;
+    }
+    .modal-header h2 { margin: 0; color: #1E3A5F; font-size: 1.2rem; }
+    .modal-close {
+      background: none; border: none; font-size: 1.5rem;
+      color: #9CA3AF; cursor: pointer; padding: 0; line-height: 1;
+    }
+    .modal-body { padding: 1.25rem 1.5rem; }
+    .modal-footer {
+      padding: 1rem 1.5rem; border-top: 1px solid #E5E7EB;
+      display: flex; justify-content: flex-end; gap: 0.5rem;
+      position: sticky; bottom: 0; background: #fff;
+    }
+    .section-title {
+      font-size: 0.78rem;
+      color: #C41E3A;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
+      margin: 1.25rem 0 0.5rem;
+      border-bottom: 1px solid #FEE2E2;
+      padding-bottom: 0.25rem;
+    }
+    .section-title:first-child { margin-top: 0.25rem; }
+    .form-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 0.5rem 1rem;
+    }
+    .form-row.span-2 { grid-column: 1 / -1; }
+    .form-row { margin-bottom: 0.6rem; }
+    .form-row label {
+      display: block; font-size: 0.78rem; font-weight: 600;
+      color: #374151; margin-bottom: 0.15rem;
+    }
+    .form-row input, .form-row select, .form-row textarea {
+      width: 100%; padding: 0.4rem 0.6rem;
+      border: 1px solid #D1D5DB; border-radius: 6px;
+      font-size: 0.88rem; background: #fff;
+    }
+    .form-row input:focus, .form-row select:focus, .form-row textarea:focus {
+      outline: none; border-color: #C41E3A;
+      box-shadow: 0 0 0 2px rgba(196,30,58,0.1);
+    }
+    .form-row.readonly input { background: #F9FAFB; color: #6B7280; }
+    .form-row input[type="checkbox"] { width: auto; margin-right: 0.5rem; }
+    .form-row .help {
+      display: block; font-size: 0.72rem; color: #9CA3AF; margin-top: 0.15rem;
+    }
+    .auth-note {
+      background: #FEF3C7; color: #92400E;
+      font-size: 0.82rem; padding: 0.5rem 0.75rem;
+      border-radius: 6px; margin-bottom: 1rem;
+      border: 1px solid #FDE68A;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Stores</h1>
+        <p>Store master directory (replaces forms.nfc.local/contacts/development/physical)</p>
+      </div>
+      <div class="nav-btns">
+        <a href="/contacts.html" class="nav-btn">← Contacts</a>
+        <a href="/" class="nav-btn">Home</a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div id="messages"></div>
+
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <input type="text" id="search" placeholder="Search by ID, name, city, state…" />
+        <label class="filter-pill">
+          <input type="checkbox" id="active-only" checked />
+          Active only
+        </label>
+        <span class="count" id="count">—</span>
+      </div>
+      <button id="add-btn" class="btn btn-primary">+ Add Store</button>
+    </div>
+
+    <div id="table-wrap">
+      <div class="loading">Loading stores…</div>
+    </div>
+  </main>
+
+  <!-- Edit / Add modal -->
+  <div id="modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">Edit Store</h2>
+        <button class="modal-close" id="modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-auth-note" class="auth-note" style="display:none;">
+          You're not logged in as an admin — viewing only. Sign in as an admin to edit.
+        </div>
+        <div id="form-container"><!-- generated by JS --></div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="save-btn" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ──────────────────────────────────────────────────────────────────────────
+    // Field configuration — groups + types for the edit modal
+    //   col   = SQLite column name (must match exactly)
+    //   label = pretty label for the form
+    //   type  = text | number | date | checkbox | textarea
+    //   help  = optional help text under the input
+    //   span  = '2' to span both grid columns; default 1
+    //   ro    = readonly (auto-managed fields like StoreID + audit)
+    // ──────────────────────────────────────────────────────────────────────────
+    const STORE_SECTIONS = [
+      { title: 'Identity', fields: [
+        { col: 'StoreID',       label: 'Store ID',    type: 'number', ro: true,
+          help: 'Newk\'s internal ID (e.g. 1042). Can\'t be changed.' },
+        { col: 'StoreName',     label: 'Store Name',  type: 'text' },
+        { col: 'StoreTagline',  label: 'Tagline',     type: 'text', span: 2 },
+      ]},
+      { title: 'Address', fields: [
+        { col: 'StoreAdd1', label: 'Address Line 1', type: 'text', span: 2 },
+        { col: 'StoreAdd2', label: 'Address Line 2', type: 'text', span: 2 },
+        { col: 'StoreAdd3', label: 'Address Line 3', type: 'text', span: 2 },
+        { col: 'StoreCity', label: 'City', type: 'text' },
+        { col: 'StoreState', label: 'State', type: 'text' },
+        { col: 'StoreZip', label: 'Zip', type: 'number' },
+        { col: 'StoreCountry', label: 'Country', type: 'text' },
+        { col: 'StoreCountryCode', label: 'Country Code', type: 'text' },
+        { col: 'StoreCrossStreet', label: 'Cross Street', type: 'text', span: 2 },
+        { col: 'StoreLatitude', label: 'Latitude', type: 'number' },
+        { col: 'StoreLongitude', label: 'Longitude', type: 'number' },
+      ]},
+      { title: 'Contact', fields: [
+        { col: 'StorePhone', label: 'Phone', type: 'text' },
+        { col: 'StoreFax', label: 'Fax', type: 'text' },
+        { col: 'StoreEmail', label: 'Email', type: 'text', span: 2 },
+        { col: 'StoreEmail2', label: 'Secondary Email', type: 'text', span: 2 },
+        { col: 'StoreExtraEmails', label: 'Extra Emails', type: 'text', span: 2,
+          help: 'Semicolon-separated for distribution lists' },
+        { col: 'StoreCateringEmail', label: 'Catering Email', type: 'text' },
+        { col: 'StoreCateringPhone', label: 'Catering Phone', type: 'text' },
+        { col: 'StoreFirstName', label: 'Manager First Name', type: 'text' },
+        { col: 'StoreLastName', label: 'Manager Last Name', type: 'text' },
+      ]},
+      { title: 'Status & Dates', fields: [
+        { col: 'StoreStatus', label: 'Status', type: 'text' },
+        { col: 'StoreStatusDesc', label: 'Status Description', type: 'text' },
+        { col: 'StoreOpenDate', label: 'Open Date', type: 'date' },
+        { col: 'StoreCloseDate', label: 'Close Date', type: 'date' },
+        { col: 'RefreshCloseDate', label: 'Refresh Close Date', type: 'date' },
+        { col: 'RefreshReOpenDate', label: 'Refresh Re-Open Date', type: 'date' },
+        { col: 'OwnershipChangeDate', label: 'Ownership Change Date', type: 'date' },
+        { col: 'ToastLive', label: 'Toast Go-Live Date', type: 'date' },
+        { col: 'MonkeyLiveDate', label: 'Monkey Media Go-Live', type: 'date' },
+        { col: 'IsMonkeyStore', label: 'Monkey Store', type: 'checkbox' },
+        { col: 'StoreIsComping', label: 'Comping Store', type: 'checkbox' },
+        { col: 'ActiveCrunchtime', label: 'Active on CrunchTime', type: 'checkbox' },
+      ]},
+      { title: 'Operations', fields: [
+        { col: 'StoreAlcFlag', label: 'Sells Alcohol', type: 'checkbox' },
+        { col: 'StoreMenuBoardType', label: 'Menu Board Type ID', type: 'number',
+          help: 'FK — dropdown coming in round 3' },
+        { col: 'OLOLink', label: 'OLO Link', type: 'text', span: 2 },
+        { col: 'CateringOLOLink', label: 'Catering OLO Link', type: 'text', span: 2 },
+        { col: 'CateringMenuURL', label: 'Catering Menu URL', type: 'text', span: 2 },
+        { col: 'StoreCareers', label: 'Careers URL', type: 'text', span: 2 },
+        { col: 'StoreHoursOfOperation', label: 'Hours of Operation', type: 'textarea', span: 2 },
+      ]},
+      { title: 'Leadership & FKs', fields: [
+        { col: 'StoreCompany', label: 'Company ID', type: 'number',
+          help: 'FK to Company — dropdown coming in round 3' },
+        { col: 'StoreAreaDirID', label: 'Area Director ID', type: 'number',
+          help: 'FK to AreaDir — dropdown coming in round 3' },
+        { col: 'StoreFMMID', label: 'FMM ID', type: 'number' },
+        { col: 'StoreFBCID', label: 'FBC ID', type: 'number' },
+        { col: 'StoreDMAID', label: 'DMA ID', type: 'number' },
+        { col: 'StoreRegionID', label: 'Region ID', type: 'text' },
+        { col: 'StoreSystemID', label: 'System ID', type: 'number' },
+        { col: 'StoreDistrictID', label: 'District ID', type: 'number' },
+        { col: 'StoreDivisionID', label: 'Division ID', type: 'number' },
+        { col: 'StoreOwnershipID', label: 'Ownership ID', type: 'number' },
+        { col: 'StoreCateringMgrID', label: 'Catering Manager ID', type: 'number' },
+        { col: 'StorePrimaryContact', label: 'Primary Contact ID', type: 'number' },
+        { col: 'StoreBillingID', label: 'Billing ID', type: 'number' },
+        { col: 'StoreSyscoID', label: 'Sysco Market ID', type: 'number' },
+      ]},
+      { title: 'External Systems', fields: [
+        { col: 'StoreCFID', label: 'Catering Forms ID', type: 'text' },
+        { col: 'StoreCFPW', label: 'Catering Forms Password', type: 'text' },
+        { col: 'POSSoftwareKeyID', label: 'POS Software Key', type: 'text' },
+        { col: 'KnappGeo', label: 'Knapp Geography ID', type: 'number' },
+      ]},
+      { title: 'Audit', fields: [
+        { col: 'LastUpdatedBy', label: 'Last Updated By', type: 'text', ro: true },
+        { col: 'LastUpdated', label: 'Last Updated At', type: 'text', ro: true },
+      ]},
+    ];
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Auth state
+    // ──────────────────────────────────────────────────────────────────────────
+    const authToken = localStorage.getItem('auth_token');
+    let currentUser = null;
+    try { currentUser = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    const isAdmin = currentUser && currentUser.role === 'admin';
+
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+      return h;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // State
+    // ──────────────────────────────────────────────────────────────────────────
+    let allRows = [];
+    let sortCol = 'StoreID';
+    let sortDir = 1;
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+    function showError(msg) {
+      const el = document.getElementById('messages');
+      el.innerHTML = `<div class="error">${escapeHtml(msg)}</div>`;
+      setTimeout(() => { el.innerHTML = ''; }, 6000);
+    }
+    function showInfo(msg) {
+      const el = document.getElementById('messages');
+      el.innerHTML = `<div class="info">${escapeHtml(msg)}</div>`;
+      setTimeout(() => { el.innerHTML = ''; }, 4000);
+    }
+
+    function isActive(row) {
+      // "Active" = no close date set, OR close date in the future,
+      // OR status indicates open. Helps hide retired/closed stores by default.
+      if (row.StoreCloseDate) {
+        const d = new Date(row.StoreCloseDate);
+        if (!isNaN(d) && d <= new Date()) return false;
+      }
+      const status = (row.StoreStatus || '').toLowerCase();
+      if (status.includes('closed') || status.includes('retire')) return false;
+      return true;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Data
+    // ──────────────────────────────────────────────────────────────────────────
+    async function loadList() {
+      const wrap = document.getElementById('table-wrap');
+      wrap.innerHTML = '<div class="loading">Loading stores…</div>';
+      try {
+        const r = await fetch('/api/contacts/stores', { headers: authHeaders() });
+        if (r.status === 401) {
+          wrap.innerHTML = '<div class="error">You need to be logged in. <a href="/">Sign in</a> first.</div>';
+          return;
+        }
+        if (!r.ok) {
+          const txt = await r.text();
+          wrap.innerHTML = `<div class="error">Failed to load: ${escapeHtml(txt)}</div>`;
+          return;
+        }
+        allRows = await r.json();
+        render();
+      } catch (e) {
+        wrap.innerHTML = `<div class="error">Network error: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function render() {
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      const activeOnly = document.getElementById('active-only').checked;
+
+      let rows = allRows.filter(r => {
+        if (activeOnly && !isActive(r)) return false;
+        if (!q) return true;
+        const blob = [
+          r.StoreID, r.StoreName, r.StoreCity, r.StoreState,
+          r.StoreStatus, r.StoreAdd1
+        ].filter(v => v != null).join(' ').toLowerCase();
+        return blob.includes(q);
+      });
+
+      rows.sort((a, b) => {
+        const av = a[sortCol], bv = b[sortCol];
+        const an = (av === null || av === undefined || av === '');
+        const bn = (bv === null || bv === undefined || bv === '');
+        if (an && bn) return 0;
+        if (an) return 1;
+        if (bn) return -1;
+        const aS = typeof av === 'number' ? av : av.toString().toLowerCase();
+        const bS = typeof bv === 'number' ? bv : bv.toString().toLowerCase();
+        if (aS < bS) return -1 * sortDir;
+        if (aS > bS) return  1 * sortDir;
+        return 0;
+      });
+
+      document.getElementById('count').textContent =
+        `${rows.length}${rows.length !== allRows.length ? ' of ' + allRows.length : ''}`;
+
+      const wrap = document.getElementById('table-wrap');
+      if (rows.length === 0) {
+        wrap.innerHTML = `<div class="empty">${
+          allRows.length === 0
+            ? 'No stores in SQLite yet. Run contacts_export_from_sqlserver.py to import.'
+            : 'No matches for your search/filter.'
+        }</div>`;
+        return;
+      }
+
+      const headers = [
+        ['StoreID',       '#'],
+        ['StoreName',     'Store'],
+        ['StoreCity',     'City'],
+        ['StoreState',    'State'],
+        ['StoreStatus',   'Status'],
+        ['StoreOpenDate', 'Open'],
+        ['LastUpdatedBy', 'Last Edited By'],
+        ['LastUpdated',   'When'],
+      ];
+
+      let html = '<table><thead><tr>';
+      headers.forEach(([col, label]) => {
+        const ind = (sortCol === col) ? `<span class="sort-indicator">${sortDir>0?'▲':'▼'}</span>` : '';
+        html += `<th data-col="${col}">${label}${ind}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+      rows.forEach(r => {
+        const lastWhen = r.LastUpdated
+          ? new Date(r.LastUpdated).toLocaleDateString()
+          : '';
+        const statusBadge = statusBadgeHtml(r);
+        html += `<tr class="row" data-id="${r.StoreID}">
+          <td>${escapeHtml(r.StoreID ?? '')}</td>
+          <td><strong>${escapeHtml(r.StoreName ?? '')}</strong></td>
+          <td>${escapeHtml(r.StoreCity ?? '')}</td>
+          <td>${escapeHtml(r.StoreState ?? '')}</td>
+          <td>${statusBadge}</td>
+          <td>${escapeHtml(r.StoreOpenDate ?? '')}</td>
+          <td>${escapeHtml(r.LastUpdatedBy ?? '')}</td>
+          <td>${escapeHtml(lastWhen)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
+
+      wrap.querySelectorAll('tr.row').forEach(tr => {
+        tr.addEventListener('click', () => openEditModal(parseInt(tr.dataset.id, 10)));
+      });
+      wrap.querySelectorAll('th[data-col]').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.col;
+          if (sortCol === col) sortDir *= -1;
+          else { sortCol = col; sortDir = 1; }
+          render();
+        });
+      });
+    }
+
+    function statusBadgeHtml(row) {
+      const active = isActive(row);
+      const label = row.StoreStatus || (active ? 'Open' : 'Closed');
+      const cls = active ? 'status-open' : 'status-closed';
+      return `<span class="status-badge ${cls}">${escapeHtml(label)}</span>`;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Modal — generate form from STORE_SECTIONS config
+    // ──────────────────────────────────────────────────────────────────────────
+    function renderForm() {
+      const c = document.getElementById('form-container');
+      let html = '';
+      STORE_SECTIONS.forEach(sec => {
+        html += `<div class="section-title">${sec.title}</div>`;
+        html += '<div class="form-grid">';
+        sec.fields.forEach(f => {
+          const id = `f_${f.col}`;
+          const spanCls = f.span === 2 ? ' span-2' : '';
+          const roCls = f.ro ? ' readonly' : '';
+          html += `<div class="form-row${spanCls}${roCls}">`;
+          html += `<label for="${id}">${f.label}</label>`;
+          if (f.type === 'checkbox') {
+            html += `<input type="checkbox" id="${id}" data-col="${f.col}" />`;
+          } else if (f.type === 'textarea') {
+            html += `<textarea id="${id}" data-col="${f.col}" rows="2"${f.ro?' readonly':''}></textarea>`;
+          } else {
+            const t = f.type || 'text';
+            html += `<input type="${t}" id="${id}" data-col="${f.col}"${f.ro?' readonly':''} />`;
+          }
+          if (f.help) html += `<span class="help">${f.help}</span>`;
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+      c.innerHTML = html;
+    }
+
+    function setEditableState() {
+      document.getElementById('modal-auth-note').style.display = isAdmin ? 'none' : '';
+      const c = document.getElementById('form-container');
+      c.querySelectorAll('input, select, textarea').forEach(el => {
+        // Don't override server-imposed readonly (audit fields)
+        if (!el.hasAttribute('readonly')) el.disabled = !isAdmin;
+      });
+      document.getElementById('save-btn').style.display = isAdmin ? '' : 'none';
+    }
+
+    function openAddModal() {
+      document.getElementById('modal-title').textContent = 'Add Store';
+      // Clear all inputs
+      const c = document.getElementById('form-container');
+      c.querySelectorAll('input, textarea').forEach(el => {
+        if (el.type === 'checkbox') el.checked = false;
+        else el.value = '';
+      });
+      // Allow editing StoreID since it's a new record
+      const storeIdField = document.getElementById('f_StoreID');
+      if (storeIdField) {
+        storeIdField.readOnly = false;
+        storeIdField.parentElement.classList.remove('readonly');
+      }
+      setEditableState();
+      document.getElementById('modal').classList.add('visible');
+    }
+
+    function openEditModal(id) {
+      const row = allRows.find(r => r.StoreID === id);
+      if (!row) return;
+      document.getElementById('modal-title').textContent =
+        `${isAdmin ? 'Edit' : 'View'}: ${row.StoreName || '#'+row.StoreID}`;
+      // Keep StoreID readonly on edits
+      const storeIdField = document.getElementById('f_StoreID');
+      if (storeIdField) {
+        storeIdField.readOnly = true;
+        storeIdField.parentElement.classList.add('readonly');
+      }
+      // Populate from row
+      STORE_SECTIONS.forEach(sec => {
+        sec.fields.forEach(f => {
+          const el = document.getElementById(`f_${f.col}`);
+          if (!el) return;
+          const v = row[f.col];
+          if (f.type === 'checkbox') {
+            el.checked = !!(v === 1 || v === true || v === '1' || v === 'true');
+          } else if (f.type === 'date' && v) {
+            // SQLite stores ISO timestamps; date input wants YYYY-MM-DD
+            el.value = String(v).slice(0, 10);
+          } else {
+            el.value = (v ?? '');
+          }
+        });
+      });
+      setEditableState();
+      document.getElementById('modal').classList.add('visible');
+    }
+
+    function closeModal() {
+      document.getElementById('modal').classList.remove('visible');
+    }
+
+    function readForm() {
+      const out = {};
+      STORE_SECTIONS.forEach(sec => {
+        sec.fields.forEach(f => {
+          if (f.ro && f.col !== 'StoreID') return;  // skip audit fields
+          const el = document.getElementById(`f_${f.col}`);
+          if (!el) return;
+          if (f.type === 'checkbox') {
+            out[f.col] = el.checked ? 1 : 0;
+          } else if (f.type === 'number') {
+            const s = el.value.trim();
+            out[f.col] = s === '' ? null : Number(s);
+          } else {
+            const s = (el.value ?? '').trim();
+            out[f.col] = s === '' ? null : s;
+          }
+        });
+      });
+      return out;
+    }
+
+    async function onSave() {
+      const payload = readForm();
+      const isNew = !payload.StoreID || !allRows.find(r => r.StoreID === payload.StoreID);
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true;
+      try {
+        let url, method;
+        if (isNew) { url = '/api/contacts/stores'; method = 'POST'; }
+        else      { url = `/api/contacts/stores/${payload.StoreID}`; method = 'PUT'; }
+        const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+        if (r.status === 401) { showError('Sign in required.'); btn.disabled = false; return; }
+        if (r.status === 403) { showError('Admin role required.'); btn.disabled = false; return; }
+        if (!r.ok) {
+          const txt = await r.text();
+          showError(`Save failed: ${txt}`);
+          btn.disabled = false;
+          return;
+        }
+        closeModal();
+        showInfo(isNew ? 'Store added.' : 'Store updated.');
+        await loadList();
+      } catch (e) {
+        showError(`Network error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Wire up
+    // ──────────────────────────────────────────────────────────────────────────
+    document.getElementById('add-btn').addEventListener('click', () => {
+      if (!isAdmin) { showError('Admin role required to add stores.'); return; }
+      openAddModal();
+    });
+    document.getElementById('cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    document.getElementById('save-btn').addEventListener('click', onSave);
+    document.getElementById('search').addEventListener('input', () => render());
+    document.getElementById('active-only').addEventListener('change', () => render());
+    document.getElementById('modal').addEventListener('click', e => {
+      if (e.target.id === 'modal') closeModal();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    if (!isAdmin) {
+      document.getElementById('add-btn').style.opacity = 0.55;
+      document.getElementById('add-btn').title = 'Admin role required';
+    }
+
+    renderForm();        // build the modal HTML once
+    loadList();          // then fetch + display data
+  </script>
+</body>
+</html>

@@ -99,6 +99,26 @@ def initialize_schema() -> None:
             LastUpdated   TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_company_name ON Company(CompanyName);
+
+        -- Store master directory (62 columns in SQL Server). The exporter
+        -- recreates this table on each export, so the "skeleton" defined
+        -- here only matters before the first export — keeps the UI from
+        -- 500'ing when the DB is otherwise empty.
+        CREATE TABLE IF NOT EXISTS Store (
+            StoreID       INTEGER PRIMARY KEY,
+            StoreName     TEXT,
+            StoreCity     TEXT,
+            StoreState    TEXT,
+            StoreStatus   TEXT,
+            StoreOpenDate TEXT,
+            StoreCloseDate TEXT,
+            StoreCompany  INTEGER,
+            StoreAreaDirID INTEGER,
+            LastUpdatedBy TEXT,
+            LastUpdated   TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_store_name ON Store(StoreName);
+        CREATE INDEX IF NOT EXISTS idx_store_state ON Store(StoreState);
         """)
         conn.commit()
 
@@ -226,6 +246,108 @@ def delete_area_director(areadir_id: int, updated_by: str) -> bool:
         affected = cur.rowcount
         conn.commit()
         return affected > 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Store — master directory (62 columns in SQL Server).
+#
+# Different shape from AreaDir: too many columns to hand-list, so the CRUD
+# helpers are column-agnostic — they introspect what columns the SQLite
+# table actually has and operate on whatever's there. This means the
+# exporter can add/remove columns and the CRUD keeps working without code
+# changes. Some columns are protected from user edits (StoreID itself,
+# LastUpdated auto-stamp) and excluded from UPDATE/INSERT.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Columns we never let the user edit directly. The PK is auto-managed,
+# LastUpdated/LastUpdatedBy are stamped server-side.
+STORE_PROTECTED_COLUMNS = {"StoreID", "LastUpdated"}
+
+
+def _store_columns() -> List[str]:
+    """Return the column names actually present in the Store SQLite table."""
+    with get_connection() as conn:
+        rows = conn.execute("PRAGMA table_info(Store)").fetchall()
+        return [r["name"] for r in rows]
+
+
+def list_stores() -> List[Dict[str, Any]]:
+    """Return every Store with every column. The list view picks which
+    columns to show; edit modal renders them all."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM Store ORDER BY LOWER(COALESCE(StoreName, ''))"
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def get_store(store_id: int) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM Store WHERE StoreID = ?", (store_id,)
+        ).fetchone()
+        return _row_to_dict(row) if row else None
+
+
+def update_store(store_id: int, data: Dict[str, Any], updated_by: str) -> bool:
+    """
+    Update whatever columns the caller supplied. Unknown columns (not in
+    the SQLite schema) are silently dropped, so a stale frontend won't
+    fail a save. Protected columns (StoreID, LastUpdated) are ignored.
+    LastUpdatedBy + LastUpdated are always stamped.
+    """
+    valid_cols = set(_store_columns())
+    sets: List[str] = []
+    values: List[Any] = []
+    for k, v in data.items():
+        if k in STORE_PROTECTED_COLUMNS or k not in valid_cols:
+            continue
+        sets.append(f"{k} = ?")
+        # Treat empty string as NULL — matches SQL Server's typical behavior
+        # for our nullable VARCHAR columns and keeps the data tidy.
+        values.append(v if v not in ("", None) else None)
+    if not sets:
+        # Nothing to do; still bump the audit stamp so we record "user
+        # touched this record" if they opened + saved a no-op edit.
+        sets.append("LastUpdatedBy = ?")
+        values.append(updated_by)
+    else:
+        sets.append("LastUpdatedBy = ?")
+        values.append(updated_by)
+    sets.append("LastUpdated = datetime('now')")
+    values.append(store_id)
+    sql = f"UPDATE Store SET {', '.join(sets)} WHERE StoreID = ?"
+    with get_connection() as conn:
+        cur = conn.execute(sql, tuple(values))
+        affected = cur.rowcount
+        conn.commit()
+        return affected > 0
+
+
+def insert_store(data: Dict[str, Any], updated_by: str) -> int:
+    """Insert + return new StoreID. Caller must supply StoreID (it isn't
+    auto-incremented in SQL Server — RestaurantIDs are externally
+    assigned)."""
+    if not data.get("StoreID"):
+        raise ValueError("StoreID is required when inserting a new store")
+    valid_cols = set(_store_columns())
+    cols = ["StoreID"]
+    values = [int(data["StoreID"])]
+    for k, v in data.items():
+        if k in ("StoreID", "LastUpdated") or k not in valid_cols:
+            continue
+        cols.append(k)
+        values.append(v if v not in ("", None) else None)
+    cols.append("LastUpdatedBy")
+    values.append(updated_by)
+    cols.append("LastUpdated")
+    placeholders = ", ".join("?" * (len(values))) + ", datetime('now')"
+    col_list = ", ".join(cols)
+    sql = f"INSERT INTO Store ({col_list}) VALUES ({placeholders})"
+    with get_connection() as conn:
+        conn.execute(sql, tuple(values))
+        conn.commit()
+        return int(data["StoreID"])
 
 
 # ──────────────────────────────────────────────────────────────────────────────

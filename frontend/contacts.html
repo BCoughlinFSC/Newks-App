@@ -101,6 +101,25 @@
       vertical-align: middle;
     }
     .card.soon { opacity: 0.55; pointer-events: none; }
+
+    .sync-banner {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-left: 4px solid #16A34A;
+      border-radius: 8px;
+      padding: 0.7rem 1.25rem;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      color: #374151;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .sync-banner.stale { border-left-color: #D97706; background: #FFFBEB; }
+    .sync-banner.error { border-left-color: #DC2626; background: #FEF2F2; color: #991B1B; }
+    .sync-banner .totals { color: #6B7280; }
   </style>
 </head>
 <body>
@@ -115,13 +134,17 @@
   </div>
 
   <main>
+    <div id="sync-banner" class="sync-banner">
+      <div><strong>Loading sync status…</strong></div>
+    </div>
+
     <div class="intro">
       <h2>What lives here</h2>
-      <p>This section is the in-app replacement for <code>forms.nfc.local</code>. Data still lives in
-        SQL-PROD's <code>contacts</code> database, so existing SSRS reports and scheduled jobs keep
-        working unchanged — we just put a cleaner UI on top.</p>
-      <p>All edits are audit-logged (who, what, when) in <code>contacts.dbo.AuditDataChanges</code>
-        via the existing SQL Server triggers. Only admins can create / update / delete.</p>
+      <p>This section is the in-app replacement for <code>forms.nfc.local</code>. Data lives in
+        a local SQLite mirror that's refreshed from SQL-PROD periodically. Edits made here save
+        immediately to the local copy; sync-back to SQL Server is on the roadmap.</p>
+      <p>Only admins can create / update / delete. Every change stamps <code>LastUpdatedBy</code> +
+        <code>LastUpdated</code> so we have an audit trail to reconcile with SQL Server later.</p>
     </div>
 
     <div class="group-label">People & Leadership</div>
@@ -146,10 +169,10 @@
 
     <div class="group-label">Stores & Setup</div>
     <div class="grid">
-      <div class="card soon">
-        <div class="card-title">Store Information <span class="badge-soon">soon</span></div>
-        <p class="card-desc">Address, time zone, POS type, Toast GUID — the 24-column directory.</p>
-      </div>
+      <a href="/contacts-stores.html" class="card">
+        <div class="card-title">Store Information</div>
+        <p class="card-desc">Master store directory — address, dates, FKs, OLO links, etc.</p>
+      </a>
       <div class="card soon">
         <div class="card-title">Store Technical Info <span class="badge-soon">soon</span></div>
         <p class="card-desc">Key #, IPs, software versions, oven, vendor refs.</p>
@@ -176,5 +199,53 @@
       </div>
     </div>
   </main>
+
+  <script>
+    // ──────────────────────────────────────────────────────────────────
+    // Sync banner — shows when the local SQLite mirror was last refreshed
+    // from SQL Server (file mtime), plus row counts per table.
+    // Color codes: green = fresh (<7d), amber = stale (>7d), red = error
+    // ──────────────────────────────────────────────────────────────────
+    (async function () {
+      const banner = document.getElementById('sync-banner');
+      const authToken = localStorage.getItem('auth_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
+      try {
+        const r = await fetch('/api/contacts/health', { headers });
+        if (r.status === 401) {
+          banner.classList.add('stale');
+          banner.innerHTML = '<div>You\'re not signed in — log in to see contacts data + sync status.</div>';
+          return;
+        }
+        if (!r.ok) throw new Error(await r.text());
+        const meta = await r.json();
+        if (!meta.available) {
+          banner.classList.add('error');
+          banner.innerHTML = '<div><strong>No data yet</strong> — run <code>contacts_export_from_sqlserver.py</code> from your laptop to populate the SQLite mirror.</div>';
+          return;
+        }
+        const mtime = meta.file_mtime ? new Date(meta.file_mtime * 1000) : null;
+        const ageH = mtime ? (Date.now() - mtime.getTime()) / 3600000 : 999;
+        const stale = ageH > 24 * 7;
+        const tablesText = Object.entries(meta.tables || {})
+          .map(([t, n]) => `${t}: ${n.toLocaleString()}`)
+          .join(' · ');
+        banner.classList.toggle('stale', stale);
+        banner.innerHTML = `
+          <div>
+            <strong>Last synced from SQL Server:</strong>
+            ${mtime ? mtime.toLocaleString() : 'never'}
+            ${stale ? ' <em style="color:#92400e">(over a week old — consider re-exporting)</em>' : ''}
+          </div>
+          <div class="totals">${tablesText}</div>
+        `;
+      } catch (e) {
+        banner.classList.add('error');
+        banner.innerHTML = `<div><strong>Sync check failed:</strong> ${e.message}</div>`;
+      }
+    })();
+  </script>
 </body>
 </html>
