@@ -397,7 +397,8 @@
       { col: 'OtherPhoneVendor',      label: 'Other Phone Vendor',     type: 'text' },
       { col: 'CameraVendorID',        label: 'Camera Vendor',          type: 'lookup', lookup: 'cameravendor' },
       // A/V Software
-      { col: 'AVSoftwareTypeID',      label: 'A/V Software Type',      type: 'lookup', lookup: 'avsoftwaretype' },
+      { col: 'AVSoftwareTypeID',      label: 'A/V Software Type ID',   type: 'number',
+        help: 'FK to an AV-software table — actual SQL Server table name TBD.' },
       { col: 'OtherAVSoftware',       label: 'Other A/V Software',     type: 'text' },
       { col: 'AVSoftwareVersion',     label: 'A/V Software Version',   type: 'text' },
       { col: 'AVSoftwareInstallDate', label: 'A/V Install Date',       type: 'date' },

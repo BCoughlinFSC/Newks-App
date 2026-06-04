@@ -641,12 +641,15 @@ LOOKUPS: Dict[str, Dict[str, str]] = {
         "description": "Firewall vendor directory.",
     },
     "deliverypartner": {
-        "table": "DeliveryPartners", "pk": "DeliveryPartnerID", "label_col": "DeliveryPartnerName",
+        "table": "DeliveryPartners", "pk": "DelivPartID", "label_col": "DelivPartName",
         "title": "Delivery Partners",
         "description": "DoorDash, UberEats, etc. — vendor directory only. Per-store mapping comes from DeliveryPartnersByStore.",
     },
     "gm": {
-        "table": "GeneralManagers", "pk": "GMID", "label_col": "GMName",
+        # SQL Server schema uses UniqueID (not GMID) as PK and GeneralMgrName
+        # as the display label. Other columns (FirstName/LastName/EmailAddress/
+        # CellPhone/StoreID) auto-render via the generic CRUD page.
+        "table": "GeneralManagers", "pk": "UniqueID", "label_col": "GeneralMgrName",
         "title": "General Managers",
         "description": "Store GM directory.",
     },
@@ -665,7 +668,10 @@ LOOKUPS: Dict[str, Dict[str, str]] = {
         "description": "Self-order kiosk hardware models — referenced by Store.fkKioskTypeID.",
     },
     "hsiservicetype": {
-        "table": "HSIServiceType", "pk": "HSIServiceTypeID", "label_col": "HSIServiceTypeName",
+        # In SQL Server: PK is HSIServiceID, label column is HSIServiceType
+        # (yes, the label column has the same name as the table — quirky but
+        # consistent with Don's SyscoMarket pattern where the label = table).
+        "table": "HSIServiceType", "pk": "HSIServiceID", "label_col": "HSIServiceType",
         "title": "HSI Service Types",
         "description": "Internet service plan types — referenced by Store.FKHSIServiceType.",
     },
@@ -674,11 +680,11 @@ LOOKUPS: Dict[str, Dict[str, str]] = {
         "title": "Camera Vendors",
         "description": "Security-camera vendor directory.",
     },
-    "avsoftwaretype": {
-        "table": "AVSoftwareType", "pk": "AVSoftwareTypeID", "label_col": "AVSoftwareTypeName",
-        "title": "A/V Software Types",
-        "description": "Anti-virus software types — referenced by Store.AVSoftwareTypeID.",
-    },
+    # NOTE: AVSoftwareType was added to DEFAULT_TABLES in the exporter but
+    # SQL Server doesn't have a table by that exact name (the export found
+    # nothing). The FK column Store.AVSoftwareTypeID still exists; we just
+    # don't know the right lookup table name. Investigation TODO. For now
+    # the field stays as a numeric input in the Store edit modal.
 }
 
 
