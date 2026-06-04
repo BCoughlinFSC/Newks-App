@@ -121,11 +121,13 @@ def initialize_schema() -> None:
         CREATE INDEX IF NOT EXISTS idx_store_state ON Store(StoreState);
 
         -- StorePhysical: 1:1 satellite of Store (square footage, seats, drive-thru).
+        -- Audit columns are LastEdited/LastEditedBy here (Don's older naming
+        -- convention) — NOT LastUpdated/LastUpdatedBy like everywhere else.
         -- Exporter rebuilds the table with the full SQL Server column list.
         CREATE TABLE IF NOT EXISTS StorePhysical (
-            StoreID       INTEGER PRIMARY KEY,
-            LastUpdatedBy TEXT,
-            LastUpdated   TEXT
+            StoreID      INTEGER PRIMARY KEY,
+            LastEditedBy TEXT,
+            LastEdited   TEXT
         );
 
         -- StoreTechnical: 1:1 satellite — POS versions, IPs, network kit.
@@ -399,11 +401,22 @@ def _table_columns(table: str) -> List[str]:
             return []
 
 
-# Per-table audit/protected columns. Keep StoreID and the PKs out of UPDATE
-# targets — they're either the lookup key or auto-managed.
+# Per-table audit column naming. SQL Server's contacts schema is inconsistent
+# here: StorePhysical uses LastEdited/LastEditedBy (Don's older convention)
+# while StoreTechnical, Store, AreaDir, etc. use LastUpdated/LastUpdatedBy.
+# We respect whatever the target table actually has so the schema stays
+# faithful to SQL Server (matters for the eventual sync-back step).
+#   (audit_by_col, audit_at_col)
+_SATELLITE_AUDIT = {
+    "StorePhysical":  ("LastEditedBy",  "LastEdited"),
+    "StoreTechnical": ("LastUpdatedBy", "LastUpdated"),
+}
+
+# Per-table protected columns — never accepted from user payloads.
+# Includes PK, FK-to-Store, and both audit columns.
 _SATELLITE_PROTECTED = {
-    "StorePhysical":  {"StoreID", "LastUpdated"},
-    "StoreTechnical": {"StoreTechnicalID", "storeid", "LastUpdated"},
+    "StorePhysical":  {"StoreID", "LastEdited", "LastEditedBy"},
+    "StoreTechnical": {"StoreTechnicalID", "storeid", "LastUpdated", "LastUpdatedBy"},
 }
 
 
@@ -414,6 +427,8 @@ def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_b
     - If a row exists for this store, UPDATE its non-protected columns.
     - Otherwise INSERT a fresh row with the supplied data.
 
+    Audit columns (LastEdited/LastEditedBy for Physical, LastUpdated/
+    LastUpdatedBy for Technical) are stamped server-side per table.
     Unknown/protected columns are silently dropped, matching the Store
     pattern — keeps a stale frontend from breaking a save.
     """
@@ -421,7 +436,13 @@ def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_b
     if not valid_cols:
         logger.warning("Satellite table %s missing — exporter hasn't created it yet", table)
         return False
-    protected = _SATELLITE_PROTECTED.get(table, {"LastUpdated"})
+    protected = _SATELLITE_PROTECTED.get(table, {"LastUpdated", "LastUpdatedBy"})
+    audit_by, audit_at = _SATELLITE_AUDIT.get(table, ("LastUpdatedBy", "LastUpdated"))
+
+    # Only stamp audit columns that actually exist in the destination table.
+    # Defends against schema drift / older exports.
+    stamp_by = audit_by if audit_by in valid_cols else None
+    stamp_at = audit_at if audit_at in valid_cols else None
 
     with get_connection() as conn:
         existing = conn.execute(
@@ -437,9 +458,11 @@ def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_b
                     continue
                 sets.append(f"{k} = ?")
                 values.append(v if v not in ("", None) else None)
-            sets.append("LastUpdatedBy = ?")
-            values.append(updated_by)
-            sets.append("LastUpdated = datetime('now')")
+            if stamp_by:
+                sets.append(f"{stamp_by} = ?")
+                values.append(updated_by)
+            if stamp_at:
+                sets.append(f"{stamp_at} = datetime('now')")
             values.append(store_id)
             sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {fk_column} = ?"
             cur = conn.execute(sql, tuple(values))
@@ -454,10 +477,15 @@ def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_b
                 continue
             cols.append(k)
             values_ins.append(v if v not in ("", None) else None)
-        cols.append("LastUpdatedBy")
-        values_ins.append(updated_by)
-        cols.append("LastUpdated")
-        placeholders = ", ".join("?" * len(values_ins)) + ", datetime('now')"
+        # Stamp audit columns inline at INSERT time.
+        if stamp_by:
+            cols.append(stamp_by)
+            values_ins.append(updated_by)
+        placeholders_parts = ["?"] * len(values_ins)
+        if stamp_at:
+            cols.append(stamp_at)
+            placeholders_parts.append("datetime('now')")
+        placeholders = ", ".join(placeholders_parts)
         sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})"
         conn.execute(sql, tuple(values_ins))
         conn.commit()

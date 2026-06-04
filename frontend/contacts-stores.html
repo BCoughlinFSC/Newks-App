@@ -341,36 +341,88 @@
     // Anything in the SQLite row that isn't listed here passes through
     // untouched on save (we only PUT the fields that appear in the form).
     // ──────────────────────────────────────────────────────────────────────────
+    // Real StorePhysical columns (13). Note: audit cols are LastEdited /
+    // LastEditedBy (Don's older naming), handled server-side.
     const STORE_PHYSICAL_FIELDS = [
-      { col: 'SquareFootage',  label: 'Square Footage', type: 'number' },
-      { col: 'InteriorSeats',  label: 'Interior Seats', type: 'number' },
-      { col: 'ExteriorSeats',  label: 'Exterior Seats', type: 'number' },
-      { col: 'TotalSeats',     label: 'Total Seats',    type: 'number' },
-      { col: 'DriveThru',      label: 'Has Drive-Thru', type: 'checkbox' },
-      { col: 'Patio',          label: 'Has Patio',      type: 'checkbox' },
-      { col: 'BuildingType',   label: 'Building Type',  type: 'text' },
-      { col: 'LeaseOwnership', label: 'Lease / Own',    type: 'text' },
-      { col: 'ParkingSpaces',  label: 'Parking Spaces', type: 'number' },
-      { col: 'LandlordName',   label: 'Landlord Name',  type: 'text', span: 2 },
-      { col: 'LandlordEmail',  label: 'Landlord Email', type: 'text', span: 2 },
-      { col: 'LandlordPhone',  label: 'Landlord Phone', type: 'text' },
+      { col: 'SquareFeet',       label: 'Square Feet',        type: 'number' },
+      { col: 'TypeOfBuilding',   label: 'Type of Building',   type: 'text' },
+      { col: 'Classification',   label: 'Classification',     type: 'text' },
+      { col: 'IndoorSeats',      label: 'Indoor Seats',       type: 'number' },
+      { col: 'ExteriorSeats',    label: 'Exterior Seats',     type: 'number' },
+      { col: 'NumPOSTerms',      label: 'POS Terminals',      type: 'number',
+        help: 'StorePhysical also tracks this (originally-installed count).' },
+      { col: 'NumParkingSpots',  label: 'Parking Spots',      type: 'number' },
+      { col: 'DriveThru',        label: 'Drive-Thru',         type: 'text',
+        help: 'Yes / No / partial — free-text in SQL Server.' },
+      { col: 'CoolerLocation',   label: 'Cooler Location',    type: 'text' },
+      { col: 'GNGCoolerSize',    label: 'Grab-N-Go Cooler Size', type: 'number' },
     ];
 
+    // Real StoreTechnical columns (47). Grouped by topic via the order
+    // below; the form renders one big grid so the comments are just for
+    // future maintainers. FK columns ending in *ID are kept as numeric
+    // inputs for now — once we export FireWallProvider / PhoneVendors /
+    // CameraVendors / AVSoftwareType / KioskType / POSType / HSIServiceType
+    // we can convert them to dropdowns.
     const STORE_TECHNICAL_FIELDS = [
-      { col: 'POSType',           label: 'POS Type',           type: 'text' },
-      { col: 'POSVersion',        label: 'POS Version',        type: 'text' },
-      { col: 'AlohaVersion',      label: 'Aloha Version',      type: 'text' },
-      { col: 'ToastVersion',      label: 'Toast Version',      type: 'text' },
-      { col: 'StoreIP',           label: 'Store Public IP',    type: 'text' },
-      { col: 'LANIP',             label: 'LAN IP',             type: 'text' },
-      { col: 'KeyNumber',         label: 'Key #',              type: 'text' },
-      { col: 'Router',            label: 'Router',             type: 'text' },
-      { col: 'FireWallProvider',  label: 'Firewall Provider',  type: 'text' },
-      { col: 'PhoneVendor',       label: 'Phone Vendor',       type: 'text' },
-      { col: 'CCProcessor',       label: 'CC Processor',       type: 'text' },
-      { col: 'Oven',              label: 'Oven',               type: 'text' },
-      { col: 'BackupISP',         label: 'Backup ISP',         type: 'text' },
-      { col: 'Notes',             label: 'Notes',              type: 'textarea', span: 2 },
+      // POS — Aloha + Toast
+      { col: 'POSKey',                label: 'POS Key #',              type: 'number' },
+      { col: 'fkPOSTypeID',           label: 'POS Type ID',            type: 'number',
+        help: 'FK to POSType (no lookup yet).' },
+      { col: 'AlohaVersion',          label: 'Aloha Version',          type: 'text' },
+      { col: 'EDCVersion',            label: 'EDC Version',            type: 'text' },
+      { col: 'ATOVersion',            label: 'ATO Version',            type: 'text' },
+      { col: 'CMCVersion',            label: 'CMC Version',            type: 'text' },
+      { col: 'CFCVersion',            label: 'CFC Version',            type: 'text' },
+      { col: 'SVVersion',             label: 'SV Version',             type: 'text' },
+      { col: 'WarezLastUpdated',      label: 'Software Last Updated',  type: 'date' },
+      { col: 'NumPOSTerms',           label: 'POS Terminals (Current)', type: 'number' },
+      { col: 'ToastPOSVersion',       label: 'Toast POS Version',      type: 'text' },
+      { col: 'ToastPayVersion',       label: 'Toast Pay Version',      type: 'text' },
+      { col: 'ToastKDSCount',         label: 'Toast KDS Count',        type: 'number' },
+      { col: 'ToastHandHeldCount',    label: 'Toast Handheld Count',   type: 'number' },
+      { col: 'PrinterCount',          label: 'Printer Count',          type: 'number' },
+      // Network
+      { col: 'ExternalIP',            label: 'External IP',            type: 'text' },
+      { col: 'MgmtIP',                label: 'Management IP',          type: 'text' },
+      { col: 'StaticIPCount',         label: 'Static IP Count',        type: 'number' },
+      { col: 'Bandwidth',             label: 'Bandwidth',              type: 'text' },
+      { col: 'ISPName',               label: 'ISP Name',               type: 'text' },
+      { col: 'FKHSIServiceType',      label: 'HSI Service Type ID',    type: 'number',
+        help: 'FK to HSIServiceType (no lookup yet).' },
+      { col: 'ManagedSwitch',         label: 'Managed Switch',         type: 'text' },
+      { col: 'Failover',              label: 'Failover',               type: 'text' },
+      { col: 'AccessPoint',           label: 'Access Point',           type: 'text' },
+      { col: 'FireWallProvider',      label: 'Firewall Provider ID',   type: 'number',
+        help: 'FK to FireWallProvider (no lookup yet).' },
+      // Vendors
+      { col: 'PhoneVendorID',         label: 'Phone Vendor ID',        type: 'number',
+        help: 'FK to PhoneVendors (no lookup yet).' },
+      { col: 'OtherPhoneVendor',      label: 'Other Phone Vendor',     type: 'text' },
+      { col: 'CameraVendorID',        label: 'Camera Vendor ID',       type: 'number',
+        help: 'FK to CameraVendors (no lookup yet).' },
+      // A/V Software
+      { col: 'AVSoftwareTypeID',      label: 'A/V Software Type ID',   type: 'number',
+        help: 'FK to AVSoftwareType (no lookup yet).' },
+      { col: 'OtherAVSoftware',       label: 'Other A/V Software',     type: 'text' },
+      { col: 'AVSoftwareVersion',     label: 'A/V Software Version',   type: 'text' },
+      { col: 'AVSoftwareInstallDate', label: 'A/V Install Date',       type: 'date' },
+      { col: 'AVSoftwareExpirationDate', label: 'A/V Expiration Date', type: 'date' },
+      // Kiosks
+      { col: 'fkKioskTypeID',         label: 'Kiosk Type ID',          type: 'number',
+        help: 'FK to KioskType (no lookup yet).' },
+      { col: 'NumKiosks',             label: 'Number of Kiosks',       type: 'number' },
+      // Credit-card processors — stored as 0/1 flags in SQL Server
+      { col: 'CCProcessorInHouse',    label: 'CC Processor: In-House', type: 'checkbox' },
+      { col: 'CCProcessorOLO',        label: 'CC Processor: OLO',      type: 'checkbox' },
+      { col: 'CCProcessorMM',         label: 'CC Processor: Monkey Media', type: 'checkbox' },
+      { col: 'CCProcessorAmexDirect', label: 'CC Processor: Amex Direct',  type: 'checkbox' },
+      // Misc
+      { col: 'Oven',                  label: 'Oven',                   type: 'text' },
+      { col: 'TimeZone',              label: 'Time Zone (offset)',     type: 'number' },
+      { col: 'DST',                   label: 'Observes Daylight Savings', type: 'checkbox' },
+      { col: 'KEA',                   label: 'KEA',                    type: 'checkbox',
+        help: 'Kitchen Equipment Alert flag (legacy).' },
     ];
 
     // ──────────────────────────────────────────────────────────────────────────
