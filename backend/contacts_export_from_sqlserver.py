@@ -47,15 +47,32 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # Tables to mirror. Add to this list as we extend the Contacts UI to
 # cover more parts of the SQL Server contacts schema.
 DEFAULT_TABLES = [
-    "AreaDir",
-    "Company",
+    # Store master + satellites
     "Store",                  # 62-col store master directory
+    "StorePhysical",          # 1:1 — square feet, seats, drive-thru
+    "StoreTechnical",         # 1:1 — Aloha/Toast versions, IPs, network
+    "StoreClosure",           # 1:many — full closure history (~11k rows)
+
+    # People
+    "AreaDir",
+    "FBC",
+    "FMM",
+    "CateringMgr",
+    "BillingContacts",
+    "PrimaryContacts",
+
+    # Entities
+    "Company",
+    "DMA",
+    "OwnerShip",
+    "SyscoMarket",
+
     # Future:
-    # "StorePhysical", "StoreTechnical", "StoreClosure", "StoreSize",  -- satellite tables for joined view
-    # "BillingContacts", "PrimaryContacts", "CateringMgr", "GeneralManagers",
-    # "CCProcessors", "FireWallProvider", "DeliveryPartners", "DeliveryPartnersByStore",
-    # "PhoneVendors", "OwnerShip", "CateringGoals", "CateringBudgeted",
-    # "POSType", "MenuType", "DMA",  -- lookups
+    # "StoreSize" — looks like a deprecated StorePhysical duplicate, skipping
+    # "GeneralManagers", "CCProcessors", "FireWallProvider",
+    # "DeliveryPartners", "DeliveryPartnersByStore", "PhoneVendors",
+    # "CateringGoals", "CateringBudgeted",
+    # "POSType", "MenuType",  -- lookups
 ]
 
 # SQL Server data type → SQLite affinity

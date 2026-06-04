@@ -18950,6 +18950,72 @@ async def contacts_create_store(
         raise HTTPException(status_code=500, detail=f"DB error: {exc}")
 
 
+# ─── Store satellites + lookups ───────────────────────────────────────────────
+#
+# /full hydrates Store + Physical + Technical + closure history in a single
+# round-trip so the edit modal can populate all tabs without N requests.
+# The PUT endpoints upsert — they INSERT if the satellite row doesn't exist
+# yet (some stores have Store but no StorePhysical row), UPDATE otherwise.
+
+@app.get("/api/contacts/stores/{store_id}/full")
+async def contacts_get_store_full(store_id: int, _user: User = Depends(get_current_user)):
+    """Store + Physical + Technical + closure history. One call hydrates the modal."""
+    full = contacts_db.get_store_full(store_id)
+    if not full:
+        raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    return full
+
+
+@app.put("/api/contacts/stores/{store_id}/physical")
+async def contacts_update_store_physical(
+    store_id: int,
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Upsert the StorePhysical satellite row for this store."""
+    if not contacts_db.get_store(store_id):
+        raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    try:
+        ok = contacts_db.update_store_physical(store_id, body, updated_by=admin_user.name)
+        logger.info("StorePhysical upserted store=%s by %s", store_id, admin_user.email)
+        return {"StoreID": store_id, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.update_store_physical failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.put("/api/contacts/stores/{store_id}/technical")
+async def contacts_update_store_technical(
+    store_id: int,
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Upsert the StoreTechnical satellite row for this store."""
+    if not contacts_db.get_store(store_id):
+        raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    try:
+        ok = contacts_db.update_store_technical(store_id, body, updated_by=admin_user.name)
+        logger.info("StoreTechnical upserted store=%s by %s", store_id, admin_user.email)
+        return {"StoreID": store_id, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.update_store_technical failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.get("/api/contacts/stores/{store_id}/closures")
+async def contacts_list_store_closures(store_id: int, _user: User = Depends(get_current_user)):
+    """Read-only closure history for a store. Editing UI comes later."""
+    return contacts_db.list_store_closures(store_id)
+
+
+@app.get("/api/contacts/lookups/{name}")
+async def contacts_get_lookup(name: str, _user: User = Depends(get_current_user)):
+    """Generic FK dropdown source. `name` is one of: company, areadir, fbc, fmm,
+    dma, ownership, cateringmgr, billing, primarycontact, sysco. Returns
+    [{id, label}]. Unknown names return [] so the form gracefully degrades."""
+    return contacts_db.list_lookup(name)
+
+
 @app.get("/api/monkey/alerts/not-accepted")
 async def monkey_alert_not_accepted():
     """Orders due within 24 hours not yet accepted."""

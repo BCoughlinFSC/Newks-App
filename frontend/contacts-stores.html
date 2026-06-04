@@ -236,12 +236,15 @@
   <script>
     // ──────────────────────────────────────────────────────────────────────────
     // Field configuration — groups + types for the edit modal
-    //   col   = SQLite column name (must match exactly)
-    //   label = pretty label for the form
-    //   type  = text | number | date | checkbox | textarea
-    //   help  = optional help text under the input
-    //   span  = '2' to span both grid columns; default 1
-    //   ro    = readonly (auto-managed fields like StoreID + audit)
+    //   col    = SQLite column name (must match exactly)
+    //   label  = pretty label for the form
+    //   type   = text | number | date | checkbox | textarea | lookup
+    //   lookup = (when type='lookup') one of the LOOKUP names below; the form
+    //            fetches /api/contacts/lookups/{name} → [{id, label}] and
+    //            renders a <select>. Empty option = NULL.
+    //   help   = optional help text under the input
+    //   span   = '2' to span both grid columns; default 1
+    //   ro     = readonly (auto-managed fields like StoreID + audit)
     // ──────────────────────────────────────────────────────────────────────────
     const STORE_SECTIONS = [
       { title: 'Identity', fields: [
@@ -292,7 +295,7 @@
       { title: 'Operations', fields: [
         { col: 'StoreAlcFlag', label: 'Sells Alcohol', type: 'checkbox' },
         { col: 'StoreMenuBoardType', label: 'Menu Board Type ID', type: 'number',
-          help: 'FK — dropdown coming in round 3' },
+          help: 'No lookup table yet — leave as numeric ID.' },
         { col: 'OLOLink', label: 'OLO Link', type: 'text', span: 2 },
         { col: 'CateringOLOLink', label: 'Catering OLO Link', type: 'text', span: 2 },
         { col: 'CateringMenuURL', label: 'Catering Menu URL', type: 'text', span: 2 },
@@ -300,22 +303,21 @@
         { col: 'StoreHoursOfOperation', label: 'Hours of Operation', type: 'textarea', span: 2 },
       ]},
       { title: 'Leadership & FKs', fields: [
-        { col: 'StoreCompany', label: 'Company ID', type: 'number',
-          help: 'FK to Company — dropdown coming in round 3' },
-        { col: 'StoreAreaDirID', label: 'Area Director ID', type: 'number',
-          help: 'FK to AreaDir — dropdown coming in round 3' },
-        { col: 'StoreFMMID', label: 'FMM ID', type: 'number' },
-        { col: 'StoreFBCID', label: 'FBC ID', type: 'number' },
-        { col: 'StoreDMAID', label: 'DMA ID', type: 'number' },
-        { col: 'StoreRegionID', label: 'Region ID', type: 'text' },
-        { col: 'StoreSystemID', label: 'System ID', type: 'number' },
+        { col: 'StoreCompany',        label: 'Company',          type: 'lookup', lookup: 'company' },
+        { col: 'StoreAreaDirID',      label: 'Area Director',    type: 'lookup', lookup: 'areadir' },
+        { col: 'StoreFMMID',          label: 'FMM',              type: 'lookup', lookup: 'fmm' },
+        { col: 'StoreFBCID',          label: 'FBC',              type: 'lookup', lookup: 'fbc' },
+        { col: 'StoreDMAID',          label: 'DMA',              type: 'lookup', lookup: 'dma' },
+        { col: 'StoreOwnershipID',    label: 'Ownership',        type: 'lookup', lookup: 'ownership' },
+        { col: 'StoreCateringMgrID',  label: 'Catering Manager', type: 'lookup', lookup: 'cateringmgr' },
+        { col: 'StorePrimaryContact', label: 'Primary Contact',  type: 'lookup', lookup: 'primarycontact' },
+        { col: 'StoreBillingID',      label: 'Billing Contact',  type: 'lookup', lookup: 'billing' },
+        { col: 'StoreSyscoID',        label: 'Sysco Market',     type: 'lookup', lookup: 'sysco' },
+        // These IDs have no lookup table yet — leave numeric.
+        { col: 'StoreRegionID',   label: 'Region ID',   type: 'text' },
+        { col: 'StoreSystemID',   label: 'System ID',   type: 'number' },
         { col: 'StoreDistrictID', label: 'District ID', type: 'number' },
         { col: 'StoreDivisionID', label: 'Division ID', type: 'number' },
-        { col: 'StoreOwnershipID', label: 'Ownership ID', type: 'number' },
-        { col: 'StoreCateringMgrID', label: 'Catering Manager ID', type: 'number' },
-        { col: 'StorePrimaryContact', label: 'Primary Contact ID', type: 'number' },
-        { col: 'StoreBillingID', label: 'Billing ID', type: 'number' },
-        { col: 'StoreSyscoID', label: 'Sysco Market ID', type: 'number' },
       ]},
       { title: 'External Systems', fields: [
         { col: 'StoreCFID', label: 'Catering Forms ID', type: 'text' },
@@ -328,6 +330,56 @@
         { col: 'LastUpdated', label: 'Last Updated At', type: 'text', ro: true },
       ]},
     ];
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Satellite tables — StorePhysical (1:1), StoreTechnical (1:1).
+    //
+    // These render as additional sections in the modal and save via
+    // /api/contacts/stores/{id}/physical and /technical respectively.
+    // The exporter brings the full SQL Server column list down, but here
+    // we only surface the columns we want as first-class form fields.
+    // Anything in the SQLite row that isn't listed here passes through
+    // untouched on save (we only PUT the fields that appear in the form).
+    // ──────────────────────────────────────────────────────────────────────────
+    const STORE_PHYSICAL_FIELDS = [
+      { col: 'SquareFootage',  label: 'Square Footage', type: 'number' },
+      { col: 'InteriorSeats',  label: 'Interior Seats', type: 'number' },
+      { col: 'ExteriorSeats',  label: 'Exterior Seats', type: 'number' },
+      { col: 'TotalSeats',     label: 'Total Seats',    type: 'number' },
+      { col: 'DriveThru',      label: 'Has Drive-Thru', type: 'checkbox' },
+      { col: 'Patio',          label: 'Has Patio',      type: 'checkbox' },
+      { col: 'BuildingType',   label: 'Building Type',  type: 'text' },
+      { col: 'LeaseOwnership', label: 'Lease / Own',    type: 'text' },
+      { col: 'ParkingSpaces',  label: 'Parking Spaces', type: 'number' },
+      { col: 'LandlordName',   label: 'Landlord Name',  type: 'text', span: 2 },
+      { col: 'LandlordEmail',  label: 'Landlord Email', type: 'text', span: 2 },
+      { col: 'LandlordPhone',  label: 'Landlord Phone', type: 'text' },
+    ];
+
+    const STORE_TECHNICAL_FIELDS = [
+      { col: 'POSType',           label: 'POS Type',           type: 'text' },
+      { col: 'POSVersion',        label: 'POS Version',        type: 'text' },
+      { col: 'AlohaVersion',      label: 'Aloha Version',      type: 'text' },
+      { col: 'ToastVersion',      label: 'Toast Version',      type: 'text' },
+      { col: 'StoreIP',           label: 'Store Public IP',    type: 'text' },
+      { col: 'LANIP',             label: 'LAN IP',             type: 'text' },
+      { col: 'KeyNumber',         label: 'Key #',              type: 'text' },
+      { col: 'Router',            label: 'Router',             type: 'text' },
+      { col: 'FireWallProvider',  label: 'Firewall Provider',  type: 'text' },
+      { col: 'PhoneVendor',       label: 'Phone Vendor',       type: 'text' },
+      { col: 'CCProcessor',       label: 'CC Processor',       type: 'text' },
+      { col: 'Oven',              label: 'Oven',               type: 'text' },
+      { col: 'BackupISP',         label: 'Backup ISP',         type: 'text' },
+      { col: 'Notes',             label: 'Notes',              type: 'textarea', span: 2 },
+    ];
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Loaded once at page init; cache populated by loadAllLookups().
+    // Shape: { 'company': [{id, label}, ...], ... }
+    // ──────────────────────────────────────────────────────────────────────────
+    const LOOKUP_CACHE = {};
+    // Track satellite payloads + closure history for the currently-open store.
+    let modalContext = { storeId: null, physical: {}, technical: {}, closures: [] };
 
     // ──────────────────────────────────────────────────────────────────────────
     // Auth state
@@ -500,34 +552,103 @@
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Modal — generate form from STORE_SECTIONS config
+    // Modal — generate form from STORE_SECTIONS + satellite configs.
+    // Each field's id is prefixed with the section group ('store_', 'phys_',
+    // 'tech_') so readForm() can route values to the right backend endpoint.
     // ──────────────────────────────────────────────────────────────────────────
+    function renderFieldHtml(f, idPrefix) {
+      const id = `${idPrefix}_${f.col}`;
+      const spanCls = f.span === 2 ? ' span-2' : '';
+      const roCls = f.ro ? ' readonly' : '';
+      let html = `<div class="form-row${spanCls}${roCls}">`;
+      html += `<label for="${id}">${f.label}</label>`;
+      if (f.type === 'checkbox') {
+        html += `<input type="checkbox" id="${id}" data-col="${f.col}" data-group="${idPrefix}" />`;
+      } else if (f.type === 'textarea') {
+        html += `<textarea id="${id}" data-col="${f.col}" data-group="${idPrefix}" rows="2"${f.ro?' readonly':''}></textarea>`;
+      } else if (f.type === 'lookup') {
+        // Options are filled in by populateLookupOptions() once the cache
+        // is loaded. Until then the select is just an empty <option>.
+        html += `<select id="${id}" data-col="${f.col}" data-group="${idPrefix}" data-lookup="${f.lookup}"${f.ro?' disabled':''}>`;
+        html += `<option value="">— none —</option>`;
+        html += `</select>`;
+      } else {
+        const t = f.type || 'text';
+        html += `<input type="${t}" id="${id}" data-col="${f.col}" data-group="${idPrefix}"${f.ro?' readonly':''} />`;
+      }
+      if (f.help) html += `<span class="help">${f.help}</span>`;
+      html += '</div>';
+      return html;
+    }
+
     function renderForm() {
       const c = document.getElementById('form-container');
       let html = '';
+
+      // Base Store sections
       STORE_SECTIONS.forEach(sec => {
         html += `<div class="section-title">${sec.title}</div>`;
         html += '<div class="form-grid">';
-        sec.fields.forEach(f => {
-          const id = `f_${f.col}`;
-          const spanCls = f.span === 2 ? ' span-2' : '';
-          const roCls = f.ro ? ' readonly' : '';
-          html += `<div class="form-row${spanCls}${roCls}">`;
-          html += `<label for="${id}">${f.label}</label>`;
-          if (f.type === 'checkbox') {
-            html += `<input type="checkbox" id="${id}" data-col="${f.col}" />`;
-          } else if (f.type === 'textarea') {
-            html += `<textarea id="${id}" data-col="${f.col}" rows="2"${f.ro?' readonly':''}></textarea>`;
-          } else {
-            const t = f.type || 'text';
-            html += `<input type="${t}" id="${id}" data-col="${f.col}"${f.ro?' readonly':''} />`;
-          }
-          if (f.help) html += `<span class="help">${f.help}</span>`;
-          html += '</div>';
-        });
+        sec.fields.forEach(f => { html += renderFieldHtml(f, 'store'); });
         html += '</div>';
       });
+
+      // StorePhysical satellite (1:1)
+      html += '<div class="section-title">Physical (Square Footage, Seats, Drive-Thru)</div>';
+      html += '<div class="form-grid">';
+      STORE_PHYSICAL_FIELDS.forEach(f => { html += renderFieldHtml(f, 'phys'); });
+      html += '</div>';
+
+      // StoreTechnical satellite (1:1)
+      html += '<div class="section-title">Technical (POS, Network, Vendors)</div>';
+      html += '<div class="form-grid">';
+      STORE_TECHNICAL_FIELDS.forEach(f => { html += renderFieldHtml(f, 'tech'); });
+      html += '</div>';
+
+      // StoreClosure history — read-only count + last few entries
+      html += '<div class="section-title">Closure History (read-only)</div>';
+      html += '<div id="closure-history"><em style="color:#6B7280;font-size:0.85rem;">No closure history loaded.</em></div>';
+
       c.innerHTML = html;
+      populateLookupOptions();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Lookups — fetch all FK dropdown data on page load.
+    // Caches in LOOKUP_CACHE so opening the modal doesn't re-fetch every time.
+    // ──────────────────────────────────────────────────────────────────────────
+    async function loadAllLookups() {
+      // Gather every distinct lookup name referenced in STORE_SECTIONS
+      const names = new Set();
+      STORE_SECTIONS.forEach(sec => sec.fields.forEach(f => {
+        if (f.type === 'lookup' && f.lookup) names.add(f.lookup);
+      }));
+      await Promise.all(Array.from(names).map(async name => {
+        try {
+          const r = await fetch(`/api/contacts/lookups/${name}`, { headers: authHeaders() });
+          if (!r.ok) { LOOKUP_CACHE[name] = []; return; }
+          LOOKUP_CACHE[name] = await r.json();
+        } catch (e) {
+          console.warn(`Lookup '${name}' failed:`, e);
+          LOOKUP_CACHE[name] = [];
+        }
+      }));
+    }
+
+    function populateLookupOptions() {
+      // Fill <select data-lookup="…"> elements with cached options.
+      // Called after renderForm() and after loadAllLookups() finishes.
+      document.querySelectorAll('select[data-lookup]').forEach(sel => {
+        const name = sel.dataset.lookup;
+        const opts = LOOKUP_CACHE[name] || [];
+        // Preserve the "— none —" first option, then append rows.
+        const current = sel.value;
+        sel.innerHTML = '<option value="">— none —</option>' +
+          opts.map(o =>
+            `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label || '(unnamed)')} — ${escapeHtml(o.id)}</option>`
+          ).join('');
+        if (current) sel.value = current;  // restore selection after refresh
+      });
     }
 
     function setEditableState() {
@@ -540,16 +661,39 @@
       document.getElementById('save-btn').style.display = isAdmin ? '' : 'none';
     }
 
-    function openAddModal() {
-      document.getElementById('modal-title').textContent = 'Add Store';
-      // Clear all inputs
+    function clearFormFields() {
       const c = document.getElementById('form-container');
       c.querySelectorAll('input, textarea').forEach(el => {
         if (el.type === 'checkbox') el.checked = false;
         else el.value = '';
       });
+      c.querySelectorAll('select').forEach(el => { el.value = ''; });
+      document.getElementById('closure-history').innerHTML =
+        '<em style="color:#6B7280;font-size:0.85rem;">No closure history (new store).</em>';
+    }
+
+    // Populate one set of fields from a row. group = 'store' | 'phys' | 'tech'.
+    function populateGroup(fields, row, group) {
+      fields.forEach(f => {
+        const el = document.getElementById(`${group}_${f.col}`);
+        if (!el) return;
+        const v = row ? row[f.col] : null;
+        if (f.type === 'checkbox') {
+          el.checked = !!(v === 1 || v === true || v === '1' || v === 'true');
+        } else if (f.type === 'date' && v) {
+          el.value = String(v).slice(0, 10);
+        } else {
+          el.value = (v ?? '');
+        }
+      });
+    }
+
+    function openAddModal() {
+      document.getElementById('modal-title').textContent = 'Add Store';
+      clearFormFields();
+      modalContext = { storeId: null, physical: {}, technical: {}, closures: [] };
       // Allow editing StoreID since it's a new record
-      const storeIdField = document.getElementById('f_StoreID');
+      const storeIdField = document.getElementById('store_StoreID');
       if (storeIdField) {
         storeIdField.readOnly = false;
         storeIdField.parentElement.classList.remove('readonly');
@@ -558,82 +702,175 @@
       document.getElementById('modal').classList.add('visible');
     }
 
-    function openEditModal(id) {
+    async function openEditModal(id) {
       const row = allRows.find(r => r.StoreID === id);
       if (!row) return;
       document.getElementById('modal-title').textContent =
         `${isAdmin ? 'Edit' : 'View'}: ${row.StoreName || '#'+row.StoreID}`;
+
       // Keep StoreID readonly on edits
-      const storeIdField = document.getElementById('f_StoreID');
+      const storeIdField = document.getElementById('store_StoreID');
       if (storeIdField) {
         storeIdField.readOnly = true;
         storeIdField.parentElement.classList.add('readonly');
       }
-      // Populate from row
-      STORE_SECTIONS.forEach(sec => {
-        sec.fields.forEach(f => {
-          const el = document.getElementById(`f_${f.col}`);
-          if (!el) return;
-          const v = row[f.col];
-          if (f.type === 'checkbox') {
-            el.checked = !!(v === 1 || v === true || v === '1' || v === 'true');
-          } else if (f.type === 'date' && v) {
-            // SQLite stores ISO timestamps; date input wants YYYY-MM-DD
-            el.value = String(v).slice(0, 10);
-          } else {
-            el.value = (v ?? '');
-          }
-        });
-      });
+
+      // Populate base store from the list-cached row immediately for snappy UI…
+      populateGroup(STORE_SECTIONS.flatMap(s => s.fields), row, 'store');
+      // …blank satellites first to clear previous selection while /full loads.
+      populateGroup(STORE_PHYSICAL_FIELDS,  null, 'phys');
+      populateGroup(STORE_TECHNICAL_FIELDS, null, 'tech');
+      document.getElementById('closure-history').innerHTML =
+        '<em style="color:#6B7280;font-size:0.85rem;">Loading…</em>';
       setEditableState();
       document.getElementById('modal').classList.add('visible');
+
+      // Fetch /full to hydrate satellites + closure history.
+      try {
+        const r = await fetch(`/api/contacts/stores/${id}/full`, { headers: authHeaders() });
+        if (!r.ok) {
+          document.getElementById('closure-history').innerHTML =
+            `<em style="color:#9CA3AF;">Couldn't load satellites: ${escapeHtml(await r.text())}</em>`;
+          return;
+        }
+        const full = await r.json();
+        modalContext = {
+          storeId: id,
+          physical:  full.physical  || {},
+          technical: full.technical || {},
+          closures:  full.closures  || [],
+        };
+        // Refresh base store from server too (in case other tabs edited it)
+        if (full.store) populateGroup(STORE_SECTIONS.flatMap(s => s.fields), full.store, 'store');
+        populateGroup(STORE_PHYSICAL_FIELDS,  modalContext.physical,  'phys');
+        populateGroup(STORE_TECHNICAL_FIELDS, modalContext.technical, 'tech');
+        renderClosureHistory(modalContext.closures);
+        setEditableState();
+      } catch (e) {
+        document.getElementById('closure-history').innerHTML =
+          `<em style="color:#9CA3AF;">Couldn't load satellites: ${escapeHtml(e.message)}</em>`;
+      }
+    }
+
+    function renderClosureHistory(rows) {
+      const el = document.getElementById('closure-history');
+      if (!rows || rows.length === 0) {
+        el.innerHTML = '<em style="color:#6B7280;font-size:0.85rem;">No closures recorded.</em>';
+        return;
+      }
+      // Pick the most useful columns if they exist; everything else surfaces
+      // in a "more" tooltip via title attribute.
+      const pickCols = ['ClosureDate', 'ReopenDate', 'ClosureType', 'ClosureReason', 'Notes'];
+      const headers = pickCols.filter(c => rows.some(r => r[c] != null));
+      let html = `<div style="color:#6B7280;font-size:0.8rem;margin-bottom:0.4rem;">${rows.length} closure record(s)</div>`;
+      if (headers.length === 0) {
+        // Fall back to dumping all fields of the first row's keys.
+        const allKeys = Object.keys(rows[0]).filter(k => !['LastUpdated','LastUpdatedBy'].includes(k));
+        headers.push(...allKeys.slice(0, 4));
+      }
+      html += '<table style="width:100%;font-size:0.82rem;border:1px solid #E5E7EB;">';
+      html += '<thead style="background:#F9FAFB;"><tr>' +
+        headers.map(h => `<th style="text-align:left;padding:0.3rem 0.5rem;border-bottom:1px solid #E5E7EB;">${escapeHtml(h)}</th>`).join('') +
+        '</tr></thead><tbody>';
+      rows.slice(0, 25).forEach(r => {
+        html += '<tr>' +
+          headers.map(h => `<td style="padding:0.3rem 0.5rem;border-bottom:1px solid #F3F4F6;">${escapeHtml(r[h] ?? '')}</td>`).join('') +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+      if (rows.length > 25) {
+        html += `<div style="color:#9CA3AF;font-size:0.78rem;margin-top:0.3rem;">…and ${rows.length - 25} more — full closure-history editing UI is on the roadmap.</div>`;
+      }
+      el.innerHTML = html;
     }
 
     function closeModal() {
       document.getElementById('modal').classList.remove('visible');
     }
 
-    function readForm() {
+    // Read one group of fields back out of the form into a plain {col: value} dict.
+    function readGroup(fields, group, includeReadonly) {
       const out = {};
-      STORE_SECTIONS.forEach(sec => {
-        sec.fields.forEach(f => {
-          if (f.ro && f.col !== 'StoreID') return;  // skip audit fields
-          const el = document.getElementById(`f_${f.col}`);
-          if (!el) return;
-          if (f.type === 'checkbox') {
-            out[f.col] = el.checked ? 1 : 0;
-          } else if (f.type === 'number') {
-            const s = el.value.trim();
-            out[f.col] = s === '' ? null : Number(s);
-          } else {
-            const s = (el.value ?? '').trim();
-            out[f.col] = s === '' ? null : s;
-          }
-        });
+      fields.forEach(f => {
+        if (f.ro && !includeReadonly) return;
+        const el = document.getElementById(`${group}_${f.col}`);
+        if (!el) return;
+        if (f.type === 'checkbox') {
+          out[f.col] = el.checked ? 1 : 0;
+        } else if (f.type === 'number' || f.type === 'lookup') {
+          const s = (el.value ?? '').toString().trim();
+          out[f.col] = s === '' ? null : Number(s);
+        } else {
+          const s = (el.value ?? '').trim();
+          out[f.col] = s === '' ? null : s;
+        }
       });
       return out;
     }
 
+    function readForm() {
+      // Store payload — include StoreID even though it's `ro` so POST can use it.
+      const storePayload = readGroup(
+        STORE_SECTIONS.flatMap(s => s.fields), 'store', /*includeReadonly=*/false
+      );
+      // The above skips StoreID because ro=true; re-read it explicitly.
+      const storeIdEl = document.getElementById('store_StoreID');
+      if (storeIdEl && storeIdEl.value.trim() !== '') {
+        storePayload.StoreID = Number(storeIdEl.value.trim());
+      }
+      return {
+        store:     storePayload,
+        physical:  readGroup(STORE_PHYSICAL_FIELDS,  'phys', false),
+        technical: readGroup(STORE_TECHNICAL_FIELDS, 'tech', false),
+      };
+    }
+
     async function onSave() {
       const payload = readForm();
-      const isNew = !payload.StoreID || !allRows.find(r => r.StoreID === payload.StoreID);
+      const storeId = payload.store.StoreID;
+      const isNew = !storeId || !allRows.find(r => r.StoreID === storeId);
       const btn = document.getElementById('save-btn');
       btn.disabled = true;
       try {
+        // 1) Save the base Store row first (POST for new, PUT for edit).
         let url, method;
         if (isNew) { url = '/api/contacts/stores'; method = 'POST'; }
-        else      { url = `/api/contacts/stores/${payload.StoreID}`; method = 'PUT'; }
-        const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+        else      { url = `/api/contacts/stores/${storeId}`; method = 'PUT'; }
+        const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload.store) });
         if (r.status === 401) { showError('Sign in required.'); btn.disabled = false; return; }
         if (r.status === 403) { showError('Admin role required.'); btn.disabled = false; return; }
         if (!r.ok) {
-          const txt = await r.text();
-          showError(`Save failed: ${txt}`);
+          showError(`Store save failed: ${await r.text()}`);
           btn.disabled = false;
           return;
         }
+
+        // 2) Then upsert each satellite via its own endpoint. Skip if the
+        // payload is entirely empty (every value null) — avoids creating
+        // empty satellite rows for stores that don't have any data yet.
+        const hasData = obj => Object.values(obj).some(v => v !== null && v !== '');
+        const sideTasks = [];
+        if (hasData(payload.physical)) {
+          sideTasks.push(fetch(`/api/contacts/stores/${storeId}/physical`, {
+            method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload.physical),
+          }));
+        }
+        if (hasData(payload.technical)) {
+          sideTasks.push(fetch(`/api/contacts/stores/${storeId}/technical`, {
+            method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload.technical),
+          }));
+        }
+        const results = await Promise.all(sideTasks);
+        const sideErrors = [];
+        for (const sr of results) {
+          if (!sr.ok) sideErrors.push(await sr.text());
+        }
+        if (sideErrors.length) {
+          showError(`Store saved, but satellite save failed: ${sideErrors.join('; ')}`);
+        } else {
+          showInfo(isNew ? 'Store added.' : 'Store updated.');
+        }
         closeModal();
-        showInfo(isNew ? 'Store added.' : 'Store updated.');
         await loadList();
       } catch (e) {
         showError(`Network error: ${e.message}`);
@@ -667,7 +904,14 @@
     }
 
     renderForm();        // build the modal HTML once
-    loadList();          // then fetch + display data
+    // Prime FK dropdown cache before opening any modal, then load the list.
+    // Running in parallel — the modal can wait for lookups via populateLookupOptions
+    // if the user clicks fast, but in practice both finish before any click.
+    (async () => {
+      await loadAllLookups();
+      populateLookupOptions();
+    })();
+    loadList();          // fetch + display data
   </script>
 </body>
 </html>

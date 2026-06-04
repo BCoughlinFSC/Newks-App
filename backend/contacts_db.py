@@ -119,6 +119,35 @@ def initialize_schema() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_store_name ON Store(StoreName);
         CREATE INDEX IF NOT EXISTS idx_store_state ON Store(StoreState);
+
+        -- StorePhysical: 1:1 satellite of Store (square footage, seats, drive-thru).
+        -- Exporter rebuilds the table with the full SQL Server column list.
+        CREATE TABLE IF NOT EXISTS StorePhysical (
+            StoreID       INTEGER PRIMARY KEY,
+            LastUpdatedBy TEXT,
+            LastUpdated   TEXT
+        );
+
+        -- StoreTechnical: 1:1 satellite — POS versions, IPs, network kit.
+        -- ⚠ The PK is StoreTechnicalID and the FK to Store is the lowercase
+        -- `storeid` column (matches SQL Server schema). Exporter rebuilds.
+        CREATE TABLE IF NOT EXISTS StoreTechnical (
+            StoreTechnicalID INTEGER PRIMARY KEY,
+            storeid          INTEGER,
+            LastUpdatedBy    TEXT,
+            LastUpdated      TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_storetechnical_fk ON StoreTechnical(storeid);
+
+        -- StoreClosure: 1:many — full history of every closure window.
+        -- Read-only in v1; closure-history editing UI comes later.
+        CREATE TABLE IF NOT EXISTS StoreClosure (
+            StoreClosureID INTEGER PRIMARY KEY,
+            StoreID        INTEGER,
+            LastUpdatedBy  TEXT,
+            LastUpdated    TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_storeclosure_fk ON StoreClosure(StoreID);
         """)
         conn.commit()
 
@@ -348,6 +377,198 @@ def insert_store(data: Dict[str, Any], updated_by: str) -> int:
         conn.execute(sql, tuple(values))
         conn.commit()
         return int(data["StoreID"])
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Store satellites — StorePhysical (1:1), StoreTechnical (1:1), StoreClosure (1:many)
+#
+# Same column-agnostic pattern as Store: introspect the SQLite schema and
+# operate on whatever columns the exporter dropped in. StorePhysical and
+# StoreTechnical are both keyed off StoreID — Physical uses StoreID directly
+# as PK, Technical has its own StoreTechnicalID PK with a lowercase `storeid`
+# FK column (matches SQL Server schema verbatim).
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _table_columns(table: str) -> List[str]:
+    """Return the columns actually present in the given SQLite table."""
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            return [r["name"] for r in rows]
+        except sqlite3.OperationalError:
+            return []
+
+
+# Per-table audit/protected columns. Keep StoreID and the PKs out of UPDATE
+# targets — they're either the lookup key or auto-managed.
+_SATELLITE_PROTECTED = {
+    "StorePhysical":  {"StoreID", "LastUpdated"},
+    "StoreTechnical": {"StoreTechnicalID", "storeid", "LastUpdated"},
+}
+
+
+def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_by: str,
+                      fk_column: str) -> bool:
+    """
+    Generic upsert for a 1:1 satellite table keyed off Store.
+    - If a row exists for this store, UPDATE its non-protected columns.
+    - Otherwise INSERT a fresh row with the supplied data.
+
+    Unknown/protected columns are silently dropped, matching the Store
+    pattern — keeps a stale frontend from breaking a save.
+    """
+    valid_cols = set(_table_columns(table))
+    if not valid_cols:
+        logger.warning("Satellite table %s missing — exporter hasn't created it yet", table)
+        return False
+    protected = _SATELLITE_PROTECTED.get(table, {"LastUpdated"})
+
+    with get_connection() as conn:
+        existing = conn.execute(
+            f"SELECT 1 FROM {table} WHERE {fk_column} = ? LIMIT 1",
+            (store_id,),
+        ).fetchone()
+
+        if existing:
+            sets: List[str] = []
+            values: List[Any] = []
+            for k, v in data.items():
+                if k in protected or k not in valid_cols:
+                    continue
+                sets.append(f"{k} = ?")
+                values.append(v if v not in ("", None) else None)
+            sets.append("LastUpdatedBy = ?")
+            values.append(updated_by)
+            sets.append("LastUpdated = datetime('now')")
+            values.append(store_id)
+            sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {fk_column} = ?"
+            cur = conn.execute(sql, tuple(values))
+            conn.commit()
+            return cur.rowcount > 0
+
+        # INSERT path — supply FK + whatever payload columns are valid.
+        cols: List[str] = [fk_column]
+        values_ins: List[Any] = [store_id]
+        for k, v in data.items():
+            if k in protected or k == fk_column or k not in valid_cols:
+                continue
+            cols.append(k)
+            values_ins.append(v if v not in ("", None) else None)
+        cols.append("LastUpdatedBy")
+        values_ins.append(updated_by)
+        cols.append("LastUpdated")
+        placeholders = ", ".join("?" * len(values_ins)) + ", datetime('now')"
+        sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})"
+        conn.execute(sql, tuple(values_ins))
+        conn.commit()
+        return True
+
+
+def get_store_physical(store_id: int) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        try:
+            row = conn.execute(
+                "SELECT * FROM StorePhysical WHERE StoreID = ?", (store_id,)
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        except sqlite3.OperationalError:
+            return None
+
+
+def update_store_physical(store_id: int, data: Dict[str, Any], updated_by: str) -> bool:
+    return _upsert_satellite("StorePhysical", store_id, data, updated_by, fk_column="StoreID")
+
+
+def get_store_technical(store_id: int) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        try:
+            # StoreTechnical FK is lowercase `storeid` per SQL Server schema.
+            row = conn.execute(
+                "SELECT * FROM StoreTechnical WHERE storeid = ?", (store_id,)
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        except sqlite3.OperationalError:
+            return None
+
+
+def update_store_technical(store_id: int, data: Dict[str, Any], updated_by: str) -> bool:
+    return _upsert_satellite("StoreTechnical", store_id, data, updated_by, fk_column="storeid")
+
+
+def list_store_closures(store_id: int) -> List[Dict[str, Any]]:
+    """Return all closure history rows for a store. Read-only in v1."""
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(
+                "SELECT * FROM StoreClosure WHERE StoreID = ? ORDER BY StoreClosureID DESC",
+                (store_id,),
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows]
+        except sqlite3.OperationalError:
+            return []
+
+
+def get_store_full(store_id: int) -> Optional[Dict[str, Any]]:
+    """Return Store + Physical + Technical + closure count in one payload.
+    Lets the edit modal hydrate all sections from a single round-trip."""
+    base = get_store(store_id)
+    if not base:
+        return None
+    physical  = get_store_physical(store_id)  or {}
+    technical = get_store_technical(store_id) or {}
+    closures  = list_store_closures(store_id)
+    return {
+        "store":         base,
+        "physical":      physical,
+        "technical":     technical,
+        "closures":      closures,
+        "closure_count": len(closures),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Lookups — populate FK dropdowns in the edit UIs.
+#
+# Each entry: (table, id_col, name_col). The exporter brings these tables
+# down from SQL Server; the frontend asks /api/contacts/lookups/{name}
+# for the (id, label) pairs to render in <select> options.
+# ──────────────────────────────────────────────────────────────────────────────
+
+LOOKUPS: Dict[str, tuple] = {
+    "company":         ("Company",          "CompanyID",      "CompanyName"),
+    "areadir":         ("AreaDir",          "AreaDirID",      "AreaDirName"),
+    "fbc":             ("FBC",              "FBCID",          "FBCName"),
+    "fmm":             ("FMM",              "FMMID",          "FMMName"),
+    "dma":             ("DMA",              "DMAID",          "DMAName"),
+    "ownership":       ("OwnerShip",        "OwnerShipID",    "OwnerShipName"),
+    "cateringmgr":     ("CateringMgr",      "CateringMgrID",  "CateringMgrName"),
+    "billing":         ("BillingContacts",  "BillingID",      "BillingName"),
+    "primarycontact":  ("PrimaryContacts",  "PrimaryID",      "PrimaryName"),
+    "sysco":           ("SyscoMarket",      "SyscoID",        "SyscoMarket"),
+}
+
+
+def list_lookup(name: str) -> List[Dict[str, Any]]:
+    """Return [{id, label}] for the named lookup. Empty list on any error
+    (missing table, schema drift) so a stale frontend gracefully degrades
+    to the old number input instead of crashing the form."""
+    spec = LOOKUPS.get(name.lower())
+    if not spec:
+        return []
+    table, id_col, name_col = spec
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(
+                f"SELECT {id_col} AS id, {name_col} AS label "
+                f"FROM {table} "
+                f"WHERE {id_col} IS NOT NULL "
+                f"ORDER BY LOWER(COALESCE({name_col}, ''))"
+            ).fetchall()
+            return [{"id": r["id"], "label": r["label"]} for r in rows]
+        except sqlite3.OperationalError as exc:
+            logger.warning("lookup %s failed (%s.%s/%s): %s",
+                           name, table, id_col, name_col, exc)
+            return []
 
 
 # ──────────────────────────────────────────────────────────────────────────────
