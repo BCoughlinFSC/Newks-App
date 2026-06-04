@@ -153,17 +153,29 @@
         <div class="card-title">Area Directors</div>
         <p class="card-desc">FBC names, emails, SMG distribution lists. 68 records.</p>
       </a>
-      <div class="card soon">
-        <div class="card-title">Billing Contacts <span class="badge-soon">soon</span></div>
+      <a href="/contacts-lookup.html?table=billing" class="card">
+        <div class="card-title">Billing Contacts</div>
         <p class="card-desc">Accounts-payable contacts by company.</p>
-      </div>
-      <div class="card soon">
-        <div class="card-title">Catering Managers <span class="badge-soon">soon</span></div>
-        <p class="card-desc">Per-store catering point of contact.</p>
-      </div>
+      </a>
+      <a href="/contacts-lookup.html?table=cateringmgr" class="card">
+        <div class="card-title">Catering Managers</div>
+        <p class="card-desc">Per-region catering point of contact.</p>
+      </a>
+      <a href="/contacts-lookup.html?table=primarycontact" class="card">
+        <div class="card-title">Primary Contacts</div>
+        <p class="card-desc">Primary store / company contacts.</p>
+      </a>
+      <a href="/contacts-lookup.html?table=fbc" class="card">
+        <div class="card-title">FBCs</div>
+        <p class="card-desc">Franchise Business Consultants directory.</p>
+      </a>
+      <a href="/contacts-lookup.html?table=fmm" class="card">
+        <div class="card-title">FMMs</div>
+        <p class="card-desc">Field Marketing Managers directory.</p>
+      </a>
       <div class="card soon">
         <div class="card-title">General Managers <span class="badge-soon">soon</span></div>
-        <p class="card-desc">Store GM directory.</p>
+        <p class="card-desc">Store GM directory — needs table export.</p>
       </div>
     </div>
 
@@ -171,31 +183,46 @@
     <div class="grid">
       <a href="/contacts-stores.html" class="card">
         <div class="card-title">Store Information</div>
-        <p class="card-desc">Master store directory — address, dates, FKs, OLO links, etc.</p>
+        <p class="card-desc">
+          Master store directory — address, dates, FKs, OLO links, plus Physical
+          and Technical satellites inline in the edit modal.
+        </p>
       </a>
-      <div class="card soon">
-        <div class="card-title">Store Technical Info <span class="badge-soon">soon</span></div>
-        <p class="card-desc">Key #, IPs, software versions, oven, vendor refs.</p>
-      </div>
-      <div class="card soon">
-        <div class="card-title">Companies <span class="badge-soon">soon</span></div>
+      <a href="/contacts-lookup.html?table=company" class="card">
+        <div class="card-title">Companies</div>
         <p class="card-desc">Corp / Franchisee designations.</p>
-      </div>
+      </a>
+      <a href="/contacts-lookup.html?table=ownership" class="card">
+        <div class="card-title">Ownership</div>
+        <p class="card-desc">Corp / Franchisee ownership entities.</p>
+      </a>
+    </div>
+
+    <div class="group-label">Markets & Geography</div>
+    <div class="grid">
+      <a href="/contacts-lookup.html?table=dma" class="card">
+        <div class="card-title">DMAs</div>
+        <p class="card-desc">Designated Market Areas (Nielsen regions).</p>
+      </a>
+      <a href="/contacts-lookup.html?table=sysco" class="card">
+        <div class="card-title">Sysco Markets</div>
+        <p class="card-desc">Sysco distribution market directory.</p>
+      </a>
     </div>
 
     <div class="group-label">Vendors & Services</div>
     <div class="grid">
       <div class="card soon">
         <div class="card-title">CC Processors <span class="badge-soon">soon</span></div>
-        <p class="card-desc">Credit-card processor accounts.</p>
+        <p class="card-desc">Credit-card processor accounts — needs table export.</p>
       </div>
       <div class="card soon">
         <div class="card-title">Delivery Partners <span class="badge-soon">soon</span></div>
-        <p class="card-desc">DoorDash / UberEats / etc. + per-store mappings.</p>
+        <p class="card-desc">DoorDash / UberEats / etc. + per-store mappings — needs export.</p>
       </div>
       <div class="card soon">
         <div class="card-title">Phone / Firewall Vendors <span class="badge-soon">soon</span></div>
-        <p class="card-desc">Network + telecom vendor directory.</p>
+        <p class="card-desc">Network + telecom vendor directory — needs export.</p>
       </div>
     </div>
   </main>

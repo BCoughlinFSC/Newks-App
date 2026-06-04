@@ -562,28 +562,75 @@ def get_store_full(store_id: int) -> Optional[Dict[str, Any]]:
 # for the (id, label) pairs to render in <select> options.
 # ──────────────────────────────────────────────────────────────────────────────
 
-LOOKUPS: Dict[str, tuple] = {
-    "company":         ("Company",          "CompanyID",      "CompanyName"),
-    "areadir":         ("AreaDir",          "AreaDirID",      "AreaDirName"),
-    "fbc":             ("FBC",              "FBCID",          "FBCName"),
-    "fmm":             ("FMM",              "FMMID",          "FMMName"),
-    "dma":             ("DMA",              "DMAID",          "DMAName"),
-    "ownership":       ("OwnerShip",        "OwnerShipID",    "OwnerShipName"),
-    "cateringmgr":     ("CateringMgr",      "CateringMgrID",  "CateringMgrName"),
-    "billing":         ("BillingContacts",  "BillingID",      "BillingName"),
-    "primarycontact":  ("PrimaryContacts",  "PrimaryID",      "PrimaryName"),
-    "sysco":           ("SyscoMarket",      "SyscoID",        "SyscoMarket"),
+LOOKUPS: Dict[str, Dict[str, str]] = {
+    "company": {
+        "table": "Company", "pk": "CompanyID", "label_col": "CompanyName",
+        "title": "Companies",
+        "description": "Corp / Franchisee designations.",
+    },
+    "areadir": {
+        # Note: AreaDir has its own bespoke CRUD page (/contacts-areadir.html)
+        # so this entry exists primarily to feed the FK dropdown. The generic
+        # page will still work if invoked, but the dedicated one is richer.
+        "table": "AreaDir", "pk": "AreaDirID", "label_col": "AreaDirName",
+        "title": "Area Directors",
+        "description": "FBC names, emails, SMG distribution lists.",
+    },
+    "fbc": {
+        "table": "FBC", "pk": "FBCID", "label_col": "FBCName",
+        "title": "FBCs",
+        "description": "Franchise Business Consultants directory.",
+    },
+    "fmm": {
+        "table": "FMM", "pk": "FMMID", "label_col": "FMMName",
+        "title": "FMMs",
+        "description": "Field Marketing Managers directory.",
+    },
+    "dma": {
+        "table": "DMA", "pk": "DMAID", "label_col": "DMAName",
+        "title": "DMAs",
+        "description": "Designated Market Areas (Nielsen regions).",
+    },
+    "ownership": {
+        "table": "OwnerShip", "pk": "OwnerShipID", "label_col": "OwnerShipName",
+        "title": "Ownership",
+        "description": "Corp / Franchisee ownership entities.",
+    },
+    "cateringmgr": {
+        "table": "CateringMgr", "pk": "CateringMgrID", "label_col": "CateringMgrName",
+        "title": "Catering Managers",
+        "description": "Per-region catering point of contact.",
+    },
+    "billing": {
+        "table": "BillingContacts", "pk": "BillingID", "label_col": "BillingName",
+        "title": "Billing Contacts",
+        "description": "Accounts-payable contacts by company.",
+    },
+    "primarycontact": {
+        "table": "PrimaryContacts", "pk": "PrimaryID", "label_col": "PrimaryName",
+        "title": "Primary Contacts",
+        "description": "Primary store / company contacts.",
+    },
+    "sysco": {
+        "table": "SyscoMarket", "pk": "SyscoID", "label_col": "SyscoMarket",
+        "title": "Sysco Markets",
+        "description": "Sysco distribution market directory.",
+    },
 }
+
+
+def _lookup_spec(name: str) -> Optional[Dict[str, str]]:
+    return LOOKUPS.get((name or "").lower())
 
 
 def list_lookup(name: str) -> List[Dict[str, Any]]:
     """Return [{id, label}] for the named lookup. Empty list on any error
     (missing table, schema drift) so a stale frontend gracefully degrades
     to the old number input instead of crashing the form."""
-    spec = LOOKUPS.get(name.lower())
+    spec = _lookup_spec(name)
     if not spec:
         return []
-    table, id_col, name_col = spec
+    table, id_col, name_col = spec["table"], spec["pk"], spec["label_col"]
     with get_connection() as conn:
         try:
             rows = conn.execute(
@@ -597,6 +644,211 @@ def list_lookup(name: str) -> List[Dict[str, Any]]:
             logger.warning("lookup %s failed (%s.%s/%s): %s",
                            name, table, id_col, name_col, exc)
             return []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Generic CRUD for lookup tables — powers /contacts-lookup.html?table=key
+#
+# The columns and audit-column naming vary per table (SQL Server inconsistency),
+# so every helper here introspects PRAGMA table_info at runtime. Protected
+# columns (PK + audit) are never accepted from the payload; audit columns are
+# stamped server-side. Unknown columns are silently dropped so a stale frontend
+# doesn't break a save.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Common audit column pairs we've seen in Don's schema. Whichever pair exists
+# in the target table is what we stamp.
+_AUDIT_COLUMN_CANDIDATES = [
+    ("LastUpdatedBy", "LastUpdated"),
+    ("LastEditedBy",  "LastEdited"),
+]
+
+
+def _detect_audit_columns(valid_cols: set) -> tuple:
+    """Return (audit_by_col, audit_at_col) — whichever pair exists in the
+    table, or (None, None) if neither is present."""
+    for by_col, at_col in _AUDIT_COLUMN_CANDIDATES:
+        if by_col in valid_cols or at_col in valid_cols:
+            return (by_col if by_col in valid_cols else None,
+                    at_col if at_col in valid_cols else None)
+    return (None, None)
+
+
+def get_lookup_meta(name: str) -> Optional[Dict[str, Any]]:
+    """Return descriptor + column schema for the named lookup table.
+
+    Used by the generic CRUD page to build the list view + edit modal
+    dynamically. Empty `columns` list signals the SQLite table doesn't
+    exist yet (export not run).
+    """
+    spec = _lookup_spec(name)
+    if not spec:
+        return None
+    table = spec["table"]
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+    columns = [
+        {
+            "name":    r["name"],
+            "type":    r["type"],
+            "notnull": bool(r["notnull"]),
+            "pk":      bool(r["pk"]),
+        }
+        for r in rows
+    ]
+    return {
+        "key":         name.lower(),
+        "table":       table,
+        "pk":          spec["pk"],
+        "label_col":   spec["label_col"],
+        "title":       spec["title"],
+        "description": spec["description"],
+        "columns":     columns,
+    }
+
+
+def list_lookup_rows(name: str) -> List[Dict[str, Any]]:
+    """Return every row in the named lookup table, ordered by label column."""
+    spec = _lookup_spec(name)
+    if not spec:
+        return []
+    table, label_col = spec["table"], spec["label_col"]
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(
+                f"SELECT * FROM {table} "
+                f"ORDER BY LOWER(COALESCE({label_col}, ''))"
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows]
+        except sqlite3.OperationalError as exc:
+            logger.warning("list_lookup_rows %s failed: %s", name, exc)
+            return []
+
+
+def get_lookup_row(name: str, row_id: Any) -> Optional[Dict[str, Any]]:
+    """Single-row fetch by PK."""
+    spec = _lookup_spec(name)
+    if not spec:
+        return None
+    table, pk = spec["table"], spec["pk"]
+    with get_connection() as conn:
+        try:
+            row = conn.execute(
+                f"SELECT * FROM {table} WHERE {pk} = ?", (row_id,)
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        except sqlite3.OperationalError:
+            return None
+
+
+def update_lookup_row(name: str, row_id: Any, data: Dict[str, Any],
+                      updated_by: str) -> bool:
+    """Update non-protected columns. Audit cols stamped server-side."""
+    spec = _lookup_spec(name)
+    if not spec:
+        return False
+    table, pk = spec["table"], spec["pk"]
+    valid_cols = set(_table_columns(table))
+    if not valid_cols:
+        return False
+    audit_by, audit_at = _detect_audit_columns(valid_cols)
+    protected = {pk} | {c for c in (audit_by, audit_at) if c}
+
+    sets: List[str] = []
+    values: List[Any] = []
+    for k, v in data.items():
+        if k in protected or k not in valid_cols:
+            continue
+        sets.append(f"{k} = ?")
+        values.append(v if v not in ("", None) else None)
+    if audit_by:
+        sets.append(f"{audit_by} = ?")
+        values.append(updated_by)
+    if audit_at:
+        sets.append(f"{audit_at} = datetime('now')")
+    if not sets:
+        return False  # nothing valid to update
+    values.append(row_id)
+    sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {pk} = ?"
+    with get_connection() as conn:
+        cur = conn.execute(sql, tuple(values))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def insert_lookup_row(name: str, data: Dict[str, Any], updated_by: str) -> Any:
+    """Insert a new row. PK may or may not be supplied:
+      - If the payload includes the PK and it's not None, use it
+      - Otherwise rely on SQLite's INTEGER PRIMARY KEY auto-increment
+    Returns the resulting row's PK value.
+    """
+    spec = _lookup_spec(name)
+    if not spec:
+        raise ValueError(f"Unknown lookup '{name}'")
+    table, pk = spec["table"], spec["pk"]
+    valid_cols = set(_table_columns(table))
+    if not valid_cols:
+        raise RuntimeError(f"Table {table} doesn't exist yet (run exporter first)")
+    audit_by, audit_at = _detect_audit_columns(valid_cols)
+    protected_for_insert = {c for c in (audit_by, audit_at) if c}
+
+    cols: List[str] = []
+    values: List[Any] = []
+    supplied_pk = data.get(pk)
+    if supplied_pk not in (None, ""):
+        cols.append(pk)
+        values.append(supplied_pk)
+    for k, v in data.items():
+        if k == pk or k in protected_for_insert or k not in valid_cols:
+            continue
+        cols.append(k)
+        values.append(v if v not in ("", None) else None)
+    if audit_by:
+        cols.append(audit_by)
+        values.append(updated_by)
+    placeholders = ["?"] * len(values)
+    if audit_at:
+        cols.append(audit_at)
+        placeholders.append("datetime('now')")
+    sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
+    with get_connection() as conn:
+        cur = conn.execute(sql, tuple(values))
+        new_id = supplied_pk if supplied_pk not in (None, "") else cur.lastrowid
+        conn.commit()
+        return new_id
+
+
+def delete_lookup_row(name: str, row_id: Any, updated_by: str) -> bool:
+    """Delete a row. Stamps audit-by first (matches Don's trigger-friendly
+    pattern, so a future SQL-Server sync-back can capture the deleter)."""
+    spec = _lookup_spec(name)
+    if not spec:
+        return False
+    table, pk = spec["table"], spec["pk"]
+    valid_cols = set(_table_columns(table))
+    if not valid_cols:
+        return False
+    audit_by, audit_at = _detect_audit_columns(valid_cols)
+    with get_connection() as conn:
+        # Stamp audit cols (if they exist) before the delete fires.
+        if audit_by or audit_at:
+            stamps, vals = [], []
+            if audit_by:
+                stamps.append(f"{audit_by} = ?")
+                vals.append(updated_by)
+            if audit_at:
+                stamps.append(f"{audit_at} = datetime('now')")
+            vals.append(row_id)
+            conn.execute(
+                f"UPDATE {table} SET {', '.join(stamps)} WHERE {pk} = ?",
+                tuple(vals),
+            )
+        cur = conn.execute(f"DELETE FROM {table} WHERE {pk} = ?", (row_id,))
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # ──────────────────────────────────────────────────────────────────────────────

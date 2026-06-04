@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lookup — Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /*
+     * Generic CRUD page shared by every lookup table on /contacts.html.
+     * Reads ?table=<key> from the URL and builds list + edit modal
+     * dynamically from /api/contacts/lookup/<key>/meta. Keep the styling
+     * in sync with contacts-stores.html / contacts-areadir.html so the
+     * whole Contacts section feels cohesive.
+     */
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c;
+    }
+    .header {
+      background: #C41E3A; padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p  { margin: 0.4rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+    .nav-btns { display: flex; gap: 0.5rem; }
+    .nav-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.5rem 1rem; border-radius: 6px;
+      font-size: 0.9rem; cursor: pointer; text-decoration: none;
+    }
+    .nav-btn:hover { background: rgba(255,255,255,0.25); }
+
+    main { padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }
+
+    .toolbar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;
+    }
+    .toolbar-left {
+      display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 240px;
+    }
+    .toolbar-left input[type="text"] {
+      flex: 1; padding: 0.55rem 0.75rem;
+      border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.95rem;
+    }
+    .count { color: #6B7280; font-size: 0.85rem; }
+
+    .btn {
+      padding: 0.55rem 1rem; border-radius: 6px; font-size: 0.9rem;
+      cursor: pointer; border: none; font-weight: 600;
+    }
+    .btn-primary { background: #C41E3A; color: #fff; }
+    .btn-primary:hover { background: #A01A2E; }
+    .btn-secondary { background: #fff; color: #374151; border: 1px solid #D1D5DB; }
+    .btn-secondary:hover { background: #F3F4F6; }
+    .btn-danger { background: #DC2626; color: #fff; }
+    .btn-danger:hover { background: #B91C1C; }
+    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+    table {
+      width: 100%; border-collapse: collapse;
+      background: #fff; border: 1px solid #E5E7EB;
+      border-radius: 8px; overflow: hidden; font-size: 0.88rem;
+    }
+    thead { background: #F9FAFB; }
+    th {
+      text-align: left; padding: 0.7rem 0.85rem;
+      font-weight: 600; color: #374151;
+      border-bottom: 2px solid #E5E7EB;
+      cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    th:hover { background: #F3F4F6; }
+    th .sort-indicator { color: #C41E3A; font-size: 0.7rem; margin-left: 0.25rem; }
+    td {
+      padding: 0.55rem 0.85rem;
+      border-bottom: 1px solid #F3F4F6;
+      vertical-align: top;
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    tr.row { cursor: pointer; }
+    tr.row:hover { background: #FEF2F2; }
+    tr.row:last-child td { border-bottom: 0; }
+    .empty {
+      padding: 2rem; text-align: center; color: #9CA3AF; font-style: italic;
+    }
+    .loading { color: #6B7280; padding: 2rem; text-align: center; }
+    .error {
+      background: #FEE2E2; color: #991B1B;
+      padding: 0.75rem 1rem; border-radius: 6px;
+      margin-bottom: 1rem; border: 1px solid #FECACA;
+    }
+    .info {
+      background: #DBEAFE; color: #1E40AF;
+      padding: 0.75rem 1rem; border-radius: 6px;
+      margin-bottom: 1rem; border: 1px solid #BFDBFE;
+    }
+    .pk-pill {
+      display: inline-block; padding: 0.1rem 0.45rem;
+      border-radius: 4px; background: #F3F4F6; color: #6B7280;
+      font-size: 0.78rem; font-family: ui-monospace, monospace;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal {
+      background: #fff; border-radius: 10px;
+      width: 600px; max-width: 95%; max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    }
+    .modal-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid #E5E7EB;
+      display: flex; justify-content: space-between; align-items: center;
+      position: sticky; top: 0; background: #fff; z-index: 1;
+    }
+    .modal-header h2 { margin: 0; color: #1E3A5F; font-size: 1.2rem; }
+    .modal-close {
+      background: none; border: none; font-size: 1.5rem;
+      color: #9CA3AF; cursor: pointer; padding: 0; line-height: 1;
+    }
+    .modal-body { padding: 1.25rem 1.5rem; }
+    .modal-footer {
+      padding: 1rem 1.5rem; border-top: 1px solid #E5E7EB;
+      display: flex; justify-content: space-between; gap: 0.5rem;
+      position: sticky; bottom: 0; background: #fff;
+    }
+    .form-row { margin-bottom: 0.7rem; }
+    .form-row label {
+      display: block; font-size: 0.82rem; font-weight: 600;
+      color: #374151; margin-bottom: 0.2rem;
+    }
+    .form-row input, .form-row textarea {
+      width: 100%; padding: 0.45rem 0.7rem;
+      border: 1px solid #D1D5DB; border-radius: 6px;
+      font-size: 0.9rem; background: #fff;
+    }
+    .form-row input:focus, .form-row textarea:focus {
+      outline: none; border-color: #C41E3A;
+      box-shadow: 0 0 0 2px rgba(196,30,58,0.1);
+    }
+    .form-row.readonly input { background: #F9FAFB; color: #6B7280; }
+    .form-row input[type="checkbox"] { width: auto; margin-right: 0.4rem; }
+    .form-row .help {
+      display: block; font-size: 0.74rem; color: #9CA3AF; margin-top: 0.15rem;
+    }
+    .auth-note {
+      background: #FEF3C7; color: #92400E;
+      font-size: 0.82rem; padding: 0.5rem 0.75rem;
+      border-radius: 6px; margin-bottom: 1rem;
+      border: 1px solid #FDE68A;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1 id="page-title">Loading…</h1>
+        <p id="page-desc">&nbsp;</p>
+      </div>
+      <div class="nav-btns">
+        <a href="/contacts.html" class="nav-btn">← Contacts</a>
+        <a href="/" class="nav-btn">Home</a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div id="messages"></div>
+
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <input type="text" id="search" placeholder="Search…" />
+        <span class="count" id="count">—</span>
+      </div>
+      <button id="add-btn" class="btn btn-primary">+ Add Row</button>
+    </div>
+
+    <div id="table-wrap">
+      <div class="loading">Loading…</div>
+    </div>
+  </main>
+
+  <!-- Edit / Add modal -->
+  <div id="modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">Edit</h2>
+        <button class="modal-close" id="modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-auth-note" class="auth-note" style="display:none;">
+          You're not logged in as an admin — viewing only. Sign in as an admin to edit.
+        </div>
+        <div id="form-container"><!-- generated by JS --></div>
+      </div>
+      <div class="modal-footer">
+        <button id="delete-btn" class="btn btn-danger" style="display:none;">Delete</button>
+        <div style="display:flex; gap:0.5rem; margin-left:auto;">
+          <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+          <button id="save-btn" class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ──────────────────────────────────────────────────────────────────────────
+    // Parse ?table=key from URL — the key controls which lookup we show.
+    // ──────────────────────────────────────────────────────────────────────────
+    const params = new URLSearchParams(window.location.search);
+    const TABLE_KEY = (params.get('table') || '').toLowerCase();
+
+    // Auth
+    const authToken = localStorage.getItem('auth_token');
+    let currentUser = null;
+    try { currentUser = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    const isAdmin = currentUser && currentUser.role === 'admin';
+
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+      return h;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // State
+    // ──────────────────────────────────────────────────────────────────────────
+    let meta = null;        // { table, pk, label_col, title, columns: [...] }
+    let allRows = [];
+    let sortCol = null;
+    let sortDir = 1;
+    let editingId = null;   // null = adding new
+
+    // Audit + PK columns are read-only in the form (auto-managed).
+    function isReadonlyCol(name) {
+      if (!meta) return false;
+      if (name === meta.pk) return true;  // PK shown but not edited (existing rows)
+      return ['LastUpdated','LastUpdatedBy','LastEdited','LastEditedBy'].includes(name);
+    }
+
+    // Map SQLite affinity → HTML input type.
+    function inputType(col) {
+      const t = (col.type || '').toUpperCase();
+      if (t === 'INTEGER') return 'number';
+      if (t === 'REAL')    return 'number';
+      // Heuristic: short TEXT columns that look like dates get type=date.
+      // The exporter stores SQL Server datetimes as TEXT, so we can't tell
+      // for sure here — fall back to text and let the user paste a date.
+      return 'text';
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+    function showError(msg) {
+      const el = document.getElementById('messages');
+      el.innerHTML = `<div class="error">${escapeHtml(msg)}</div>`;
+      setTimeout(() => { el.innerHTML = ''; }, 6000);
+    }
+    function showInfo(msg) {
+      const el = document.getElementById('messages');
+      el.innerHTML = `<div class="info">${escapeHtml(msg)}</div>`;
+      setTimeout(() => { el.innerHTML = ''; }, 4000);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Boot
+    // ──────────────────────────────────────────────────────────────────────────
+    async function boot() {
+      if (!TABLE_KEY) {
+        document.getElementById('page-title').textContent = 'No table specified';
+        document.getElementById('page-desc').textContent  =
+          'Add ?table=company (or fbc, fmm, etc.) to the URL.';
+        document.getElementById('table-wrap').innerHTML =
+          '<div class="empty">Pass ?table=&lt;key&gt; in the URL — see /contacts.html for the list of cards.</div>';
+        document.getElementById('add-btn').style.display = 'none';
+        return;
+      }
+      try {
+        const r = await fetch(`/api/contacts/lookup/${TABLE_KEY}/meta`, { headers: authHeaders() });
+        if (r.status === 401) {
+          document.getElementById('table-wrap').innerHTML =
+            '<div class="error">You need to be logged in. <a href="/">Sign in</a> first.</div>';
+          return;
+        }
+        if (r.status === 404) {
+          document.getElementById('page-title').textContent = `Unknown table: ${TABLE_KEY}`;
+          document.getElementById('table-wrap').innerHTML =
+            '<div class="empty">No lookup named "' + escapeHtml(TABLE_KEY) + '". Try a different ?table= value.</div>';
+          document.getElementById('add-btn').style.display = 'none';
+          return;
+        }
+        if (!r.ok) throw new Error(await r.text());
+        meta = await r.json();
+      } catch (e) {
+        showError(`Couldn't load schema: ${e.message}`);
+        return;
+      }
+
+      // Title / description from the per-table metadata
+      document.title = `${meta.title} — Newk's Reporting Platform`;
+      document.getElementById('page-title').textContent = meta.title;
+      document.getElementById('page-desc').textContent  = meta.description || '';
+
+      if (!meta.columns || meta.columns.length === 0) {
+        document.getElementById('table-wrap').innerHTML =
+          '<div class="empty">Table not in SQLite yet — run contacts_export_from_sqlserver.py to import.</div>';
+        document.getElementById('add-btn').style.display = 'none';
+        return;
+      }
+
+      sortCol = meta.label_col;
+      renderForm();
+      await loadList();
+
+      if (!isAdmin) {
+        document.getElementById('add-btn').style.opacity = 0.55;
+        document.getElementById('add-btn').title = 'Admin role required';
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Form generation — one row per column from the schema
+    // ──────────────────────────────────────────────────────────────────────────
+    function renderForm() {
+      const c = document.getElementById('form-container');
+      let html = '';
+      meta.columns.forEach(col => {
+        const ro = isReadonlyCol(col.name);
+        const t = inputType(col);
+        // Multiline-friendly textarea for any column whose name suggests prose
+        const isLongText = /notes|description|comment|address/i.test(col.name);
+        html += `<div class="form-row${ro ? ' readonly' : ''}">`;
+        html += `<label for="f_${col.name}">${escapeHtml(col.name)}`;
+        if (col.notnull) html += ' <span style="color:#DC2626;">*</span>';
+        html += `</label>`;
+        if (isLongText) {
+          html += `<textarea id="f_${col.name}" data-col="${col.name}" rows="2"${ro?' readonly':''}></textarea>`;
+        } else {
+          html += `<input type="${t}" id="f_${col.name}" data-col="${col.name}"${ro?' readonly':''} />`;
+        }
+        html += `<span class="help">${col.type || 'TEXT'}${col.pk ? ' • PK' : ''}</span>`;
+        html += '</div>';
+      });
+      c.innerHTML = html;
+    }
+
+    function setEditableState() {
+      document.getElementById('modal-auth-note').style.display = isAdmin ? 'none' : '';
+      document.querySelectorAll('#form-container input, #form-container textarea').forEach(el => {
+        if (!el.hasAttribute('readonly')) el.disabled = !isAdmin;
+      });
+      document.getElementById('save-btn').style.display   = isAdmin ? '' : 'none';
+      document.getElementById('delete-btn').style.display =
+        (isAdmin && editingId !== null) ? '' : 'none';
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Data loading + table rendering
+    // ──────────────────────────────────────────────────────────────────────────
+    async function loadList() {
+      const wrap = document.getElementById('table-wrap');
+      wrap.innerHTML = '<div class="loading">Loading…</div>';
+      try {
+        const r = await fetch(`/api/contacts/lookup/${TABLE_KEY}`, { headers: authHeaders() });
+        if (r.status === 401) {
+          wrap.innerHTML = '<div class="error">Sign in required.</div>';
+          return;
+        }
+        if (!r.ok) { wrap.innerHTML = `<div class="error">Load failed: ${escapeHtml(await r.text())}</div>`; return; }
+        allRows = await r.json();
+        render();
+      } catch (e) {
+        wrap.innerHTML = `<div class="error">Network error: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    // Pick a small set of columns to show in the list view. Always include
+    // PK + label column; then add up to 4 more "interesting" columns.
+    function listColumns() {
+      const seen = new Set([meta.pk, meta.label_col]);
+      const interesting = [];
+      for (const c of meta.columns) {
+        if (seen.has(c.name)) continue;
+        // Skip audit + obvious junk in the list (still editable in modal)
+        if (['LastUpdated','LastUpdatedBy','LastEdited','LastEditedBy'].includes(c.name)) continue;
+        interesting.push(c.name);
+        seen.add(c.name);
+        if (interesting.length >= 4) break;
+      }
+      const base = [meta.pk, meta.label_col].filter(Boolean);
+      return [...base, ...interesting, 'LastUpdatedBy', 'LastUpdated', 'LastEditedBy', 'LastEdited']
+        .filter(c => meta.columns.some(col => col.name === c));
+    }
+
+    function render() {
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      let rows = allRows;
+      if (q) {
+        rows = rows.filter(r =>
+          Object.values(r).some(v => v != null && String(v).toLowerCase().includes(q))
+        );
+      }
+      // Sort
+      rows = rows.slice().sort((a, b) => {
+        const av = a[sortCol], bv = b[sortCol];
+        const an = (av === null || av === undefined || av === '');
+        const bn = (bv === null || bv === undefined || bv === '');
+        if (an && bn) return 0;
+        if (an) return 1;
+        if (bn) return -1;
+        const aS = typeof av === 'number' ? av : av.toString().toLowerCase();
+        const bS = typeof bv === 'number' ? bv : bv.toString().toLowerCase();
+        if (aS < bS) return -1 * sortDir;
+        if (aS > bS) return  1 * sortDir;
+        return 0;
+      });
+      document.getElementById('count').textContent =
+        `${rows.length}${rows.length !== allRows.length ? ' of ' + allRows.length : ''}`;
+      const wrap = document.getElementById('table-wrap');
+      if (rows.length === 0) {
+        wrap.innerHTML = `<div class="empty">${
+          allRows.length === 0 ? 'No rows yet.' : 'No matches for your search.'
+        }</div>`;
+        return;
+      }
+      const cols = listColumns();
+      let html = '<table><thead><tr>';
+      cols.forEach(c => {
+        const ind = (sortCol === c) ? `<span class="sort-indicator">${sortDir>0?'▲':'▼'}</span>` : '';
+        html += `<th data-col="${escapeHtml(c)}">${escapeHtml(c)}${ind}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+      rows.forEach(r => {
+        html += `<tr class="row" data-id="${escapeHtml(r[meta.pk])}">`;
+        cols.forEach(c => {
+          let v = r[c];
+          if (c === meta.pk) v = `<span class="pk-pill">${escapeHtml(v ?? '')}</span>`;
+          else if (c === 'LastUpdated' || c === 'LastEdited') v = v ? new Date(v).toLocaleDateString() : '';
+          else v = escapeHtml(v ?? '');
+          html += `<td>${v}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
+      wrap.querySelectorAll('tr.row').forEach(tr => {
+        tr.addEventListener('click', () => openEditModal(tr.dataset.id));
+      });
+      wrap.querySelectorAll('th[data-col]').forEach(th => {
+        th.addEventListener('click', () => {
+          const c = th.dataset.col;
+          if (sortCol === c) sortDir *= -1;
+          else { sortCol = c; sortDir = 1; }
+          render();
+        });
+      });
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Modal — open / populate / save / delete
+    // ──────────────────────────────────────────────────────────────────────────
+    function clearForm() {
+      document.querySelectorAll('#form-container input, #form-container textarea').forEach(el => {
+        if (el.type === 'checkbox') el.checked = false;
+        else el.value = '';
+      });
+    }
+
+    function openAddModal() {
+      if (!isAdmin) { showError('Admin role required.'); return; }
+      editingId = null;
+      document.getElementById('modal-title').textContent = `Add ${meta.title}`;
+      clearForm();
+      // PK is editable on adds (user may want to pick the ID explicitly)
+      const pkEl = document.getElementById(`f_${meta.pk}`);
+      if (pkEl) {
+        pkEl.readOnly = false;
+        pkEl.parentElement.classList.remove('readonly');
+        pkEl.placeholder = '(leave blank to auto-assign)';
+      }
+      setEditableState();
+      document.getElementById('modal').classList.add('visible');
+    }
+
+    function openEditModal(id) {
+      // Coerce numeric strings back to number when looking up in allRows
+      const row = allRows.find(r => String(r[meta.pk]) === String(id));
+      if (!row) return;
+      editingId = row[meta.pk];
+      document.getElementById('modal-title').textContent =
+        `${isAdmin ? 'Edit' : 'View'}: ${row[meta.label_col] ?? '#'+id}`;
+      // PK readonly on edits
+      const pkEl = document.getElementById(`f_${meta.pk}`);
+      if (pkEl) {
+        pkEl.readOnly = true;
+        pkEl.parentElement.classList.add('readonly');
+        pkEl.placeholder = '';
+      }
+      // Populate every form field from the row
+      meta.columns.forEach(col => {
+        const el = document.getElementById(`f_${col.name}`);
+        if (!el) return;
+        el.value = row[col.name] ?? '';
+      });
+      setEditableState();
+      document.getElementById('modal').classList.add('visible');
+    }
+
+    function closeModal() {
+      document.getElementById('modal').classList.remove('visible');
+      editingId = null;
+    }
+
+    function readForm() {
+      const out = {};
+      meta.columns.forEach(col => {
+        // Skip audit cols (server-stamped). PK is included so POST can use it.
+        if (['LastUpdated','LastUpdatedBy','LastEdited','LastEditedBy'].includes(col.name)) return;
+        const el = document.getElementById(`f_${col.name}`);
+        if (!el) return;
+        const s = (el.value ?? '').toString().trim();
+        if (s === '') { out[col.name] = null; return; }
+        if (inputType(col) === 'number') {
+          const n = Number(s);
+          out[col.name] = Number.isFinite(n) ? n : s;
+        } else {
+          out[col.name] = s;
+        }
+      });
+      return out;
+    }
+
+    async function onSave() {
+      if (!isAdmin) { showError('Admin role required.'); return; }
+      const payload = readForm();
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true;
+      try {
+        let url, method;
+        if (editingId === null) {
+          url = `/api/contacts/lookup/${TABLE_KEY}`;
+          method = 'POST';
+        } else {
+          url = `/api/contacts/lookup/${TABLE_KEY}/${encodeURIComponent(editingId)}`;
+          method = 'PUT';
+        }
+        const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(payload) });
+        if (r.status === 401) { showError('Sign in required.'); return; }
+        if (r.status === 403) { showError('Admin role required.'); return; }
+        if (!r.ok) { showError(`Save failed: ${await r.text()}`); return; }
+        closeModal();
+        showInfo(editingId === null ? 'Row added.' : 'Row updated.');
+        await loadList();
+      } catch (e) {
+        showError(`Network error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function onDelete() {
+      if (!isAdmin || editingId === null) return;
+      if (!confirm('Delete this row? This affects only the local SQLite mirror.')) return;
+      const btn = document.getElementById('delete-btn');
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/contacts/lookup/${TABLE_KEY}/${encodeURIComponent(editingId)}`,
+          { method: 'DELETE', headers: authHeaders() });
+        if (r.status === 401) { showError('Sign in required.'); return; }
+        if (r.status === 403) { showError('Admin role required.'); return; }
+        if (!r.ok) { showError(`Delete failed: ${await r.text()}`); return; }
+        closeModal();
+        showInfo('Row deleted.');
+        await loadList();
+      } catch (e) {
+        showError(`Network error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Wire up
+    // ──────────────────────────────────────────────────────────────────────────
+    document.getElementById('add-btn').addEventListener('click', openAddModal);
+    document.getElementById('cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    document.getElementById('save-btn').addEventListener('click', onSave);
+    document.getElementById('delete-btn').addEventListener('click', onDelete);
+    document.getElementById('search').addEventListener('input', () => render());
+    document.getElementById('modal').addEventListener('click', e => {
+      if (e.target.id === 'modal') closeModal();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    boot();
+  </script>
+</body>
+</html>

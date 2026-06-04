@@ -19016,6 +19016,112 @@ async def contacts_get_lookup(name: str, _user: User = Depends(get_current_user)
     return contacts_db.list_lookup(name)
 
 
+# ─── Generic lookup-table CRUD (powers /contacts-lookup.html?table=X) ────────
+#
+# Note: this is DIFFERENT from /api/contacts/lookups/{name} above. That one
+# returns [{id, label}] for FK dropdowns. These endpoints return full rows
+# and accept writes — they power the dedicated CRUD page for each lookup.
+
+@app.get("/api/contacts/lookup/{key}/meta")
+async def contacts_lookup_meta(key: str, _user: User = Depends(get_current_user)):
+    """Return descriptor + column schema for the named lookup table. The
+    generic CRUD page uses this to build its list view + edit modal."""
+    meta = contacts_db.get_lookup_meta(key)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Unknown lookup '{key}'")
+    return meta
+
+
+@app.get("/api/contacts/lookup/{key}")
+async def contacts_lookup_list(key: str, _user: User = Depends(get_current_user)):
+    """List all rows in the named lookup table."""
+    if not contacts_db.get_lookup_meta(key):
+        raise HTTPException(status_code=404, detail=f"Unknown lookup '{key}'")
+    return contacts_db.list_lookup_rows(key)
+
+
+@app.get("/api/contacts/lookup/{key}/{row_id}")
+async def contacts_lookup_get(
+    key: str,
+    row_id: str,  # accept as str since some PKs are non-integer (uniqueidentifier etc.)
+    _user: User = Depends(get_current_user),
+):
+    """Fetch a single lookup row by PK."""
+    if not contacts_db.get_lookup_meta(key):
+        raise HTTPException(status_code=404, detail=f"Unknown lookup '{key}'")
+    # Coerce to int if all-digits — PKs in our schema are mostly INTEGER.
+    rid: Any = int(row_id) if row_id.lstrip("-").isdigit() else row_id
+    row = contacts_db.get_lookup_row(key, rid)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Row {row_id} not found in {key}")
+    return row
+
+
+@app.post("/api/contacts/lookup/{key}")
+async def contacts_lookup_create(
+    key: str,
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Create a new lookup-table row. Admin only. PK may be omitted to let
+    SQLite auto-assign (INTEGER PRIMARY KEY), or supplied to use a fixed ID."""
+    if not contacts_db.get_lookup_meta(key):
+        raise HTTPException(status_code=404, detail=f"Unknown lookup '{key}'")
+    try:
+        new_id = contacts_db.insert_lookup_row(key, body, updated_by=admin_user.name)
+        logger.info("Lookup %s row created id=%s by %s", key, new_id, admin_user.email)
+        return {"id": new_id, "success": True}
+    except Exception as exc:
+        logger.error("contacts.insert_lookup_row %s failed: %s", key, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.put("/api/contacts/lookup/{key}/{row_id}")
+async def contacts_lookup_update(
+    key: str,
+    row_id: str,
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Update an existing lookup row. Admin only."""
+    if not contacts_db.get_lookup_meta(key):
+        raise HTTPException(status_code=404, detail=f"Unknown lookup '{key}'")
+    rid: Any = int(row_id) if row_id.lstrip("-").isdigit() else row_id
+    if not contacts_db.get_lookup_row(key, rid):
+        raise HTTPException(status_code=404, detail=f"Row {row_id} not found in {key}")
+    try:
+        ok = contacts_db.update_lookup_row(key, rid, body, updated_by=admin_user.name)
+        logger.info("Lookup %s row %s updated by %s", key, rid, admin_user.email)
+        return {"id": rid, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.update_lookup_row %s/%s failed: %s",
+                     key, row_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.delete("/api/contacts/lookup/{key}/{row_id}")
+async def contacts_lookup_delete(
+    key: str,
+    row_id: str,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Delete a lookup row. Admin only. Stamps audit-by first so the
+    eventual sync-back to SQL Server captures who initiated the delete."""
+    if not contacts_db.get_lookup_meta(key):
+        raise HTTPException(status_code=404, detail=f"Unknown lookup '{key}'")
+    rid: Any = int(row_id) if row_id.lstrip("-").isdigit() else row_id
+    if not contacts_db.get_lookup_row(key, rid):
+        raise HTTPException(status_code=404, detail=f"Row {row_id} not found in {key}")
+    try:
+        ok = contacts_db.delete_lookup_row(key, rid, updated_by=admin_user.name)
+        logger.info("Lookup %s row %s deleted by %s", key, rid, admin_user.email)
+        return {"id": rid, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.delete_lookup_row %s/%s failed: %s",
+                     key, row_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
 @app.get("/api/monkey/alerts/not-accepted")
 async def monkey_alert_not_accepted():
     """Orders due within 24 hours not yet accepted."""
