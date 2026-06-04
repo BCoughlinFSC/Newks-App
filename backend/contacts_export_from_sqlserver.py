@@ -60,19 +60,34 @@ DEFAULT_TABLES = [
     "CateringMgr",
     "BillingContacts",
     "PrimaryContacts",
+    "GeneralManagers",        # store GM directory
 
-    # Entities
+    # Entities / geography
     "Company",
     "DMA",
     "OwnerShip",
     "SyscoMarket",
 
-    # Future:
-    # "StoreSize" — looks like a deprecated StorePhysical duplicate, skipping
-    # "GeneralManagers", "CCProcessors", "FireWallProvider",
-    # "DeliveryPartners", "DeliveryPartnersByStore", "PhoneVendors",
+    # Vendors & services — front-of-house cards in the UI
+    "CCProcessors",           # credit-card processor accounts
+    "PhoneVendors",           # phone-system vendor directory
+    "FireWallProvider",       # firewall vendor directory
+    "DeliveryPartners",       # DoorDash, UberEats, etc.
+    "DeliveryPartnersByStore",  # 1:many — which stores use which partners
+
+    # StoreTechnical FK lookup tables (small but power the FK dropdowns in
+    # the Store edit modal — fkPOSTypeID, fkKioskTypeID, FKHSIServiceType,
+    # CameraVendorID, AVSoftwareTypeID).
+    "POSType",
+    "KioskType",
+    "HSIServiceType",
+    "CameraVendors",
+    "AVSoftwareType",
+
+    # Future / not in UI yet:
+    # "StoreSize"          — looks like a deprecated StorePhysical duplicate, skipping
     # "CateringGoals", "CateringBudgeted",
-    # "POSType", "MenuType",  -- lookups
+    # "MenuType",          — lookup for Store.StoreMenuBoardType FK
 ]
 
 # SQL Server data type → SQLite affinity

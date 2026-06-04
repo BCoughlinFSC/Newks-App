@@ -616,6 +616,69 @@ LOOKUPS: Dict[str, Dict[str, str]] = {
         "title": "Sysco Markets",
         "description": "Sysco distribution market directory.",
     },
+
+    # ── Vendors & services (round 5) ───────────────────────────────────
+    # Best-guess PK / label column names based on Don's naming conventions.
+    # If a guess is wrong, list_lookup() returns [] gracefully and the
+    # dropdown will fall back to numeric IDs until we fix it.
+
+    "ccprocessor": {
+        "table": "CCProcessors", "pk": "CCProcessorID", "label_col": "CCProcessorName",
+        "title": "CC Processors",
+        "description": "Credit-card processor accounts.",
+    },
+    "phonevendor": {
+        # FK column in StoreTechnical is PhoneVendorID — PK should match.
+        "table": "PhoneVendors", "pk": "PhoneVendorID", "label_col": "PhoneVendorName",
+        "title": "Phone Vendors",
+        "description": "Phone-system vendor directory.",
+    },
+    "firewall": {
+        # FK column in StoreTechnical is FireWallProvider (no ID suffix —
+        # the SQL Server schema is inconsistent). Best guess for the PK.
+        "table": "FireWallProvider", "pk": "FireWallProviderID", "label_col": "FireWallProviderName",
+        "title": "Firewall Providers",
+        "description": "Firewall vendor directory.",
+    },
+    "deliverypartner": {
+        "table": "DeliveryPartners", "pk": "DeliveryPartnerID", "label_col": "DeliveryPartnerName",
+        "title": "Delivery Partners",
+        "description": "DoorDash, UberEats, etc. — vendor directory only. Per-store mapping comes from DeliveryPartnersByStore.",
+    },
+    "gm": {
+        "table": "GeneralManagers", "pk": "GMID", "label_col": "GMName",
+        "title": "General Managers",
+        "description": "Store GM directory.",
+    },
+
+    # ── StoreTechnical FK lookups (round 5) ────────────────────────────
+    # Powers the dropdowns in the Technical section of the Store modal.
+
+    "postype": {
+        "table": "POSType", "pk": "POSTypeID", "label_col": "POSTypeName",
+        "title": "POS Types",
+        "description": "POS-system types (Aloha, Toast, etc.) — referenced by Store.fkPOSTypeID.",
+    },
+    "kiosktype": {
+        "table": "KioskType", "pk": "KioskTypeID", "label_col": "KioskTypeName",
+        "title": "Kiosk Types",
+        "description": "Self-order kiosk hardware models — referenced by Store.fkKioskTypeID.",
+    },
+    "hsiservicetype": {
+        "table": "HSIServiceType", "pk": "HSIServiceTypeID", "label_col": "HSIServiceTypeName",
+        "title": "HSI Service Types",
+        "description": "Internet service plan types — referenced by Store.FKHSIServiceType.",
+    },
+    "cameravendor": {
+        "table": "CameraVendors", "pk": "CameraVendorID", "label_col": "CameraVendorName",
+        "title": "Camera Vendors",
+        "description": "Security-camera vendor directory.",
+    },
+    "avsoftwaretype": {
+        "table": "AVSoftwareType", "pk": "AVSoftwareTypeID", "label_col": "AVSoftwareTypeName",
+        "title": "A/V Software Types",
+        "description": "Anti-virus software types — referenced by Store.AVSoftwareTypeID.",
+    },
 }
 
 

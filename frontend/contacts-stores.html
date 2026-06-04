@@ -367,8 +367,7 @@
     const STORE_TECHNICAL_FIELDS = [
       // POS — Aloha + Toast
       { col: 'POSKey',                label: 'POS Key #',              type: 'number' },
-      { col: 'fkPOSTypeID',           label: 'POS Type ID',            type: 'number',
-        help: 'FK to POSType (no lookup yet).' },
+      { col: 'fkPOSTypeID',           label: 'POS Type',               type: 'lookup', lookup: 'postype' },
       { col: 'AlohaVersion',          label: 'Aloha Version',          type: 'text' },
       { col: 'EDCVersion',            label: 'EDC Version',            type: 'text' },
       { col: 'ATOVersion',            label: 'ATO Version',            type: 'text' },
@@ -388,29 +387,23 @@
       { col: 'StaticIPCount',         label: 'Static IP Count',        type: 'number' },
       { col: 'Bandwidth',             label: 'Bandwidth',              type: 'text' },
       { col: 'ISPName',               label: 'ISP Name',               type: 'text' },
-      { col: 'FKHSIServiceType',      label: 'HSI Service Type ID',    type: 'number',
-        help: 'FK to HSIServiceType (no lookup yet).' },
+      { col: 'FKHSIServiceType',      label: 'HSI Service Type',       type: 'lookup', lookup: 'hsiservicetype' },
       { col: 'ManagedSwitch',         label: 'Managed Switch',         type: 'text' },
       { col: 'Failover',              label: 'Failover',               type: 'text' },
       { col: 'AccessPoint',           label: 'Access Point',           type: 'text' },
-      { col: 'FireWallProvider',      label: 'Firewall Provider ID',   type: 'number',
-        help: 'FK to FireWallProvider (no lookup yet).' },
+      { col: 'FireWallProvider',      label: 'Firewall Provider',     type: 'lookup', lookup: 'firewall' },
       // Vendors
-      { col: 'PhoneVendorID',         label: 'Phone Vendor ID',        type: 'number',
-        help: 'FK to PhoneVendors (no lookup yet).' },
+      { col: 'PhoneVendorID',         label: 'Phone Vendor',           type: 'lookup', lookup: 'phonevendor' },
       { col: 'OtherPhoneVendor',      label: 'Other Phone Vendor',     type: 'text' },
-      { col: 'CameraVendorID',        label: 'Camera Vendor ID',       type: 'number',
-        help: 'FK to CameraVendors (no lookup yet).' },
+      { col: 'CameraVendorID',        label: 'Camera Vendor',          type: 'lookup', lookup: 'cameravendor' },
       // A/V Software
-      { col: 'AVSoftwareTypeID',      label: 'A/V Software Type ID',   type: 'number',
-        help: 'FK to AVSoftwareType (no lookup yet).' },
+      { col: 'AVSoftwareTypeID',      label: 'A/V Software Type',      type: 'lookup', lookup: 'avsoftwaretype' },
       { col: 'OtherAVSoftware',       label: 'Other A/V Software',     type: 'text' },
       { col: 'AVSoftwareVersion',     label: 'A/V Software Version',   type: 'text' },
       { col: 'AVSoftwareInstallDate', label: 'A/V Install Date',       type: 'date' },
       { col: 'AVSoftwareExpirationDate', label: 'A/V Expiration Date', type: 'date' },
       // Kiosks
-      { col: 'fkKioskTypeID',         label: 'Kiosk Type ID',          type: 'number',
-        help: 'FK to KioskType (no lookup yet).' },
+      { col: 'fkKioskTypeID',         label: 'Kiosk Type',             type: 'lookup', lookup: 'kiosktype' },
       { col: 'NumKiosks',             label: 'Number of Kiosks',       type: 'number' },
       // Credit-card processors — stored as 0/1 flags in SQL Server
       { col: 'CCProcessorInHouse',    label: 'CC Processor: In-House', type: 'checkbox' },
@@ -670,11 +663,15 @@
     // Caches in LOOKUP_CACHE so opening the modal doesn't re-fetch every time.
     // ──────────────────────────────────────────────────────────────────────────
     async function loadAllLookups() {
-      // Gather every distinct lookup name referenced in STORE_SECTIONS
+      // Gather every distinct lookup name across all sections — base Store
+      // sections plus the StorePhysical / StoreTechnical satellite configs.
       const names = new Set();
-      STORE_SECTIONS.forEach(sec => sec.fields.forEach(f => {
+      const addFrom = arr => arr.forEach(f => {
         if (f.type === 'lookup' && f.lookup) names.add(f.lookup);
-      }));
+      });
+      STORE_SECTIONS.forEach(sec => addFrom(sec.fields));
+      addFrom(STORE_PHYSICAL_FIELDS);
+      addFrom(STORE_TECHNICAL_FIELDS);
       await Promise.all(Array.from(names).map(async name => {
         try {
           const r = await fetch(`/api/contacts/lookups/${name}`, { headers: authHeaders() });
