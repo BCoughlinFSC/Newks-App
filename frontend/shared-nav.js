@@ -60,6 +60,7 @@
     { key: 'msi-discrepancy',  label: 'MSI Discrepancy',             href: '/msi-discrepancy.html' },
     { key: 'toast-pricing',    label: 'Toast Pricing Export',         href: '#', action: 'toastPricing' },
     { key: 'olo',              label: 'Digital Orders by Platform',   href: '/olo.html' },
+    { key: 'contacts',         label: 'Contacts (forms.nfc.local)',   href: '/contacts.html' },
   ];
 
   // ─── Detect active page ─────────────────────────
