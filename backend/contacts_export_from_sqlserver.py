@@ -77,20 +77,18 @@ DEFAULT_TABLES = [
 
     # StoreTechnical FK lookup tables (small but power the FK dropdowns in
     # the Store edit modal — fkPOSTypeID, fkKioskTypeID, FKHSIServiceType,
-    # CameraVendorID).
+    # CameraVendorID, AVSoftwareTypeID).
     "POSType",
     "KioskType",
     "HSIServiceType",
     "CameraVendors",
+    "AVSoftwareTypes",       # note: plural in SQL Server (FK column is AVSoftwareTypeID, singular)
 
     # Future / not in UI yet:
-    # "AVSoftwareType"     — referenced by StoreTechnical.AVSoftwareTypeID
-    #                        but no table by that exact name in SQL Server.
-    #                        Investigate: actual table might be AVSoftware,
-    #                        AVSoftwareTypes (plural), or something else.
     # "StoreSize"          — looks like a deprecated StorePhysical duplicate, skipping
     # "CateringGoals", "CateringBudgeted",
     # "MenuType",          — lookup for Store.StoreMenuBoardType FK
+    # "EditsToAVSoftwareTypes" — audit-log table for AVSoftwareTypes, skip
 ]
 
 # SQL Server data type → SQLite affinity

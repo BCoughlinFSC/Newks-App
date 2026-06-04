@@ -536,21 +536,46 @@ def list_store_closures(store_id: int) -> List[Dict[str, Any]]:
             return []
 
 
+def list_delivery_partners_by_store(store_id: int) -> List[Dict[str, Any]]:
+    """Return all DeliveryPartnersByStore rows for a store. Read-only in v1
+    — editing UI (add/remove a partner) comes in a future round.
+
+    Defensive about column names: we know it has a StoreID FK and probably
+    DelivPartID, but other columns vary. SELECT * lets the frontend render
+    whatever's there. If the table doesn't exist, return [] gracefully."""
+    with get_connection() as conn:
+        try:
+            # Filter by StoreID — that's the one column we're confident about
+            # since it's the FK to Store and matches the documented relationship.
+            rows = conn.execute(
+                "SELECT * FROM DeliveryPartnersByStore WHERE StoreID = ?",
+                (store_id,),
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows]
+        except sqlite3.OperationalError as exc:
+            logger.warning("list_delivery_partners_by_store(%s) failed: %s",
+                           store_id, exc)
+            return []
+
+
 def get_store_full(store_id: int) -> Optional[Dict[str, Any]]:
-    """Return Store + Physical + Technical + closure count in one payload.
-    Lets the edit modal hydrate all sections from a single round-trip."""
+    """Return Store + Physical + Technical + closures + delivery partners
+    in one payload. Lets the edit modal hydrate all sections from a single
+    round-trip."""
     base = get_store(store_id)
     if not base:
         return None
-    physical  = get_store_physical(store_id)  or {}
-    technical = get_store_technical(store_id) or {}
-    closures  = list_store_closures(store_id)
+    physical          = get_store_physical(store_id)        or {}
+    technical         = get_store_technical(store_id)       or {}
+    closures          = list_store_closures(store_id)
+    delivery_partners = list_delivery_partners_by_store(store_id)
     return {
-        "store":         base,
-        "physical":      physical,
-        "technical":     technical,
-        "closures":      closures,
-        "closure_count": len(closures),
+        "store":             base,
+        "physical":          physical,
+        "technical":         technical,
+        "closures":          closures,
+        "closure_count":     len(closures),
+        "delivery_partners": delivery_partners,
     }
 
 
@@ -680,11 +705,14 @@ LOOKUPS: Dict[str, Dict[str, str]] = {
         "title": "Camera Vendors",
         "description": "Security-camera vendor directory.",
     },
-    # NOTE: AVSoftwareType was added to DEFAULT_TABLES in the exporter but
-    # SQL Server doesn't have a table by that exact name (the export found
-    # nothing). The FK column Store.AVSoftwareTypeID still exists; we just
-    # don't know the right lookup table name. Investigation TODO. For now
-    # the field stays as a numeric input in the Store edit modal.
+    "avsoftwaretype": {
+        # SQL Server table is AVSoftwareTypes (plural) even though the FK
+        # column in StoreTechnical is AVSoftwareTypeID (singular). PK/label
+        # column names are best-guess; verify after re-export.
+        "table": "AVSoftwareTypes", "pk": "AVSoftwareTypeID", "label_col": "AVSoftwareTypeName",
+        "title": "A/V Software Types",
+        "description": "Anti-virus software types — referenced by Store.AVSoftwareTypeID.",
+    },
 }
 
 

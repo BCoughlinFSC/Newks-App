@@ -19008,6 +19008,16 @@ async def contacts_list_store_closures(store_id: int, _user: User = Depends(get_
     return contacts_db.list_store_closures(store_id)
 
 
+@app.get("/api/contacts/stores/{store_id}/delivery-partners")
+async def contacts_list_store_delivery_partners(
+    store_id: int,
+    _user: User = Depends(get_current_user),
+):
+    """Read-only list of which delivery partners (DoorDash, UberEats, etc.)
+    this store uses. Editing UI (add/remove a partner) comes in a future round."""
+    return contacts_db.list_delivery_partners_by_store(store_id)
+
+
 @app.get("/api/contacts/lookups/{name}")
 async def contacts_get_lookup(name: str, _user: User = Depends(get_current_user)):
     """Generic FK dropdown source. `name` is one of: company, areadir, fbc, fmm,

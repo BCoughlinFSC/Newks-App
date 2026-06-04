@@ -397,8 +397,7 @@
       { col: 'OtherPhoneVendor',      label: 'Other Phone Vendor',     type: 'text' },
       { col: 'CameraVendorID',        label: 'Camera Vendor',          type: 'lookup', lookup: 'cameravendor' },
       // A/V Software
-      { col: 'AVSoftwareTypeID',      label: 'A/V Software Type ID',   type: 'number',
-        help: 'FK to an AV-software table — actual SQL Server table name TBD.' },
+      { col: 'AVSoftwareTypeID',      label: 'A/V Software Type',      type: 'lookup', lookup: 'avsoftwaretype' },
       { col: 'OtherAVSoftware',       label: 'Other A/V Software',     type: 'text' },
       { col: 'AVSoftwareVersion',     label: 'A/V Software Version',   type: 'text' },
       { col: 'AVSoftwareInstallDate', label: 'A/V Install Date',       type: 'date' },
@@ -425,7 +424,7 @@
     // ──────────────────────────────────────────────────────────────────────────
     const LOOKUP_CACHE = {};
     // Track satellite payloads + closure history for the currently-open store.
-    let modalContext = { storeId: null, physical: {}, technical: {}, closures: [] };
+    let modalContext = { storeId: null, physical: {}, technical: {}, closures: [], delivery_partners: [] };
 
     // ──────────────────────────────────────────────────────────────────────────
     // Auth state
@@ -655,6 +654,10 @@
       html += '<div class="section-title">Closure History (read-only)</div>';
       html += '<div id="closure-history"><em style="color:#6B7280;font-size:0.85rem;">No closure history loaded.</em></div>';
 
+      // DeliveryPartnersByStore — read-only list of partners for this store
+      html += '<div class="section-title">Delivery Partners (read-only)</div>';
+      html += '<div id="delivery-partners"><em style="color:#6B7280;font-size:0.85rem;">No delivery partners loaded.</em></div>';
+
       c.innerHTML = html;
       populateLookupOptions();
     }
@@ -720,6 +723,8 @@
       c.querySelectorAll('select').forEach(el => { el.value = ''; });
       document.getElementById('closure-history').innerHTML =
         '<em style="color:#6B7280;font-size:0.85rem;">No closure history (new store).</em>';
+      document.getElementById('delivery-partners').innerHTML =
+        '<em style="color:#6B7280;font-size:0.85rem;">No delivery partners (new store).</em>';
     }
 
     // Populate one set of fields from a row. group = 'store' | 'phys' | 'tech'.
@@ -741,7 +746,7 @@
     function openAddModal() {
       document.getElementById('modal-title').textContent = 'Add Store';
       clearFormFields();
-      modalContext = { storeId: null, physical: {}, technical: {}, closures: [] };
+      modalContext = { storeId: null, physical: {}, technical: {}, closures: [], delivery_partners: [] };
       // Allow editing StoreID since it's a new record
       const storeIdField = document.getElementById('store_StoreID');
       if (storeIdField) {
@@ -772,6 +777,8 @@
       populateGroup(STORE_TECHNICAL_FIELDS, null, 'tech');
       document.getElementById('closure-history').innerHTML =
         '<em style="color:#6B7280;font-size:0.85rem;">Loading…</em>';
+      document.getElementById('delivery-partners').innerHTML =
+        '<em style="color:#6B7280;font-size:0.85rem;">Loading…</em>';
       setEditableState();
       document.getElementById('modal').classList.add('visible');
 
@@ -786,20 +793,77 @@
         const full = await r.json();
         modalContext = {
           storeId: id,
-          physical:  full.physical  || {},
-          technical: full.technical || {},
-          closures:  full.closures  || [],
+          physical:          full.physical          || {},
+          technical:         full.technical         || {},
+          closures:          full.closures          || [],
+          delivery_partners: full.delivery_partners || [],
         };
         // Refresh base store from server too (in case other tabs edited it)
         if (full.store) populateGroup(STORE_SECTIONS.flatMap(s => s.fields), full.store, 'store');
         populateGroup(STORE_PHYSICAL_FIELDS,  modalContext.physical,  'phys');
         populateGroup(STORE_TECHNICAL_FIELDS, modalContext.technical, 'tech');
         renderClosureHistory(modalContext.closures);
+        renderDeliveryPartners(modalContext.delivery_partners);
         setEditableState();
       } catch (e) {
         document.getElementById('closure-history').innerHTML =
           `<em style="color:#9CA3AF;">Couldn't load satellites: ${escapeHtml(e.message)}</em>`;
       }
+    }
+
+    function renderDeliveryPartners(rows) {
+      // Read-only table of DeliveryPartnersByStore rows for this store.
+      // Resolves DelivPartID → partner name via the already-loaded
+      // LOOKUP_CACHE['deliverypartner'] (no extra fetch).
+      const el = document.getElementById('delivery-partners');
+      if (!rows || rows.length === 0) {
+        el.innerHTML = '<em style="color:#6B7280;font-size:0.85rem;">No delivery partners assigned to this store.</em>';
+        return;
+      }
+      const partnerLookup = {};
+      (LOOKUP_CACHE['deliverypartner'] || []).forEach(p => { partnerLookup[p.id] = p.label; });
+
+      // Pick out the most useful columns if they exist; everything else
+      // surfaces in a generic dump fallback (same pattern as closure history).
+      const sample = rows[0];
+      const sampleKeys = Object.keys(sample);
+      // The partner FK could be DelivPartID, DeliveryPartnerID, or PartnerID —
+      // detect dynamically.
+      const fkCol = sampleKeys.find(k => /deliv.*part.*id|partnerid/i.test(k));
+      const headers = [];
+      if (fkCol) headers.push(fkCol);
+      // Common useful columns if present
+      ['IsActive', 'Active', 'StartDate', 'EndDate', 'Notes', 'CommissionPct', 'StoreSpecificFee']
+        .forEach(c => { if (sampleKeys.includes(c)) headers.push(c); });
+      // If nothing matched, fall back to dumping every column that isn't audit.
+      if (headers.length === 0) {
+        sampleKeys
+          .filter(k => !['LastUpdated','LastUpdatedBy','LastEdited','LastEditedBy'].includes(k))
+          .forEach(k => headers.push(k));
+      }
+
+      let html = `<div style="color:#6B7280;font-size:0.8rem;margin-bottom:0.4rem;">${rows.length} partner mapping(s)</div>`;
+      html += '<table style="width:100%;font-size:0.82rem;border:1px solid #E5E7EB;">';
+      html += '<thead style="background:#F9FAFB;"><tr>';
+      // First column is always partner name (resolved from FK)
+      html += '<th style="text-align:left;padding:0.3rem 0.5rem;border-bottom:1px solid #E5E7EB;">Partner</th>';
+      headers.filter(h => h !== fkCol).forEach(h => {
+        html += `<th style="text-align:left;padding:0.3rem 0.5rem;border-bottom:1px solid #E5E7EB;">${escapeHtml(h)}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+      rows.forEach(r => {
+        html += '<tr>';
+        const partnerName = fkCol
+          ? (partnerLookup[r[fkCol]] || `(unknown #${r[fkCol] ?? '?'})`)
+          : '(no FK col detected)';
+        html += `<td style="padding:0.3rem 0.5rem;border-bottom:1px solid #F3F4F6;"><strong>${escapeHtml(partnerName)}</strong></td>`;
+        headers.filter(h => h !== fkCol).forEach(h => {
+          html += `<td style="padding:0.3rem 0.5rem;border-bottom:1px solid #F3F4F6;">${escapeHtml(r[h] ?? '')}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
     }
 
     function renderClosureHistory(rows) {
