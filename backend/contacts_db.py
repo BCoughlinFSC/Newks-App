@@ -333,11 +333,16 @@ def mark_outbox_applied(row_id: int, success: bool, error_message: Optional[str]
 
 
 def retry_outbox_row(row_id: int) -> bool:
-    """Manual admin action: reset a failed row back to pending."""
+    """Manual admin action: reset a failed row back to pending. Also
+    resets the attempt counter so the drainer gets its full retry budget
+    on the next run."""
     with get_connection() as conn:
         cur = conn.execute(
             "UPDATE contacts_outbox "
-            "SET applied_status = NULL, applied_at = NULL, error_message = NULL "
+            "SET applied_status = NULL, "
+            "    applied_at = NULL, "
+            "    error_message = NULL, "
+            "    attempts = 0 "
             "WHERE id = ? AND applied_status = 'error'",
             (row_id,),
         )
