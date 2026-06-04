@@ -38,7 +38,7 @@ import logging
 import os
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -209,6 +209,9 @@ def _copy_rows(src_cur, dst_conn, table_name: str, cols: List[Dict]) -> int:
     rows = src_cur.fetchall()
 
     # Convert pyodbc Row → tuple of values (handling datetime, Decimal, etc.)
+    # SQLite (Python 3.12+) no longer auto-adapts date/time/datetime — and
+    # `time` was never auto-adapted. Stringify all three to ISO format so
+    # the column stays TEXT-compatible (matches TYPE_MAP).
     payload = []
     for r in rows:
         out_row = []
@@ -217,6 +220,10 @@ def _copy_rows(src_cur, dst_conn, table_name: str, cols: List[Dict]) -> int:
                 out_row.append(None)
             elif isinstance(v, datetime):
                 out_row.append(v.isoformat(sep=" ", timespec="seconds"))
+            elif isinstance(v, date):           # bare date (no time component)
+                out_row.append(v.isoformat())
+            elif isinstance(v, time):           # bare time (no date component)
+                out_row.append(v.isoformat(timespec="seconds"))
             elif hasattr(v, "__float__"):  # Decimal etc.
                 try:
                     out_row.append(float(v))
