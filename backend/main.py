@@ -6605,6 +6605,12 @@ async def _on_startup():
     aloha_sales_db.initialize_db()
     toast_config_db.initialize_db()
     monkey_db.initialize_db()
+    # Contacts SQLite: tables created idempotently so the UI works even
+    # before the first SQL Server → SQLite export has happened.
+    try:
+        contacts_db.initialize_schema()
+    except Exception as exc:
+        logger.warning("contacts_db.initialize_schema failed (non-fatal): %s", exc)
     _scheduler.start()
     logger.info(
         "APScheduler started — nightly jobs scheduled "
@@ -18804,9 +18810,8 @@ class AreaDirectorIn(BaseModel):
 
 @app.get("/api/contacts/health")
 async def contacts_health(_user: User = Depends(get_current_user)):
-    """Connectivity check for the contacts SQL Server connection."""
-    ok = contacts_db.db_available()
-    return {"available": ok, "database": contacts_db.SQL_DATABASE, "server": contacts_db.SQL_SERVER}
+    """Status of the local SQLite contacts mirror — row counts, file mtime, path."""
+    return contacts_db.get_metadata()
 
 
 @app.get("/api/contacts/companies")
