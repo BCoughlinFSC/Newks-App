@@ -832,8 +832,12 @@
       const fkCol = sampleKeys.find(k => /deliv.*part.*id|partnerid/i.test(k));
       const headers = [];
       if (fkCol) headers.push(fkCol);
-      // Common useful columns if present
-      ['IsActive', 'Active', 'StartDate', 'EndDate', 'Notes', 'CommissionPct', 'StoreSpecificFee']
+      // Common useful columns if present. The first batch are generic
+      // mapping-table columns we might encounter; the second batch are the
+      // actual SQL Server columns on DeliveryPartnersByStore (per Kim's
+      // PRAGMA audit) — URL + merchant ID assigned by the partner.
+      ['IsActive', 'Active', 'StartDate', 'EndDate', 'Notes', 'CommissionPct',
+       'StoreSpecificFee', 'DeliveryPartnerURL', 'IdAtDeliveryPartner']
         .forEach(c => { if (sampleKeys.includes(c)) headers.push(c); });
       // If nothing matched, fall back to dumping every column that isn't audit.
       if (headers.length === 0) {
