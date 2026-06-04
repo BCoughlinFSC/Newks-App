@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Outbox — Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /*
+     * Admin-only inspector for the contacts_outbox sync-back queue.
+     * Shows pending / success / failed rows; lets admins retry failed rows.
+     * The dev-jan02 drainer cron is what actually applies edits to
+     * SQL Server — this page is just for visibility + recovery.
+     */
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c;
+    }
+    .header {
+      background: #C41E3A; padding: 1.5rem 2rem;
+      border-bottom: 3px solid #A01A2E;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.75rem; font-weight: 700; }
+    .header p  { margin: 0.4rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+    .nav-btns { display: flex; gap: 0.5rem; }
+    .nav-btn {
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 0.5rem 1rem; border-radius: 6px;
+      font-size: 0.9rem; cursor: pointer; text-decoration: none;
+    }
+    .nav-btn:hover { background: rgba(255,255,255,0.25); }
+    main { padding: 1.5rem 2rem; max-width: 1500px; margin: 0 auto; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .stat-card .label {
+      color: #6B7280;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+    .stat-card .value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1E3A5F;
+      margin-top: 0.3rem;
+    }
+    .stat-card.warn .value  { color: #D97706; }
+    .stat-card.error .value { color: #DC2626; }
+
+    .filters {
+      display: flex;
+      gap: 0.4rem;
+      margin-bottom: 1rem;
+    }
+    .filter-btn {
+      padding: 0.5rem 0.9rem;
+      border-radius: 6px;
+      border: 1px solid #D1D5DB;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    .filter-btn.active {
+      background: #C41E3A;
+      color: #fff;
+      border-color: #C41E3A;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 0.85rem;
+    }
+    thead { background: #F9FAFB; }
+    th {
+      text-align: left; padding: 0.6rem 0.8rem;
+      font-weight: 600; color: #374151;
+      border-bottom: 2px solid #E5E7EB;
+      white-space: nowrap;
+    }
+    td {
+      padding: 0.5rem 0.8rem;
+      border-bottom: 1px solid #F3F4F6;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .op-pill {
+      display: inline-block; padding: 0.1rem 0.45rem;
+      border-radius: 4px; font-size: 0.72rem; font-weight: 700;
+      font-family: ui-monospace, monospace;
+    }
+    .op-INSERT { background: #DCFCE7; color: #166534; }
+    .op-UPDATE { background: #DBEAFE; color: #1E40AF; }
+    .op-DELETE { background: #FEE2E2; color: #991B1B; }
+    .status-pending { color: #D97706; font-weight: 600; }
+    .status-success { color: #16A34A; font-weight: 600; }
+    .status-error   { color: #DC2626; font-weight: 600; }
+    .payload {
+      font-family: ui-monospace, monospace;
+      font-size: 0.78rem;
+      color: #4B5563;
+      max-width: 480px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .payload:hover { white-space: normal; word-break: break-all; }
+    .err {
+      color: #991B1B;
+      font-size: 0.78rem;
+      font-family: ui-monospace, monospace;
+      max-width: 280px;
+    }
+    .btn {
+      padding: 0.35rem 0.7rem;
+      border-radius: 5px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      border: none;
+      font-weight: 600;
+    }
+    .btn-secondary { background: #fff; color: #374151; border: 1px solid #D1D5DB; }
+    .btn-secondary:hover { background: #F3F4F6; }
+    .btn-warn { background: #D97706; color: #fff; }
+    .btn-warn:hover { background: #B45309; }
+    .empty {
+      padding: 2rem; text-align: center;
+      color: #9CA3AF; font-style: italic;
+    }
+    .feature-off {
+      background: #FEF3C7; color: #92400E;
+      border: 1px solid #FDE68A;
+      padding: 1rem 1.25rem; border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+    .error-banner {
+      background: #FEE2E2; color: #991B1B;
+      padding: 0.75rem 1rem; border-radius: 6px;
+      margin-bottom: 1rem; border: 1px solid #FECACA;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Outbox</h1>
+        <p>SQL Server sync-back queue · dev-jan02 drainer picks up pending rows hourly</p>
+      </div>
+      <div class="nav-btns">
+        <a href="/contacts.html" class="nav-btn">← Contacts</a>
+        <a href="/" class="nav-btn">Home</a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div id="feature-off" class="feature-off" style="display:none;">
+      <strong>Outbox feature flag is OFF.</strong> Edits aren't being captured for SQL Server sync.
+      Set <code>CONTACTS_OUTBOX_ENABLED=1</code> in <code>backend/.env</code> on Cloudways and
+      restart the app to enable.
+    </div>
+
+    <div id="error-banner" class="error-banner" style="display:none;"></div>
+
+    <div class="stats" id="stats"><!-- filled by JS --></div>
+
+    <div class="filters">
+      <button class="filter-btn active" data-status="">All</button>
+      <button class="filter-btn" data-status="pending">Pending</button>
+      <button class="filter-btn" data-status="error">Failed</button>
+      <button class="filter-btn" data-status="success">Applied</button>
+    </div>
+
+    <div id="rows"><div class="empty">Loading…</div></div>
+  </main>
+
+  <script>
+    const authToken = localStorage.getItem('auth_token');
+    let currentUser = null;
+    try { currentUser = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    const isAdmin = currentUser && currentUser.role === 'admin';
+
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      if (authToken) h['Authorization'] = 'Bearer ' + authToken;
+      return h;
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    let currentStatus = '';  // '' = all
+
+    async function loadStats() {
+      const r = await fetch('/api/contacts/outbox/stats', { headers: authHeaders() });
+      if (!r.ok) {
+        document.getElementById('error-banner').style.display = '';
+        document.getElementById('error-banner').textContent = 'Could not load stats — are you signed in?';
+        return null;
+      }
+      return await r.json();
+    }
+
+    function renderStats(s) {
+      const container = document.getElementById('stats');
+      const pendingClass = s.pending > 0 ? 'warn' : '';
+      const failedClass  = s.failed  > 0 ? 'error' : '';
+      const lastApplied = s.last_applied_at
+        ? new Date(s.last_applied_at).toLocaleString()
+        : 'never';
+      container.innerHTML = `
+        <div class="stat-card ${pendingClass}">
+          <div class="label">Pending</div>
+          <div class="value">${s.pending}</div>
+        </div>
+        <div class="stat-card ${failedClass}">
+          <div class="label">Failed</div>
+          <div class="value">${s.failed}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Applied (all-time)</div>
+          <div class="value">${s.applied}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Last drained</div>
+          <div class="value" style="font-size: 1rem;">${lastApplied}</div>
+        </div>
+      `;
+      if (!s.enabled) document.getElementById('feature-off').style.display = '';
+    }
+
+    async function loadRows() {
+      const wrap = document.getElementById('rows');
+      wrap.innerHTML = '<div class="empty">Loading…</div>';
+      const qs = currentStatus ? `?status=${currentStatus}` : '';
+      const r = await fetch(`/api/contacts/outbox${qs}`, { headers: authHeaders() });
+      if (r.status === 401) { wrap.innerHTML = '<div class="error-banner">Sign in required.</div>'; return; }
+      if (r.status === 403) { wrap.innerHTML = '<div class="error-banner">Admin role required.</div>'; return; }
+      if (!r.ok) { wrap.innerHTML = `<div class="error-banner">Load failed: ${escapeHtml(await r.text())}</div>`; return; }
+      const rows = await r.json();
+      if (rows.length === 0) {
+        wrap.innerHTML = '<div class="empty">No rows.</div>';
+        return;
+      }
+      let html = '<table><thead><tr>' +
+        ['ID','Op','Table','PK','Payload','User','Created','Status','Attempts','Error',''].map(h =>
+          `<th>${h}</th>`
+        ).join('') +
+      '</tr></thead><tbody>';
+      rows.forEach(r => {
+        let payloadDisplay;
+        try {
+          payloadDisplay = JSON.stringify(JSON.parse(r.payload_json || '{}'));
+        } catch { payloadDisplay = r.payload_json || ''; }
+        const status = r.applied_status || 'pending';
+        const statusClass = `status-${status}`;
+        const retry = (status === 'error')
+          ? `<button class="btn btn-warn" data-retry="${r.id}">Retry</button>`
+          : '';
+        html += `<tr>
+          <td>${r.id}</td>
+          <td><span class="op-pill op-${escapeHtml(r.operation)}">${escapeHtml(r.operation)}</span></td>
+          <td>${escapeHtml(r.table_name)}</td>
+          <td>${escapeHtml(r.pk_col)}=<strong>${escapeHtml(r.pk_val)}</strong></td>
+          <td><div class="payload">${escapeHtml(payloadDisplay)}</div></td>
+          <td>${escapeHtml(r.source_user ?? '')}</td>
+          <td>${escapeHtml(r.created_at ?? '')}</td>
+          <td class="${statusClass}">${escapeHtml(status)}</td>
+          <td>${r.attempts ?? 0}</td>
+          <td><div class="err">${escapeHtml(r.error_message ?? '')}</div></td>
+          <td>${retry}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
+
+      wrap.querySelectorAll('button[data-retry]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.retry;
+          btn.disabled = true;
+          const r = await fetch(`/api/contacts/outbox/${id}/retry`, {
+            method: 'POST',
+            headers: authHeaders(),
+          });
+          if (r.ok) {
+            await reload();
+          } else {
+            alert('Retry failed: ' + await r.text());
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function reload() {
+      const s = await loadStats();
+      if (s) renderStats(s);
+      await loadRows();
+    }
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentStatus = btn.dataset.status;
+        loadRows();
+      });
+    });
+
+    reload();
+  </script>
+</body>
+</html>

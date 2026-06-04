@@ -19132,6 +19132,76 @@ async def contacts_lookup_delete(
         raise HTTPException(status_code=500, detail=f"DB error: {exc}")
 
 
+# ─── Outbox (SQL Server sync-back queue) ──────────────────────────────────────
+#
+# Three audiences:
+#   1. The status banner on /contacts.html — anyone with view access calls
+#      GET /api/contacts/outbox/stats to render counts.
+#   2. Admins inspecting the queue — GET /api/contacts/outbox?status=...
+#   3. The dev-jan02 drainer cron — POST /api/contacts/outbox/claim to grab
+#      a batch, then POST /api/contacts/outbox/{id}/applied to confirm.
+#
+# Drainer auth: uses an admin token. We could split that out into a dedicated
+# 'drainer' role later, but for v1 reusing the admin role keeps things simple.
+
+@app.get("/api/contacts/outbox/stats")
+async def contacts_outbox_stats(_user: User = Depends(get_current_user)):
+    """Outbox queue snapshot — pending count, last drain time, etc."""
+    return contacts_db.get_outbox_stats()
+
+
+@app.get("/api/contacts/outbox")
+async def contacts_outbox_list(
+    status: Optional[str] = None,
+    limit: int = 200,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """List outbox rows. status: 'pending' | 'success' | 'error' | None (all).
+    Admin only — this is operational data, not user-facing."""
+    return contacts_db.list_outbox_rows(status=status, limit=limit)
+
+
+@app.post("/api/contacts/outbox/claim")
+async def contacts_outbox_claim(
+    batch_size: int = 100,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Drainer side: claim the next batch of pending rows (and bump their
+    attempt counter). The drainer then applies them against SQL Server and
+    posts each result back to /applied."""
+    return contacts_db.claim_pending_outbox(batch_size=batch_size)
+
+
+@app.post("/api/contacts/outbox/{row_id}/applied")
+async def contacts_outbox_mark_applied(
+    row_id: int,
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Drainer side: mark an outbox row as success/error.
+    Body: {success: bool, error_message?: str}"""
+    success = bool(body.get("success"))
+    err = body.get("error_message")
+    ok = contacts_db.mark_outbox_applied(row_id, success=success, error_message=err)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Outbox row {row_id} not found")
+    return {"id": row_id, "success": True}
+
+
+@app.post("/api/contacts/outbox/{row_id}/retry")
+async def contacts_outbox_retry(
+    row_id: int,
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Admin action: reset a failed outbox row back to pending so the
+    drainer picks it up again on its next run."""
+    ok = contacts_db.retry_outbox_row(row_id)
+    if not ok:
+        raise HTTPException(status_code=404,
+                            detail=f"Outbox row {row_id} not found or not in error state")
+    return {"id": row_id, "success": True}
+
+
 @app.get("/api/monkey/alerts/not-accepted")
 async def monkey_alert_not_accepted():
     """Orders due within 24 hours not yet accepted."""

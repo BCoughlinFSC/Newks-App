@@ -137,6 +137,9 @@
     <div id="sync-banner" class="sync-banner">
       <div><strong>Loading sync status…</strong></div>
     </div>
+    <div id="outbox-banner" class="sync-banner" style="display:none;">
+      <div><strong>Loading outbox status…</strong></div>
+    </div>
 
     <div class="intro">
       <h2>What lives here</h2>
@@ -299,6 +302,47 @@
       } catch (e) {
         banner.classList.add('error');
         banner.innerHTML = `<div><strong>Sync check failed:</strong> ${e.message}</div>`;
+      }
+    })();
+
+    // ──────────────────────────────────────────────────────────────────
+    // Outbox banner — shows pending sync-back queue size.
+    // Only renders when CONTACTS_OUTBOX_ENABLED=1 on the backend; if the
+    // feature is off (stats.enabled === false), we hide the banner entirely.
+    // ──────────────────────────────────────────────────────────────────
+    (async function () {
+      const banner = document.getElementById('outbox-banner');
+      const authToken = localStorage.getItem('auth_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+      try {
+        const r = await fetch('/api/contacts/outbox/stats', { headers });
+        if (!r.ok) return;  // 401 etc. — silently skip; user can't see the queue
+        const s = await r.json();
+        if (!s.enabled) return;  // feature flag off — hide entirely
+        banner.style.display = '';
+        const isClean = (s.pending === 0 && s.failed === 0);
+        const hasErrors = (s.failed > 0);
+        banner.classList.toggle('stale', s.pending > 0 && !hasErrors);
+        banner.classList.toggle('error', hasErrors);
+        const oldestPending = s.oldest_pending
+          ? ` (oldest: ${new Date(s.oldest_pending).toLocaleString()})` : '';
+        const lastApplied = s.last_applied_at
+          ? new Date(s.last_applied_at).toLocaleString() : 'never';
+        let msg;
+        if (isClean) {
+          msg = `<strong>SQL Server sync:</strong> queue empty. Last drained: ${lastApplied}.`;
+        } else if (hasErrors) {
+          msg = `<strong>SQL Server sync:</strong> ${s.failed} failed${oldestPending}. <a href="/contacts-outbox.html">Review →</a>`;
+        } else {
+          msg = `<strong>SQL Server sync:</strong> ${s.pending} edit(s) pending${oldestPending}. <a href="/contacts-outbox.html">Details →</a>`;
+        }
+        banner.innerHTML =
+          `<div>${msg}</div>` +
+          `<div class="totals">Pending: ${s.pending} · Failed: ${s.failed} · Applied (all-time): ${s.applied}</div>`;
+      } catch (e) {
+        // Best-effort — don't error-block the main page if outbox check fails.
+        console.warn('Outbox stats failed:', e);
       }
     })();
   </script>

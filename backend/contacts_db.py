@@ -19,6 +19,7 @@ Future:
     truth and the SQL Server DB can be retired.
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -31,6 +32,14 @@ CONTACTS_DB_PATH = os.getenv(
     "CONTACTS_SQLITE_PATH",
     os.path.join(os.path.dirname(__file__), "data", "contacts", "contacts.db"),
 )
+
+# Feature flag for the SQL-Server sync-back outbox. When OFF (default),
+# write paths behave exactly as before — local SQLite is the only target.
+# When ON, every INSERT/UPDATE/DELETE also appends to contacts_outbox so
+# the dev-jan02 drainer cron can replay it against SQL Server.
+# Set CONTACTS_OUTBOX_ENABLED=1 in .env to enable. Default OFF so Phase 1
+# can be deployed dark and Phase 2 (the drainer) can be tested first.
+OUTBOX_ENABLED = os.getenv("CONTACTS_OUTBOX_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 @contextmanager
@@ -150,6 +159,33 @@ def initialize_schema() -> None:
             LastUpdated    TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_storeclosure_fk ON StoreClosure(StoreID);
+
+        -- contacts_outbox: durable queue of edits to replay against SQL Server.
+        -- Every write helper appends a row here when CONTACTS_OUTBOX_ENABLED=1.
+        -- The dev-jan02 drainer cron fetches pending rows, replays them,
+        -- and posts back success/failure. Failed rows can be retried.
+        --
+        -- applied_status: NULL = pending, 'success' = applied, 'error' = failed
+        -- payload is JSON: {col: value, col: value, ...}
+        CREATE TABLE IF NOT EXISTS contacts_outbox (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at      TEXT NOT NULL,
+            operation       TEXT NOT NULL,        -- INSERT | UPDATE | DELETE
+            table_name      TEXT NOT NULL,
+            pk_col          TEXT NOT NULL,
+            pk_val          TEXT NOT NULL,        -- stored as TEXT for flexibility
+            payload_json    TEXT,                 -- {} for DELETE
+            source_user     TEXT,                 -- LastUpdatedBy stamp
+            applied_at      TEXT,
+            applied_status  TEXT,                 -- NULL | 'success' | 'error'
+            error_message   TEXT,
+            attempts        INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_outbox_pending
+            ON contacts_outbox(applied_status, created_at)
+            WHERE applied_status IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_outbox_table
+            ON contacts_outbox(table_name, pk_val);
         """)
         conn.commit()
 
@@ -157,6 +193,156 @@ def initialize_schema() -> None:
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     """Convert a Row to a plain dict — JSON-serializable."""
     return {k: row[k] for k in row.keys()}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Outbox — every write helper calls _record_outbox() so the dev-jan02 drainer
+# cron can replay changes against SQL Server. No-ops when CONTACTS_OUTBOX_ENABLED
+# is unset, so Phase 1 can be deployed before Phase 2 (the drainer) exists.
+#
+# Catches all exceptions: outbox failure should NEVER fail the underlying user
+# operation. If we can't record an outbox row, log it loudly but let the user's
+# edit succeed locally — better to have a missed sync row than a broken UI.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _record_outbox(operation: str, table_name: str, pk_col: str, pk_val: Any,
+                   payload: Optional[Dict[str, Any]], source_user: Optional[str],
+                   conn: Optional[sqlite3.Connection] = None) -> None:
+    """Append a row to contacts_outbox. No-op if outbox is disabled.
+
+    operation:   'INSERT' | 'UPDATE' | 'DELETE'
+    table_name:  SQL Server table name (e.g. 'Store', 'Company')
+    pk_col:      primary-key column name (e.g. 'StoreID')
+    pk_val:      primary-key value for this row
+    payload:     {col: value, ...} of changed columns; empty {} for DELETE
+    source_user: who made the edit (will be the LastUpdatedBy on SQL Server)
+    conn:        if supplied, write outbox row through this connection so it
+                 commits atomically with the underlying user write. If None,
+                 we open a separate connection (best-effort).
+    """
+    if not OUTBOX_ENABLED:
+        return
+    try:
+        payload_json = json.dumps(payload or {}, default=str)
+        sql = """
+            INSERT INTO contacts_outbox
+              (created_at, operation, table_name, pk_col, pk_val,
+               payload_json, source_user)
+            VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)
+        """
+        args = (operation, table_name, pk_col, str(pk_val),
+                payload_json, source_user)
+        if conn is not None:
+            conn.execute(sql, args)
+        else:
+            with get_connection() as c:
+                c.execute(sql, args)
+                c.commit()
+    except Exception as exc:
+        # Never propagate — outbox failure must not break the user edit.
+        logger.error("outbox record failed (op=%s table=%s pk=%s): %s",
+                     operation, table_name, pk_val, exc, exc_info=True)
+
+
+def get_outbox_stats() -> Dict[str, Any]:
+    """Snapshot of outbox queue health — feeds the status banner."""
+    try:
+        with get_connection() as conn:
+            pending = conn.execute(
+                "SELECT COUNT(*) AS n FROM contacts_outbox WHERE applied_status IS NULL"
+            ).fetchone()["n"]
+            failed = conn.execute(
+                "SELECT COUNT(*) AS n FROM contacts_outbox WHERE applied_status = 'error'"
+            ).fetchone()["n"]
+            applied = conn.execute(
+                "SELECT COUNT(*) AS n FROM contacts_outbox WHERE applied_status = 'success'"
+            ).fetchone()["n"]
+            last_applied = conn.execute(
+                "SELECT MAX(applied_at) AS t FROM contacts_outbox WHERE applied_status = 'success'"
+            ).fetchone()["t"]
+            oldest_pending = conn.execute(
+                "SELECT MIN(created_at) AS t FROM contacts_outbox WHERE applied_status IS NULL"
+            ).fetchone()["t"]
+        return {
+            "enabled":         OUTBOX_ENABLED,
+            "pending":         pending,
+            "failed":          failed,
+            "applied":         applied,
+            "last_applied_at": last_applied,
+            "oldest_pending":  oldest_pending,
+        }
+    except Exception as exc:
+        logger.warning("get_outbox_stats failed: %s", exc)
+        return {"enabled": OUTBOX_ENABLED, "pending": 0, "failed": 0, "applied": 0,
+                "last_applied_at": None, "oldest_pending": None, "error": str(exc)}
+
+
+def list_outbox_rows(status: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:
+    """List outbox rows for the admin page.
+    status: 'pending', 'success', 'error', or None for all."""
+    with get_connection() as conn:
+        if status == 'pending':
+            where = "WHERE applied_status IS NULL"
+        elif status in ('success', 'error'):
+            where = f"WHERE applied_status = '{status}'"
+        else:
+            where = ""
+        rows = conn.execute(
+            f"SELECT * FROM contacts_outbox {where} "
+            f"ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def claim_pending_outbox(batch_size: int = 100) -> List[Dict[str, Any]]:
+    """Drainer-side: return the next batch of pending rows + bump their
+    attempt counter. The drainer applies each row, then calls
+    mark_outbox_applied() to record the result."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM contacts_outbox "
+            "WHERE applied_status IS NULL "
+            "ORDER BY created_at LIMIT ?",
+            (batch_size,),
+        ).fetchall()
+        ids = [r["id"] for r in rows]
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE contacts_outbox SET attempts = attempts + 1 "
+                f"WHERE id IN ({placeholders})",
+                tuple(ids),
+            )
+            conn.commit()
+        return [_row_to_dict(r) for r in rows]
+
+
+def mark_outbox_applied(row_id: int, success: bool, error_message: Optional[str] = None) -> bool:
+    """Drainer posts back: row N succeeded or failed."""
+    status = 'success' if success else 'error'
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE contacts_outbox "
+            "SET applied_status = ?, applied_at = datetime('now'), error_message = ? "
+            "WHERE id = ?",
+            (status, error_message, row_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def retry_outbox_row(row_id: int) -> bool:
+    """Manual admin action: reset a failed row back to pending."""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE contacts_outbox "
+            "SET applied_status = NULL, applied_at = NULL, error_message = NULL "
+            "WHERE id = ? AND applied_status = 'error'",
+            (row_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -224,6 +410,16 @@ def insert_area_director(data: Dict[str, Any], updated_by: str) -> int:
             ),
         )
         new_id = cur.lastrowid
+        _record_outbox("INSERT", "AreaDir", "AreaDirID", new_id, {
+            "AreaDirName":      full_name,
+            "AreaDirFirstName": data.get("AreaDirFirstName") or None,
+            "AreaDirLastName":  data.get("AreaDirLastName")  or None,
+            "AreaDirEmail":     data.get("AreaDirEmail")     or None,
+            "AreaDirSMGEmail":  data.get("AreaDirSMGEmail")  or None,
+            "AreaDirCFPW":      data.get("AreaDirCFPW")      or None,
+            "AreaDirCFID":      data.get("AreaDirCFID")      or None,
+            "CompanyID":        data.get("CompanyID"),
+        }, updated_by, conn=conn)
         conn.commit()
         return int(new_id)
 
@@ -260,6 +456,17 @@ def update_area_director(areadir_id: int, data: Dict[str, Any], updated_by: str)
             ),
         )
         affected = cur.rowcount
+        if affected > 0:
+            _record_outbox("UPDATE", "AreaDir", "AreaDirID", areadir_id, {
+                "AreaDirName":      full_name,
+                "AreaDirFirstName": data.get("AreaDirFirstName") or None,
+                "AreaDirLastName":  data.get("AreaDirLastName")  or None,
+                "AreaDirEmail":     data.get("AreaDirEmail")     or None,
+                "AreaDirSMGEmail":  data.get("AreaDirSMGEmail")  or None,
+                "AreaDirCFPW":      data.get("AreaDirCFPW")      or None,
+                "AreaDirCFID":      data.get("AreaDirCFID")      or None,
+                "CompanyID":        data.get("CompanyID"),
+            }, updated_by, conn=conn)
         conn.commit()
         return affected > 0
 
@@ -275,6 +482,9 @@ def delete_area_director(areadir_id: int, updated_by: str) -> bool:
         )
         cur = conn.execute("DELETE FROM AreaDir WHERE AreaDirID = ?", (areadir_id,))
         affected = cur.rowcount
+        if affected > 0:
+            _record_outbox("DELETE", "AreaDir", "AreaDirID", areadir_id, {},
+                           updated_by, conn=conn)
         conn.commit()
         return affected > 0
 
@@ -330,13 +540,16 @@ def update_store(store_id: int, data: Dict[str, Any], updated_by: str) -> bool:
     valid_cols = set(_store_columns())
     sets: List[str] = []
     values: List[Any] = []
+    # Build the outbox payload alongside the SQL — record what we actually
+    # changed (sans protected/unknown cols) so the SQL Server replay matches.
+    outbox_payload: Dict[str, Any] = {}
     for k, v in data.items():
         if k in STORE_PROTECTED_COLUMNS or k not in valid_cols:
             continue
         sets.append(f"{k} = ?")
-        # Treat empty string as NULL — matches SQL Server's typical behavior
-        # for our nullable VARCHAR columns and keeps the data tidy.
-        values.append(v if v not in ("", None) else None)
+        normalized = v if v not in ("", None) else None
+        values.append(normalized)
+        outbox_payload[k] = normalized
     if not sets:
         # Nothing to do; still bump the audit stamp so we record "user
         # touched this record" if they opened + saved a no-op edit.
@@ -351,6 +564,9 @@ def update_store(store_id: int, data: Dict[str, Any], updated_by: str) -> bool:
     with get_connection() as conn:
         cur = conn.execute(sql, tuple(values))
         affected = cur.rowcount
+        if affected > 0 and outbox_payload:
+            _record_outbox("UPDATE", "Store", "StoreID", store_id,
+                           outbox_payload, updated_by, conn=conn)
         conn.commit()
         return affected > 0
 
@@ -364,11 +580,14 @@ def insert_store(data: Dict[str, Any], updated_by: str) -> int:
     valid_cols = set(_store_columns())
     cols = ["StoreID"]
     values = [int(data["StoreID"])]
+    outbox_payload: Dict[str, Any] = {"StoreID": int(data["StoreID"])}
     for k, v in data.items():
         if k in ("StoreID", "LastUpdated") or k not in valid_cols:
             continue
         cols.append(k)
-        values.append(v if v not in ("", None) else None)
+        normalized = v if v not in ("", None) else None
+        values.append(normalized)
+        outbox_payload[k] = normalized
     cols.append("LastUpdatedBy")
     values.append(updated_by)
     cols.append("LastUpdated")
@@ -377,6 +596,8 @@ def insert_store(data: Dict[str, Any], updated_by: str) -> int:
     sql = f"INSERT INTO Store ({col_list}) VALUES ({placeholders})"
     with get_connection() as conn:
         conn.execute(sql, tuple(values))
+        _record_outbox("INSERT", "Store", "StoreID", int(data["StoreID"]),
+                       outbox_payload, updated_by, conn=conn)
         conn.commit()
         return int(data["StoreID"])
 
@@ -453,11 +674,14 @@ def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_b
         if existing:
             sets: List[str] = []
             values: List[Any] = []
+            outbox_payload: Dict[str, Any] = {}
             for k, v in data.items():
                 if k in protected or k not in valid_cols:
                     continue
                 sets.append(f"{k} = ?")
-                values.append(v if v not in ("", None) else None)
+                normalized = v if v not in ("", None) else None
+                values.append(normalized)
+                outbox_payload[k] = normalized
             if stamp_by:
                 sets.append(f"{stamp_by} = ?")
                 values.append(updated_by)
@@ -466,17 +690,25 @@ def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_b
             values.append(store_id)
             sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {fk_column} = ?"
             cur = conn.execute(sql, tuple(values))
+            if cur.rowcount > 0 and outbox_payload:
+                # Outbox key = the FK column / value used by SQL Server to
+                # locate the row (StoreID for Physical, storeid for Technical).
+                _record_outbox("UPDATE", table, fk_column, store_id,
+                               outbox_payload, updated_by, conn=conn)
             conn.commit()
             return cur.rowcount > 0
 
         # INSERT path — supply FK + whatever payload columns are valid.
         cols: List[str] = [fk_column]
         values_ins: List[Any] = [store_id]
+        outbox_payload = {fk_column: store_id}
         for k, v in data.items():
             if k in protected or k == fk_column or k not in valid_cols:
                 continue
             cols.append(k)
-            values_ins.append(v if v not in ("", None) else None)
+            normalized = v if v not in ("", None) else None
+            values_ins.append(normalized)
+            outbox_payload[k] = normalized
         # Stamp audit columns inline at INSERT time.
         if stamp_by:
             cols.append(stamp_by)
@@ -488,6 +720,8 @@ def _upsert_satellite(table: str, store_id: int, data: Dict[str, Any], updated_b
         placeholders = ", ".join(placeholders_parts)
         sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})"
         conn.execute(sql, tuple(values_ins))
+        _record_outbox("INSERT", table, fk_column, store_id,
+                       outbox_payload, updated_by, conn=conn)
         conn.commit()
         return True
 
@@ -856,11 +1090,14 @@ def update_lookup_row(name: str, row_id: Any, data: Dict[str, Any],
 
     sets: List[str] = []
     values: List[Any] = []
+    outbox_payload: Dict[str, Any] = {}
     for k, v in data.items():
         if k in protected or k not in valid_cols:
             continue
         sets.append(f"{k} = ?")
-        values.append(v if v not in ("", None) else None)
+        normalized = v if v not in ("", None) else None
+        values.append(normalized)
+        outbox_payload[k] = normalized
     if audit_by:
         sets.append(f"{audit_by} = ?")
         values.append(updated_by)
@@ -872,6 +1109,9 @@ def update_lookup_row(name: str, row_id: Any, data: Dict[str, Any],
     sql = f"UPDATE {table} SET {', '.join(sets)} WHERE {pk} = ?"
     with get_connection() as conn:
         cur = conn.execute(sql, tuple(values))
+        if cur.rowcount > 0 and outbox_payload:
+            _record_outbox("UPDATE", table, pk, row_id,
+                           outbox_payload, updated_by, conn=conn)
         conn.commit()
         return cur.rowcount > 0
 
@@ -894,15 +1134,19 @@ def insert_lookup_row(name: str, data: Dict[str, Any], updated_by: str) -> Any:
 
     cols: List[str] = []
     values: List[Any] = []
+    outbox_payload: Dict[str, Any] = {}
     supplied_pk = data.get(pk)
     if supplied_pk not in (None, ""):
         cols.append(pk)
         values.append(supplied_pk)
+        outbox_payload[pk] = supplied_pk
     for k, v in data.items():
         if k == pk or k in protected_for_insert or k not in valid_cols:
             continue
         cols.append(k)
-        values.append(v if v not in ("", None) else None)
+        normalized = v if v not in ("", None) else None
+        values.append(normalized)
+        outbox_payload[k] = normalized
     if audit_by:
         cols.append(audit_by)
         values.append(updated_by)
@@ -914,6 +1158,11 @@ def insert_lookup_row(name: str, data: Dict[str, Any], updated_by: str) -> Any:
     with get_connection() as conn:
         cur = conn.execute(sql, tuple(values))
         new_id = supplied_pk if supplied_pk not in (None, "") else cur.lastrowid
+        # Include the new PK in the outbox payload so SQL Server INSERT
+        # picks it up (matters when SQLite auto-assigned an INTEGER PK).
+        outbox_payload[pk] = new_id
+        _record_outbox("INSERT", table, pk, new_id,
+                       outbox_payload, updated_by, conn=conn)
         conn.commit()
         return new_id
 
@@ -944,6 +1193,9 @@ def delete_lookup_row(name: str, row_id: Any, updated_by: str) -> bool:
                 tuple(vals),
             )
         cur = conn.execute(f"DELETE FROM {table} WHERE {pk} = ?", (row_id,))
+        if cur.rowcount > 0:
+            _record_outbox("DELETE", table, pk, row_id, {},
+                           updated_by, conn=conn)
         conn.commit()
         return cur.rowcount > 0
 
