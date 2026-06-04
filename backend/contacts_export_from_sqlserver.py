@@ -89,53 +89,63 @@ TYPE_MAP = {
 
 
 def _connect_sql_server():
-    """pyodbc connection to SQL-PROD contacts DB."""
+    """pymssql connection to SQL-PROD contacts DB.
+
+    Why pymssql instead of pyodbc: pymssql is pure-Python (bundles its
+    own FreeTDS), so it installs via `pip install pymssql` with no
+    system ODBC driver or sudo required. pyodbc needs unixODBC plus a
+    Microsoft-supplied SQL Server driver, which is awkward on
+    locked-down Linux boxes like dev-jan02.
+    """
     try:
-        import pyodbc
+        import pymssql
     except ImportError:
-        sys.exit("ERROR: pyodbc not installed. Run: pip install pyodbc")
+        sys.exit("ERROR: pymssql not installed. Run: pip3 install pymssql")
 
     host     = os.getenv("CONTACTS_SOURCE_HOST",     "sql-prod.nfc.local")
     user     = os.getenv("CONTACTS_SOURCE_USER",     "reports")
     password = os.getenv("CONTACTS_SOURCE_PASSWORD", "")
-    driver   = os.getenv("CONTACTS_SOURCE_DRIVER",   "ODBC Driver 17 for SQL Server")
 
     if not password:
         sys.exit("ERROR: CONTACTS_SOURCE_PASSWORD env var not set "
                  "(get it from KeePass — Don used the 'reports' SQL user)")
 
-    conn_str = (
-        f"DRIVER={{{driver}}};"
-        f"SERVER={host};"
-        f"DATABASE=contacts;"
-        f"UID={user};"
-        f"PWD={password};"
-    )
     logger.info("Connecting to SQL Server: %s as %s", host, user)
-    return pyodbc.connect(conn_str)
+    return pymssql.connect(
+        server=host,
+        user=user,
+        password=password,
+        database="contacts",
+        timeout=30,
+        login_timeout=15,
+    )
 
 
 def _introspect_table(src_cur, table_name: str) -> Tuple[List[Dict], Optional[str]]:
     """
     Return ([{name, sql_type, sqlite_type, max_length, nullable}, ...], pk_column_name)
     for the given table in the contacts schema.
+
+    Uses pymssql's default tuple cursor: row[0]=column_name, row[1]=data_type, etc.
+    Placeholder syntax is %s (pymssql), not ? (pyodbc).
     """
     # Columns
     src_cur.execute("""
         SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
         FROM   contacts.INFORMATION_SCHEMA.COLUMNS
-        WHERE  TABLE_NAME = ?
+        WHERE  TABLE_NAME = %s
         ORDER BY ORDINAL_POSITION
-    """, table_name)
+    """, (table_name,))
     cols = []
     for row in src_cur.fetchall():
-        sql_type = (row.DATA_TYPE or "").lower()
+        col_name, data_type, max_len, is_nullable = row[0], row[1], row[2], row[3]
+        sql_type = (data_type or "").lower()
         cols.append({
-            "name":        row.COLUMN_NAME,
+            "name":        col_name,
             "sql_type":    sql_type,
             "sqlite_type": TYPE_MAP.get(sql_type, "TEXT"),
-            "max_length":  row.CHARACTER_MAXIMUM_LENGTH,
-            "nullable":    (row.IS_NULLABLE == "YES"),
+            "max_length":  max_len,
+            "nullable":    (is_nullable == "YES"),
         })
 
     # Primary key
@@ -145,12 +155,12 @@ def _introspect_table(src_cur, table_name: str) -> Tuple[List[Dict], Optional[st
         JOIN   contacts.INFORMATION_SCHEMA.KEY_COLUMN_USAGE COL
           ON   TC.CONSTRAINT_NAME = COL.CONSTRAINT_NAME
          AND   TC.TABLE_NAME = COL.TABLE_NAME
-        WHERE  TC.TABLE_NAME = ?
+        WHERE  TC.TABLE_NAME = %s
           AND  TC.CONSTRAINT_TYPE = 'PRIMARY KEY'
         ORDER BY COL.ORDINAL_POSITION
-    """, table_name)
+    """, (table_name,))
     pk_rows = src_cur.fetchall()
-    pk = pk_rows[0].COLUMN_NAME if pk_rows else None
+    pk = pk_rows[0][0] if pk_rows else None
     return cols, pk
 
 
