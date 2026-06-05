@@ -3744,11 +3744,17 @@
                 let payload = null;
                 let lastDone = -1;
                 // Caps so we don't loop forever if something is fundamentally
-                // broken (vs the transient hiccups we're trying to absorb).
+                // broken. Generous limits because the single-worker uvicorn
+                // can have its event loop blocked for many minutes while the
+                // background pick-aggregation job runs, during which /status
+                // polls consistently come back as 1-byte garbage (nginx
+                // forwarding partial buffer state when proxy_read_timeout
+                // fires). Polls eventually succeed when the worker yields
+                // between stores, so we tolerate long streaks.
                 let consecutiveTransient = 0;   // resets on any clean poll
-                const MAX_TRANSIENT       = 10; // ~20-50s of consecutive failures
+                const MAX_TRANSIENT       = 200; // ~6-7 min of consecutive bad polls @ 2s sleep
                 const pollStartTs         = Date.now();
-                const POLL_HARD_DEADLINE_MS = 30 * 60 * 1000;  // 30 min total
+                const POLL_HARD_DEADLINE_MS = 60 * 60 * 1000;  // 60 min total wall-clock
                 while (true) {
                   // Total-time guardrail. A real multi-pick export takes
                   // ~10 min worst case; 30 min means something hung.
