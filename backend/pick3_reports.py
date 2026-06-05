@@ -27,7 +27,7 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 import pick_export_jobs
@@ -1239,9 +1239,22 @@ async def picks_drill_down_all_stores_multi_status(job_id: str):
 @router.get("/api/reports/picks/drill-down-all-stores-multi/result/{job_id}")
 async def picks_drill_down_all_stores_multi_result(job_id: str):
     """Return the full result payload for a completed multi-pick job.
-    Streams the raw JSON bytes from SQLite straight to the response so
-    we don't materialize a huge Python dict in memory + re-serialize it.
-    Returns 404 if missing/expired, 409 if not yet done."""
+    Returns the raw JSON bytes directly from SQLite — no re-serialization
+    of the Python dict (which is the source of the truncation bug if you
+    let FastAPI re-jsonify a 30 MB structure).
+
+    Headers we set explicitly:
+      Content-Length      — so nginx knows the exact size up front and
+                            doesn't fall back to chunked encoding
+      X-Accel-Buffering   — 'no' tells nginx to skip proxy_buffering
+                            for this response, which avoids the
+                            buffer-then-truncate failure mode that
+                            broke the previous combined /status path
+      Cache-Control       — 'no-store' so browsers don't try to cache
+                            a 30 MB response
+
+    Returns 404 if missing/expired, 409 if not yet done.
+    """
     status = await asyncio.to_thread(pick_export_jobs.get_status_only, job_id)
     if not status:
         raise HTTPException(status_code=404, detail="job not found (may have expired)")
@@ -1253,14 +1266,21 @@ async def picks_drill_down_all_stores_multi_result(job_id: str):
     if not raw:
         raise HTTPException(status_code=404,
                             detail="result missing or already purged")
-    # StreamingResponse keeps Starlette from buffering the whole payload
-    # again, and the 64 KB chunk size keeps nginx's default proxy buffers
-    # happy. The raw string is already a valid JSON document (it's what
-    # was stored via json.dumps in finish_done), so no re-serialization.
-    def _chunks():
-        for i in range(0, len(raw), 65536):
-            yield raw[i:i + 65536]
-    return StreamingResponse(_chunks(), media_type="application/json")
+    # raw is already a valid JSON document (stored via json.dumps in
+    # finish_done). Encode once to UTF-8 bytes so we can set an exact
+    # Content-Length — nginx with proxy_buffering on otherwise
+    # silently truncates chunked-encoded large responses.
+    body = raw.encode("utf-8")
+    logger.info("Picks multi result %s served: %d bytes", job_id, len(body))
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Length":     str(len(body)),
+            "X-Accel-Buffering":  "no",
+            "Cache-Control":      "no-store",
+        },
+    )
 
 
 @router.post("/api/reports/picks/drill-down-all-stores-multi/cancel/{job_id}")

@@ -3768,6 +3768,7 @@
                   // (nginx in front of Cloudways was truncating those,
                   // causing JSON.parse() to throw "Unexpected end of JSON
                   // input" in the Excel export flow).
+                  showStatus('info', 'Fetching pick reports result…');
                   const resultRes = await fetch(
                     `/api/reports/picks/drill-down-all-stores-multi/result/${encodeURIComponent(job_id)}`,
                     { headers: getAuthHeaders(), signal: picksSignal },
@@ -3777,7 +3778,21 @@
                     for (const t of types) out[t.key] = { label: t.label, error: 'result fetch failed: ' + errText };
                     break;
                   }
-                  payload = await resultRes.json();
+                  // Read as text first so we can give a helpful diagnostic
+                  // if it's truncated — JSON.parse on a truncated body
+                  // throws "Unexpected end of JSON input" with no other
+                  // context, which is exactly what hid the original bug.
+                  const resultText = await resultRes.text();
+                  const sizeKB = Math.round(resultText.length / 1024);
+                  try {
+                    payload = JSON.parse(resultText);
+                  } catch (parseErr) {
+                    const tail = resultText.slice(-120).replace(/\s+/g, ' ');
+                    const msg = `result body invalid JSON (${sizeKB} KB, ends "${tail}"). ` +
+                                `Likely nginx truncation — check the backend logs.`;
+                    for (const t of types) out[t.key] = { label: t.label, error: msg };
+                    break;
+                  }
                   break;
                 }
                 if (payload) {
