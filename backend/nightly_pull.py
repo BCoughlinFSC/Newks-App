@@ -38,6 +38,27 @@ USAGE
   python nightly_pull.py 2026-05-10 --store 1076 --skip-rollup --skip-royalty
                                                # fastest: hst tables only, no rollup
 
+  python nightly_pull.py --days-back 3         # repoll yesterday + 3 prior days
+                                               # (4 distinct dates). Catches late
+                                               # voids / next-day adjustments.
+  python nightly_pull.py --days-back 7         # weekly catch-up (8 distinct dates)
+
+WHY --days-back EXISTS
+----------------------
+Restaurants regularly adjust prior-day sales: voids/comps entered the next
+morning, managers reconciling shifts, etc. The default 1-day pull only
+captures yesterday's state at 3am, missing anything edited later. Running
+a rolling window each night ensures the recent past stays accurate.
+
+Recommended cron pattern:
+  Mon-Sat: --days-back 3   (yesterday + 3 prior = 4 dates)
+  Sunday : --days-back 7   (yesterday + 7 prior = 8 dates, weekly safety net)
+
+When --days-back is set, the rollup + royalty rebuilds happen ONCE at the
+end for the full date range (single proc call with start/end dates) rather
+than once per date. Per-store API pulls run sequentially, oldest→newest,
+so if the run dies partway we've at least caught up the oldest gaps first.
+
 NOTES on --store mode
 ---------------------
   • DELETE is per-store, so other stores' data for the date is untouched.
@@ -99,6 +120,7 @@ async def pull_store(
         "ok":         False,
         "orders":     0,
         "checks":     0,
+        "payments":   0,
         "items":      0,
         "error":      None,
     }
@@ -148,9 +170,10 @@ async def pull_store(
             return result
 
         parsed = parse_orders(orders, store_guid, store_num, date_yyyymmdd)
-        result["orders"] = len(parsed["orders"])
-        result["checks"] = len(parsed["checks"])
-        result["items"]  = len(parsed["items"])
+        result["orders"]   = len(parsed["orders"])
+        result["checks"]   = len(parsed["checks"])
+        result["payments"] = len(parsed["payments"])
+        result["items"]    = len(parsed["items"])
 
         # Write to SQL Server
         conn = db.get_toast_connection()
@@ -159,6 +182,10 @@ async def pull_store(
                 db.upsert_orders(conn, parsed["orders"])
             if parsed["checks"]:
                 db.upsert_checks(conn, parsed["checks"])
+            # Always run — upsert_payments DELETEs stale rows for this store/date
+            # even when there are zero new payments (100% cash day).
+            db.upsert_payments(conn, parsed["payments"],
+                               store_num=store_num, biz_date=date_sql)
             if parsed["items"]:
                 db.upsert_items(conn, parsed["items"], skip_truncate=True, skip_proc=True)
         finally:
@@ -168,8 +195,9 @@ async def pull_store(
         conn = db.get_toast_connection()
         try:
             inserted = db.direct_copy_items_from_temp(conn, store_num, date_sql)
-            log.info("  [%s] %s — %d orders / %d checks / %d items inserted.",
-                     store_num, store_name, result["orders"], result["checks"], inserted)
+            log.info("  [%s] %s — %d orders / %d checks / %d payments / %d items inserted.",
+                     store_num, store_name,
+                     result["orders"], result["checks"], result["payments"], inserted)
         finally:
             conn.close()
 
@@ -192,7 +220,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     ap.add_argument(
         "target_date", nargs="?",
-        help="Business date YYYY-MM-DD (default: yesterday). Cron-friendly.",
+        help="Business date YYYY-MM-DD (default: yesterday). Cron-friendly. "
+             "Mutually exclusive with --days-back.",
+    )
+    ap.add_argument(
+        "--days-back", type=int, default=0, metavar="N",
+        help="Repoll yesterday and N prior days (N+1 distinct dates total). "
+             "Catches late voids / next-day adjustments. "
+             "Example: --days-back 3 pulls yesterday + 3 prior = 4 dates. "
+             "Mutually exclusive with a positional target_date.",
     )
     ap.add_argument(
         "--store", "--stores", dest="store",
@@ -207,22 +243,47 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--skip-royalty", action="store_true",
         help="Skip sp_tbl_Royalty_Values rebuild.",
     )
-    return ap.parse_args(argv)
+    args = ap.parse_args(argv)
+
+    # Guard against contradictory inputs
+    if args.target_date and args.days_back:
+        ap.error("Use EITHER a positional target_date OR --days-back, not both.")
+    if args.days_back < 0:
+        ap.error("--days-back must be 0 or greater.")
+    return args
+
+
+def _date_range(end_date: date, days_back: int) -> list[str]:
+    """Return YYYY-MM-DD strings from oldest → newest, ending at end_date.
+    days_back=0 returns just [end_date]; days_back=3 returns 4 dates."""
+    return [
+        (end_date - timedelta(days=offset)).strftime("%Y-%m-%d")
+        for offset in range(days_back, -1, -1)  # e.g. 3,2,1,0 → oldest first
+    ]
 
 
 async def main():
     overall_start = time.time()
     args = _parse_args(sys.argv[1:])
 
+    # ── Resolve the date range to pull ────────────────────────────────────
+    # Three modes:
+    #   1. Positional target_date → single date (back-compat / manual reruns)
+    #   2. --days-back N → N+1 dates ending yesterday (rolling repoll)
+    #   3. Neither → yesterday only (original default cron behavior)
     if args.target_date:
         try:
             date.fromisoformat(args.target_date)
         except ValueError:
             print(f"ERROR: Invalid date '{args.target_date}'. Use YYYY-MM-DD format.")
             sys.exit(1)
-        target_date = args.target_date
+        target_dates: list[str] = [args.target_date]
     else:
-        target_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        yesterday = date.today() - timedelta(days=1)
+        target_dates = _date_range(yesterday, args.days_back)
+
+    range_start = target_dates[0]
+    range_end   = target_dates[-1]
 
     # Parse --store: comma-separated list of store_num ints
     store_filter: set[int] = set()
@@ -238,11 +299,13 @@ async def main():
                 sys.exit(1)
 
     log.info("=" * 70)
+    range_str = (range_start if range_start == range_end
+                 else f"{range_start}..{range_end} ({len(target_dates)} dates)")
     if store_filter:
-        log.info("NIGHTLY PULL — %s — STORES %s (filtered)", target_date,
+        log.info("NIGHTLY PULL — %s — STORES %s (filtered)", range_str,
                  ",".join(str(s) for s in sorted(store_filter)))
     else:
-        log.info("NIGHTLY PULL — %s — ALL STORES", target_date)
+        log.info("NIGHTLY PULL — %s — ALL STORES", range_str)
     if args.skip_rollup:
         log.info("  --skip-rollup set: hst tables only, NO rollup rebuild")
     if args.skip_royalty:
@@ -275,34 +338,45 @@ async def main():
         log.error("No stores found — aborting.")
         return
 
-    failures = []
+    failures: list[dict] = []
+    per_date_summary: list[tuple[str, int]] = []   # [(date, failure_count_for_date)]
 
-    # Pull selected stores
+    # ── Pull each date, oldest → newest ───────────────────────────────────
+    # Order matters: if the run dies partway, oldest dates are already done,
+    # so the next run can pick up from yesterday onward.
     async with httpx.AsyncClient(timeout=120.0) as client:
-        for s in stores:
-            result = await pull_store(
-                client,
-                store_guid=str(s["guid"]),
-                store_num=int(s["store_num"]),
-                store_name=s.get("name", f"Store {s['store_num']}"),
-                date_sql=target_date,
-            )
-            if not result["ok"]:
-                failures.append(result)
+        for d in target_dates:
+            log.info("-" * 70)
+            log.info("Pulling %s (%d stores)…", d, len(stores))
+            date_failures = 0
+            for s in stores:
+                result = await pull_store(
+                    client,
+                    store_guid=str(s["guid"]),
+                    store_num=int(s["store_num"]),
+                    store_name=s.get("name", f"Store {s['store_num']}"),
+                    date_sql=d,
+                )
+                if not result["ok"]:
+                    failures.append(result)
+                    date_failures += 1
+            per_date_summary.append((d, date_failures))
 
+    # ── Rollup + royalty: ONE call covering the full range ───────────────
+    # The existing procs already accept start/end date parameters, so a single
+    # wide call handles a multi-date repoll without N round-trips.
     # Fix DayPartIDs BEFORE rollup so channel breakdown is correct.
-    # Skipped together with rollup since DayPartID fix is a prerequisite for the rollup.
     rollup_ok = None  # None = skipped, True/False = attempted
     if args.skip_rollup:
         log.info("-" * 70)
         log.info("DayPartID fix + rollup rebuild SKIPPED (--skip-rollup).")
     else:
         log.info("-" * 70)
-        log.info("Fixing DayPartIDs for %s…", target_date)
+        log.info("Fixing DayPartIDs for %s..%s…", range_start, range_end)
         try:
             conn = db.get_toast_connection()
             try:
-                fixed = db.fix_daypart_ids(conn, target_date, target_date)
+                fixed = db.fix_daypart_ids(conn, range_start, range_end)
                 log.info("DayPartID fix: %d rows updated.", fixed)
             finally:
                 conn.close()
@@ -310,22 +384,23 @@ async def main():
             log.error("DayPartID fix FAILED: %s", e)
 
         log.info("-" * 70)
-        log.info("Rebuilding rollup for %s…", target_date)
+        log.info("Rebuilding rollup for %s..%s…", range_start, range_end)
         rollup_ok = False
         try:
             conn = db.get_toast_connection()
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "DELETE FROM dev_aloha.dbo.tbl_SalesDataByDayPart WHERE DateOfBusiness = ?",
-                    target_date,
+                    "DELETE FROM dev_aloha.dbo.tbl_SalesDataByDayPart "
+                    "WHERE DateOfBusiness BETWEEN ? AND ?",
+                    range_start, range_end,
                 )
                 log.info("Deleted %d stale rollup rows.", cur.rowcount)
                 conn.commit()
                 db.run_rollup(
                     conn,
-                    start_date=target_date,
-                    end_date=target_date,
+                    start_date=range_start,
+                    end_date=range_end,
                     store_grouping=STORE_GROUPING,
                     store_group=STORE_GROUP,
                 )
@@ -336,21 +411,21 @@ async def main():
         except Exception as e:
             log.error("Rollup FAILED: %s", e)
 
-    # Rebuild royalty for the target date only
+    # Rebuild royalty for the full range
     royalty_ok = None  # None = skipped
     if args.skip_royalty:
         log.info("-" * 70)
         log.info("Royalty rebuild SKIPPED (--skip-royalty).")
     else:
         log.info("-" * 70)
-        log.info("Rebuilding royalty for %s…", target_date)
+        log.info("Rebuilding royalty for %s..%s…", range_start, range_end)
         royalty_ok = False
         try:
             conn = db.get_toast_connection()
             try:
                 conn.execute(
                     "EXEC dev_aloha.dbo.sp_tbl_Royalty_Values @StartDate=?, @EndDate=?",
-                    target_date, target_date,
+                    range_start, range_end,
                 )
                 conn.commit()
             finally:
@@ -360,15 +435,19 @@ async def main():
         except Exception as e:
             log.error("Royalty FAILED: %s", e)
 
-    # Summary
+    # ── Summary ───────────────────────────────────────────────────────────
     total_dur = time.time() - overall_start
     log.info("=" * 70)
     log.info("NIGHTLY PULL COMPLETE")
-    log.info("  Date    : %s", target_date)
+    log.info("  Range   : %s", range_str)
     if store_filter:
         log.info("  Filter  : --store %s",
                  ",".join(str(s) for s in sorted(store_filter)))
-    log.info("  Stores  : %d total / %d failed", len(stores), len(failures))
+    log.info("  Stores  : %d × %d dates = %d store-day attempts / %d failed",
+             len(stores), len(target_dates), len(stores) * len(target_dates), len(failures))
+    if len(target_dates) > 1:
+        for d, fc in per_date_summary:
+            log.info("    %s : %d failure(s)", d, fc)
     log.info("  Rollup  : %s", "SKIPPED" if rollup_ok is None
              else ("OK" if rollup_ok else "FAILED"))
     log.info("  Royalty : %s", "SKIPPED" if royalty_ok is None
