@@ -19142,6 +19142,89 @@ async def contacts_toast_devices(
     return payload
 
 
+# Separate cache for printers — same TTL, keyed by GUID.
+_toast_printers_cache: Dict[str, Dict[str, Any]] = {}
+
+
+@app.get("/api/contacts/stores/{store_id}/toast-printers")
+async def contacts_toast_printers(
+    store_id: int,
+    _user: User = Depends(get_current_user),
+):
+    """Live printer list from Toast Configuration API /config/v2/printers.
+    Same auth + GUID-resolution pattern as toast-devices above. Returns
+    {guid, printers: [{guid, entityType, name}], source, cached_at}.
+    Pagination via Toast-Next-Page-Token header is handled transparently."""
+    guid = _store_id_to_toast_guid(store_id)
+    if not guid:
+        return {
+            "store_id": store_id,
+            "guid":     None,
+            "printers": [],
+            "source":   "no-mapping",
+            "message":  "Store isn't in aloha_location_mapping.json yet.",
+        }
+
+    now = time.time()
+    cached = _toast_printers_cache.get(guid)
+    if cached and (now - cached["cached_at"]) < _TOAST_DEVICES_TTL_SEC:
+        return {**cached, "source": "cache"}
+
+    try:
+        headers = await get_standard_api_auth_headers()
+        headers["Toast-Restaurant-External-ID"] = guid
+        url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/printers"
+        all_printers: List[Dict[str, Any]] = []
+        page_token: Optional[str] = None
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Toast Config API paginates via Toast-Next-Page-Token response
+            # header echoed back as pageToken query param. Most Newk's stores
+            # have <20 printers so one page is the norm, but loop anyway.
+            for _attempt in range(10):  # sanity cap
+                params = {"pageToken": page_token} if page_token else {}
+                r = await client.get(url, headers=headers, params=params)
+                if r.status_code == 403:
+                    return {
+                        "store_id": store_id, "guid": guid,
+                        "printers": [], "source": "forbidden",
+                        "message": "Toast API returned 403 — the credentials "
+                                   "don't have config:read scope for this restaurant.",
+                    }
+                if r.status_code != 200:
+                    return {
+                        "store_id": store_id, "guid": guid,
+                        "printers": [], "source": f"http-{r.status_code}",
+                        "message": r.text[:300],
+                    }
+                page = r.json()
+                if isinstance(page, dict):  # shouldn't happen, defensive
+                    page = page.get("printers") or page.get("data") or []
+                if isinstance(page, list):
+                    all_printers.extend(page)
+                page_token = r.headers.get("Toast-Next-Page-Token")
+                if not page_token:
+                    break
+    except Exception as exc:
+        logger.error("toast-printers fetch failed for store %s (%s): %s",
+                     store_id, guid, exc)
+        return {
+            "store_id": store_id, "guid": guid,
+            "printers": [], "source": "error",
+            "message":  f"Network error: {exc}",
+        }
+
+    payload = {
+        "store_id":  store_id,
+        "guid":      guid,
+        "printers":  all_printers,
+        "printer_count": len(all_printers),
+        "cached_at": now,
+        "source":    "live",
+    }
+    _toast_printers_cache[guid] = payload
+    return payload
+
+
 @app.get("/api/contacts/lookups/{name}")
 async def contacts_get_lookup(name: str, _user: User = Depends(get_current_user)):
     """Generic FK dropdown source. `name` is one of: company, areadir, fbc, fmm,

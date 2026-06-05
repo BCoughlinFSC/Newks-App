@@ -719,139 +719,194 @@
       </div>`;
     }
 
-    // Group devices into the four buckets we care about, by deviceName /
-    // deviceModel patterns. Toast's API doesn't categorize, so we pattern-
-    // match against the typical names Newk's uses. Anything unknown lands
-    // in "Other".
+    // Group POS devices into register/handheld/kiosk buckets by name/model.
+    // Toast Device Details API ONLY returns POS devices (no KDS, no
+    // printers — those are separate endpoints), so everything here is a
+    // POS terminal of some kind. We split it three ways:
+    //   - register: stationary POS terminal (TT200 / TS200 / Front Counter)
+    //   - handheld: Toast Go / TG200 / server pad
+    //   - kiosk:    self-order kiosk
+    //   - other:    anything we can't tag (rare; rolled into POS Devices total)
     function categorizeDevices(devices) {
-      const buckets = { kds: [], handheld: [], printer: [], register: [], other: [] };
+      const buckets = { register: [], handheld: [], kiosk: [], other: [] };
       devices.forEach(d => {
         const name  = (d.deviceName  || '').toLowerCase();
         const model = (d.deviceModel || '').toLowerCase();
         const blob  = `${name} ${model}`;
-        if (/(kds|kitchen\s*display|kitchen\s*screen|expo|prep)/.test(blob)) buckets.kds.push(d);
-        else if (/(handheld|hh\b|elo\s*m50|m50\b|server\s*pad|tablet)/.test(blob)) buckets.handheld.push(d);
-        else if (/(printer|kp\b|kitchen\s*printer|receipt|impact)/.test(blob)) buckets.printer.push(d);
-        else if (/(register|pos|front\s*counter|fc\b|station|terminal|kiosk|self.?order)/.test(blob)) buckets.register.push(d);
-        else buckets.other.push(d);
+        if (/(toast\s*go|tg\d+|handheld|\bhh\b|server\s*pad|m50\b|elo\s*m50)/.test(blob)) {
+          buckets.handheld.push(d);
+        } else if (/(kiosk|self.?order|kx\d+)/.test(blob)) {
+          buckets.kiosk.push(d);
+        } else if (/(register|terminal|\bterm\b|station|front\s*counter|\bfc\b|tt\d+|ts\d+|pos\b)/.test(blob)) {
+          buckets.register.push(d);
+        } else {
+          buckets.other.push(d);
+        }
       });
       return buckets;
     }
 
     async function hydrateToastDevices(storeId, technicalFallback) {
-      // Called after the page renders. Updates #toast-stack-body with the
-      // live device list from /api/contacts/stores/{id}/toast-devices, or
-      // a graceful fallback message if the API can't help us (no Toast
-      // mapping for this store, 403 from Toast, etc.).
+      // Called after the page renders. Fires the Device Details API and
+      // the Configuration printers API in parallel, then merges into a
+      // single rich card. Both endpoints are graceful — if one fails the
+      // other still renders.
       const body  = document.getElementById('toast-stack-body');
       const badge = document.getElementById('toast-stack-badge');
       if (!body) return;
-      try {
-        const r = await fetch(`/api/contacts/stores/${storeId}/toast-devices`, { headers: authHeaders() });
+
+      const fetchOne = async (path) => {
+        const r = await fetch(`/api/contacts/stores/${storeId}${path}`, { headers: authHeaders() });
         if (!r.ok) throw new Error(await r.text());
-        const data = await r.json();
+        return r.json();
+      };
 
-        // ── Non-live source: explain why and show what little we have ──
-        if (data.source !== 'live' && data.source !== 'cache') {
-          const labelMap = {
-            'no-mapping': 'Not yet on Toast',
-            'forbidden':  'Toast API access denied',
-            'error':      'Network error',
-          };
-          badge.textContent = labelMap[data.source] || data.source;
-          badge.style.background = '#FEE2E2';
-          badge.style.color = '#991B1B';
-          body.innerHTML = renderTechFallback(technicalFallback,
-            `<div style="color: var(--ink-muted); font-size: 0.86rem; margin-bottom: 0.8rem;">
-               ${escapeHtml(data.message || 'Live device data unavailable.')}
-               Falling back to manually-maintained fields.
-             </div>`);
-          return;
-        }
-
-        // ── Live data ──
-        const devices = data.devices || [];
-        const buckets = categorizeDevices(devices);
-        const sourceLabel = data.source === 'cache' ? 'Live (cached)' : 'Live';
-        badge.textContent = `${sourceLabel} · ${devices.length} device${devices.length === 1 ? '' : 's'}`;
-        badge.style.background = '#DCFCE7';
-        badge.style.color = '#166534';
-
-        // Top counts
-        let html = `<div class="stat-tiles">
-          ${statTile(buckets.register.length || 0, 'Registers / POS')}
-          ${statTile(buckets.kds.length || 0,      'KDS')}
-          ${statTile(buckets.handheld.length || 0, 'Handhelds')}
-          ${statTile(buckets.printer.length || 0,  'Printers')}
-        </div>`;
-
-        // Most-common POS version (the version field is what IT cares about)
-        const versions = devices
-          .map(d => d.posAppVersion).filter(Boolean);
-        const versionCounts = {};
-        versions.forEach(v => { versionCounts[v] = (versionCounts[v] || 0) + 1; });
-        const versionSummary = Object.entries(versionCounts)
-          .sort((a, b) => b[1] - a[1])
-          .map(([v, n]) => `${escapeHtml(v)} (${n})`)
-          .join(' · ');
-        if (versionSummary) {
-          html += `<div style="margin-top: 0.8rem; font-size: 0.85rem;">
-            <span style="color: var(--ink-muted);">POS Version:</span>
-            <strong style="color: var(--navy);"> ${versionSummary}</strong>
-          </div>`;
-        }
-        if (buckets.other.length) {
-          html += `<div style="margin-top: 0.4rem; font-size: 0.78rem; color: var(--ink-muted);">
-            (+${buckets.other.length} uncategorized device${buckets.other.length === 1 ? '' : 's'} — see expanded list below)
-          </div>`;
-        }
-
-        // Expandable per-device detail table
-        if (devices.length) {
-          html += `<details style="margin-top: 0.9rem;">
-            <summary style="cursor: pointer; font-size: 0.85rem; color: var(--navy); font-weight: 600;">
-              Show all ${devices.length} devices
-            </summary>
-            <table style="width:100%; font-size: 0.82rem; margin-top: 0.5rem; border-collapse: collapse;">
-              <thead><tr style="background: var(--line-soft);">
-                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Name</th>
-                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Model</th>
-                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Serial #</th>
-                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Version</th>
-              </tr></thead>
-              <tbody>
-                ${devices.map(d => `<tr>
-                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft);">${escapeHtml(d.deviceName || '—')}</td>
-                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); color: var(--ink-muted);">${escapeHtml(d.deviceModel || '—')}</td>
-                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); font-family: ui-monospace, monospace; font-size: 0.78rem;">${escapeHtml(d.serialNumber || '—')}</td>
-                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft);">${escapeHtml(d.posAppVersion || '—')}</td>
-                </tr>`).join('')}
-              </tbody>
-            </table>
-          </details>`;
-        } else {
-          html += `<div style="margin-top: 0.8rem; color: var(--ink-muted); font-size: 0.86rem;">
-            Toast returned 0 devices for this restaurant.
-          </div>`;
-        }
-
-        // Toast GUID footer (handy for IT)
-        if (data.guid) {
-          html += `<div style="margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--line-soft); font-size: 0.78rem; color: var(--ink-muted); font-family: ui-monospace, monospace; word-break: break-all;">
-            Toast GUID: ${escapeHtml(data.guid)}
-          </div>`;
-        }
-
-        body.innerHTML = html;
+      let devData, printerData;
+      try {
+        [devData, printerData] = await Promise.all([
+          fetchOne('/toast-devices'),
+          fetchOne('/toast-printers'),
+        ]);
       } catch (e) {
         badge.textContent = 'Error';
         badge.style.background = '#FEE2E2';
         badge.style.color = '#991B1B';
         body.innerHTML = renderTechFallback(technicalFallback,
           `<div style="color: var(--bad); font-size: 0.85rem; margin-bottom: 0.7rem;">
-             Couldn't reach Toast Device Details API: ${escapeHtml(e.message)}
+             Couldn't reach Toast APIs: ${escapeHtml(e.message)}
            </div>`);
+        return;
       }
+
+      // If devices endpoint says "no mapping", the store isn't on Toast.
+      // Show fallback + the printers data (which probably also said
+      // no-mapping, but we still call out the situation cleanly).
+      if (devData.source === 'no-mapping') {
+        badge.textContent = 'Not yet on Toast';
+        badge.style.background = '#FEE2E2';
+        badge.style.color = '#991B1B';
+        body.innerHTML = renderTechFallback(technicalFallback,
+          `<div style="color: var(--ink-muted); font-size: 0.86rem; margin-bottom: 0.8rem;">
+             ${escapeHtml(devData.message || 'Store not mapped to a Toast GUID.')}
+             Showing the manually-maintained fields instead.
+           </div>`);
+        return;
+      }
+
+      const devices  = devData.devices  || [];
+      const printers = printerData.printers || [];
+      const buckets  = categorizeDevices(devices);
+
+      // ── Header badge ──
+      const liveBoth = (devData.source === 'live'  || devData.source === 'cache') &&
+                       (printerData.source === 'live' || printerData.source === 'cache');
+      const partialNote = liveBoth
+        ? ''
+        : (printerData.source !== 'live' && printerData.source !== 'cache'
+            ? ` · printers ${printerData.source}` : '');
+      const cachedNote = (devData.source === 'cache') ? ' (cached)' : '';
+      badge.textContent = `Live${cachedNote} · ${devices.length} POS · ${printers.length} printers${partialNote}`;
+      badge.style.background = '#DCFCE7';
+      badge.style.color = '#166534';
+
+      // ── Stat tiles: only the categories we actually have data for ──
+      const tiles = [];
+      tiles.push(statTile(devices.length, 'POS Devices'));
+      tiles.push(statTile(printers.length, 'Printers'));
+      // Show handhelds / kiosks tile only if any present (otherwise hide
+      // entirely — better than showing 0s that look like missing data)
+      if (buckets.handheld.length) tiles.push(statTile(buckets.handheld.length, 'Handhelds'));
+      if (buckets.kiosk.length)    tiles.push(statTile(buckets.kiosk.length,    'Kiosks'));
+
+      let html = `<div class="stat-tiles">${tiles.join('')}</div>`;
+
+      // ── POS version histogram ──
+      const versions = devices.map(d => d.posAppVersion).filter(Boolean);
+      const versionCounts = {};
+      versions.forEach(v => { versionCounts[v] = (versionCounts[v] || 0) + 1; });
+      const versionSummary = Object.entries(versionCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([v, n]) => `${escapeHtml(v)} (${n})`)
+        .join(' · ');
+      if (versionSummary) {
+        html += `<div style="margin-top: 0.8rem; font-size: 0.85rem;">
+          <span style="color: var(--ink-muted);">POS Version:</span>
+          <strong style="color: var(--navy);"> ${versionSummary}</strong>
+        </div>`;
+      }
+
+      // ── POS device breakdown line (only if we have splits beyond just registers) ──
+      const subParts = [];
+      if (buckets.register.length) subParts.push(`${buckets.register.length} register${buckets.register.length === 1 ? '' : 's'}`);
+      if (buckets.handheld.length) subParts.push(`${buckets.handheld.length} handheld${buckets.handheld.length === 1 ? '' : 's'}`);
+      if (buckets.kiosk.length)    subParts.push(`${buckets.kiosk.length} kiosk${buckets.kiosk.length === 1 ? '' : 's'}`);
+      if (buckets.other.length)    subParts.push(`${buckets.other.length} other`);
+      if (subParts.length > 1) {
+        html += `<div style="margin-top: 0.35rem; font-size: 0.78rem; color: var(--ink-muted);">
+          Breakdown: ${subParts.join(' · ')}
+        </div>`;
+      }
+
+      // ── Expandable POS devices table ──
+      if (devices.length) {
+        html += `<details style="margin-top: 0.9rem;">
+          <summary style="cursor: pointer; font-size: 0.85rem; color: var(--navy); font-weight: 600;">
+            Show all ${devices.length} POS device${devices.length === 1 ? '' : 's'}
+          </summary>
+          <table style="width:100%; font-size: 0.82rem; margin-top: 0.5rem; border-collapse: collapse;">
+            <thead><tr style="background: var(--line-soft);">
+              <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Name</th>
+              <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Model</th>
+              <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Serial #</th>
+              <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Version</th>
+            </tr></thead>
+            <tbody>
+              ${devices.map(d => `<tr>
+                <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft);">${escapeHtml(d.deviceName || '—')}</td>
+                <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); color: var(--ink-muted);">${escapeHtml(d.deviceModel || '—')}</td>
+                <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); font-family: ui-monospace, monospace; font-size: 0.78rem;">${escapeHtml(d.serialNumber || '—')}</td>
+                <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft);">${escapeHtml(d.posAppVersion || '—')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </details>`;
+      }
+
+      // ── Expandable printers list ──
+      if (printers.length) {
+        html += `<details style="margin-top: 0.5rem;">
+          <summary style="cursor: pointer; font-size: 0.85rem; color: var(--navy); font-weight: 600;">
+            Show all ${printers.length} printer${printers.length === 1 ? '' : 's'}
+          </summary>
+          <table style="width:100%; font-size: 0.82rem; margin-top: 0.5rem; border-collapse: collapse;">
+            <thead><tr style="background: var(--line-soft);">
+              <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Name</th>
+              <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Entity Type</th>
+              <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">GUID</th>
+            </tr></thead>
+            <tbody>
+              ${printers.map(p => `<tr>
+                <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft);">${escapeHtml(p.name || '—')}</td>
+                <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); color: var(--ink-muted);">${escapeHtml(p.entityType || '—')}</td>
+                <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); font-family: ui-monospace, monospace; font-size: 0.74rem; color: var(--ink-muted);">${escapeHtml(p.guid || '—')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </details>`;
+      } else if (printerData.source !== 'live' && printerData.source !== 'cache') {
+        html += `<div style="margin-top: 0.5rem; font-size: 0.78rem; color: var(--ink-muted);">
+          Printer list unavailable: ${escapeHtml(printerData.message || printerData.source)}.
+        </div>`;
+      }
+
+      // Toast GUID footer
+      if (devData.guid) {
+        html += `<div style="margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--line-soft); font-size: 0.78rem; color: var(--ink-muted); font-family: ui-monospace, monospace; word-break: break-all;">
+          Toast GUID: ${escapeHtml(devData.guid)}
+        </div>`;
+      }
+
+      body.innerHTML = html;
     }
 
     function renderTechFallback(t, leadHtml) {
