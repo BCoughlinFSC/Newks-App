@@ -3763,9 +3763,20 @@
                       error: `gave up after ${Math.round((Date.now()-pollStartTs)/60000)} min — job may still be running on server (job_id=${job_id})` };
                     break;
                   }
+                  // cache: 'no-store' + a cache-busting query param + Pragma
+                  // header forces Chrome to NOT reuse a kept-alive HTTP/2
+                  // connection for this poll. Kim's curl-from-PowerShell
+                  // tests returned clean JSON while the browser running
+                  // alongside got 1-byte garbage on the same endpoint —
+                  // the difference was browser connection reuse hitting
+                  // some Cloudways-edge keepalive padding behavior.
                   const pollRes = await fetch(
-                    `/api/reports/picks/drill-down-all-stores-multi/status/${encodeURIComponent(job_id)}`,
-                    { headers: getAuthHeaders(), signal: picksSignal },
+                    `/api/reports/picks/drill-down-all-stores-multi/status/${encodeURIComponent(job_id)}?_t=${Date.now()}`,
+                    {
+                      headers: { ...getAuthHeaders(), 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+                      cache: 'no-store',
+                      signal: picksSignal,
+                    },
                   );
                   // A long Pick export polls /status ~once per 5 seconds for
                   // many minutes. Empirically, ONE of those polls can come
