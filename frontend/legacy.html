@@ -3763,8 +3763,21 @@
                     for (const t of types) out[t.key] = { label: t.label, error: 'cancelled' };
                     break;
                   }
-                  // status === 'done'
-                  payload = job.result;
+                  // status === 'done' — fetch the result separately so the
+                  // multi-MB payload isn't crammed into the status response
+                  // (nginx in front of Cloudways was truncating those,
+                  // causing JSON.parse() to throw "Unexpected end of JSON
+                  // input" in the Excel export flow).
+                  const resultRes = await fetch(
+                    `/api/reports/picks/drill-down-all-stores-multi/result/${encodeURIComponent(job_id)}`,
+                    { headers: getAuthHeaders(), signal: picksSignal },
+                  );
+                  if (!resultRes.ok) {
+                    const errText = await resultRes.text();
+                    for (const t of types) out[t.key] = { label: t.label, error: 'result fetch failed: ' + errText };
+                    break;
+                  }
+                  payload = await resultRes.json();
                   break;
                 }
                 if (payload) {

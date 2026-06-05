@@ -1208,19 +1208,59 @@ async def picks_drill_down_all_stores_multi_start(request: PickMultiDrillDownAll
 
 @router.get("/api/reports/picks/drill-down-all-stores-multi/status/{job_id}")
 async def picks_drill_down_all_stores_multi_status(job_id: str):
-    """Poll a multi-pick export job. Returns full result when status=='done'."""
+    """Lightweight poll endpoint — returns status + progress + error, but
+    NEVER the result payload. When status=='done' the client should call
+    /result/{job_id} once to fetch the actual report data.
+
+    Previously this endpoint returned the full result inline, which broke
+    for large multi-report exports (3 report types × ~90 stores generates
+    tens of MB of JSON) because nginx in front of Cloudways would buffer-
+    truncate or time-out the response. The frontend would then see a
+    truncated body and JSON.parse() would throw "Unexpected end of JSON
+    input". Splitting fixed it — polling responses stay <1 KB, and the
+    one-shot /result fetch can take its time without affecting polls."""
     # Best-effort cleanup of jobs older than 1 hour every time we poll.
     await asyncio.to_thread(pick_export_jobs.purge_old, 3600.0)
-    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    job = await asyncio.to_thread(pick_export_jobs.get_status_only, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found (may have expired)")
     return {
-        "job_id":   job_id,
-        "status":   job["status"],
-        "progress": job.get("progress"),
-        "result":   job.get("result") if job["status"] == "done" else None,
-        "error":    job.get("error"),
+        "job_id":           job_id,
+        "status":           job["status"],
+        "progress":         job.get("progress"),
+        "error":            job.get("error"),
+        # Signals the client to call /result next once True.
+        "result_available": job.get("result_available", False),
+        # Useful for debugging large-payload issues (bytes of result_json).
+        "result_size":      job.get("result_size", 0),
     }
+
+
+@router.get("/api/reports/picks/drill-down-all-stores-multi/result/{job_id}")
+async def picks_drill_down_all_stores_multi_result(job_id: str):
+    """Return the full result payload for a completed multi-pick job.
+    Streams the raw JSON bytes from SQLite straight to the response so
+    we don't materialize a huge Python dict in memory + re-serialize it.
+    Returns 404 if missing/expired, 409 if not yet done."""
+    status = await asyncio.to_thread(pick_export_jobs.get_status_only, job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="job not found (may have expired)")
+    if status["status"] != "done":
+        raise HTTPException(status_code=409,
+                            detail=f"job is {status['status']}, not 'done' — "
+                                   f"poll /status until it completes")
+    raw = await asyncio.to_thread(pick_export_jobs.get_raw_result, job_id)
+    if not raw:
+        raise HTTPException(status_code=404,
+                            detail="result missing or already purged")
+    # StreamingResponse keeps Starlette from buffering the whole payload
+    # again, and the 64 KB chunk size keeps nginx's default proxy buffers
+    # happy. The raw string is already a valid JSON document (it's what
+    # was stored via json.dumps in finish_done), so no re-serialization.
+    def _chunks():
+        for i in range(0, len(raw), 65536):
+            yield raw[i:i + 65536]
+    return StreamingResponse(_chunks(), media_type="application/json")
 
 
 @router.post("/api/reports/picks/drill-down-all-stores-multi/cancel/{job_id}")

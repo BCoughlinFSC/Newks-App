@@ -147,6 +147,62 @@ def is_cancelled(job_id: str) -> bool:
         return False
 
 
+def get_status_only(job_id: str) -> Optional[Dict[str, Any]]:
+    """Lightweight job lookup that NEVER deserializes the result payload.
+    Use this for /status polling so the response stays small (KB, not MB)
+    even for jobs with huge results — nginx in front of Cloudways will
+    silently truncate large response bodies if they exceed the proxy
+    buffer or proxy_read_timeout. Pair with get_raw_result() to fetch
+    the actual data in a separate, dedicated request."""
+    if not os.path.exists(JOBS_DB_PATH):
+        return None
+    try:
+        with _conn() as c:
+            row = c.execute(
+                "SELECT id, status, progress_json, error, created_at, finished_at,"
+                " CASE WHEN result_json IS NULL THEN 0 ELSE length(result_json) END"
+                " FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    progress = None
+    if row[2]:
+        try:
+            progress = json.loads(row[2])
+        except Exception:
+            progress = None
+    return {
+        "id":               row[0],
+        "status":           row[1],
+        "progress":         progress,
+        "error":            row[3],
+        "created_at":       row[4],
+        "finished_at":      row[5],
+        "result_size":      int(row[6] or 0),    # bytes of result_json
+        "result_available": bool(row[6] and row[1] == "done"),
+    }
+
+
+def get_raw_result(job_id: str) -> Optional[str]:
+    """Return the raw JSON string of result_json from SQLite, with no
+    intermediate Python deserialization. The caller can stream it
+    straight to the HTTP response — saves both memory + CPU for large
+    payloads. Returns None if the job doesn't exist or has no result yet."""
+    if not os.path.exists(JOBS_DB_PATH):
+        return None
+    try:
+        with _conn() as c:
+            row = c.execute(
+                "SELECT result_json FROM jobs WHERE id = ?", (job_id,),
+            ).fetchone()
+    except Exception:
+        return None
+    return row[0] if row and row[0] else None
+
+
 def get(job_id: str) -> Optional[Dict[str, Any]]:
     """Return the job row as a dict, or None if no such job."""
     if not os.path.exists(JOBS_DB_PATH):
