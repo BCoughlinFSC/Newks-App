@@ -695,9 +695,170 @@
     }
 
     function cardToastStack(tech) {
+      // Placeholder shell — content is populated asynchronously by
+      // hydrateToastDevices() once the Device Details API responds.
+      // We render the manually-maintained fallback values immediately so
+      // the card never looks empty even if Toast is slow or unavailable.
       const t = tech || {};
-      return `<div class="card">
-        <h3><span class="icon">🍞</span> Toast POS Stack</h3>
+      return `<div class="card span-2" id="toast-stack-card">
+        <h3>
+          <span class="icon">🍞</span> Toast POS Stack
+          <span id="toast-stack-badge" style="margin-left:auto; font-size:0.7rem; font-weight:600; padding:0.15rem 0.5rem; border-radius:999px; background:var(--line-soft); color:var(--ink-muted); text-transform:none; letter-spacing:0;">Loading live data…</span>
+        </h3>
+        <div id="toast-stack-body">
+          <div class="stat-tiles">
+            ${statTile('—', 'KDS')}
+            ${statTile('—', 'Handhelds')}
+            ${statTile('—', 'Printers')}
+            ${statTile('—', 'Kiosks / Other')}
+          </div>
+          <div style="color: var(--ink-muted); font-size: 0.86rem; margin-top: 0.7rem;">
+            Fetching device list from Toast Device Details API…
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // Group devices into the four buckets we care about, by deviceName /
+    // deviceModel patterns. Toast's API doesn't categorize, so we pattern-
+    // match against the typical names Newk's uses. Anything unknown lands
+    // in "Other".
+    function categorizeDevices(devices) {
+      const buckets = { kds: [], handheld: [], printer: [], register: [], other: [] };
+      devices.forEach(d => {
+        const name  = (d.deviceName  || '').toLowerCase();
+        const model = (d.deviceModel || '').toLowerCase();
+        const blob  = `${name} ${model}`;
+        if (/(kds|kitchen\s*display|kitchen\s*screen|expo|prep)/.test(blob)) buckets.kds.push(d);
+        else if (/(handheld|hh\b|elo\s*m50|m50\b|server\s*pad|tablet)/.test(blob)) buckets.handheld.push(d);
+        else if (/(printer|kp\b|kitchen\s*printer|receipt|impact)/.test(blob)) buckets.printer.push(d);
+        else if (/(register|pos|front\s*counter|fc\b|station|terminal|kiosk|self.?order)/.test(blob)) buckets.register.push(d);
+        else buckets.other.push(d);
+      });
+      return buckets;
+    }
+
+    async function hydrateToastDevices(storeId, technicalFallback) {
+      // Called after the page renders. Updates #toast-stack-body with the
+      // live device list from /api/contacts/stores/{id}/toast-devices, or
+      // a graceful fallback message if the API can't help us (no Toast
+      // mapping for this store, 403 from Toast, etc.).
+      const body  = document.getElementById('toast-stack-body');
+      const badge = document.getElementById('toast-stack-badge');
+      if (!body) return;
+      try {
+        const r = await fetch(`/api/contacts/stores/${storeId}/toast-devices`, { headers: authHeaders() });
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+
+        // ── Non-live source: explain why and show what little we have ──
+        if (data.source !== 'live' && data.source !== 'cache') {
+          const labelMap = {
+            'no-mapping': 'Not yet on Toast',
+            'forbidden':  'Toast API access denied',
+            'error':      'Network error',
+          };
+          badge.textContent = labelMap[data.source] || data.source;
+          badge.style.background = '#FEE2E2';
+          badge.style.color = '#991B1B';
+          body.innerHTML = renderTechFallback(technicalFallback,
+            `<div style="color: var(--ink-muted); font-size: 0.86rem; margin-bottom: 0.8rem;">
+               ${escapeHtml(data.message || 'Live device data unavailable.')}
+               Falling back to manually-maintained fields.
+             </div>`);
+          return;
+        }
+
+        // ── Live data ──
+        const devices = data.devices || [];
+        const buckets = categorizeDevices(devices);
+        const sourceLabel = data.source === 'cache' ? 'Live (cached)' : 'Live';
+        badge.textContent = `${sourceLabel} · ${devices.length} device${devices.length === 1 ? '' : 's'}`;
+        badge.style.background = '#DCFCE7';
+        badge.style.color = '#166534';
+
+        // Top counts
+        let html = `<div class="stat-tiles">
+          ${statTile(buckets.register.length || 0, 'Registers / POS')}
+          ${statTile(buckets.kds.length || 0,      'KDS')}
+          ${statTile(buckets.handheld.length || 0, 'Handhelds')}
+          ${statTile(buckets.printer.length || 0,  'Printers')}
+        </div>`;
+
+        // Most-common POS version (the version field is what IT cares about)
+        const versions = devices
+          .map(d => d.posAppVersion).filter(Boolean);
+        const versionCounts = {};
+        versions.forEach(v => { versionCounts[v] = (versionCounts[v] || 0) + 1; });
+        const versionSummary = Object.entries(versionCounts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([v, n]) => `${escapeHtml(v)} (${n})`)
+          .join(' · ');
+        if (versionSummary) {
+          html += `<div style="margin-top: 0.8rem; font-size: 0.85rem;">
+            <span style="color: var(--ink-muted);">POS Version:</span>
+            <strong style="color: var(--navy);"> ${versionSummary}</strong>
+          </div>`;
+        }
+        if (buckets.other.length) {
+          html += `<div style="margin-top: 0.4rem; font-size: 0.78rem; color: var(--ink-muted);">
+            (+${buckets.other.length} uncategorized device${buckets.other.length === 1 ? '' : 's'} — see expanded list below)
+          </div>`;
+        }
+
+        // Expandable per-device detail table
+        if (devices.length) {
+          html += `<details style="margin-top: 0.9rem;">
+            <summary style="cursor: pointer; font-size: 0.85rem; color: var(--navy); font-weight: 600;">
+              Show all ${devices.length} devices
+            </summary>
+            <table style="width:100%; font-size: 0.82rem; margin-top: 0.5rem; border-collapse: collapse;">
+              <thead><tr style="background: var(--line-soft);">
+                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Name</th>
+                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Model</th>
+                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Serial #</th>
+                <th style="text-align:left; padding: 0.3rem 0.5rem; font-size:0.72rem; text-transform:uppercase; color:var(--ink-muted);">Version</th>
+              </tr></thead>
+              <tbody>
+                ${devices.map(d => `<tr>
+                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft);">${escapeHtml(d.deviceName || '—')}</td>
+                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); color: var(--ink-muted);">${escapeHtml(d.deviceModel || '—')}</td>
+                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft); font-family: ui-monospace, monospace; font-size: 0.78rem;">${escapeHtml(d.serialNumber || '—')}</td>
+                  <td style="padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line-soft);">${escapeHtml(d.posAppVersion || '—')}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </details>`;
+        } else {
+          html += `<div style="margin-top: 0.8rem; color: var(--ink-muted); font-size: 0.86rem;">
+            Toast returned 0 devices for this restaurant.
+          </div>`;
+        }
+
+        // Toast GUID footer (handy for IT)
+        if (data.guid) {
+          html += `<div style="margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--line-soft); font-size: 0.78rem; color: var(--ink-muted); font-family: ui-monospace, monospace; word-break: break-all;">
+            Toast GUID: ${escapeHtml(data.guid)}
+          </div>`;
+        }
+
+        body.innerHTML = html;
+      } catch (e) {
+        badge.textContent = 'Error';
+        badge.style.background = '#FEE2E2';
+        badge.style.color = '#991B1B';
+        body.innerHTML = renderTechFallback(technicalFallback,
+          `<div style="color: var(--bad); font-size: 0.85rem; margin-bottom: 0.7rem;">
+             Couldn't reach Toast Device Details API: ${escapeHtml(e.message)}
+           </div>`);
+      }
+    }
+
+    function renderTechFallback(t, leadHtml) {
+      // Manually-maintained fallback (the old card content) — used when
+      // we can't get live device data.
+      t = t || {};
+      return `${leadHtml || ''}
         <div class="stat-tiles">
           ${statTile(t.ToastKDSCount,      'KDS')}
           ${statTile(t.ToastHandHeldCount, 'Handhelds')}
@@ -709,8 +870,7 @@
           ${field('Toast POS Version', t.ToastPOSVersion)}
           ${field('Toast Pay Version', t.ToastPayVersion)}
           ${field('Kiosk Type',       resolveLookup('kiosktype', t.fkKioskTypeID))}
-        </div>
-      </div>`;
+        </div>`;
     }
 
     function cardNetwork(tech) {
@@ -1092,6 +1252,13 @@
         </main>
       `;
       document.getElementById('root').innerHTML = html;
+
+      // Fire the Toast Device Details fetch in the background so it
+      // doesn't block the rest of the page from rendering. The card
+      // shows a "Loading live data…" badge until this resolves.
+      hydrateToastDevices(store.StoreID, technical).catch(e => {
+        console.warn('Toast device hydration failed:', e);
+      });
     }
 
     async function boot() {

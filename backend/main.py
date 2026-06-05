@@ -19028,6 +19028,120 @@ async def contacts_list_store_gms(
     return contacts_db.list_general_managers_by_store(store_id)
 
 
+# ─── Toast Device Details (live API call) ─────────────────────────────────────
+#
+# Pulls the real device list from Toast's prerelease Device Details API.
+# Replaces the mostly-empty manual fields in StoreTechnical (ToastKDSCount,
+# ToastHandHeldCount, PrinterCount, etc.) with what's actually deployed in
+# the store right now. Requires:
+#   - Toast Standard API creds (TOAST_STANDARD_API_CLIENT_ID/_SECRET)
+#   - The 'device-details.info:read' scope enabled on those creds
+#   - The store's Toast GUID, looked up via aloha_location_mapping.json
+#     (Aloha StoreID → Toast GUID), inverted at call time
+
+# 15-minute cache; device lists barely change.
+_toast_devices_cache: Dict[str, Dict[str, Any]] = {}
+_TOAST_DEVICES_TTL_SEC = 15 * 60
+
+
+def _store_id_to_toast_guid(store_id: int) -> Optional[str]:
+    """Aloha StoreID → Toast restaurant GUID, by inverting the existing
+    aloha_location_mapping.json (toast_guid → aloha_id). Returns None if
+    the mapping doesn't include this store (e.g. not yet on Toast)."""
+    mapping = get_aloha_location_mapping()
+    if not mapping:
+        return None
+    target = str(store_id)
+    for guid, aloha_id in mapping.items():
+        if str(aloha_id) == target:
+            return guid
+    return None
+
+
+@app.get("/api/contacts/stores/{store_id}/toast-devices")
+async def contacts_toast_devices(
+    store_id: int,
+    _user: User = Depends(get_current_user),
+):
+    """Live device list from Toast Device Details API. Returns
+    {guid, devices: [{serialNumber, deviceName, deviceModel, deviceId,
+    posAppVersion}], cached_at, source}. Falls back gracefully if the
+    store isn't on Toast yet or the API rejects access (e.g. scope
+    not enabled)."""
+    guid = _store_id_to_toast_guid(store_id)
+    if not guid:
+        return {
+            "store_id":  store_id,
+            "guid":      None,
+            "devices":   [],
+            "source":    "no-mapping",
+            "message":   "Store isn't in aloha_location_mapping.json yet "
+                         "— either not on Toast, or the mapping file needs "
+                         "to be regenerated.",
+        }
+
+    # Cache check
+    now = time.time()
+    cached = _toast_devices_cache.get(guid)
+    if cached and (now - cached["cached_at"]) < _TOAST_DEVICES_TTL_SEC:
+        return {**cached, "source": "cache"}
+
+    # Live call
+    try:
+        headers = await get_standard_api_auth_headers()
+        headers["Toast-Restaurant-External-ID"] = guid
+        url = f"{TOAST_STANDARD_API_BASE_URL}/device-details/v1/device-info"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.get(url, headers=headers)
+    except Exception as exc:
+        logger.error("toast-devices fetch failed for store %s (%s): %s",
+                     store_id, guid, exc)
+        return {
+            "store_id": store_id,
+            "guid":     guid,
+            "devices":  [],
+            "source":   "error",
+            "message":  f"Network error: {exc}",
+        }
+
+    if r.status_code == 403:
+        return {
+            "store_id": store_id,
+            "guid":     guid,
+            "devices":  [],
+            "source":   "forbidden",
+            "message":  "Toast API returned 403 — likely the "
+                        "'device-details.info:read' scope isn't enabled "
+                        "on these credentials, or the restaurant guid is "
+                        "outside our partner scope.",
+        }
+    if r.status_code != 200:
+        return {
+            "store_id": store_id,
+            "guid":     guid,
+            "devices":  [],
+            "source":   f"http-{r.status_code}",
+            "message":  r.text[:300],
+        }
+
+    devices = r.json()
+    if isinstance(devices, dict):  # defensive — some Toast endpoints wrap in {data: [...]}
+        devices = devices.get("devices") or devices.get("data") or []
+    if not isinstance(devices, list):
+        devices = []
+
+    payload = {
+        "store_id":  store_id,
+        "guid":      guid,
+        "devices":   devices,
+        "device_count": len(devices),
+        "cached_at": now,
+        "source":    "live",
+    }
+    _toast_devices_cache[guid] = payload
+    return payload
+
+
 @app.get("/api/contacts/lookups/{name}")
 async def contacts_get_lookup(name: str, _user: User = Depends(get_current_user)):
     """Generic FK dropdown source. `name` is one of: company, areadir, fbc, fmm,
