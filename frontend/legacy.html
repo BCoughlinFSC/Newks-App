@@ -3748,22 +3748,37 @@
                     `/api/reports/picks/drill-down-all-stores-multi/status/${encodeURIComponent(job_id)}`,
                     { headers: getAuthHeaders(), signal: picksSignal },
                   );
+                  // A long Pick export polls /status ~once per 5 seconds for
+                  // many minutes. Empirically, ONE of those polls can come
+                  // back with a malformed/truncated body (e.g. nginx in
+                  // front of Cloudways occasionally returns a 1-byte
+                  // garbage response — not the full payload, not a 5xx, just
+                  // a broken connection that gets bucketized as a "200" by
+                  // fetch). One bad poll shouldn't kill the whole export —
+                  // the job is still running on the backend and the next
+                  // poll will be fine. So we tolerate transient parse
+                  // failures: log them but keep polling.
                   if (!pollRes.ok) {
                     const errText = await pollRes.text();
+                    // Transient HTTP errors (5xx) — retry. 4xx is fatal.
+                    if (pollRes.status >= 500 && pollRes.status < 600) {
+                      console.warn(`Poll ${pollRes.status} (transient), retrying:`, errText.slice(0, 100));
+                      await sleepAbortable(2000, picksSignal);
+                      continue;
+                    }
                     for (const t of types) out[t.key] = { label: t.label, error: errText };
                     break;
                   }
-                  // Same defensive parse as /start above — capture byte
-                  // count + tail if /status body is truncated.
                   const pollText = await pollRes.text();
                   let job;
                   try {
                     job = JSON.parse(pollText);
                   } catch (parseErr) {
                     const tail = pollText.slice(-120).replace(/\s+/g, ' ');
-                    const msg = `/status body invalid JSON (${pollText.length} bytes, ends "${tail}")`;
-                    for (const t of types) out[t.key] = { label: t.label, error: msg };
-                    break;
+                    console.warn(`Poll body invalid JSON (${pollText.length} bytes, ends "${tail}") — retrying in 2s`);
+                    showStatus('info', `Pick reports… (transient network hiccup, retrying)`);
+                    await sleepAbortable(2000, picksSignal);
+                    continue;  // retry the same poll
                   }
                   if (job.status === 'running') {
                     const p = job.progress || {};
@@ -3788,35 +3803,47 @@
                     for (const t of types) out[t.key] = { label: t.label, error: 'cancelled' };
                     break;
                   }
-                  // status === 'done' — fetch the result separately so the
-                  // multi-MB payload isn't crammed into the status response
-                  // (nginx in front of Cloudways was truncating those,
-                  // causing JSON.parse() to throw "Unexpected end of JSON
-                  // input" in the Excel export flow).
+                  // status === 'done' — fetch the result separately, with
+                  // the same retry logic for transient nginx hiccups. The
+                  // result body is the big one (tens of MB), so we give
+                  // it more attempts before giving up.
                   showStatus('info', 'Fetching pick reports result…');
-                  const resultRes = await fetch(
-                    `/api/reports/picks/drill-down-all-stores-multi/result/${encodeURIComponent(job_id)}`,
-                    { headers: getAuthHeaders(), signal: picksSignal },
-                  );
-                  if (!resultRes.ok) {
-                    const errText = await resultRes.text();
-                    for (const t of types) out[t.key] = { label: t.label, error: 'result fetch failed: ' + errText };
-                    break;
-                  }
-                  // Read as text first so we can give a helpful diagnostic
-                  // if it's truncated — JSON.parse on a truncated body
-                  // throws "Unexpected end of JSON input" with no other
-                  // context, which is exactly what hid the original bug.
-                  const resultText = await resultRes.text();
-                  const sizeKB = Math.round(resultText.length / 1024);
-                  try {
-                    payload = JSON.parse(resultText);
-                  } catch (parseErr) {
-                    const tail = resultText.slice(-120).replace(/\s+/g, ' ');
-                    const msg = `result body invalid JSON (${sizeKB} KB, ends "${tail}"). ` +
-                                `Likely nginx truncation — check the backend logs.`;
-                    for (const t of types) out[t.key] = { label: t.label, error: msg };
-                    break;
+                  let payloadAttempt = 0;
+                  while (payloadAttempt < 5) {
+                    payloadAttempt++;
+                    const resultRes = await fetch(
+                      `/api/reports/picks/drill-down-all-stores-multi/result/${encodeURIComponent(job_id)}`,
+                      { headers: getAuthHeaders(), signal: picksSignal },
+                    );
+                    if (!resultRes.ok) {
+                      const errText = await resultRes.text();
+                      // 5xx → transient, retry. 4xx → give up.
+                      if (resultRes.status >= 500 && resultRes.status < 600 && payloadAttempt < 5) {
+                        console.warn(`Result fetch ${resultRes.status} (transient, attempt ${payloadAttempt}/5):`, errText.slice(0, 100));
+                        await sleepAbortable(3000, picksSignal);
+                        continue;
+                      }
+                      for (const t of types) out[t.key] = { label: t.label, error: 'result fetch failed: ' + errText };
+                      break;
+                    }
+                    const resultText = await resultRes.text();
+                    const sizeKB = Math.round(resultText.length / 1024);
+                    try {
+                      payload = JSON.parse(resultText);
+                      break;  // success
+                    } catch (parseErr) {
+                      const tail = resultText.slice(-120).replace(/\s+/g, ' ');
+                      if (payloadAttempt < 5) {
+                        console.warn(`Result body invalid JSON (${sizeKB} KB, attempt ${payloadAttempt}/5) — retrying`);
+                        showStatus('info', `Pick reports result… (retry ${payloadAttempt}/5 — transient hiccup)`);
+                        await sleepAbortable(3000, picksSignal);
+                        continue;
+                      }
+                      const msg = `result body invalid JSON after 5 attempts (last: ${sizeKB} KB, ends "${tail}"). ` +
+                                  `Likely nginx truncation — check the backend logs.`;
+                      for (const t of types) out[t.key] = { label: t.label, error: msg };
+                      break;
+                    }
                   }
                   break;
                 }
