@@ -3723,7 +3723,21 @@
                 const errText = await startRes.text();
                 for (const t of types) out[t.key] = { label: t.label, error: errText };
               } else {
-                const { job_id } = await startRes.json();
+                // Wrap .json() in try/catch so a truncated /start response
+                // produces a diagnostic with the byte count + tail of the
+                // body instead of the bare "SyntaxError: Unexpected end of
+                // JSON input" that left us blind in the previous fix round.
+                const startText = await startRes.text();
+                let job_id;
+                try {
+                  ({ job_id } = JSON.parse(startText));
+                } catch (parseErr) {
+                  const tail = startText.slice(-120).replace(/\s+/g, ' ');
+                  const msg = `/start body invalid JSON (${startText.length} bytes, ends "${tail}")`;
+                  for (const t of types) out[t.key] = { label: t.label, error: msg };
+                  pickPairingResults = out;
+                  throw new Error(msg);  // exit outer try
+                }
                 picksActiveJobId = job_id;
                 // 2. Poll for completion. Server-side job state is in SQLite so
                 //    polls land safely even with multiple uvicorn workers.
@@ -3739,7 +3753,18 @@
                     for (const t of types) out[t.key] = { label: t.label, error: errText };
                     break;
                   }
-                  const job = await pollRes.json();
+                  // Same defensive parse as /start above — capture byte
+                  // count + tail if /status body is truncated.
+                  const pollText = await pollRes.text();
+                  let job;
+                  try {
+                    job = JSON.parse(pollText);
+                  } catch (parseErr) {
+                    const tail = pollText.slice(-120).replace(/\s+/g, ' ');
+                    const msg = `/status body invalid JSON (${pollText.length} bytes, ends "${tail}")`;
+                    for (const t of types) out[t.key] = { label: t.label, error: msg };
+                    break;
+                  }
                   if (job.status === 'running') {
                     const p = job.progress || {};
                     if (p.total) {
