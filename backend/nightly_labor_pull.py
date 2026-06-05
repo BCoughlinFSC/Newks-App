@@ -73,6 +73,12 @@ TOAST_STANDARD_API_BASE_URL = os.getenv(
 CLIENT_ID = os.getenv("TOAST_STANDARD_API_CLIENT_ID")
 CLIENT_SECRET = os.getenv("TOAST_STANDARD_API_CLIENT_SECRET")
 
+# Default concurrency for parallel API fetches across stores. Unlike the
+# sales puller, the labor write path has no shared staging table — each
+# store's DELETE/INSERT is scoped by Store guid — so we can parallelize
+# the whole pull_store_labor function safely.
+DEFAULT_CONCURRENCY = int(os.getenv("TOAST_PULL_CONCURRENCY", "5"))
+
 
 # ─── Toast auth ──────────────────────────────────────────────────────────────
 
@@ -395,6 +401,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                     help="Fetch and map but do not write to SQL.")
     ap.add_argument("--debug-first", action="store_true",
                     help="Dump first API entry's full JSON for field verification.")
+    ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, metavar="N",
+                    help=f"Max concurrent Toast API fetches across stores "
+                         f"(default {DEFAULT_CONCURRENCY}, or $TOAST_PULL_CONCURRENCY). "
+                         f"Set to 1 for fully sequential.")
     args = ap.parse_args(argv)
 
     # Guard against contradictory inputs. --days-back is mutually exclusive
@@ -404,6 +414,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                  "--start-date / --end-date.")
     if args.days_back < 0:
         ap.error("--days-back must be 0 or greater.")
+    if args.concurrency < 1:
+        ap.error("--concurrency must be 1 or greater.")
     return args
 
 
@@ -460,6 +472,8 @@ async def main():
         log.info("  --dry-run: no DB writes")
     if args.skip_rollup:
         log.info("  --skip-rollup: sp_process_pulled_labor will NOT be called")
+    if args.concurrency > 1:
+        log.info("  Concurrency: %d parallel API fetches", args.concurrency)
     log.info("=" * 70)
 
     conn = db.get_toast_connection()
@@ -482,12 +496,14 @@ async def main():
     failures: list[dict] = []
     totals = {"fetched": 0, "inserted": 0}
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        token = await get_token(client)
-        log.info("Standard API auth: OK")
+    # Per-store work runs in parallel — labor has no shared staging table,
+    # each store's DELETE+INSERT is scoped by Store guid + date range so
+    # concurrent writes don't contend with each other.
+    sem = asyncio.Semaphore(args.concurrency)
 
-        for idx, s in enumerate(stores):
-            result = await pull_store_labor(
+    async def pull_with_sem(idx: int, s: dict) -> dict:
+        async with sem:
+            return await pull_store_labor(
                 client,
                 token=token,
                 store_guid=str(s["guid"]),
@@ -496,12 +512,34 @@ async def main():
                 start_date=start_date,
                 end_date=end_date,
                 dry_run=args.dry_run,
+                # Only the first store dumps the debug payload (and only if
+                # explicitly requested). With parallel execution, "first"
+                # means lowest index — not first-to-finish.
                 debug_first=(args.debug_first and idx == 0),
             )
-            if not result["ok"]:
-                failures.append(result)
-            totals["fetched"] += result["fetched"]
-            totals["inserted"] += result["inserted"]
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        token = await get_token(client)
+        log.info("Standard API auth: OK")
+
+        pull_tasks = [pull_with_sem(idx, s) for idx, s in enumerate(stores)]
+        results = await asyncio.gather(*pull_tasks, return_exceptions=True)
+
+        for s, r in zip(stores, results):
+            if isinstance(r, Exception):
+                failures.append({
+                    "store_num":  int(s["store_num"]),
+                    "store_name": s.get("name", f"Store {s['store_num']}"),
+                    "ok":         False,
+                    "error":      f"task raised {type(r).__name__}: {r}",
+                    "fetched":    0,
+                    "inserted":   0,
+                })
+                continue
+            if not r["ok"]:
+                failures.append(r)
+            totals["fetched"]  += r["fetched"]
+            totals["inserted"] += r["inserted"]
 
     # Rollup
     rollup_ok = None

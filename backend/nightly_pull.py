@@ -103,30 +103,113 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 STORE_GROUPING = 9
 STORE_GROUP    = 243
 
+# Default concurrency for the parallel API-fetch phase. Toast's published
+# rate limits are generous; 5 concurrent stores keeps us well under any
+# realistic cap while shaving runtime ~5x. Override per-run with
+# --concurrency or the TOAST_PULL_CONCURRENCY env var.
+DEFAULT_CONCURRENCY = int(os.getenv("TOAST_PULL_CONCURRENCY", "5"))
 
-# ─── Process one store ────────────────────────────────────────────────────────
 
-async def pull_store(
+# ─── Phase 1: parallel API fetch (no DB writes) ───────────────────────────────
+#
+# Why split fetch from write: the write path uses hstItem_temp, a SHARED
+# staging table that gets TRUNCATEd per-store. If we ran multiple writes
+# concurrently, store A's TRUNCATE would wipe store B's just-loaded rows.
+# So we fetch all stores in parallel (the slow part), then write them out
+# one at a time (the safe part).
+
+async def fetch_store_data(
     client: httpx.AsyncClient,
     store_guid: str,
     store_num: int,
     store_name: str,
     date_sql: str,
 ) -> dict:
+    """Hit Toast API for one (store, date). Returns a dict with parsed
+    payloads ready for the write phase. No DB writes happen here.
+
+    On API failure returns an error dict — caller decides what to do.
+    """
     date_yyyymmdd = date_sql.replace("-", "")
     result = {
         "store_num":  store_num,
+        "store_guid": store_guid,
         "store_name": store_name,
+        "date_sql":   date_sql,
         "ok":         False,
         "orders":     0,
         "checks":     0,
         "payments":   0,
         "items":      0,
         "error":      None,
+        "parsed":     None,  # populated on success
     }
 
     try:
-        # Delete stale rows
+        orders, errors = await fetch_orders_with_retry(
+            client, store_guid, store_num, date_yyyymmdd
+        )
+        if errors and not orders:
+            result["error"] = str(errors[0])
+            log.error("  [%s] API fetch failed: %s", store_num, errors[0])
+            return result
+
+        if not orders:
+            # Closed-day case. Mark ok so write phase still runs its DELETE
+            # (clears any stale rows from a prior partial run).
+            result["ok"] = True
+            result["parsed"] = {"orders": [], "checks": [], "payments": [], "items": []}
+            return result
+
+        parsed = parse_orders(orders, store_guid, store_num, date_yyyymmdd)
+        result["orders"]   = len(parsed["orders"])
+        result["checks"]   = len(parsed["checks"])
+        result["payments"] = len(parsed["payments"])
+        result["items"]    = len(parsed["items"])
+        result["parsed"]   = parsed
+        result["ok"]       = True
+        return result
+    except Exception as e:
+        result["error"] = str(e)
+        log.error("  [%s] %s — Fetch exception: %s",
+                  store_num, store_name, e, exc_info=True)
+        return result
+
+
+# ─── Phase 2: serialized DB write (uses hstItem_temp staging) ─────────────────
+
+def write_store_data(fetched: dict) -> dict:
+    """Write one store's parsed payload to SQL Server. Runs sequentially
+    across stores because hstItem_temp is shared. Returns a result dict
+    with insert counts (compatible shape with the old pull_store result).
+    """
+    store_num  = fetched["store_num"]
+    store_name = fetched["store_name"]
+    date_sql   = fetched["date_sql"]
+    parsed     = fetched["parsed"] or {}
+
+    out = {
+        "store_num":  store_num,
+        "store_name": store_name,
+        "date_sql":   date_sql,
+        "ok":         False,
+        "orders":     fetched.get("orders", 0),
+        "checks":     fetched.get("checks", 0),
+        "payments":   fetched.get("payments", 0),
+        "items":      0,
+        "error":      None,
+    }
+
+    # If the fetch failed, surface that error and don't touch the DB —
+    # safer than the old behavior, which DELETEd before fetching and
+    # could leave stores empty on API failure.
+    if not fetched.get("ok"):
+        out["error"] = fetched.get("error") or "fetch failed"
+        return out
+
+    try:
+        # Delete stale rows (always — closed-day stores still benefit from
+        # clearing partial leftover rows from a prior failed run).
         conn = db.get_toast_connection()
         try:
             cur = conn.cursor()
@@ -146,7 +229,13 @@ async def pull_store(
         finally:
             conn.close()
 
-        # Truncate staging table
+        if not parsed.get("orders") and not parsed.get("items"):
+            log.info("  [%s] %s — 0 orders (closed).", store_num, store_name)
+            out["ok"] = True
+            return out
+
+        # Truncate the shared staging table — guarded by sequential
+        # iteration in the caller.
         conn = db.get_toast_connection()
         try:
             conn.execute("TRUNCATE TABLE dbo.hstItem_temp")
@@ -154,39 +243,18 @@ async def pull_store(
         finally:
             conn.close()
 
-        # Fetch from Toast API
-        orders, errors = await fetch_orders_with_retry(
-            client, store_guid, store_num, date_yyyymmdd
-        )
-
-        if errors and not orders:
-            result["error"] = str(errors[0])
-            log.error("  [%s] API fetch failed: %s", store_num, errors[0])
-            return result
-
-        if not orders:
-            log.info("  [%s] %s — 0 orders (closed).", store_num, store_name)
-            result["ok"] = True
-            return result
-
-        parsed = parse_orders(orders, store_guid, store_num, date_yyyymmdd)
-        result["orders"]   = len(parsed["orders"])
-        result["checks"]   = len(parsed["checks"])
-        result["payments"] = len(parsed["payments"])
-        result["items"]    = len(parsed["items"])
-
-        # Write to SQL Server
+        # Write parsed payload
         conn = db.get_toast_connection()
         try:
-            if parsed["orders"]:
+            if parsed.get("orders"):
                 db.upsert_orders(conn, parsed["orders"])
-            if parsed["checks"]:
+            if parsed.get("checks"):
                 db.upsert_checks(conn, parsed["checks"])
-            # Always run — upsert_payments DELETEs stale rows for this store/date
-            # even when there are zero new payments (100% cash day).
-            db.upsert_payments(conn, parsed["payments"],
+            # Always run — upsert_payments DELETEs stale rows for this
+            # store/date even when there are zero new payments (cash-only day).
+            db.upsert_payments(conn, parsed.get("payments", []),
                                store_num=store_num, biz_date=date_sql)
-            if parsed["items"]:
+            if parsed.get("items"):
                 db.upsert_items(conn, parsed["items"], skip_truncate=True, skip_proc=True)
         finally:
             conn.close()
@@ -195,20 +263,35 @@ async def pull_store(
         conn = db.get_toast_connection()
         try:
             inserted = db.direct_copy_items_from_temp(conn, store_num, date_sql)
+            out["items"] = inserted
             log.info("  [%s] %s — %d orders / %d checks / %d payments / %d items inserted.",
                      store_num, store_name,
-                     result["orders"], result["checks"], result["payments"], inserted)
+                     out["orders"], out["checks"], out["payments"], inserted)
         finally:
             conn.close()
 
-        result["ok"] = True
-
+        out["ok"] = True
     except Exception as e:
-        result["error"] = str(e)
-        log.error("  [%s] %s — Unexpected error: %s", store_num, store_name, e,
-                  exc_info=True)
+        out["error"] = str(e)
+        log.error("  [%s] %s — Write exception: %s",
+                  store_num, store_name, e, exc_info=True)
+    return out
 
-    return result
+
+# ─── Backward-compat wrapper (still callable by other scripts) ───────────────
+#
+# A few existing repoll scripts in the repo call pull_store(...) directly.
+# Keep it working by chaining fetch → write in the original sequential shape.
+
+async def pull_store(
+    client: httpx.AsyncClient,
+    store_guid: str,
+    store_num: int,
+    store_name: str,
+    date_sql: str,
+) -> dict:
+    fetched = await fetch_store_data(client, store_guid, store_num, store_name, date_sql)
+    return write_store_data(fetched)
 
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -243,6 +326,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--skip-royalty", action="store_true",
         help="Skip sp_tbl_Royalty_Values rebuild.",
     )
+    ap.add_argument(
+        "--concurrency", type=int, default=DEFAULT_CONCURRENCY, metavar="N",
+        help=f"Max concurrent Toast API fetches (default {DEFAULT_CONCURRENCY}, "
+             f"or $TOAST_PULL_CONCURRENCY if set). Set to 1 to run fully sequentially.",
+    )
     args = ap.parse_args(argv)
 
     # Guard against contradictory inputs
@@ -250,6 +338,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ap.error("Use EITHER a positional target_date OR --days-back, not both.")
     if args.days_back < 0:
         ap.error("--days-back must be 0 or greater.")
+    if args.concurrency < 1:
+        ap.error("--concurrency must be 1 or greater.")
     return args
 
 
@@ -310,6 +400,8 @@ async def main():
         log.info("  --skip-rollup set: hst tables only, NO rollup rebuild")
     if args.skip_royalty:
         log.info("  --skip-royalty set: NO royalty rebuild")
+    if args.concurrency > 1:
+        log.info("  Concurrency: %d parallel API fetches", args.concurrency)
     log.info("=" * 70)
 
     # Load stores
@@ -344,22 +436,60 @@ async def main():
     # ── Pull each date, oldest → newest ───────────────────────────────────
     # Order matters: if the run dies partway, oldest dates are already done,
     # so the next run can pick up from yesterday onward.
+    #
+    # Per-date flow has two phases:
+    #   Phase 1 (PARALLEL): fetch from Toast API for all stores at once,
+    #                       capped at args.concurrency concurrent fetches
+    #   Phase 2 (SEQUENTIAL): write each store's payload to SQL Server one
+    #                         at a time, because hstItem_temp is shared
+    sem = asyncio.Semaphore(args.concurrency)
+
+    async def fetch_with_sem(s, date_sql):
+        async with sem:
+            return await fetch_store_data(
+                client,
+                store_guid=str(s["guid"]),
+                store_num=int(s["store_num"]),
+                store_name=s.get("name", f"Store {s['store_num']}"),
+                date_sql=date_sql,
+            )
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         for d in target_dates:
             log.info("-" * 70)
-            log.info("Pulling %s (%d stores)…", d, len(stores))
+            log.info("Pulling %s (%d stores, %d concurrent)…",
+                     d, len(stores), args.concurrency)
+            date_start = time.time()
+
+            # Phase 1: parallel fetch — return_exceptions=True keeps one
+            # store's failure from cancelling the others mid-batch.
+            fetch_tasks = [fetch_with_sem(s, d) for s in stores]
+            fetched_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+            fetch_dur = time.time() - date_start
+            log.info("  Fetch phase done in %.1fs (%d store payloads).",
+                     fetch_dur, len(fetched_results))
+
+            # Phase 2: sequential write — also handles exceptions surfaced
+            # by gather() (rare; usually only if a coroutine itself crashed).
             date_failures = 0
-            for s in stores:
-                result = await pull_store(
-                    client,
-                    store_guid=str(s["guid"]),
-                    store_num=int(s["store_num"]),
-                    store_name=s.get("name", f"Store {s['store_num']}"),
-                    date_sql=d,
-                )
-                if not result["ok"]:
-                    failures.append(result)
+            write_start = time.time()
+            for s, fr in zip(stores, fetched_results):
+                if isinstance(fr, Exception):
+                    failures.append({
+                        "store_num":  int(s["store_num"]),
+                        "store_name": s.get("name", f"Store {s['store_num']}"),
+                        "ok":         False,
+                        "error":      f"fetch raised {type(fr).__name__}: {fr}",
+                    })
                     date_failures += 1
+                    continue
+                write_result = write_store_data(fr)
+                if not write_result["ok"]:
+                    failures.append(write_result)
+                    date_failures += 1
+            write_dur = time.time() - write_start
+            log.info("  Write phase done in %.1fs (%d failures).",
+                     write_dur, date_failures)
             per_date_summary.append((d, date_failures))
 
     # ── Rollup + royalty: ONE call covering the full range ───────────────
