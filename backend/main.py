@@ -19018,6 +19018,16 @@ async def contacts_list_store_delivery_partners(
     return contacts_db.list_delivery_partners_by_store(store_id)
 
 
+@app.get("/api/contacts/stores/{store_id}/gms")
+async def contacts_list_store_gms(
+    store_id: int,
+    _user: User = Depends(get_current_user),
+):
+    """Read-only list of General Managers assigned to this store.
+    Source: GeneralManagers table with StoreID FK."""
+    return contacts_db.list_general_managers_by_store(store_id)
+
+
 @app.get("/api/contacts/lookups/{name}")
 async def contacts_get_lookup(name: str, _user: User = Depends(get_current_user)):
     """Generic FK dropdown source. `name` is one of: company, areadir, fbc, fmm,

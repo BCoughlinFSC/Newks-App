@@ -775,6 +775,24 @@ def list_store_closures(store_id: int) -> List[Dict[str, Any]]:
             return []
 
 
+def list_general_managers_by_store(store_id: int) -> List[Dict[str, Any]]:
+    """Return all GeneralManagers rows for a store. Most stores have 1 GM,
+    but the schema allows multiple. Returns [] if the table doesn't exist
+    yet or has no rows for this store."""
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(
+                "SELECT * FROM GeneralManagers WHERE StoreID = ? "
+                "ORDER BY LOWER(COALESCE(GeneralMgrName, LastName, ''))",
+                (store_id,),
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows]
+        except sqlite3.OperationalError as exc:
+            logger.warning("list_general_managers_by_store(%s) failed: %s",
+                           store_id, exc)
+            return []
+
+
 def list_delivery_partners_by_store(store_id: int) -> List[Dict[str, Any]]:
     """Return all DeliveryPartnersByStore rows for a store. Read-only in v1
     — editing UI (add/remove a partner) comes in a future round.
@@ -797,10 +815,34 @@ def list_delivery_partners_by_store(store_id: int) -> List[Dict[str, Any]]:
             return []
 
 
+def _resolve_lookup_full(name: str, row_id: Any) -> Optional[Dict[str, Any]]:
+    """Look up a single lookup-table row by PK, return the FULL row dict
+    (not just id/label). Used by get_store_full() so the profile page can
+    show emails / phones / addresses for resolved FKs without N+1 fetches.
+    None on missing id or table-not-loaded — caller falls back gracefully.
+    """
+    if row_id is None or row_id == "":
+        return None
+    spec = _lookup_spec(name)
+    if not spec:
+        return None
+    table, pk = spec["table"], spec["pk"]
+    with get_connection() as conn:
+        try:
+            row = conn.execute(
+                f"SELECT * FROM {table} WHERE {pk} = ? LIMIT 1", (row_id,)
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        except sqlite3.OperationalError:
+            return None
+
+
 def get_store_full(store_id: int) -> Optional[Dict[str, Any]]:
     """Return Store + Physical + Technical + closures + delivery partners
-    in one payload. Lets the edit modal hydrate all sections from a single
-    round-trip."""
+    + GMs + resolved contact dicts in one payload. Lets the profile page
+    render rich contact info (emails/phones/addresses for AreaDir,
+    Primary, Billing, Catering Mgr, Company, Ownership) without making
+    a separate round-trip for each FK."""
     base = get_store(store_id)
     if not base:
         return None
@@ -808,6 +850,23 @@ def get_store_full(store_id: int) -> Optional[Dict[str, Any]]:
     technical         = get_store_technical(store_id)       or {}
     closures          = list_store_closures(store_id)
     delivery_partners = list_delivery_partners_by_store(store_id)
+    general_managers  = list_general_managers_by_store(store_id)
+
+    # Resolve each FK to its full row so the frontend can show emails
+    # and phones, not just names. Each value is either a dict or None.
+    contacts_resolved = {
+        "company":         _resolve_lookup_full("company",        base.get("StoreCompany")),
+        "ownership":       _resolve_lookup_full("ownership",      base.get("StoreOwnershipID")),
+        "area_director":   _resolve_lookup_full("areadir",        base.get("StoreAreaDirID")),
+        "fbc":             _resolve_lookup_full("fbc",            base.get("StoreFBCID")),
+        "fmm":             _resolve_lookup_full("fmm",            base.get("StoreFMMID")),
+        "catering_mgr":    _resolve_lookup_full("cateringmgr",    base.get("StoreCateringMgrID")),
+        "primary_contact": _resolve_lookup_full("primarycontact", base.get("StorePrimaryContact")),
+        "billing":         _resolve_lookup_full("billing",        base.get("StoreBillingID")),
+        "sysco":           _resolve_lookup_full("sysco",          base.get("StoreSyscoID")),
+        "dma":             _resolve_lookup_full("dma",            base.get("StoreDMAID")),
+    }
+
     return {
         "store":             base,
         "physical":          physical,
@@ -815,6 +874,8 @@ def get_store_full(store_id: int) -> Optional[Dict[str, Any]]:
         "closures":          closures,
         "closure_count":     len(closures),
         "delivery_partners": delivery_partners,
+        "general_managers":  general_managers,
+        "contacts":          contacts_resolved,
     }
 
 

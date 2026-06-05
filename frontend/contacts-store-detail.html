@@ -153,6 +153,80 @@
     }
     .card h3 .icon { font-size: 1rem; }
 
+    /* Contact-rich rows (used in Leadership + GM cards) */
+    .contact-grid {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.5rem 1rem;
+      align-items: start;
+    }
+    .contact-row {
+      display: contents;  /* lets children participate in the parent grid */
+    }
+    .contact-label {
+      color: var(--ink-muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      font-weight: 600;
+      padding-top: 0.15rem;
+    }
+    .contact-value {
+      color: var(--ink);
+      font-size: 0.9rem;
+      word-break: break-word;
+    }
+    .contact-name {
+      font-weight: 600;
+      color: var(--navy);
+    }
+    .contact-line {
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+      margin-top: 0.1rem;
+    }
+    .contact-line a {
+      color: var(--ink-muted);
+      text-decoration: none;
+    }
+    .contact-line a:hover {
+      color: var(--newks-red);
+      text-decoration: underline;
+    }
+    .contact-empty {
+      color: #C7CDD3;
+      font-style: italic;
+    }
+    .contact-secondary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem 1.5rem;
+      padding-top: 0.85rem;
+      margin-top: 0.85rem;
+      border-top: 1px solid var(--line-soft);
+    }
+    .contact-mini {
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+    }
+    .contact-mini-label {
+      color: var(--ink-muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      font-weight: 600;
+    }
+    .contact-mini-value {
+      color: var(--ink);
+      font-weight: 500;
+    }
+    .contact-mini-value em {
+      color: #C7CDD3;
+      font-weight: 400;
+    }
+
     /* Field rows inside cards */
     .field-list { display: flex; flex-direction: column; gap: 0.55rem; }
     .field-row {
@@ -485,24 +559,115 @@
       return `<span class="${cls}">${dot} ${escapeHtml(label)}</span>`;
     }
 
-    function cardLeadership(store) {
-      const rows = [
-        ['Company',             resolveLookup('company',        store.StoreCompany)],
-        ['Ownership',           resolveLookup('ownership',      store.StoreOwnershipID)],
-        ['Area Director',       resolveLookup('areadir',        store.StoreAreaDirID)],
-        ['FBC',                 resolveLookup('fbc',            store.StoreFBCID)],
-        ['FMM',                 resolveLookup('fmm',            store.StoreFMMID)],
-        ['Catering Manager',    resolveLookup('cateringmgr',    store.StoreCateringMgrID)],
-        ['Primary Contact',     resolveLookup('primarycontact', store.StorePrimaryContact)],
-        ['Billing Contact',     resolveLookup('billing',        store.StoreBillingID)],
-        ['DMA',                 resolveLookup('dma',            store.StoreDMAID)],
-        ['Sysco Market',        resolveLookup('sysco',          store.StoreSyscoID)],
+    // Each contact card shows name + (email/phone if available). Helpers below.
+    function fmtContact(person, opts = {}) {
+      // person: {name, email, phone} or null
+      // opts: { nameKey: 'Foo', emailKey: 'FooEmail', phoneKey: 'FooPhone' }
+      if (!person) return '<span class="contact-empty">—</span>';
+      const name  = person[opts.nameKey]  || person.name  || null;
+      const email = person[opts.emailKey] || person.email || null;
+      const phone = person[opts.phoneKey] || person.phone || null;
+      let html = '';
+      if (name)  html += `<div class="contact-name">${escapeHtml(name)}</div>`;
+      if (email) html += `<div class="contact-line"><a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></div>`;
+      if (phone) html += `<div class="contact-line"><a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a></div>`;
+      return html || '<span class="contact-empty">—</span>';
+    }
+
+    function contactBlock(label, person, fieldMap) {
+      // Renders one labeled person block inside a leadership card.
+      // fieldMap: { name: 'AreaDirName', email: 'AreaDirEmail', phone: 'AreaDirPhone' }
+      const display = person ? fmtContact({
+        name:  person[fieldMap.name],
+        email: person[fieldMap.email],
+        phone: person[fieldMap.phone],
+      }) : '<span class="contact-empty">—</span>';
+      return `<div class="contact-row">
+        <div class="contact-label">${escapeHtml(label)}</div>
+        <div class="contact-value">${display}</div>
+      </div>`;
+    }
+
+    function cardLeadership(store, contacts) {
+      // Use the server-resolved `contacts` payload (full rows) when available,
+      // falling back to bare names from the lookup cache for any FKs we don't
+      // have a richer record for.
+      const c = contacts || {};
+      const fallback = (name, id) => {
+        const label = resolveLookup(name, id);
+        return label ? { _label: label } : null;
+      };
+
+      const items = [
+        ['Area Director',    c.area_director,   { name: 'AreaDirName',    email: 'AreaDirEmail',    phone: null }],
+        ['Primary Contact',  c.primary_contact, { name: 'PrimaryName',    email: 'PrimaryEmail',    phone: 'PrimaryPhone' }],
+        ['Billing Contact',  c.billing,         { name: 'BillingName',    email: 'BillingEmail',    phone: 'BillingPhone' }],
+        ['Catering Manager', c.catering_mgr,    { name: 'CateringMgrName',email: 'CateringMgrEmail',phone: null }],
+        ['Company',          c.company,         { name: 'CompanyName',    email: 'CompanyEmail',    phone: 'CompanyPhone' }],
+        ['Ownership',        c.ownership,       { name: 'OwnerShipName',  email: 'OwnerShipEmail',  phone: null }],
       ];
+
+      // FBC/FMM/DMA/Sysco we only have names for in the lookup cache.
+      const idRows = [
+        ['FBC',          fallback('fbc',   store.StoreFBCID)],
+        ['FMM',          fallback('fmm',   store.StoreFMMID)],
+        ['DMA',          fallback('dma',   store.StoreDMAID)],
+        ['Sysco Market', fallback('sysco', store.StoreSyscoID)],
+      ];
+
+      let html = `<div class="card span-2">
+        <h3><span class="icon">👥</span> Leadership & Contacts</h3>
+        <div class="contact-grid">`;
+      items.forEach(([label, person, fmap]) => {
+        html += contactBlock(label, person, fmap);
+      });
+      html += `</div>
+        <div class="contact-secondary">`;
+      idRows.forEach(([label, item]) => {
+        const val = item ? item._label : null;
+        html += `<div class="contact-mini">
+          <span class="contact-mini-label">${escapeHtml(label)}</span>
+          <span class="contact-mini-value">${val ? escapeHtml(val) : '<em>—</em>'}</span>
+        </div>`;
+      });
+      html += `</div>
+      </div>`;
+      return html;
+    }
+
+    function cardGMs(gms) {
+      // Dedicated GM card — replaces the "Manager" quick-cell we used to
+      // show (which was sourced from StoreFirstName/LastName, an unreliable
+      // field). GMs come from the GeneralManagers table by StoreID FK.
+      if (!gms || gms.length === 0) {
+        return `<div class="card">
+          <h3><span class="icon">🧑‍🍳</span> General Manager</h3>
+          <div style="color: var(--ink-muted); font-size: 0.88rem; font-style: italic;">
+            No GM assigned in the contacts database.
+          </div>
+        </div>`;
+      }
+      const blocks = gms.map(g => {
+        const name = g.GeneralMgrName ||
+          [g.FirstName, g.LastName].filter(Boolean).join(' ').trim() ||
+          `GM #${g.UniqueID}`;
+        return `<div class="contact-row">
+          <div class="contact-label" style="visibility:hidden;">·</div>
+          <div class="contact-value">
+            <div class="contact-name">${escapeHtml(name)}</div>
+            ${g.EmailAddress
+              ? `<div class="contact-line"><a href="mailto:${escapeHtml(g.EmailAddress)}">${escapeHtml(g.EmailAddress)}</a></div>` : ''}
+            ${g.CellPhone
+              ? `<div class="contact-line"><a href="tel:${escapeHtml(g.CellPhone)}">${escapeHtml(g.CellPhone)}</a></div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+      const heading = gms.length === 1
+        ? 'General Manager'
+        : `General Managers (${gms.length})`;
       return `<div class="card">
-        <h3><span class="icon">👥</span> Leadership & Affiliation</h3>
-        <div class="field-list">
-          ${rows.map(([k, v]) => field(k, v)).join('')}
-        </div>
+        <h3><span class="icon">🧑‍🍳</span> ${heading}</h3>
+        <div class="contact-grid">${blocks}</div>
       </div>`;
     }
 
@@ -796,6 +961,8 @@
       const technical = full.technical || {};
       const closures  = full.closures  || [];
       const partners  = full.delivery_partners || [];
+      const gms       = full.general_managers || [];
+      const contacts  = full.contacts  || {};
 
       const isOpen = isStoreOpen(store);
       const years  = yearsBetween(store.StoreOpenDate);
@@ -811,8 +978,14 @@
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`
         : null;
 
-      const managerName = [store.StoreFirstName, store.StoreLastName]
-        .filter(Boolean).join(' ').trim() || null;
+      // Primary GM for the hero quick-strip. The full GM list appears later
+      // as its own card.
+      const primaryGM = gms[0] || null;
+      const gmName = primaryGM
+        ? (primaryGM.GeneralMgrName
+            || [primaryGM.FirstName, primaryGM.LastName].filter(Boolean).join(' ').trim()
+            || null)
+        : null;
 
       document.title = `${store.StoreName || `Store #${store.StoreID}`} — Newk's`;
 
@@ -878,23 +1051,26 @@
               </div>
             </div>
             <div class="quick-cell">
-              <div class="icon">👤</div>
+              <div class="icon">🧑‍🍳</div>
               <div>
-                <div class="label">Manager</div>
-                <div class="value">${managerName
-                  ? escapeHtml(managerName)
-                  : '<span class="empty">—</span>'}</div>
+                <div class="label">General Manager</div>
+                <div class="value">${gmName
+                  ? (primaryGM.EmailAddress
+                      ? `<a href="mailto:${escapeHtml(primaryGM.EmailAddress)}">${escapeHtml(gmName)}</a>`
+                      : escapeHtml(gmName))
+                  : '<span class="empty">Not assigned</span>'}</div>
               </div>
             </div>
           </div>
 
           <!-- Main card grid -->
           <div class="grid">
+            ${cardGMs(gms)}
             ${cardPhysical(physical)}
             ${cardToastStack(technical)}
             ${cardNetwork(technical)}
             ${cardVendors(technical)}
-            ${cardLeadership(store)}
+            ${cardLeadership(store, contacts)}
             ${cardCCProcessors(technical)}
             ${cardFlags(store)}
             ${cardHours(store)}
