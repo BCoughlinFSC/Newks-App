@@ -3743,7 +3743,20 @@
                 //    polls land safely even with multiple uvicorn workers.
                 let payload = null;
                 let lastDone = -1;
+                // Caps so we don't loop forever if something is fundamentally
+                // broken (vs the transient hiccups we're trying to absorb).
+                let consecutiveTransient = 0;   // resets on any clean poll
+                const MAX_TRANSIENT       = 10; // ~20-50s of consecutive failures
+                const pollStartTs         = Date.now();
+                const POLL_HARD_DEADLINE_MS = 30 * 60 * 1000;  // 30 min total
                 while (true) {
+                  // Total-time guardrail. A real multi-pick export takes
+                  // ~10 min worst case; 30 min means something hung.
+                  if (Date.now() - pollStartTs > POLL_HARD_DEADLINE_MS) {
+                    for (const t of types) out[t.key] = { label: t.label,
+                      error: `gave up after ${Math.round((Date.now()-pollStartTs)/60000)} min — job may still be running on server (job_id=${job_id})` };
+                    break;
+                  }
                   const pollRes = await fetch(
                     `/api/reports/picks/drill-down-all-stores-multi/status/${encodeURIComponent(job_id)}`,
                     { headers: getAuthHeaders(), signal: picksSignal },
@@ -3760,9 +3773,10 @@
                   // failures: log them but keep polling.
                   if (!pollRes.ok) {
                     const errText = await pollRes.text();
-                    // Transient HTTP errors (5xx) — retry. 4xx is fatal.
-                    if (pollRes.status >= 500 && pollRes.status < 600) {
-                      console.warn(`Poll ${pollRes.status} (transient), retrying:`, errText.slice(0, 100));
+                    // Transient HTTP errors (5xx) — retry, capped. 4xx is fatal.
+                    if (pollRes.status >= 500 && pollRes.status < 600 && consecutiveTransient < MAX_TRANSIENT) {
+                      consecutiveTransient++;
+                      console.warn(`Poll ${pollRes.status} (transient ${consecutiveTransient}/${MAX_TRANSIENT}), retrying:`, errText.slice(0, 100));
                       await sleepAbortable(2000, picksSignal);
                       continue;
                     }
@@ -3775,11 +3789,22 @@
                     job = JSON.parse(pollText);
                   } catch (parseErr) {
                     const tail = pollText.slice(-120).replace(/\s+/g, ' ');
-                    console.warn(`Poll body invalid JSON (${pollText.length} bytes, ends "${tail}") — retrying in 2s`);
-                    showStatus('info', `Pick reports… (transient network hiccup, retrying)`);
+                    if (consecutiveTransient >= MAX_TRANSIENT) {
+                      const msg = `/status returned ${MAX_TRANSIENT}+ consecutive invalid responses ` +
+                                  `(last: ${pollText.length} bytes ending "${tail}") — giving up. ` +
+                                  `Job may still be running on server (job_id=${job_id}).`;
+                      for (const t of types) out[t.key] = { label: t.label, error: msg };
+                      break;
+                    }
+                    consecutiveTransient++;
+                    console.warn(`Poll body invalid JSON (${pollText.length} bytes, ends "${tail}") — retry ${consecutiveTransient}/${MAX_TRANSIENT}`);
+                    showStatus('info', `Pick reports… (transient hiccup ${consecutiveTransient}/${MAX_TRANSIENT}, retrying)`);
                     await sleepAbortable(2000, picksSignal);
-                    continue;  // retry the same poll
+                    continue;
                   }
+                  // Clean response — reset the transient counter so a fresh
+                  // streak of hiccups later still gets the full retry budget.
+                  consecutiveTransient = 0;
                   if (job.status === 'running') {
                     const p = job.progress || {};
                     if (p.total) {
