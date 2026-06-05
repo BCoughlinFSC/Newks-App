@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Store Profile — Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /*
+     * Read-only "internal IT / operations portal" view for one store.
+     * Sister page to /contacts-stores.html (the editable list + form).
+     *
+     * Loads via ?id=<StoreID>. Fetches /api/contacts/stores/{id}/full plus
+     * the lookup tables we need to resolve FK IDs into human names, then
+     * lays out the master data as scannable cards instead of a maintenance
+     * form. Toast is foregrounded (since that's where Newk's is going);
+     * Aloha legacy fields live under a collapsed section at the bottom.
+     */
+    :root {
+      --newks-red:    #C41E3A;
+      --newks-red-d:  #A01A2E;
+      --ink:          #1F2937;
+      --ink-muted:    #6B7280;
+      --line:         #E5E7EB;
+      --line-soft:    #F3F4F6;
+      --bg:           #F8FAFC;
+      --card:         #FFFFFF;
+      --navy:         #1E3A5F;
+      --good:         #16A34A;
+      --good-bg:      #DCFCE7;
+      --warn:         #D97706;
+      --warn-bg:      #FEF3C7;
+      --bad:          #DC2626;
+      --bad-bg:       #FEE2E2;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+    }
+    a { color: var(--newks-red); }
+
+    /* ── Hero ───────────────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, var(--navy) 0%, #2B4D7A 100%);
+      color: #fff;
+      padding: 2rem 1.5rem;
+    }
+    .hero-inner {
+      max-width: 1200px; margin: 0 auto;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      flex-wrap: wrap; gap: 1.5rem;
+    }
+    .hero-main h1 {
+      margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em;
+    }
+    .hero-main .subtitle {
+      margin: 0.35rem 0 0; font-size: 1rem; color: rgba(255,255,255,0.8);
+    }
+    .hero-meta {
+      display: flex; gap: 0.5rem; flex-wrap: wrap;
+      margin-top: 0.9rem;
+    }
+    .hero-pill {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.3rem 0.7rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.25);
+      font-size: 0.82rem;
+      font-weight: 500;
+    }
+    .hero-pill.open    { background: rgba(34, 197, 94, 0.25);  border-color: rgba(34, 197, 94, 0.5); }
+    .hero-pill.closed  { background: rgba(248, 113, 113, 0.25);border-color: rgba(248, 113, 113, 0.5); }
+    .hero-pill.toast   { background: rgba(251, 146, 60, 0.25); border-color: rgba(251, 146, 60, 0.5); }
+
+    .hero-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .btn {
+      padding: 0.55rem 1rem; border-radius: 6px; font-size: 0.9rem;
+      font-weight: 600; cursor: pointer; text-decoration: none;
+      border: 1px solid transparent; display: inline-block;
+    }
+    .btn-ghost {
+      background: rgba(255,255,255,0.12); color: #fff;
+      border-color: rgba(255,255,255,0.3);
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.22); }
+    .btn-primary { background: var(--newks-red); color: #fff; }
+    .btn-primary:hover { background: var(--newks-red-d); }
+    .btn-secondary { background: #fff; color: var(--ink); border-color: var(--line); }
+    .btn-secondary:hover { background: var(--line-soft); }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+
+    .quick-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .quick-cell {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    .quick-cell .icon {
+      font-size: 1.3rem; line-height: 1;
+      background: var(--line-soft); border-radius: 8px;
+      width: 38px; height: 38px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .quick-cell .label {
+      font-size: 0.7rem; color: var(--ink-muted);
+      text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+    }
+    .quick-cell .value {
+      font-size: 0.95rem; color: var(--ink); font-weight: 500;
+      word-break: break-word;
+    }
+    .quick-cell .value a { text-decoration: none; }
+    .quick-cell .value a:hover { text-decoration: underline; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.2rem;
+    }
+    .card.span-2 { grid-column: span 2; }
+    @media (max-width: 700px) { .card.span-2 { grid-column: span 1; } }
+
+    .card h3 {
+      margin: 0 0 0.9rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--newks-red);
+      font-weight: 700;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .card h3 .icon { font-size: 1rem; }
+
+    /* Field rows inside cards */
+    .field-list { display: flex; flex-direction: column; gap: 0.55rem; }
+    .field-row {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.85rem;
+      align-items: baseline;
+    }
+    .field-label {
+      color: var(--ink-muted);
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+    .field-value {
+      color: var(--ink);
+      font-size: 0.92rem;
+      font-weight: 500;
+      text-align: right;
+      word-break: break-word;
+    }
+    .field-value.empty { color: #C7CDD3; font-weight: 400; font-style: italic; }
+
+    /* Stat tile grid (sq ft, seats, etc.) */
+    .stat-tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 0.6rem;
+    }
+    .stat-tile {
+      background: var(--line-soft);
+      border-radius: 8px;
+      padding: 0.7rem 0.6rem;
+      text-align: center;
+    }
+    .stat-tile .stat-value {
+      font-size: 1.35rem; font-weight: 700; color: var(--navy);
+      line-height: 1.2;
+    }
+    .stat-tile .stat-label {
+      font-size: 0.7rem; color: var(--ink-muted);
+      text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+      margin-top: 0.2rem;
+    }
+
+    /* Status / flag chips */
+    .chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.78rem; font-weight: 600;
+      background: var(--line-soft);
+      color: var(--ink-muted);
+      border: 1px solid var(--line);
+    }
+    .chip.on  { background: var(--good-bg); color: var(--good); border-color: rgba(22,163,74,0.2); }
+    .chip.off { background: var(--bad-bg);  color: var(--bad);  border-color: rgba(220,38,38,0.2); }
+
+    /* Link buttons inside cards */
+    .link-row {
+      display: flex; flex-wrap: wrap; gap: 0.4rem;
+      margin-top: 0.4rem;
+    }
+    .link-btn {
+      padding: 0.4rem 0.7rem;
+      background: var(--line-soft);
+      border-radius: 6px;
+      font-size: 0.82rem;
+      color: var(--navy);
+      text-decoration: none;
+      border: 1px solid var(--line);
+      display: inline-flex; align-items: center; gap: 0.35rem;
+    }
+    .link-btn:hover { background: #E5EDF6; }
+
+    /* Delivery partner tiles */
+    .partner-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.6rem;
+    }
+    .partner {
+      padding: 0.7rem 0.85rem;
+      background: var(--line-soft);
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .partner .name { font-weight: 700; color: var(--navy); margin-bottom: 0.15rem; }
+    .partner .mid  { font-size: 0.78rem; color: var(--ink-muted); font-family: ui-monospace, monospace; }
+    .partner .url  { font-size: 0.78rem; margin-top: 0.3rem; word-break: break-all; }
+
+    /* Hours of operation */
+    .hours-table {
+      width: 100%; border-collapse: collapse; font-size: 0.85rem;
+    }
+    .hours-table td {
+      padding: 0.3rem 0; border-bottom: 1px solid var(--line-soft);
+    }
+    .hours-table tr:last-child td { border-bottom: 0; }
+    .hours-table td:first-child {
+      color: var(--ink-muted); width: 5rem; font-weight: 500;
+    }
+    .hours-table td:last-child { text-align: right; }
+
+    /* Timeline-ish for key dates */
+    .timeline { display: flex; flex-direction: column; gap: 0.55rem; }
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 0.75rem 1fr max-content;
+      gap: 0.6rem;
+      align-items: center;
+    }
+    .timeline-dot {
+      width: 0.6rem; height: 0.6rem; border-radius: 50%;
+      background: var(--newks-red);
+    }
+    .timeline-dot.muted { background: var(--line); }
+    .timeline-item .label { color: var(--ink); font-size: 0.88rem; }
+    .timeline-item .date  { color: var(--ink-muted); font-size: 0.82rem; }
+
+    /* Collapsible sections */
+    details.collapsible {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0;
+      margin-bottom: 1rem;
+    }
+    details.collapsible > summary {
+      cursor: pointer;
+      padding: 1rem 1.2rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--ink-muted);
+      list-style: none;
+      display: flex; align-items: center; gap: 0.5rem;
+      user-select: none;
+    }
+    details.collapsible > summary::-webkit-details-marker { display: none; }
+    details.collapsible > summary::after {
+      content: "▾";
+      margin-left: auto;
+      color: var(--ink-muted);
+      transition: transform 0.2s;
+    }
+    details.collapsible[open] > summary::after { transform: rotate(180deg); }
+    details.collapsible > div.body {
+      padding: 0 1.2rem 1.2rem;
+    }
+
+    /* Closure history compact table */
+    .closures {
+      font-size: 0.83rem;
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .closures th, .closures td {
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+    }
+    .closures th {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      letter-spacing: 0.4px;
+      background: var(--line-soft);
+    }
+
+    /* Footer + state */
+    .audit {
+      color: var(--ink-muted);
+      font-size: 0.82rem;
+      padding: 1rem 0;
+      text-align: center;
+      border-top: 1px solid var(--line);
+      margin-top: 0.5rem;
+    }
+    .loading, .error-state {
+      max-width: 600px; margin: 4rem auto;
+      text-align: center; padding: 2rem;
+      background: var(--card); border-radius: 12px; border: 1px solid var(--line);
+    }
+    .error-state {
+      background: #FEF2F2; border-color: #FECACA; color: #991B1B;
+    }
+
+    @media (max-width: 700px) {
+      .hero-main h1 { font-size: 1.5rem; }
+      main { padding: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="loading">Loading store profile…</div>
+  </div>
+
+  <script>
+    // ──────────────────────────────────────────────────────────────────
+    // Read ?id= from URL
+    // ──────────────────────────────────────────────────────────────────
+    const params  = new URLSearchParams(window.location.search);
+    const STORE_ID = parseInt(params.get('id') || '', 10);
+
+    const authToken = localStorage.getItem('auth_token');
+    let currentUser = null;
+    try { currentUser = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+      return h;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Lookup cache — same pattern as contacts-stores.html. Resolves FK
+    // IDs to human-readable names without N+1 fetches.
+    // Keys here match the backend LOOKUPS dict.
+    // ──────────────────────────────────────────────────────────────────
+    const FK_FIELDS = {
+      StoreCompany:        'company',
+      StoreAreaDirID:      'areadir',
+      StoreFBCID:          'fbc',
+      StoreFMMID:          'fmm',
+      StoreDMAID:          'dma',
+      StoreOwnershipID:    'ownership',
+      StoreCateringMgrID:  'cateringmgr',
+      StoreBillingID:      'billing',
+      StorePrimaryContact: 'primarycontact',
+      StoreSyscoID:        'sysco',
+    };
+    const TECH_FK_FIELDS = {
+      fkPOSTypeID:      'postype',
+      fkKioskTypeID:    'kiosktype',
+      FKHSIServiceType: 'hsiservicetype',
+      FireWallProvider: 'firewall',
+      PhoneVendorID:    'phonevendor',
+      CameraVendorID:   'cameravendor',
+      AVSoftwareTypeID: 'avsoftwaretype',
+    };
+    const LOOKUP_CACHE = {};   // { name: { id: 'label', ... } }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    function resolveLookup(lookupName, id) {
+      if (id === null || id === undefined || id === '') return null;
+      const map = LOOKUP_CACHE[lookupName];
+      if (!map) return `#${id}`;            // lookup didn't load
+      return map[id] || `#${id}`;           // unknown id, show raw
+    }
+
+    async function loadAllLookups() {
+      const names = new Set([...Object.values(FK_FIELDS), ...Object.values(TECH_FK_FIELDS),
+                             'deliverypartner']);
+      await Promise.all([...names].map(async name => {
+        try {
+          const r = await fetch(`/api/contacts/lookups/${name}`, { headers: authHeaders() });
+          if (!r.ok) { LOOKUP_CACHE[name] = {}; return; }
+          const rows = await r.json();
+          LOOKUP_CACHE[name] = Object.fromEntries(rows.map(r => [r.id, r.label]));
+        } catch {
+          LOOKUP_CACHE[name] = {};
+        }
+      }));
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Formatting helpers
+    // ──────────────────────────────────────────────────────────────────
+    function formatDate(v) {
+      if (!v) return null;
+      const s = String(v);
+      if (s.startsWith('9999') || s.startsWith('1900')) return null;  // sentinel
+      const d = new Date(s);
+      return isNaN(d) ? s : d.toLocaleDateString(undefined,
+        { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+    function yearsBetween(openDate) {
+      if (!openDate) return null;
+      const d = new Date(openDate);
+      if (isNaN(d)) return null;
+      const years = (Date.now() - d.getTime()) / (1000*60*60*24*365.25);
+      return Math.floor(years);
+    }
+    function isStoreOpen(store) {
+      if (store.StoreCloseDate) {
+        const d = new Date(store.StoreCloseDate);
+        if (!isNaN(d) && d <= new Date()) return false;
+      }
+      const status = (store.StoreStatus || '').toLowerCase();
+      if (status.includes('closed') || status.includes('retire')) return false;
+      return true;
+    }
+    function flagOn(v) {
+      return v === 1 || v === true || v === '1' || v === 'true';
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Card-content builders. Each returns an HTML string for ONE card,
+    // or empty string if there's nothing useful to show.
+    // ──────────────────────────────────────────────────────────────────
+    function field(label, value, opts = {}) {
+      const empty = value === null || value === undefined || value === '';
+      const cls = empty ? 'field-value empty' : 'field-value';
+      const display = empty ? (opts.placeholder || '—') : value;
+      return `<div class="field-row">
+        <div class="field-label">${escapeHtml(label)}</div>
+        <div class="${cls}">${opts.html ? display : escapeHtml(display)}</div>
+      </div>`;
+    }
+
+    function statTile(value, label) {
+      const v = (value === null || value === undefined || value === '') ? '—' : value;
+      return `<div class="stat-tile">
+        <div class="stat-value">${escapeHtml(v)}</div>
+        <div class="stat-label">${escapeHtml(label)}</div>
+      </div>`;
+    }
+
+    function chip(label, on) {
+      const cls = on ? 'chip on' : 'chip off';
+      const dot = on ? '✓' : '✕';
+      return `<span class="${cls}">${dot} ${escapeHtml(label)}</span>`;
+    }
+
+    function cardLeadership(store) {
+      const rows = [
+        ['Company',             resolveLookup('company',        store.StoreCompany)],
+        ['Ownership',           resolveLookup('ownership',      store.StoreOwnershipID)],
+        ['Area Director',       resolveLookup('areadir',        store.StoreAreaDirID)],
+        ['FBC',                 resolveLookup('fbc',            store.StoreFBCID)],
+        ['FMM',                 resolveLookup('fmm',            store.StoreFMMID)],
+        ['Catering Manager',    resolveLookup('cateringmgr',    store.StoreCateringMgrID)],
+        ['Primary Contact',     resolveLookup('primarycontact', store.StorePrimaryContact)],
+        ['Billing Contact',     resolveLookup('billing',        store.StoreBillingID)],
+        ['DMA',                 resolveLookup('dma',            store.StoreDMAID)],
+        ['Sysco Market',        resolveLookup('sysco',          store.StoreSyscoID)],
+      ];
+      return `<div class="card">
+        <h3><span class="icon">👥</span> Leadership & Affiliation</h3>
+        <div class="field-list">
+          ${rows.map(([k, v]) => field(k, v)).join('')}
+        </div>
+      </div>`;
+    }
+
+    function cardPhysical(physical) {
+      const p = physical || {};
+      const totalSeats = (parseInt(p.IndoorSeats) || 0) + (parseInt(p.ExteriorSeats) || 0);
+      return `<div class="card">
+        <h3><span class="icon">📐</span> Physical Footprint</h3>
+        <div class="stat-tiles">
+          ${statTile(p.SquareFeet, 'Sq Ft')}
+          ${statTile(totalSeats || null, 'Total Seats')}
+          ${statTile(p.NumParkingSpots, 'Parking')}
+          ${statTile(p.NumPOSTerms, 'POS Terms')}
+        </div>
+        <div class="field-list" style="margin-top: 1rem;">
+          ${field('Indoor Seats',  p.IndoorSeats)}
+          ${field('Exterior Seats', p.ExteriorSeats)}
+          ${field('Building Type', p.TypeOfBuilding)}
+          ${field('Drive-Thru',    p.DriveThru)}
+          ${field('Cooler Location', p.CoolerLocation)}
+          ${field('Grab-N-Go Cooler', p.GNGCoolerSize)}
+          ${field('Classification', p.Classification)}
+        </div>
+      </div>`;
+    }
+
+    function cardToastStack(tech) {
+      const t = tech || {};
+      return `<div class="card">
+        <h3><span class="icon">🍞</span> Toast POS Stack</h3>
+        <div class="stat-tiles">
+          ${statTile(t.ToastKDSCount,      'KDS')}
+          ${statTile(t.ToastHandHeldCount, 'Handhelds')}
+          ${statTile(t.PrinterCount,       'Printers')}
+          ${statTile(t.NumKiosks,          'Kiosks')}
+        </div>
+        <div class="field-list" style="margin-top: 1rem;">
+          ${field('POS Type',         resolveLookup('postype', t.fkPOSTypeID))}
+          ${field('Toast POS Version', t.ToastPOSVersion)}
+          ${field('Toast Pay Version', t.ToastPayVersion)}
+          ${field('Kiosk Type',       resolveLookup('kiosktype', t.fkKioskTypeID))}
+        </div>
+      </div>`;
+    }
+
+    function cardNetwork(tech) {
+      const t = tech || {};
+      return `<div class="card">
+        <h3><span class="icon">🌐</span> Network & Connectivity</h3>
+        <div class="field-list">
+          ${field('ISP',               t.ISPName)}
+          ${field('Service Type',      resolveLookup('hsiservicetype', t.FKHSIServiceType))}
+          ${field('Bandwidth',         t.Bandwidth)}
+          ${field('External IP',       t.ExternalIP)}
+          ${field('Management IP',     t.MgmtIP)}
+          ${field('Static IP Count',   t.StaticIPCount)}
+          ${field('Firewall Provider', resolveLookup('firewall', t.FireWallProvider))}
+          ${field('Managed Switch',    cleanSelectOne(t.ManagedSwitch))}
+          ${field('Failover',          cleanSelectOne(t.Failover))}
+          ${field('Access Point',      cleanSelectOne(t.AccessPoint))}
+        </div>
+      </div>`;
+    }
+
+    function cleanSelectOne(v) {
+      // SQL Server has placeholder "*Select One" strings from Don's old PHP
+      // form for fields the user never filled in. Treat those as empty.
+      if (!v) return null;
+      if (String(v).trim() === '*Select One') return null;
+      return v;
+    }
+
+    function cardVendors(tech) {
+      const t = tech || {};
+      return `<div class="card">
+        <h3><span class="icon">🏪</span> Hardware & Vendors</h3>
+        <div class="field-list">
+          ${field('Phone Vendor',
+                  resolveLookup('phonevendor', t.PhoneVendorID) ||
+                  (t.OtherPhoneVendor ? `(other) ${t.OtherPhoneVendor}` : null))}
+          ${field('Camera Vendor',     resolveLookup('cameravendor', t.CameraVendorID))}
+          ${field('Oven',              t.Oven)}
+          ${field('A/V Software',      resolveLookup('avsoftwaretype', t.AVSoftwareTypeID))}
+          ${field('A/V Version',       t.AVSoftwareVersion)}
+          ${field('A/V Installed',     formatDate(t.AVSoftwareInstallDate))}
+          ${field('A/V Expires',       formatDate(t.AVSoftwareExpirationDate))}
+        </div>
+      </div>`;
+    }
+
+    function cardCCProcessors(tech) {
+      const t = tech || {};
+      const flags = [
+        ['In-House',      flagOn(t.CCProcessorInHouse)],
+        ['Online (OLO)',  flagOn(t.CCProcessorOLO)],
+        ['Monkey Media',  flagOn(t.CCProcessorMM)],
+        ['Amex Direct',   flagOn(t.CCProcessorAmexDirect)],
+      ];
+      return `<div class="card">
+        <h3><span class="icon">💳</span> CC Processors</h3>
+        <div class="chip-row">
+          ${flags.map(([l, on]) => chip(l, on)).join('')}
+        </div>
+      </div>`;
+    }
+
+    function cardOnline(store, deliveryPartners) {
+      const partnerLookup = LOOKUP_CACHE['deliverypartner'] || {};
+      const partners = (deliveryPartners || []).map(p => {
+        // FK column varies — try both common names
+        const partId = p.DeliveryPartnerID ?? p.DelivPartID;
+        const name = partnerLookup[partId] || `Partner #${partId ?? '?'}`;
+        return { name, mid: p.IdAtDeliveryPartner, url: p.DeliveryPartnerURL };
+      });
+
+      const links = [
+        ['OLO',              store.OLOLink],
+        ['Catering OLO',     store.CateringOLOLink],
+        ['Catering Menu',    store.CateringMenuURL],
+        ['Careers',          store.StoreCareers],
+      ].filter(([_, u]) => u);
+
+      let html = `<div class="card span-2">
+        <h3><span class="icon">🌍</span> Online Ordering & Delivery</h3>`;
+
+      if (links.length) {
+        html += `<div class="link-row">
+          ${links.map(([label, url]) =>
+            `<a class="link-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">↗ ${escapeHtml(label)}</a>`
+          ).join('')}
+        </div>`;
+      } else {
+        html += `<div style="color:var(--ink-muted);font-size:0.88rem;">No online links configured.</div>`;
+      }
+
+      if (partners.length) {
+        html += `<div style="margin-top:1rem;">
+          <div class="field-label" style="margin-bottom:0.5rem;">Delivery Partners (${partners.length})</div>
+          <div class="partner-grid">
+            ${partners.map(p => `<div class="partner">
+              <div class="name">${escapeHtml(p.name)}</div>
+              ${p.mid ? `<div class="mid">Merchant: ${escapeHtml(p.mid)}</div>` : ''}
+              ${p.url ? `<div class="url"><a href="${escapeHtml(p.url)}" target="_blank" rel="noopener">↗ Open</a></div>` : ''}
+            </div>`).join('')}
+          </div>
+        </div>`;
+      } else {
+        html += `<div style="margin-top:1rem; color:var(--ink-muted); font-size:0.88rem;">No third-party delivery partners assigned.</div>`;
+      }
+
+      html += `</div>`;
+      return html;
+    }
+
+    function cardHours(store) {
+      const raw = store.StoreHoursOfOperation;
+      if (!raw) return '';
+      // Format like "SUN 10:30 a-08:00 p|MON 10:30 a-08:00 p|..." → table
+      const segments = String(raw).split('|').map(s => s.trim()).filter(Boolean);
+      const rows = segments.map(seg => {
+        const m = seg.match(/^(\S+)\s+(.+)$/);
+        return m ? [m[1], m[2]] : [seg, ''];
+      });
+      return `<div class="card">
+        <h3><span class="icon">🕒</span> Hours of Operation</h3>
+        <table class="hours-table">
+          ${rows.map(([day, hours]) =>
+            `<tr><td>${escapeHtml(day)}</td><td>${escapeHtml(hours)}</td></tr>`
+          ).join('')}
+        </table>
+      </div>`;
+    }
+
+    function cardFlags(store) {
+      const items = [
+        ['Sells Alcohol',     flagOn(store.StoreAlcFlag)],
+        ['Comping Store',     flagOn(store.StoreIsComping)],
+        ['Monkey Store',      flagOn(store.IsMonkeyStore)],
+        ['Active CrunchTime', flagOn(store.ActiveCrunchtime)],
+      ];
+      return `<div class="card">
+        <h3><span class="icon">🚩</span> Operations Flags</h3>
+        <div class="chip-row">
+          ${items.map(([l, on]) => chip(l, on)).join('')}
+        </div>
+      </div>`;
+    }
+
+    function cardKeyDates(store) {
+      const items = [
+        ['Store Opened',          formatDate(store.StoreOpenDate)],
+        ['Toast Go-Live',         formatDate(store.ToastLive)],
+        ['Monkey Media Go-Live',  formatDate(store.MonkeyLiveDate)],
+        ['Refresh Close',         formatDate(store.RefreshCloseDate)],
+        ['Refresh Re-Open',       formatDate(store.RefreshReOpenDate)],
+        ['Ownership Change',      formatDate(store.OwnershipChangeDate)],
+        ['Store Closed',          formatDate(store.StoreCloseDate)],
+      ].filter(([_, v]) => v);
+      if (!items.length) return '';
+      return `<div class="card">
+        <h3><span class="icon">📅</span> Key Dates</h3>
+        <div class="timeline">
+          ${items.map(([label, date]) => `
+            <div class="timeline-item">
+              <div class="timeline-dot"></div>
+              <div class="label">${escapeHtml(label)}</div>
+              <div class="date">${escapeHtml(date)}</div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }
+
+    function cardClosures(closures) {
+      if (!closures || !closures.length) return '';
+      const pickKeys = ['ClosureDate','ReopenDate','ClosureType','ClosureReason','Notes'];
+      const cols = pickKeys.filter(c => closures.some(r => r[c] != null));
+      const fallback = cols.length ? cols : Object.keys(closures[0]).slice(0, 4);
+      return `<div class="card span-2">
+        <h3><span class="icon">🚧</span> Closure History (${closures.length})</h3>
+        <table class="closures">
+          <thead><tr>${fallback.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${closures.slice(0, 25).map(r =>
+              `<tr>${fallback.map(c => `<td>${escapeHtml(r[c] ?? '')}</td>`).join('')}</tr>`
+            ).join('')}
+          </tbody>
+        </table>
+        ${closures.length > 25
+          ? `<div style="font-size:0.78rem;color:var(--ink-muted);margin-top:0.4rem;">…and ${closures.length - 25} more.</div>`
+          : ''}
+      </div>`;
+    }
+
+    function cardLegacyAloha(tech) {
+      const t = tech || {};
+      const items = [
+        ['POS Key #',           t.POSKey],
+        ['Aloha Version',       t.AlohaVersion],
+        ['EDC Version',         t.EDCVersion],
+        ['ATO Version',         t.ATOVersion],
+        ['CMC Version',         t.CMCVersion],
+        ['CFC Version',         t.CFCVersion],
+        ['SV Version',          t.SVVersion],
+        ['Software Last Update', formatDate(t.WarezLastUpdated)],
+        ['POS Terminals (current)', t.NumPOSTerms],
+        ['Time Zone offset',    t.TimeZone],
+        ['Observes DST',        flagOn(t.DST) ? 'Yes' : 'No'],
+        ['KEA Flag',            flagOn(t.KEA) ? 'Yes' : 'No'],
+      ];
+      const hasAny = items.some(([_, v]) => v !== null && v !== undefined && v !== '');
+      if (!hasAny) return '';
+      return `<details class="collapsible">
+        <summary>📜 Legacy (Aloha) Tech Info</summary>
+        <div class="body">
+          <div class="field-list">
+            ${items.map(([k, v]) => field(k, v)).join('')}
+          </div>
+        </div>
+      </details>`;
+    }
+
+    function cardExternalIDs(store, tech) {
+      const items = [
+        ['Catering Forms ID',     store.StoreCFID],
+        ['Catering Forms PW',     store.StoreCFPW],
+        ['POS Software Key',      store.POSSoftwareKeyID],
+        ['Region ID',             store.StoreRegionID],
+        ['System ID',             store.StoreSystemID],
+        ['District ID',           store.StoreDistrictID],
+        ['Division ID',           store.StoreDivisionID],
+        ['Menu Board Type',       store.StoreMenuBoardType],
+        ['Knapp Geography',       store.KnappGeo],
+      ].filter(([_, v]) => v !== null && v !== undefined && v !== '' && v !== 0);
+      if (!items.length) return '';
+      return `<details class="collapsible">
+        <summary>🔖 External IDs & References</summary>
+        <div class="body">
+          <div class="field-list">
+            ${items.map(([k, v]) => field(k, v)).join('')}
+          </div>
+        </div>
+      </details>`;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Render
+    // ──────────────────────────────────────────────────────────────────
+    function render(full) {
+      const store     = full.store     || {};
+      const physical  = full.physical  || {};
+      const technical = full.technical || {};
+      const closures  = full.closures  || [];
+      const partners  = full.delivery_partners || [];
+
+      const isOpen = isStoreOpen(store);
+      const years  = yearsBetween(store.StoreOpenDate);
+      const onToast = !!store.ToastLive;
+
+      // Build address line
+      const addr = [
+        store.StoreAdd1, store.StoreAdd2, store.StoreAdd3,
+        [store.StoreCity, store.StoreState].filter(Boolean).join(', '),
+        store.StoreZip,
+      ].filter(Boolean).join(', ');
+      const mapsLink = addr
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`
+        : null;
+
+      const managerName = [store.StoreFirstName, store.StoreLastName]
+        .filter(Boolean).join(' ').trim() || null;
+
+      document.title = `${store.StoreName || `Store #${store.StoreID}`} — Newk's`;
+
+      const html = `
+        <div class="hero">
+          <div class="hero-inner">
+            <div class="hero-main">
+              <h1>${escapeHtml(store.StoreName || `Store #${store.StoreID}`)}</h1>
+              <div class="subtitle">
+                Store #${escapeHtml(store.StoreID)}
+                ${store.StoreCity && store.StoreState
+                  ? ` · ${escapeHtml(store.StoreCity)}, ${escapeHtml(store.StoreState)}`
+                  : ''}
+              </div>
+              <div class="hero-meta">
+                <span class="hero-pill ${isOpen ? 'open' : 'closed'}">
+                  ${isOpen ? '● Open' : '● Closed'}
+                </span>
+                ${onToast ? `<span class="hero-pill toast">🍞 On Toast</span>` : ''}
+                ${years !== null ? `<span class="hero-pill">${years} yr${years === 1 ? '' : 's'} open</span>` : ''}
+                ${store.StoreCompany ? `<span class="hero-pill">${escapeHtml(resolveLookup('company', store.StoreCompany) || '')}</span>` : ''}
+              </div>
+            </div>
+            <div class="hero-actions">
+              <a href="/contacts-stores.html" class="btn btn-ghost">← All Stores</a>
+              ${isAdmin
+                ? `<a href="/contacts-stores.html#edit-${store.StoreID}" class="btn btn-primary">✏ Edit Store</a>`
+                : ''}
+            </div>
+          </div>
+        </div>
+
+        <main>
+          <!-- Quick contact strip -->
+          <div class="quick-row">
+            <div class="quick-cell">
+              <div class="icon">📞</div>
+              <div>
+                <div class="label">Phone</div>
+                <div class="value">${store.StorePhone
+                  ? `<a href="tel:${escapeHtml(store.StorePhone)}">${escapeHtml(store.StorePhone)}</a>`
+                  : '<span class="empty">—</span>'}</div>
+              </div>
+            </div>
+            <div class="quick-cell">
+              <div class="icon">✉️</div>
+              <div>
+                <div class="label">Email</div>
+                <div class="value">${store.StoreEmail
+                  ? `<a href="mailto:${escapeHtml(store.StoreEmail)}">${escapeHtml(store.StoreEmail)}</a>`
+                  : '<span class="empty">—</span>'}</div>
+              </div>
+            </div>
+            <div class="quick-cell">
+              <div class="icon">📍</div>
+              <div>
+                <div class="label">Address</div>
+                <div class="value">${addr
+                  ? (mapsLink
+                      ? `<a href="${mapsLink}" target="_blank" rel="noopener">${escapeHtml(addr)} ↗</a>`
+                      : escapeHtml(addr))
+                  : '<span class="empty">—</span>'}</div>
+              </div>
+            </div>
+            <div class="quick-cell">
+              <div class="icon">👤</div>
+              <div>
+                <div class="label">Manager</div>
+                <div class="value">${managerName
+                  ? escapeHtml(managerName)
+                  : '<span class="empty">—</span>'}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main card grid -->
+          <div class="grid">
+            ${cardPhysical(physical)}
+            ${cardToastStack(technical)}
+            ${cardNetwork(technical)}
+            ${cardVendors(technical)}
+            ${cardLeadership(store)}
+            ${cardCCProcessors(technical)}
+            ${cardFlags(store)}
+            ${cardHours(store)}
+            ${cardKeyDates(store)}
+            ${cardOnline(store, partners)}
+            ${cardClosures(closures)}
+          </div>
+
+          <!-- Collapsible / less-used sections -->
+          ${cardLegacyAloha(technical)}
+          ${cardExternalIDs(store, technical)}
+
+          <div class="audit">
+            Last edited
+            ${store.LastUpdatedBy ? `by <strong>${escapeHtml(store.LastUpdatedBy)}</strong>` : ''}
+            ${store.LastUpdated ? `on ${escapeHtml(formatDate(store.LastUpdated) || store.LastUpdated)}` : ''}
+            · Store ID ${escapeHtml(store.StoreID)}
+          </div>
+        </main>
+      `;
+      document.getElementById('root').innerHTML = html;
+    }
+
+    async function boot() {
+      if (!STORE_ID || isNaN(STORE_ID)) {
+        document.getElementById('root').innerHTML =
+          '<div class="error-state">No store id specified. Open from <a href="/contacts-stores.html">the store list</a>.</div>';
+        return;
+      }
+      try {
+        await loadAllLookups();
+        const r = await fetch(`/api/contacts/stores/${STORE_ID}/full`, { headers: authHeaders() });
+        if (r.status === 401) {
+          document.getElementById('root').innerHTML =
+            '<div class="error-state">Sign in required. <a href="/">Sign in</a> to view stores.</div>';
+          return;
+        }
+        if (r.status === 404) {
+          document.getElementById('root').innerHTML =
+            `<div class="error-state">Store #${STORE_ID} not found.</div>`;
+          return;
+        }
+        if (!r.ok) throw new Error(await r.text());
+        const full = await r.json();
+        render(full);
+      } catch (e) {
+        document.getElementById('root').innerHTML =
+          `<div class="error-state">Couldn't load store: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

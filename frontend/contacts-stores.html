@@ -83,6 +83,20 @@
     tr.row { cursor: pointer; }
     tr.row:hover { background: #FEF2F2; }
     tr.row:last-child td { border-bottom: 0; }
+    .view-link {
+      display: inline-block;
+      padding: 0.25rem 0.55rem;
+      font-size: 0.8rem;
+      color: #1E3A5F;
+      background: #F3F4F6;
+      border: 1px solid #E5E7EB;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .view-link:hover { background: #E5EDF6; border-color: #C7D2DE; }
+    td.row-actions { text-align: right; }
     .empty {
       padding: 2rem; text-align: center; color: #9CA3AF; font-style: italic;
     }
@@ -494,6 +508,16 @@
         }
         allRows = await r.json();
         render();
+        // Honor #edit-<storeId> in the URL — lets the read-only detail
+        // page link back here with the edit modal pre-opened so the user
+        // doesn't have to re-find the store in the list.
+        const m = (window.location.hash || '').match(/^#edit-(\d+)/);
+        if (m) {
+          const id = parseInt(m[1], 10);
+          if (allRows.some(r => r.StoreID === id)) {
+            openEditModal(id);
+          }
+        }
       } catch (e) {
         wrap.innerHTML = `<div class="error">Network error: ${escapeHtml(e.message)}</div>`;
       }
@@ -549,10 +573,12 @@
         ['StoreOpenDate', 'Open'],
         ['LastUpdatedBy', 'Last Edited By'],
         ['LastUpdated',   'When'],
+        ['',              ''],   // actions column — no sort
       ];
 
       let html = '<table><thead><tr>';
       headers.forEach(([col, label]) => {
+        if (!col) { html += '<th></th>'; return; }
         const ind = (sortCol === col) ? `<span class="sort-indicator">${sortDir>0?'▲':'▼'}</span>` : '';
         html += `<th data-col="${col}">${label}${ind}</th>`;
       });
@@ -562,6 +588,10 @@
           ? new Date(r.LastUpdated).toLocaleDateString()
           : '';
         const statusBadge = statusBadgeHtml(r);
+        // View link goes to the read-only profile page. Row click (anywhere
+        // else) still opens the edit modal — admins use it as the primary
+        // workflow; the View link is for non-admins or quick scans.
+        const viewBtn = `<a class="view-link" href="/contacts-store-detail.html?id=${escapeHtml(r.StoreID)}" title="Open profile view" onclick="event.stopPropagation();">View →</a>`;
         html += `<tr class="row" data-id="${r.StoreID}">
           <td>${escapeHtml(r.StoreID ?? '')}</td>
           <td><strong>${escapeHtml(r.StoreName ?? '')}</strong></td>
@@ -571,6 +601,7 @@
           <td>${escapeHtml(r.StoreOpenDate ?? '')}</td>
           <td>${escapeHtml(r.LastUpdatedBy ?? '')}</td>
           <td>${escapeHtml(lastWhen)}</td>
+          <td class="row-actions">${viewBtn}</td>
         </tr>`;
       });
       html += '</tbody></table>';
