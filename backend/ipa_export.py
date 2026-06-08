@@ -527,18 +527,39 @@ async def build_ipa_rows(
             ly_d_iso = meta["ly_date"]
             ly_d = date.fromisoformat(ly_d_iso) if ly_d_iso else None
 
-            # One batched ERA call per date — all stores at once — avoids
-            # rate-limit rejections that a per-store fan-out triggers at chain scale.
-            try:
-                ty_by_store = await _era_dining_option_day_batch(
-                    client, d, store_guids,
-                    request_toast_report=request_toast_report,
-                    fetch_toast_report=fetch_toast_report,
-                )
-            except Exception as exc:
-                logger.warning("IPA export: TY batch fetch failed (date=%s, stores=%d): %s",
-                               d_iso, len(store_guids), exc)
+            # Optimization for historical backfills: if EVERY selected store
+            # was not yet on Toast on this date, skip the Toast ERA call
+            # entirely and go straight to the Aloha-TY fallback below.
+            # Saves ~3 min/date of pointless retries on Toast 429s (the API
+            # rate-limits hard when we ask for data on dates where nothing
+            # was sending it any orders yet).
+            #
+            # Condition: every store has a KNOWN switchover_date AND that
+            # date is strictly after d_iso. If we don't have a switchover
+            # for a store, we err on the side of calling Toast in case the
+            # switchover map is stale.
+            all_pre_switchover = all(
+                store_meta[g]["switchover"] and d_iso < store_meta[g]["switchover"]
+                for g in store_guids
+            )
+
+            if all_pre_switchover:
+                logger.info("IPA export: %s — all %d stores pre-switchover, skipping Toast ERA",
+                            d_iso, len(store_guids))
                 ty_by_store = {g: [] for g in store_guids}
+            else:
+                # One batched ERA call per date — all stores at once — avoids
+                # rate-limit rejections that a per-store fan-out triggers at chain scale.
+                try:
+                    ty_by_store = await _era_dining_option_day_batch(
+                        client, d, store_guids,
+                        request_toast_report=request_toast_report,
+                        fetch_toast_report=fetch_toast_report,
+                    )
+                except Exception as exc:
+                    logger.warning("IPA export: TY batch fetch failed (date=%s, stores=%d): %s",
+                                   d_iso, len(store_guids), exc)
+                    ty_by_store = {g: [] for g in store_guids}
 
             # LY batch — only for stores whose Toast switchover predates ly_date.
             ly_eligible = [
