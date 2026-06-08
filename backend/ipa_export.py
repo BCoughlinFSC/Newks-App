@@ -11,8 +11,12 @@ Row composition per (date D, store S): one row per unique IPA
 (SEGMENT_NAME, ORDER_CHANNEL) bucket, with TY and LY both filled when
 the data is available.
 
-  TY:  always Toast ERA on D, grouped by DINING_OPTION and collapsed
-       onto IPA segments via _IPA_SEGMENT_MAP.
+  TY:  Toast ERA on D when the store was on Toast (switchover <= D and
+       Toast actually returned rows). Otherwise — for historical backfills
+       and stores that never made it onto Toast — falls back to Aloha
+       channel-column data at D, mapped to IPA segments via
+       _ALOHA_TO_IPA_SEGMENT. Same helper that builds the LY-Aloha rows
+       (just keyed into NetSalesTY/TransTY in the output instead of LY).
   LY:  Toast ERA on ly_date(D) if switchover_date <= ly_date(D);
        otherwise Aloha channel-column data (aloha_sales_data) at
        ly_date(D), mapped to IPA segments via _ALOHA_TO_IPA_SEGMENT.
@@ -565,6 +569,30 @@ async def build_ipa_rows(
                 # Roll Toast's per-dining-option rows up to IPA segment grain
                 # (e.g. Dine In + X-Dine-In (K) + X-Dine-In-OLO all sum into "Eat In").
                 ty_by_ipa = _aggregate_to_ipa(ty_rows)
+                ty_extra_rows: List[dict] = []
+
+                # Aloha-TY fallback for historical backfill. When the export
+                # date precedes a store's Toast switchover (or the switchover
+                # is unknown), Toast ERA returns 0 rows. Mirror the LY logic:
+                # pull TY from the local Aloha SQLite using the same
+                # _aloha_ly_rows() helper. Same merge shape (segment, channel)
+                # rolls into ty_by_ipa; per-shift "Unallocated Checks" lines
+                # become ty_extra_rows (TY-side counterparts to ly_extra_rows).
+                #
+                # Trigger: Toast returned NO rows for this (store, date). We
+                # don't trigger on "Toast returned rows but they're all zero"
+                # because that's a legitimate slow day, not missing data.
+                switchover_iso = store_meta[guid]["switchover"]
+                is_pre_switchover = (not switchover_iso) or (d_iso < switchover_iso)
+                if not ty_rows and is_pre_switchover and store_meta[guid]["location"]:
+                    for ty in _aloha_ly_rows(store_meta[guid]["location"], d_iso):
+                        if ty["shiftpart"]:
+                            ty_extra_rows.append(ty)
+                            continue
+                        key = (ty["ipa_segment"], ty["ipa_channel"])
+                        bucket = ty_by_ipa.setdefault(key, {"net_sales": 0.0, "orders": 0.0})
+                        bucket["net_sales"] += ty["net_sales"]
+                        bucket["orders"]    += ty["trans"]
 
                 # Build LY at (segment, channel) grain so we can co-locate it
                 # with the matching TY on one row. Extra rows that don't fit
@@ -633,6 +661,21 @@ async def build_ipa_rows(
                         "TransTY":       0.0,
                         "NetSalesLY":    ly["net_sales"],
                         "TransLY":       ly["trans"],
+                    })
+
+                # Same idea for TY-side Aloha extras (only populated when the
+                # date predates this store's Toast switchover and Aloha had
+                # daypart-grain data for the day).
+                for ty in ty_extra_rows:
+                    all_rows.append({
+                        **base_row,
+                        "SEGMENT_NAME":  ty["ipa_segment"],
+                        "ORDER_CHANNEL": ty["ipa_channel"],
+                        "SHIFTPART":     ty["shiftpart"],
+                        "NetSalesTY":    ty["net_sales"],
+                        "TransTY":       ty["trans"],
+                        "NetSalesLY":    0.0,
+                        "TransLY":       0.0,
                     })
 
                 done_units += 1
