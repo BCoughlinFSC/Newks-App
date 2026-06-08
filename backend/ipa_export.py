@@ -527,25 +527,41 @@ async def build_ipa_rows(
             ly_d_iso = meta["ly_date"]
             ly_d = date.fromisoformat(ly_d_iso) if ly_d_iso else None
 
-            # Optimization for historical backfills: if EVERY selected store
-            # was not yet on Toast on this date, skip the Toast ERA call
-            # entirely and go straight to the Aloha-TY fallback below.
-            # Saves ~3 min/date of pointless retries on Toast 429s (the API
-            # rate-limits hard when we ask for data on dates where nothing
-            # was sending it any orders yet).
+            # Optimization for historical backfills: if no Newk's store
+            # could possibly have been on Toast yet on this date, skip the
+            # Toast ERA call entirely and go straight to the Aloha-TY
+            # fallback below. Saves ~3 min/date of pointless retries on
+            # Toast 429s.
             #
-            # Condition: every store has a KNOWN switchover_date AND that
-            # date is strictly after d_iso. If we don't have a switchover
-            # for a store, we err on the side of calling Toast in case the
-            # switchover map is stale.
-            all_pre_switchover = all(
-                store_meta[g]["switchover"] and d_iso < store_meta[g]["switchover"]
+            # Heuristic: take the EARLIEST KNOWN switchover across the
+            # selected stores. If d_iso is strictly before that, every
+            # store with a known switchover is still on Aloha — and any
+            # store without a known switchover is overwhelmingly likely
+            # still on Aloha too (most stores without entries simply haven't
+            # cut over yet). The original "require ALL stores to have a
+            # known switchover date" version of this check failed in
+            # practice because the toast_switchover_dates table is sparse
+            # — most stores don't have entries, so the check rarely
+            # triggered. Using "earliest known" handles sparse data
+            # correctly.
+            #
+            # Edge case: if we have zero switchover info AT ALL for the
+            # selected stores, we err on the side of calling Toast (the
+            # existing Aloha fallback handles "Toast returned nothing"
+            # anyway, just less efficiently).
+            known_switchovers = [
+                store_meta[g]["switchover"]
                 for g in store_guids
+                if store_meta[g]["switchover"]
+            ]
+            no_store_on_toast = (
+                bool(known_switchovers) and d_iso < min(known_switchovers)
             )
 
-            if all_pre_switchover:
-                logger.info("IPA export: %s — all %d stores pre-switchover, skipping Toast ERA",
-                            d_iso, len(store_guids))
+            if no_store_on_toast:
+                logger.info("IPA export: %s — earliest known switchover is %s, "
+                            "skipping Toast ERA (all %d stores still on Aloha)",
+                            d_iso, min(known_switchovers), len(store_guids))
                 ty_by_store = {g: [] for g in store_guids}
             else:
                 # One batched ERA call per date — all stores at once — avoids
