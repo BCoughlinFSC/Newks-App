@@ -1207,21 +1207,26 @@ async def picks_drill_down_all_stores_multi_start(request: PickMultiDrillDownAll
 
 
 @router.get("/api/reports/picks/drill-down-all-stores-multi/status/{job_id}")
-async def picks_drill_down_all_stores_multi_status(job_id: str):
+def picks_drill_down_all_stores_multi_status(job_id: str):
     """Lightweight poll endpoint — returns status + progress + error, but
     NEVER the result payload. When status=='done' the client should call
     /result/{job_id} once to fetch the actual report data.
 
-    Previously this endpoint returned the full result inline, which broke
-    for large multi-report exports (3 report types × ~90 stores generates
-    tens of MB of JSON) because nginx in front of Cloudways would buffer-
-    truncate or time-out the response. The frontend would then see a
-    truncated body and JSON.parse() would throw "Unexpected end of JSON
-    input". Splitting fixed it — polling responses stay <1 KB, and the
-    one-shot /result fetch can take its time without affecting polls."""
+    SYNC (def, not async def) on purpose: this handler runs in FastAPI's
+    thread pool instead of on the event loop. When a background pick job
+    is hammering the event loop (parsing thousands of order JSONs,
+    aggregating per-segment), an async /status handler would queue up
+    behind that work and hit nginx's proxy_read_timeout, causing nginx
+    to return a 1-byte garbage body to the browser. By running on a
+    separate thread, /status responds in <100ms regardless of how busy
+    the event loop is.
+
+    The previous async version returned the full result inline, which
+    also broke for large multi-report exports — that's been split out
+    into /result/{job_id} for some time now."""
     # Best-effort cleanup of jobs older than 1 hour every time we poll.
-    await asyncio.to_thread(pick_export_jobs.purge_old, 3600.0)
-    job = await asyncio.to_thread(pick_export_jobs.get_status_only, job_id)
+    pick_export_jobs.purge_old(3600.0)
+    job = pick_export_jobs.get_status_only(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found (may have expired)")
     return {
@@ -1237,39 +1242,29 @@ async def picks_drill_down_all_stores_multi_status(job_id: str):
 
 
 @router.get("/api/reports/picks/drill-down-all-stores-multi/result/{job_id}")
-async def picks_drill_down_all_stores_multi_result(job_id: str):
+def picks_drill_down_all_stores_multi_result(job_id: str):
     """Return the full result payload for a completed multi-pick job.
-    Returns the raw JSON bytes directly from SQLite — no re-serialization
-    of the Python dict (which is the source of the truncation bug if you
-    let FastAPI re-jsonify a 30 MB structure).
+    Returns the raw JSON bytes directly from SQLite — no re-serialization.
 
-    Headers we set explicitly:
-      Content-Length      — so nginx knows the exact size up front and
-                            doesn't fall back to chunked encoding
-      X-Accel-Buffering   — 'no' tells nginx to skip proxy_buffering
-                            for this response, which avoids the
-                            buffer-then-truncate failure mode that
-                            broke the previous combined /status path
-      Cache-Control       — 'no-store' so browsers don't try to cache
-                            a 30 MB response
+    SYNC (def, not async def): same reason as /status — runs in the
+    thread pool so it doesn't queue behind a busy event loop. The
+    payload can be tens of MB; we set Content-Length explicitly and
+    X-Accel-Buffering: no so nginx doesn't fall back to chunked
+    encoding (which is where it used to truncate).
 
     Returns 404 if missing/expired, 409 if not yet done.
     """
-    status = await asyncio.to_thread(pick_export_jobs.get_status_only, job_id)
+    status = pick_export_jobs.get_status_only(job_id)
     if not status:
         raise HTTPException(status_code=404, detail="job not found (may have expired)")
     if status["status"] != "done":
         raise HTTPException(status_code=409,
                             detail=f"job is {status['status']}, not 'done' — "
                                    f"poll /status until it completes")
-    raw = await asyncio.to_thread(pick_export_jobs.get_raw_result, job_id)
+    raw = pick_export_jobs.get_raw_result(job_id)
     if not raw:
         raise HTTPException(status_code=404,
                             detail="result missing or already purged")
-    # raw is already a valid JSON document (stored via json.dumps in
-    # finish_done). Encode once to UTF-8 bytes so we can set an exact
-    # Content-Length — nginx with proxy_buffering on otherwise
-    # silently truncates chunked-encoded large responses.
     body = raw.encode("utf-8")
     logger.info("Picks multi result %s served: %d bytes", job_id, len(body))
     return Response(
@@ -1284,16 +1279,20 @@ async def picks_drill_down_all_stores_multi_result(job_id: str):
 
 
 @router.post("/api/reports/picks/drill-down-all-stores-multi/cancel/{job_id}")
-async def picks_drill_down_all_stores_multi_cancel(job_id: str):
+def picks_drill_down_all_stores_multi_cancel(job_id: str):
     """
     Request cancellation of a running multi-pick job. The background task polls
     the cancelled flag between stores and stops doing new work as soon as it sees
     True. Stores already in-flight (those that have passed the semaphore and are
     fetching data) will finish their current work but their results are
     discarded. Idempotent — safe to call multiple times.
+
+    SYNC handler — same reason as /status: needs to respond fast even when
+    the event loop is busy with the background pick job. Otherwise a
+    "Cancel" button click could hang indefinitely.
     """
-    was_running = await asyncio.to_thread(pick_export_jobs.cancel, job_id)
-    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    was_running = pick_export_jobs.cancel(job_id)
+    job = pick_export_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found (may have expired)")
     logger.info("Picks multi job %s cancel requested (was_running=%s, current status=%s)",

@@ -2352,27 +2352,45 @@ def _get_modifier_guid_to_name(restaurant_guid: str) -> Dict[str, str]:
 async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str) -> Dict[str, List[Dict]]:
     """
     Get cached mapping of menuItemGuid -> [{tagGuid, tagName}, ...]
-    Uses V3 metadata to check if menu changed
+
+    Newk's credentials don't have the Toast Menus V3 scope — every V3
+    metadata + V3 menus call returns 403 Forbidden. The previous code
+    tried V3 first and fell back to V2 on the 403, which "worked" but
+    flooded the uvicorn log with ~200 spurious 403 lines per export
+    run, AND ate event-loop time on every call making a doomed request.
+
+    Now we just go straight to V2. The V2 helper has its own 1-hour
+    TTL cache so repeat lookups within an export are fast. If Newk's
+    ever gets V3 entitled, restore the V3 fast path here.
     """
+    return await get_menu_tags_mapping_v2(client, restaurant_guid)
+
+# ── Dead code below this point retained intentionally as inactive ──
+# The V3 implementation is preserved so it's easy to revive if/when
+# Newk's gets V3 access. It's NOT reachable from get_menu_tags_mapping
+# above — that returns straight to V2. Do not call _get_menu_tags_mapping_v3
+# directly; use the public get_menu_tags_mapping wrapper.
+async def _get_menu_tags_mapping_v3(client: httpx.AsyncClient, restaurant_guid: str) -> Dict[str, List[Dict]]:
+    """Original V3-first implementation. Currently unused — see wrapper above."""
     global _menu_tags_cache
-    
+
     standard_headers = await get_standard_api_auth_headers()
     headers_with_guid = {
         **standard_headers,
         "Toast-Restaurant-External-ID": restaurant_guid
     }
-    
+
     # Check metadata first
     metadata_url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v3/metadata"
     metadata_resp = await client.get(metadata_url, headers=headers_with_guid)
-    
+
     if metadata_resp.status_code != 200:
         # 403 is expected if V3 metadata isn't available - silently fall back to V2
         if metadata_resp.status_code != 403:
             logger.warning(f"Failed to fetch menu metadata: {metadata_resp.status_code}")
         # Fall back to V2 without caching
         return await get_menu_tags_mapping_v2(client, restaurant_guid)
-    
+
     metadata = metadata_resp.json()
     current_hash = metadata.get("hash") or metadata.get("version") or str(metadata)
     logger.info(f"MENU TAGS PATH=V3  restaurant={restaurant_guid}  hash={str(current_hash)[:16]}")
@@ -2385,15 +2403,15 @@ async def get_menu_tags_mapping(client: httpx.AsyncClient, restaurant_guid: str)
             return cached["mapping"]
 
     logger.info(f"Menu tags cache MISS for restaurant {restaurant_guid}, fetching from API")
-    
+
     # Fetch menus V3
     menus_url = f"{TOAST_STANDARD_API_BASE_URL}/menus/v3/menus"
     menus_resp = await client.get(menus_url, headers=headers_with_guid)
-    
+
     if menus_resp.status_code != 200:
         logger.warning(f"Failed to fetch menus V3: {menus_resp.status_code}, falling back to V2")
         return await get_menu_tags_mapping_v2(client, restaurant_guid)
-    
+
     menus_data = menus_resp.json()
 
     # Build mapping: menuItemGuid/modifierGuid -> [{tagGuid, tagName}, ...]
@@ -5601,6 +5619,16 @@ app.include_router(pick3_router)
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Silence the Azure Storage Blob SDK's INFO-level HTTP logging policy. By
+# default it dumps every request URL + every header + every response status
+# + every response header for each blob operation. The picks/menu-performance
+# exports each make thousands of blob fetches, which means the uvicorn log
+# fills with ~200k lines of Azure SDK chatter per export run — drowning out
+# anything actually useful. WARNING level keeps real Azure errors visible
+# while dropping the per-request noise.
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure").setLevel(logging.WARNING)
 
 app.add_middleware(
     CORSMiddleware,
@@ -11028,10 +11056,16 @@ async def run_report_start(request: Request, body: Dict[str, Any] = Body(...)):
 
 
 @app.get("/api/reports/run/status/{job_id}")
-async def run_report_status(job_id: str):
-    """Poll a run-report job. Returns full result when status=='done'."""
-    await asyncio.to_thread(pick_export_jobs.purge_old, 3600.0)
-    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+def run_report_status(job_id: str):
+    """Poll a run-report job. Returns full result when status=='done'.
+
+    SYNC (def not async def) so it runs in FastAPI's thread pool — needs
+    to respond fast even when the event loop is hammered by the
+    background work. The async version was queueing behind the busy
+    loop, hitting nginx's proxy_read_timeout, and returning 1-byte
+    garbage to the browser."""
+    pick_export_jobs.purge_old(3600.0)
+    job = pick_export_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found (may have expired)")
     return {
@@ -11044,16 +11078,18 @@ async def run_report_status(job_id: str):
 
 
 @app.post("/api/reports/run/cancel/{job_id}")
-async def run_report_cancel(job_id: str):
+def run_report_cancel(job_id: str):
     """
     Mark a run-report job as cancelled. The background task polls is_cancelled
     every 2s and bails out of the inner loopback fetch when it sees True.
     NOTE: the inner /api/reports/run task continues server-side (the inner
     endpoint doesn't know about cancellation yet) but its response is discarded
     and never written to the job result.
+
+    SYNC handler — see /status above for why.
     """
-    was_running = await asyncio.to_thread(pick_export_jobs.cancel, job_id)
-    job = await asyncio.to_thread(pick_export_jobs.get, job_id)
+    was_running = pick_export_jobs.cancel(job_id)
+    job = pick_export_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found (may have expired)")
     logger.info("Run-report job %s cancel requested (was_running=%s, status now=%s)",
