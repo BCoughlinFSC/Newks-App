@@ -3752,7 +3752,19 @@
                 // fires). Polls eventually succeed when the worker yields
                 // between stores, so we tolerate long streaks.
                 let consecutiveTransient = 0;   // resets on any clean poll
-                const MAX_TRANSIENT       = 200; // ~6-7 min of consecutive bad polls @ 2s sleep
+                // Empirically — Kim's June 2026 diag run — Cloudways' edge
+                // (HTTP/2 Apache/Varnish stack) returns a 1-byte " " body
+                // on some polls while curl-from-PowerShell against the same
+                // endpoint returns clean JSON. We can't fix the edge; we
+                // just have to be resilient to it. 1500 × 2s = ~50 min of
+                // tolerated bad polls, comfortably longer than even the
+                // hard deadline of POLL_HARD_DEADLINE_MS below.
+                const MAX_TRANSIENT       = 1500;
+                // 1-byte " " responses are the SPECIFIC proxy-bug signature.
+                // We track + log them separately from generic JSON parse fails
+                // so the console clearly distinguishes "proxy hiccup" from
+                // "something else weird".
+                let proxyHiccupCount = 0;
                 const pollStartTs         = Date.now();
                 const POLL_HARD_DEADLINE_MS = 60 * 60 * 1000;  // 60 min total wall-clock
                 while (true) {
@@ -3806,16 +3818,35 @@
                     job = JSON.parse(pollText);
                   } catch (parseErr) {
                     const tail = pollText.slice(-120).replace(/\s+/g, ' ');
+                    // Specific Cloudways-edge proxy bug signature: empty/short
+                    // body with just whitespace. uvicorn returns clean JSON
+                    // (verified via curl during the same window) but the
+                    // browser's HTTP/2 multiplexed stream gets this from the
+                    // Apache/Varnish layer instead. Don't show this as
+                    // a scary "hiccup" — it's expected noise.
+                    const isProxyHiccup = pollText.length <= 3 && pollText.trim() === '';
                     if (consecutiveTransient >= MAX_TRANSIENT) {
                       const msg = `/status returned ${MAX_TRANSIENT}+ consecutive invalid responses ` +
                                   `(last: ${pollText.length} bytes ending "${tail}") — giving up. ` +
-                                  `Job may still be running on server (job_id=${job_id}).`;
+                                  `Job may still be running on server (job_id=${job_id}). ` +
+                                  `proxyHiccups=${proxyHiccupCount}`;
                       for (const t of types) out[t.key] = { label: t.label, error: msg };
                       break;
                     }
                     consecutiveTransient++;
-                    console.warn(`Poll body invalid JSON (${pollText.length} bytes, ends "${tail}") — retry ${consecutiveTransient}/${MAX_TRANSIENT}`);
-                    showStatus('info', `Pick reports… (transient hiccup ${consecutiveTransient}/${MAX_TRANSIENT}, retrying)`);
+                    if (isProxyHiccup) {
+                      proxyHiccupCount++;
+                      // Only log every 10th occurrence so we don't flood console
+                      if (proxyHiccupCount % 10 === 1) {
+                        console.warn(`Cloudways edge proxy hiccup #${proxyHiccupCount} ` +
+                                     `(${consecutiveTransient}/${MAX_TRANSIENT} consecutive) — retrying`);
+                      }
+                      // Don't show this in the user-facing status bar; the
+                      // job is fine, this is just edge-layer flakiness.
+                    } else {
+                      console.warn(`Poll body invalid JSON (${pollText.length} bytes, ends "${tail}") — retry ${consecutiveTransient}/${MAX_TRANSIENT}`);
+                      showStatus('info', `Pick reports… (transient hiccup ${consecutiveTransient}/${MAX_TRANSIENT}, retrying)`);
+                    }
                     await sleepAbortable(2000, picksSignal);
                     continue;
                   }
@@ -3833,7 +3864,12 @@
                     } else {
                       showStatus('info', 'Fetching pick reports…');
                     }
-                    await sleepAbortable(5000, picksSignal);
+                    // 12-second poll interval (was 5s). Cuts polling frequency
+                    // by ~2.4×, which proportionally cuts the number of edge-
+                    // proxy hiccups we have to ride out. A picks export takes
+                    // 10-20 min — going from 5s to 12s means ~50-100 polls
+                    // instead of ~120-240, far below MAX_TRANSIENT=1500.
+                    await sleepAbortable(12000, picksSignal);
                     continue;
                   }
                   if (job.status === 'error') {
