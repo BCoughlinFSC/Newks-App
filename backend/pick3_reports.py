@@ -1038,7 +1038,19 @@ async def _run_picks_multi_core(
 
         done_count = {"n": 0}
         progress_lock = asyncio.Lock()
-        sem = asyncio.Semaphore(8)
+        # Concurrency clamp — multi-pick path was OOM-killing uvicorn on
+        # Cloudways at Semaphore(8) because each concurrent slot holds:
+        #   * full list of parsed orders for one store-month (8-13k orders,
+        #     ~10KB each after parse + Python overhead = ~100-150MB/store)
+        #   * three full per-type aggregation outputs (pick3/pick2/pairings)
+        #   * menu tags + modifier mappings
+        # At 8 concurrent stores that's ~1GB peak just for in-flight data,
+        # plus the accumulating `results` buffer for completed stores.
+        # 3 keeps peak in-flight at ~300-450MB which fits comfortably under
+        # the Cloudways memory cap. Tradeoff: roughly 2-3x slower wall
+        # clock (~25-30 min for 90 stores instead of ~15 min). Worth it
+        # since 15 min is moot if the process dies at 2.5 min.
+        sem = asyncio.Semaphore(3)
 
         async def one_store(rguid: str):
             """Fetch orders once, run aggregator for each requested report_type."""
