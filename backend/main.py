@@ -12,6 +12,7 @@ import copy
 
 import asyncio
 import os
+import threading
 
 import httpx
 from httpx import HTTPStatusError
@@ -11046,7 +11047,26 @@ async def run_report_start(request: Request, body: Dict[str, Any] = Body(...)):
     if force_refresh:
         forward_headers = {"X-Force-Refresh": force_refresh}
 
-    asyncio.create_task(_run_report_job(job_id, body, forward_headers))
+    # Run on a dedicated background thread (with its own asyncio loop) so the
+    # main FastAPI event loop stays free to serve UI requests even while a
+    # heavy menu-performance / picks export is grinding. Previously this was
+    # an asyncio.create_task on the main loop, which froze the rest of the
+    # app for the duration of the export (single-worker uvicorn, by design,
+    # to keep the in-memory _menu_tags_cache shared).
+    def _report_thread_entry(jid=job_id, b=body, fh=forward_headers):
+        try:
+            asyncio.run(_run_report_job(jid, b, fh))
+        except Exception as e:
+            logger.error("Run-report job %s thread crashed: %s", jid, e, exc_info=True)
+            try:
+                pick_export_jobs.finish_error(jid, f"job thread crashed: {e}")
+            except Exception:
+                pass
+    threading.Thread(
+        target=_report_thread_entry,
+        name=f"run-report-{job_id[:8]}",
+        daemon=True,
+    ).start()
     logger.info(
         "Run-report job %s started reportType=%s dateRangeType=%s force_refresh=%s",
         job_id, body.get("reportType"), body.get("dateRangeType"),
@@ -11209,7 +11229,23 @@ async def ipa_export_start(req: IpaExportRequest):
     await asyncio.to_thread(_ipa_purge_old_csvs)
     job_id = uuid.uuid4().hex
     await asyncio.to_thread(pick_export_jobs.create, job_id)
-    asyncio.create_task(_run_ipa_export_job(job_id, req))
+    # Run on a dedicated background thread (with its own asyncio loop) so the
+    # main FastAPI event loop stays free to serve UI requests during the
+    # 5-30 minute IPA export. See run_report_start above for the same fix.
+    def _ipa_thread_entry(jid=job_id, r=req):
+        try:
+            asyncio.run(_run_ipa_export_job(jid, r))
+        except Exception as e:
+            logger.error("IPA export job %s thread crashed: %s", jid, e, exc_info=True)
+            try:
+                pick_export_jobs.finish_error(jid, f"job thread crashed: {e}")
+            except Exception:
+                pass
+    threading.Thread(
+        target=_ipa_thread_entry,
+        name=f"ipa-export-{job_id[:8]}",
+        daemon=True,
+    ).start()
     logger.info("IPA export job %s started: %s..%s, %d stores",
                 job_id, req.start_date, req.end_date, len(req.store_guids))
     return {"job_id": job_id, "status": "running"}

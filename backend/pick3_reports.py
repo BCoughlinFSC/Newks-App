@@ -19,6 +19,7 @@ import csv
 import io
 import logging
 import re
+import threading
 import time
 import uuid
 import asyncio
@@ -1188,6 +1189,34 @@ async def _run_picks_multi_job(job_id: str, request: PickMultiDrillDownAllStores
             pass
 
 
+def _run_picks_multi_job_in_thread(job_id: str, request: PickMultiDrillDownAllStoresRequest) -> None:
+    """Thread entry point. Spins up a private asyncio event loop INSIDE this
+    thread so the async pick job can still use httpx/await semantics — but
+    crucially, it does NOT share the main FastAPI event loop. That means all
+    the CPU-heavy aggregation (parsing thousands of order JSONs, segmenting
+    by category, sorting) happens off the request-serving loop entirely.
+
+    Previously this ran via asyncio.create_task on the main loop, which meant
+    even with sync /status/result/cancel handlers, all OTHER pages in the
+    app (dashboard, mapping, contacts, etc.) would freeze while a multi-
+    store pick export was crunching. Threading was preferred over bumping
+    uvicorn to --workers 2 because restart.sh intentionally runs 1 worker
+    to keep the in-memory _menu_tags_cache shared (per-worker cache would
+    halve hit rate)."""
+    try:
+        asyncio.run(_run_picks_multi_job(job_id, request))
+    except Exception as e:
+        # Belt-and-suspenders: _run_picks_multi_job has its own try/except
+        # that writes the error to SQLite, but if the loop itself blows up
+        # before we get there, make sure the job doesn't sit stuck in
+        # "running" forever.
+        logger.error("Picks multi job %s thread crashed: %s", job_id, e, exc_info=True)
+        try:
+            pick_export_jobs.finish_error(job_id, f"job thread crashed: {e}")
+        except Exception:
+            pass
+
+
 @router.post("/api/reports/picks/drill-down-all-stores-multi/start")
 async def picks_drill_down_all_stores_multi_start(request: PickMultiDrillDownAllStoresRequest = Body(...)):
     """Kick off a multi-pick export as a background task. Returns {job_id}."""
@@ -1195,10 +1224,17 @@ async def picks_drill_down_all_stores_multi_start(request: PickMultiDrillDownAll
     _validate_multi_request(request)
     job_id = uuid.uuid4().hex
     await asyncio.to_thread(pick_export_jobs.create, job_id)
-    # Fire-and-forget on the current worker's event loop. With --workers 2, the
-    # status poll may land on the other worker — that's fine because state lives
-    # in SQLite, not in this process's memory.
-    asyncio.create_task(_run_picks_multi_job(job_id, request))
+    # Run on a dedicated background thread (with its own asyncio loop). This
+    # keeps the main FastAPI event loop free to serve UI requests even while
+    # the pick aggregation is grinding through 90 stores × 30 days of orders.
+    # State lives in SQLite, so /status polls don't need access to this thread.
+    t = threading.Thread(
+        target=_run_picks_multi_job_in_thread,
+        args=(job_id, request),
+        name=f"picks-multi-{job_id[:8]}",
+        daemon=True,
+    )
+    t.start()
     logger.info("Picks multi job %s started range=%s..%s types=%s stores=%d",
                 job_id, request.start_date, request.end_date,
                 ",".join(request.report_types or []),
