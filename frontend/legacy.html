@@ -1971,9 +1971,16 @@
         //    behavior + budget as the Pick & Pairings poll loop below.
         let pollResult = null;
         let pollTransient = 0;       // consecutive bad polls; resets on any clean one
-        const POLL_MAX_TRANSIENT = 200;  // × 3s ≈ 10 min of tolerated consecutive failures
+        // 12s cadence + 150 budget ≈ 30 min of tolerated consecutive failures.
+        // Cadence matters more than budget: at 3s the browser never let its
+        // wedged HTTP/2 connection go idle long enough for the Cloudways edge
+        // to retire it, so once a connection started returning 1-byte bodies
+        // it NEVER recovered (observed 2026-06-10: 10 straight minutes of
+        // 1-byte polls while uvicorn logged 200 OK for every one). The picks
+        // loop below polls at 12s and rides through the same edge fine.
+        const POLL_MAX_TRANSIENT = 150;
         while (true) {
-          await sleepAbortable(3000, signal);
+          await sleepAbortable(12000, signal);
           const pollRes = await fetch(`/api/reports/run/status/${encodeURIComponent(activeJobId)}?_t=${Date.now()}`, {
             headers: { ...getAuthHeaders(), 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
             cache: 'no-store',
