@@ -125,7 +125,13 @@ def _to_int(v) -> int:
 def main() -> int:
     xlsx_path = _find_mapping_xlsx()
     print(f"Reading {xlsx_path}")
-    df = pd.read_excel(xlsx_path)
+    # MultiLocationId is a 19-digit integer — beyond float64's ~16 significant
+    # digits. Without dtype=str, pandas reads it as float and the stringified
+    # value comes out in scientific notation with the tail digits destroyed
+    # ("1100000005890165927" → "1.100000005890166e+18"), which breaks the
+    # (multi_location_id, item_guid) unique key and creates duplicates
+    # alongside the Toast-API-synced rows. item_guid: same treatment for safety.
+    df = pd.read_excel(xlsx_path, dtype={"MultiLocationId": str, "item_guid": str})
 
     required = {
         "MultiLocationId", "ToastPLU", "AlohaPLU", "Toast_Item_Name",
