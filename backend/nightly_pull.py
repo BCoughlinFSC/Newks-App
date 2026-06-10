@@ -320,7 +320,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     ap.add_argument(
         "--skip-rollup", action="store_true",
-        help="Skip DayPartID fix + tbl_SalesDataByDayPart rebuild (use for fast hst-table-only tests).",
+        help="Skip the tbl_SalesDataByDayPart rebuild (use for fast hst-table-only "
+             "tests). The DayPartID fix always runs regardless — skipping it is "
+             "what broke the Flash Report channel breakdown for May 4-29 2026.",
     )
     ap.add_argument(
         "--skip-royalty", action="store_true",
@@ -496,23 +498,33 @@ async def main():
     # The existing procs already accept start/end date parameters, so a single
     # wide call handles a multi-date repoll without N round-trips.
     # Fix DayPartIDs BEFORE rollup so channel breakdown is correct.
+    #
+    # The DayPartID fix runs UNCONDITIONALLY — even with --skip-rollup.
+    # It's one cheap idempotent UPDATE, and skipping it is how the May 4-29
+    # 2026 incident happened: a backfill ran with --skip-rollup, left
+    # hstItem.DayPartID NULL for 4.2M rows, and the rollup's DayPartID-joined
+    # MERGEs silently dropped $8.46M of sales from every Flash Report channel
+    # column (NULL never matches a MERGE join). Totals stayed right; every
+    # order-mode line went dark. See fix_daypartid_may2026.sql.
+    log.info("-" * 70)
+    log.info("Fixing DayPartIDs for %s..%s…", range_start, range_end)
+    try:
+        conn = db.get_toast_connection()
+        try:
+            fixed = db.fix_daypart_ids(conn, range_start, range_end)
+            log.info("DayPartID fix: %d rows updated.", fixed)
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error("DayPartID fix FAILED: %s — Flash Report channel breakdown "
+                  "will silently lose these dates until fix_daypart_ids is "
+                  "re-run. Do not ignore this error.", e)
+
     rollup_ok = None  # None = skipped, True/False = attempted
     if args.skip_rollup:
         log.info("-" * 70)
-        log.info("DayPartID fix + rollup rebuild SKIPPED (--skip-rollup).")
+        log.info("Rollup rebuild SKIPPED (--skip-rollup).")
     else:
-        log.info("-" * 70)
-        log.info("Fixing DayPartIDs for %s..%s…", range_start, range_end)
-        try:
-            conn = db.get_toast_connection()
-            try:
-                fixed = db.fix_daypart_ids(conn, range_start, range_end)
-                log.info("DayPartID fix: %d rows updated.", fixed)
-            finally:
-                conn.close()
-        except Exception as e:
-            log.error("DayPartID fix FAILED: %s", e)
-
         log.info("-" * 70)
         log.info("Rebuilding rollup for %s..%s…", range_start, range_end)
         rollup_ok = False
