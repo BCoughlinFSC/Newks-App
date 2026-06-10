@@ -1989,6 +1989,46 @@ async def fetch_toast_report(
     raise HTTPException(status_code=504, detail=f"Timed out waiting for report {report_guid}. Try narrowing the date range.")
 
 
+# Restaurant-batch size for ERA menu analytics requests. One all-stores
+# payload (~98 restaurants × a week of MENU_ITEM/MODIFIER rows) is large
+# enough that the resp.json() parse spike alone can blow Cloudways' memory
+# cap — that's what OOM-killed uvicorn on a cold-cache menu report run
+# (2026-06-10). 25 restaurants keeps each payload ~4x smaller; ERA rows
+# carry restaurantGuid + businessDate, so concatenating batches yields
+# exactly the same row set as a single all-stores request.
+MENU_REPORT_RESTAURANT_BATCH = 25
+
+
+async def fetch_menu_rows_batched(
+    client: httpx.AsyncClient,
+    chunk_start: date,
+    chunk_end: date,
+    restaurant_ids: List[str],
+    group_by: List[str],
+) -> List[Dict]:
+    """Request + fetch one ERA menu report per restaurant batch, sequentially.
+
+    Sequential on purpose: parallel batches would multiply peak memory and
+    invite Toast ERA 429s. request_toast_report / fetch_toast_report keep
+    their own 5xx/202 retry behavior per batch.
+    """
+    rows: List[Dict] = []
+    batches = chunk_list(restaurant_ids, MENU_REPORT_RESTAURANT_BATCH)
+    for i, batch in enumerate(batches):
+        if len(batches) > 1:
+            logger.info(
+                "Menu analytics batch %d/%d: %s..%s (%d restaurants, groupBy=%s)",
+                i + 1, len(batches), chunk_start, chunk_end, len(batch), ",".join(group_by),
+            )
+            if i > 0:
+                await asyncio.sleep(0.5)  # pace ERA report creation a little
+        guid = await request_toast_report(client, chunk_start, chunk_end, batch, "menu", group_by)
+        batch_rows = await fetch_toast_report(client, guid, "menu")
+        if batch_rows:
+            rows.extend(batch_rows)
+    return rows
+
+
 async def _fetch_orders_from_toast_api(
     client: httpx.AsyncClient,
     restaurant_guid: str,
@@ -10136,7 +10176,8 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 if _use_local_menu:
                     pass  # all_analytics_rows + menu_item_count already populated
                 elif days_diff > 7:
-                    # Split into week-sized chunks
+                    # Split into week-sized chunks (and restaurant batches inside
+                    # each chunk — see fetch_menu_rows_batched for why)
                     logger.info(f"Splitting {days_diff} day range into week-sized chunks for groupBy support")
                     current_start = start_date
                     while current_start <= end_date:
@@ -10144,34 +10185,19 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                         chunk_end = min(current_start + timedelta(days=6), end_date)
 
                         logger.info(f"Requesting chunk: {current_start} to {chunk_end}")
-                        report_guid = await request_toast_report(
-                            client,
-                            current_start,
-                            chunk_end,
-                            restaurant_ids,
-                            "menu",
-                            ["MENU_ITEM"]
+                        chunk_rows = await fetch_menu_rows_batched(
+                            client, current_start, chunk_end, restaurant_ids, ["MENU_ITEM"]
                         )
-
-                        logger.info(f"Fetching report for chunk {current_start} to {chunk_end} (guid: {report_guid})")
-                        chunk_rows = await fetch_toast_report(client, report_guid, "menu")
                         if chunk_rows:
                             all_analytics_rows.extend(chunk_rows)
 
                         # Move to next chunk
                         current_start = chunk_end + timedelta(days=1)
                 else:
-                    # Single request for ranges <= 7 days
-                    report_guid = await request_toast_report(
-                        client,
-                        start_date,
-                        end_date,
-                        restaurant_ids,
-                        "menu",
-                        ["MENU_ITEM"]
+                    # Single request for ranges <= 7 days (restaurant-batched)
+                    all_analytics_rows = await fetch_menu_rows_batched(
+                        client, start_date, end_date, restaurant_ids, ["MENU_ITEM"]
                     )
-
-                    all_analytics_rows = await fetch_toast_report(client, report_guid, "menu")
 
                 # Track count before adding modifiers (skip if we already set it from local DB)
                 if not _use_local_menu:
@@ -10179,46 +10205,15 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 
                 # Also request modifier-level data
                 logger.info("Requesting Analytics menu report with MODIFIER groupBy...")
-            restaurant_batch_size = 25
-
             async def fetch_modifier_rows_for_chunk(chunk_start: date, chunk_end: date) -> List[Dict]:
-                try:
-                    modifier_report_guid = await request_toast_report(
-                        client,
-                        chunk_start,
-                        chunk_end,
-                        restaurant_ids,
-                        "menu",
-                        ["MODIFIER"]  # Group by modifier instead
-                    )
-                    logger.info(f"Fetching MODIFIER report for chunk {chunk_start} to {chunk_end} (guid: {modifier_report_guid})")
-                    return await fetch_toast_report(client, modifier_report_guid, "menu")
-                except HTTPException as e:
-                    if e.status_code in [502, 503, 504]:
-                        batches = chunk_list(restaurant_ids, restaurant_batch_size)
-                        logger.warning(
-                            f"MODIFIER report failed with {e.status_code} for {chunk_start} to {chunk_end}; "
-                            f"retrying in {len(batches)} restaurant batches of {restaurant_batch_size}."
-                        )
-                        all_rows: List[Dict] = []
-                        for i, batch in enumerate(batches):
-                            logger.info(
-                                f"Requesting MODIFIER chunk batch {i + 1}/{len(batches)}: "
-                                f"{chunk_start} to {chunk_end} ({len(batch)} restaurants)"
-                            )
-                            batch_guid = await request_toast_report(
-                                client,
-                                chunk_start,
-                                chunk_end,
-                                batch,
-                                "menu",
-                                ["MODIFIER"]
-                            )
-                            batch_rows = await fetch_toast_report(client, batch_guid, "menu")
-                            if batch_rows:
-                                all_rows.extend(batch_rows)
-                        return all_rows
-                    raise
+                # Proactively restaurant-batched (see fetch_menu_rows_batched).
+                # This used to request all ~98 stores in one report and only
+                # fall back to 25-store batches on a 5xx — but the all-stores
+                # payload is also what OOM-killed uvicorn on cold-cache menu
+                # runs (2026-06-10), so now we always batch.
+                return await fetch_menu_rows_batched(
+                    client, chunk_start, chunk_end, restaurant_ids, ["MODIFIER"]
+                )
                 
                 if _use_local_menu:
                     # Local-DB short-circuit: modifier rows already loaded above
