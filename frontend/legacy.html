@@ -1965,18 +1965,49 @@
 
         // 2. Poll until done / error / cancelled. State lives in SQLite server-side
         //    so polls are tiny and fast (no edge timeout risk).
+        //    Tolerate transient bad polls — the Cloudways edge occasionally
+        //    returns a 1-byte " " body (or a 5xx) on a long-lived polling
+        //    sequence even though uvicorn answered 200 with clean JSON. Same
+        //    behavior + budget as the Pick & Pairings poll loop below.
         let pollResult = null;
+        let pollTransient = 0;       // consecutive bad polls; resets on any clean one
+        const POLL_MAX_TRANSIENT = 200;  // × 3s ≈ 10 min of tolerated consecutive failures
         while (true) {
           await sleepAbortable(3000, signal);
-          const pollRes = await fetch(`/api/reports/run/status/${encodeURIComponent(activeJobId)}`, {
-            headers: getAuthHeaders(),
+          const pollRes = await fetch(`/api/reports/run/status/${encodeURIComponent(activeJobId)}?_t=${Date.now()}`, {
+            headers: { ...getAuthHeaders(), 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+            cache: 'no-store',
             signal,
           });
           if (!pollRes.ok) {
-            const error = await pollRes.text();
-            throw new Error(error);
+            const errText = await pollRes.text();
+            // 5xx = transient (edge/proxy hiccup) — retry within budget. 4xx = fatal.
+            if (pollRes.status >= 500 && pollRes.status < 600 && pollTransient < POLL_MAX_TRANSIENT) {
+              pollTransient++;
+              console.warn(`run-report poll ${pollRes.status} (transient ${pollTransient}/${POLL_MAX_TRANSIENT}), retrying`);
+              continue;
+            }
+            throw new Error(errText);
           }
-          const job = await pollRes.json();
+          const pollText = await pollRes.text();
+          let job;
+          try {
+            job = JSON.parse(pollText);
+          } catch (parseErr) {
+            if (pollTransient >= POLL_MAX_TRANSIENT) {
+              throw new Error(
+                `/status returned ${POLL_MAX_TRANSIENT}+ consecutive invalid responses ` +
+                `(last: ${pollText.length} bytes) — giving up. Job may still be ` +
+                `running on the server (job_id=${activeJobId}); it caches its ` +
+                `result when done, so re-running the report later may return instantly.`);
+            }
+            pollTransient++;
+            if (pollTransient % 10 === 1) {
+              console.warn(`run-report poll body invalid (${pollText.length} bytes) — retry ${pollTransient}/${POLL_MAX_TRANSIENT}`);
+            }
+            continue;
+          }
+          pollTransient = 0;
           if (job.status === 'running') {
             showStatus('info', 'Running report…');
             continue;
