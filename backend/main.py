@@ -10304,15 +10304,29 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # Store the original menu item GUIDs before deduplication
                 original_menu_item_guids = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
                 
-                # Deduplicate across ALL rows using (restaurantGuid, businessDate, menuItemGuid, quantitySold) as key
+                # Deduplicate exact-duplicate rows. Key includes netSales:
+                # a drink's standalone sale (full price) and its combo-
+                # modifier sale ($0/upcharge) can coincide on quantity at a
+                # store/day, but never on dollars — without netSales in the
+                # key those coincidences dropped ~210 real drinks/day
+                # (validated vs Toast PMIX 2026-05-01). True duplicates —
+                # the same sale echoed across date-chunks, or pairing-choice
+                # entities mirrored into the MENU_ITEM pull — duplicate the
+                # whole row including netSales, so they still dedup
+                # (validated: 158/159 pairing items exact vs PMIX).
                 seen = set()
                 deduplicated_rows = []
                 for row in all_analytics_rows:
+                    try:
+                        _net = round(float(row.get("netSales") or 0), 2)
+                    except (TypeError, ValueError):
+                        _net = 0.0
                     key = (
                         row.get("restaurantGuid"),
                         row.get("businessDate"),
                         row.get("menuItemGuid"),
-                        row.get("quantitySold", 0)
+                        row.get("quantitySold", 0),
+                        _net,
                     )
                     if key not in seen:
                         seen.add(key)
