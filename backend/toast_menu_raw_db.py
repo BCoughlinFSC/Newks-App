@@ -320,14 +320,23 @@ def query_rows_for_report(
     consume them without modification.
 
     The pivot reads: businessDate, restaurantGuid, restaurantName,
-    menuItemGuid, menuItemName, quantitySold. We hand all of those back from
-    typed columns; if a caller needs an obscure raw field, raw_json is there.
+    menuItemGuid, menuItemName, quantitySold, netSales. We hand all of those
+    back from typed columns; if a caller needs an obscure raw field,
+    raw_json is there.
+
+    netSales matters for dedup correctness: the report's exact-row dedup
+    keys on (restaurantGuid, businessDate, menuItemGuid, quantitySold,
+    netSales). Without netSales, a drink's standalone sales and combo-
+    modifier sales that coincide on quantity at a store/day collapse into
+    one row (~210 drinks/day lost vs Toast PMIX, validated 2026-05-01) —
+    while true duplicates (pairing-choice echo mirrors) match on dollars
+    too and still dedup.
     """
     if not db_available():
         return []
     sql = (
         "SELECT business_date, restaurant_guid, menu_item_guid, group_by_kind, "
-        "       menu_item_name, restaurant_name, quantity_sold "
+        "       menu_item_name, restaurant_name, quantity_sold, net_sales "
         "FROM toast_menu_raw "
         "WHERE business_date BETWEEN ? AND ?"
     )
@@ -349,6 +358,7 @@ def query_rows_for_report(
                 "menuItemName":   r["menu_item_name"] or "",
                 "restaurantName": r["restaurant_name"] or "",
                 "quantitySold":   r["quantity_sold"] or 0,
+                "netSales":       r["net_sales"],
                 "_groupByKind":   r["group_by_kind"],
             })
     return rows
