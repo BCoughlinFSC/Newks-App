@@ -339,7 +339,50 @@
         }
         banner.innerHTML =
           `<div>${msg}</div>` +
-          `<div class="totals">Pending: ${s.pending} · Failed: ${s.failed} · Applied (all-time): ${s.applied}</div>`;
+          `<div class="totals">Pending: ${s.pending} · Failed: ${s.failed} · Applied (all-time): ${s.applied}</div>` +
+          `<div style="margin-top:8px;">` +
+          `<button id="sync-from-sql-btn" style="cursor:pointer;padding:4px 12px;">⟳ Sync from SQL</button>` +
+          ` <span id="sync-from-sql-status" style="font-size:0.85em;"></span></div>`;
+
+        // "Sync from SQL" — queues a refresh request that the dev-jan02
+        // drainer fulfills on its next cron cycle (it exports SQL-PROD and
+        // uploads the fresh mirror; the app can't reach SQL Server itself).
+        const syncBtn = document.getElementById('sync-from-sql-btn');
+        const syncStatus = document.getElementById('sync-from-sql-status');
+
+        // Show any existing request state on load.
+        try {
+          const sr = await fetch('/api/contacts/sync-request', { headers });
+          if (sr.ok) {
+            const st = await sr.json();
+            if (st.pending) {
+              syncStatus.textContent =
+                `Sync queued ${new Date(st.pending.requested_at + 'Z').toLocaleString()} — ` +
+                `the dev-jan02 drainer fulfills it on its next cycle.`;
+              syncBtn.disabled = true;
+            } else if (st.last_fulfilled) {
+              syncStatus.textContent =
+                `Last synced from SQL: ${new Date(st.last_fulfilled.fulfilled_at + 'Z').toLocaleString()}`;
+            }
+          }
+        } catch (e) { /* non-blocking */ }
+
+        syncBtn.addEventListener('click', async () => {
+          syncBtn.disabled = true;
+          syncStatus.textContent = 'Queueing…';
+          try {
+            const r2 = await fetch('/api/contacts/sync-request', { method: 'POST', headers });
+            if (!r2.ok) throw new Error(await r2.text());
+            const req = await r2.json();
+            syncStatus.textContent = req.already_pending
+              ? 'A sync is already queued — the drainer fulfills it on its next cycle.'
+              : 'Sync queued ✓ — the dev-jan02 drainer fulfills it on its next cycle ' +
+                '(outbox must be empty first; check back after the next run).';
+          } catch (e) {
+            syncBtn.disabled = false;
+            syncStatus.textContent = 'Failed to queue sync: ' + e.message;
+          }
+        });
       } catch (e) {
         // Best-effort — don't error-block the main page if outbox check fails.
         console.warn('Outbox stats failed:', e);

@@ -28,12 +28,20 @@ USAGE
 
 ENV (set in ~/.contacts_drainer.env on dev-jan02)
     APP_BASE_URL              https://your-cloudways-host
-    APP_ADMIN_TOKEN           bearer token for an admin user
+    APP_ADMIN_EMAIL           admin login email — PREFERRED auth: the drainer
+    APP_ADMIN_PASSWORD        logs itself in each run and mints a fresh token,
+                              so the 30-day token expiry can never kill it
+                              (which is exactly what happened 2026-06-04..12)
+    APP_ADMIN_TOKEN           static bearer token — legacy fallback, only used
+                              when email/password are not set; expires ~30 days
     CONTACTS_SQL_HOST         defaults to sql-prod.nfc.local
     CONTACTS_SQL_USER         SQL Server account WITH WRITE access
     CONTACTS_SQL_PASSWORD     password
     CONTACTS_SQL_DATABASE     defaults to "contacts"
     CONTACTS_SQL_SCHEMA       defaults to "dbo"
+    CONTACTS_SOURCE_PASSWORD  read password for contacts_export_from_sqlserver
+                              (Sync-from-SQL fulfillment); defaults to
+                              CONTACTS_SQL_PASSWORD if unset
 
     # Optional email alerts on errors
     SMTP_HOST                 defaults to smtp.gmail.com
@@ -73,8 +81,10 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 
 # ── Config (from env) ────────────────────────────────────────────────────────
-APP_BASE_URL    = os.getenv("APP_BASE_URL", "").rstrip("/")
-APP_ADMIN_TOKEN = os.getenv("APP_ADMIN_TOKEN", "")
+APP_BASE_URL       = os.getenv("APP_BASE_URL", "").rstrip("/")
+APP_ADMIN_TOKEN    = os.getenv("APP_ADMIN_TOKEN", "")
+APP_ADMIN_EMAIL    = os.getenv("APP_ADMIN_EMAIL", "")
+APP_ADMIN_PASSWORD = os.getenv("APP_ADMIN_PASSWORD", "")
 SQL_HOST        = os.getenv("CONTACTS_SQL_HOST",     "sql-prod.nfc.local")
 SQL_USER        = os.getenv("CONTACTS_SQL_USER",     "")
 SQL_PASSWORD    = os.getenv("CONTACTS_SQL_PASSWORD", "")
@@ -123,35 +133,64 @@ def _get_audit_cols(cur, table: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 # ── HTTP client (Cloudways API) ──────────────────────────────────────────────
+# Auth: if APP_ADMIN_EMAIL/PASSWORD are set, the drainer logs itself in and
+# mints a fresh token every run — immune to the ~30-day token expiry that
+# silently killed the drainer from 2026-06-04 to 06-12. APP_ADMIN_TOKEN is
+# the legacy fallback for environments that only have a static token.
+
+_token = APP_ADMIN_TOKEN
+
+
+def _login() -> bool:
+    """Mint a fresh bearer token from APP_ADMIN_EMAIL/PASSWORD.
+    Returns True on success; False (with a log line) otherwise."""
+    global _token
+    if not (APP_ADMIN_EMAIL and APP_ADMIN_PASSWORD):
+        return False
+    import requests
+    try:
+        r = requests.post(
+            f"{APP_BASE_URL}/api/auth/login",
+            json={"email": APP_ADMIN_EMAIL, "password": APP_ADMIN_PASSWORD},
+            timeout=HTTP_TIMEOUT,
+        )
+    except Exception as exc:
+        logger.error("Login request failed: %s", exc)
+        return False
+    if r.status_code != 200:
+        logger.error("Login failed (HTTP %d): %s", r.status_code, r.text[:200])
+        return False
+    _token = (r.json() or {}).get("access_token") or ""
+    if _token:
+        logger.info("Logged in as %s — fresh token minted.", APP_ADMIN_EMAIL)
+    return bool(_token)
+
 
 def _headers():
-    return {
-        "Content-Type":  "application/json",
-        "Authorization": f"Bearer {APP_ADMIN_TOKEN}",
-    }
+    return {"Authorization": f"Bearer {_token}"}
+
+
+def _api(method: str, path: str, **kwargs):
+    """requests wrapper with one automatic re-login retry on 401."""
+    import requests
+    url = f"{APP_BASE_URL}{path}"
+    r = requests.request(method, url, headers=_headers(),
+                         timeout=kwargs.pop("timeout", HTTP_TIMEOUT), **kwargs)
+    if r.status_code == 401 and _login():
+        r = requests.request(method, url, headers=_headers(),
+                             timeout=HTTP_TIMEOUT, **kwargs)
+    r.raise_for_status()
+    return r
 
 
 def claim_batch(batch_size: int):
-    import requests
-    r = requests.post(
-        f"{APP_BASE_URL}/api/contacts/outbox/claim",
-        params={"batch_size": batch_size},
-        headers=_headers(),
-        timeout=HTTP_TIMEOUT,
-    )
-    r.raise_for_status()
-    return r.json()
+    return _api("POST", "/api/contacts/outbox/claim",
+                params={"batch_size": batch_size}).json()
 
 
 def mark_applied(row_id: int, success: bool, error_message: Optional[str] = None):
-    import requests
-    r = requests.post(
-        f"{APP_BASE_URL}/api/contacts/outbox/{row_id}/applied",
-        json={"success": success, "error_message": error_message},
-        headers=_headers(),
-        timeout=HTTP_TIMEOUT,
-    )
-    r.raise_for_status()
+    _api("POST", f"/api/contacts/outbox/{row_id}/applied",
+         json={"success": success, "error_message": error_message})
 
 
 # ── SQL Server connection ────────────────────────────────────────────────────
@@ -304,10 +343,18 @@ def drain(batch_size: int, dry_run: bool) -> Dict[str, int]:
     counters = {"applied": 0, "failed_terminal": 0, "failed_retry": 0, "skipped": 0}
     errors: List[str] = []
 
-    if not APP_BASE_URL or not APP_ADMIN_TOKEN:
-        sys.exit("ERROR: APP_BASE_URL and APP_ADMIN_TOKEN must be set.")
+    if not APP_BASE_URL:
+        sys.exit("ERROR: APP_BASE_URL must be set.")
+    if not (APP_ADMIN_TOKEN or (APP_ADMIN_EMAIL and APP_ADMIN_PASSWORD)):
+        sys.exit("ERROR: set APP_ADMIN_EMAIL + APP_ADMIN_PASSWORD (preferred) "
+                 "or APP_ADMIN_TOKEN.")
     if not SQL_USER or not SQL_PASSWORD:
         sys.exit("ERROR: CONTACTS_SQL_USER and CONTACTS_SQL_PASSWORD must be set.")
+
+    # Mint a fresh token up front when creds are available — don't even try
+    # a possibly-stale static token.
+    if APP_ADMIN_EMAIL and APP_ADMIN_PASSWORD and not _login():
+        sys.exit("ERROR: login to the app failed — check APP_ADMIN_EMAIL/PASSWORD.")
 
     logger.info("Claiming batch of up to %d pending outbox rows from %s", batch_size, APP_BASE_URL)
     rows = claim_batch(batch_size)
@@ -402,12 +449,87 @@ def drain(batch_size: int, dry_run: bool) -> Dict[str, int]:
     return counters
 
 
+# ── Sync-from-SQL fulfillment ────────────────────────────────────────────────
+# The Cloudways UI's "Sync from SQL" button queues a request the app itself
+# can't fulfill (it can't reach SQL-PROD). We fulfill it here: export a fresh
+# contacts.db with contacts_export_from_sqlserver.py and upload it to the
+# app's /api/contacts/import-db, which preserves the outbox queue and swaps
+# the mirror. Only runs when the outbox is FULLY drained, so a refresh can
+# never clobber edits that haven't reached SQL Server yet.
+
+EXPORT_TIMEOUT = 1800  # seconds — the full export takes a few minutes
+
+
+def maybe_fulfill_sync_request(dry_run: bool) -> None:
+    import subprocess
+    import tempfile
+
+    status = _api("GET", "/api/contacts/sync-request").json()
+    pending_req = status.get("pending")
+    if not pending_req:
+        return
+    logger.info("Sync-from-SQL request #%s pending (requested %s by %s)",
+                pending_req.get("id"), pending_req.get("requested_at"),
+                pending_req.get("requested_by"))
+
+    stats = _api("GET", "/api/contacts/outbox/stats").json()
+    if stats.get("pending"):
+        logger.info("Deferring sync fulfillment — %s outbox row(s) still pending. "
+                    "Will fulfill on a later run once the queue is empty.",
+                    stats.get("pending"))
+        return
+
+    if dry_run:
+        logger.info("DRY-RUN — would export SQL-PROD → contacts.db and upload now.")
+        return
+
+    out_path = os.path.join(tempfile.gettempdir(), f"contacts_sync_{os.getpid()}.db")
+    export_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "contacts_export_from_sqlserver.py")
+    env = dict(os.environ)
+    env.setdefault("CONTACTS_SOURCE_PASSWORD", SQL_PASSWORD)
+
+    logger.info("Running exporter: %s --output %s", export_script, out_path)
+    try:
+        proc = subprocess.run(
+            [sys.executable, export_script, "--output", out_path],
+            env=env, capture_output=True, text=True, timeout=EXPORT_TIMEOUT,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"exporter exited {proc.returncode}: "
+                f"{(proc.stderr or proc.stdout or '')[-500:]}")
+
+        size_mb = os.path.getsize(out_path) / (1024 * 1024)
+        logger.info("Export complete (%.1f MB). Uploading to %s ...", size_mb, APP_BASE_URL)
+        with open(out_path, "rb") as fh:
+            r = _api("POST", "/api/contacts/import-db",
+                     files={"file": ("contacts.db", fh, "application/octet-stream")},
+                     timeout=300)
+        logger.info("Sync-from-SQL fulfilled: %s", r.json())
+    except Exception:
+        logger.error("Sync-from-SQL fulfillment FAILED:\n%s", traceback.format_exc())
+        _send_alert(
+            subject="[Newk's Contacts] Sync-from-SQL fulfillment failed",
+            body=f"The drainer could not fulfill the pending sync request.\n\n"
+                 f"{traceback.format_exc()}\n\n"
+                 f"The request stays pending; the next cron run will retry.",
+        )
+    finally:
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+
+
 def main():
     p = argparse.ArgumentParser(description="Drain Cloudways contacts outbox → SQL Server.")
     p.add_argument("--dry-run", action="store_true",
                    help="Show what would be applied without actually touching SQL Server.")
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH,
                    help=f"Max rows to claim per run (default {DEFAULT_BATCH}).")
+    p.add_argument("--skip-sync", action="store_true",
+                   help="Skip Sync-from-SQL fulfillment (drain the outbox only).")
     args = p.parse_args()
 
     try:
@@ -422,6 +544,15 @@ def main():
             body=f"The drainer crashed before completing.\n\n{traceback.format_exc()}",
         )
         sys.exit(1)
+
+    # Fulfill a queued "Sync from SQL" request, if any (and queue is empty).
+    # Failures here alert + leave the request pending; they don't affect the
+    # drain result above.
+    if not args.skip_sync:
+        try:
+            maybe_fulfill_sync_request(args.dry_run)
+        except Exception:
+            logger.error("Sync-request check failed:\n%s", traceback.format_exc())
 
     # Non-zero exit if there were terminal failures, so cron's MAILTO catches it.
     if counters["failed_terminal"] > 0:

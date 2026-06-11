@@ -42,6 +42,54 @@ CONTACTS_DB_PATH = os.getenv(
 OUTBOX_ENABLED = os.getenv("CONTACTS_OUTBOX_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
+# ── App-local tables: outbox queue + sync requests ──────────────────────────
+# These two tables are CLOUDWAYS-ONLY state (they do not exist in SQL Server)
+# and must survive a mirror refresh. import_contacts_db() recreates them in
+# the freshly-uploaded file and copies the live rows across before swapping.
+APP_LOCAL_SCHEMA_SQL = """
+-- contacts_outbox: durable queue of edits to replay against SQL Server.
+-- Every write helper appends a row here when CONTACTS_OUTBOX_ENABLED=1.
+-- The dev-jan02 drainer cron fetches pending rows, replays them,
+-- and posts back success/failure. Failed rows can be retried.
+--
+-- applied_status: NULL = pending, 'success' = applied, 'error' = failed
+-- payload is JSON: {col: value, col: value, ...}
+CREATE TABLE IF NOT EXISTS contacts_outbox (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at      TEXT NOT NULL,
+    operation       TEXT NOT NULL,        -- INSERT | UPDATE | DELETE
+    table_name      TEXT NOT NULL,
+    pk_col          TEXT NOT NULL,
+    pk_val          TEXT NOT NULL,        -- stored as TEXT for flexibility
+    payload_json    TEXT,                 -- {} for DELETE
+    source_user     TEXT,                 -- LastUpdatedBy stamp
+    applied_at      TEXT,
+    applied_status  TEXT,                 -- NULL | 'success' | 'error'
+    error_message   TEXT,
+    attempts        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_pending
+    ON contacts_outbox(applied_status, created_at)
+    WHERE applied_status IS NULL;
+CREATE INDEX IF NOT EXISTS idx_outbox_table
+    ON contacts_outbox(table_name, pk_val);
+
+-- contacts_sync_requests: queue for the "Sync from SQL" UI button.
+-- The UI inserts a pending row; the dev-jan02 drainer polls
+-- GET /api/contacts/sync-request, and once the outbox is fully drained
+-- it exports SQL-PROD -> contacts.db and uploads it via
+-- POST /api/contacts/import-db, which marks the request fulfilled.
+CREATE TABLE IF NOT EXISTS contacts_sync_requests (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    requested_at  TEXT NOT NULL,
+    requested_by  TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending',  -- pending | fulfilled | failed
+    fulfilled_at  TEXT,
+    note          TEXT
+);
+"""
+
+
 @contextmanager
 def get_connection():
     """Yield a sqlite3 connection in WAL mode (concurrent-read-friendly)."""
@@ -160,33 +208,11 @@ def initialize_schema() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_storeclosure_fk ON StoreClosure(StoreID);
 
-        -- contacts_outbox: durable queue of edits to replay against SQL Server.
-        -- Every write helper appends a row here when CONTACTS_OUTBOX_ENABLED=1.
-        -- The dev-jan02 drainer cron fetches pending rows, replays them,
-        -- and posts back success/failure. Failed rows can be retried.
-        --
-        -- applied_status: NULL = pending, 'success' = applied, 'error' = failed
-        -- payload is JSON: {col: value, col: value, ...}
-        CREATE TABLE IF NOT EXISTS contacts_outbox (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at      TEXT NOT NULL,
-            operation       TEXT NOT NULL,        -- INSERT | UPDATE | DELETE
-            table_name      TEXT NOT NULL,
-            pk_col          TEXT NOT NULL,
-            pk_val          TEXT NOT NULL,        -- stored as TEXT for flexibility
-            payload_json    TEXT,                 -- {} for DELETE
-            source_user     TEXT,                 -- LastUpdatedBy stamp
-            applied_at      TEXT,
-            applied_status  TEXT,                 -- NULL | 'success' | 'error'
-            error_message   TEXT,
-            attempts        INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_outbox_pending
-            ON contacts_outbox(applied_status, created_at)
-            WHERE applied_status IS NULL;
-        CREATE INDEX IF NOT EXISTS idx_outbox_table
-            ON contacts_outbox(table_name, pk_val);
         """)
+        # App-local tables (outbox queue + sync requests) live in a separate
+        # constant so import_contacts_db() can recreate them inside a freshly
+        # uploaded mirror file before copying the live queue across.
+        conn.executescript(APP_LOCAL_SCHEMA_SQL)
         conn.commit()
 
 
@@ -275,6 +301,142 @@ def get_outbox_stats() -> Dict[str, Any]:
         logger.warning("get_outbox_stats failed: %s", exc)
         return {"enabled": OUTBOX_ENABLED, "pending": 0, "failed": 0, "applied": 0,
                 "last_applied_at": None, "oldest_pending": None, "error": str(exc)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sync-from-SQL: request queue + fresh-mirror import.
+# The Cloudways box can't reach SQL-PROD, so "sync from SQL" is a two-step
+# dance: the UI queues a request here, and the dev-jan02 drainer fulfills it
+# (export SQL Server → upload the fresh contacts.db → import_contacts_db).
+# ──────────────────────────────────────────────────────────────────────────────
+
+def create_sync_request(requested_by: Optional[str]) -> Dict[str, Any]:
+    """Queue a mirror-refresh request. Idempotent: if one is already pending,
+    return it instead of stacking duplicates."""
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT * FROM contacts_sync_requests WHERE status = 'pending' "
+            "ORDER BY id LIMIT 1"
+        ).fetchone()
+        if existing:
+            out = _row_to_dict(existing)
+            out["already_pending"] = True
+            return out
+        cur = conn.execute(
+            "INSERT INTO contacts_sync_requests (requested_at, requested_by) "
+            "VALUES (datetime('now'), ?)",
+            (requested_by,),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM contacts_sync_requests WHERE id = ?", (cur.lastrowid,)
+        ).fetchone()
+        out = _row_to_dict(row)
+        out["already_pending"] = False
+        return out
+
+
+def get_sync_request_status() -> Dict[str, Any]:
+    """Current pending request (if any) + the most recent fulfilled one —
+    feeds both the UI status display and the drainer's poll."""
+    with get_connection() as conn:
+        pending = conn.execute(
+            "SELECT * FROM contacts_sync_requests WHERE status = 'pending' "
+            "ORDER BY id LIMIT 1"
+        ).fetchone()
+        last = conn.execute(
+            "SELECT * FROM contacts_sync_requests WHERE status = 'fulfilled' "
+            "ORDER BY fulfilled_at DESC LIMIT 1"
+        ).fetchone()
+    return {
+        "pending":        _row_to_dict(pending) if pending else None,
+        "last_fulfilled": _row_to_dict(last) if last else None,
+    }
+
+
+def fulfill_sync_requests(note: Optional[str] = None) -> int:
+    """Mark every pending sync request fulfilled (the import satisfies all
+    of them at once). Returns the number of rows updated."""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE contacts_sync_requests "
+            "SET status = 'fulfilled', fulfilled_at = datetime('now'), note = ? "
+            "WHERE status = 'pending'",
+            (note,),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
+def import_contacts_db(uploaded_path: str) -> Dict[str, Any]:
+    """Validate a freshly-exported contacts.db and swap it into place,
+    preserving the app-local tables (contacts_outbox, contacts_sync_requests)
+    which exist only on Cloudways.
+
+    Steps:
+      1. Open the uploaded file, verify expected tables + sane row counts
+         (refuses a truncated/empty export rather than nuking the mirror).
+      2. Recreate the app-local tables inside the uploaded file and copy the
+         live rows across (ATTACH).
+      3. Swap via the sqlite3 backup API (WAL-safe; concurrent readers see
+         either old or new state, never a torn file).
+
+    Known small window: outbox rows written between step 2's copy and step
+    3's swap would be lost. The import is an admin-triggered, seconds-long
+    operation — acceptable; the drainer also only triggers it when the
+    queue is empty.
+    """
+    # ── 1. validate ──
+    src = sqlite3.connect(uploaded_path)
+    try:
+        tables = {r[0] for r in src.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        required = {"Store", "AreaDir", "Company"}
+        missing = required - tables
+        if missing:
+            raise ValueError(f"uploaded db is missing required tables: {sorted(missing)}")
+        store_rows = src.execute("SELECT COUNT(*) FROM Store").fetchone()[0]
+        if store_rows < 50:
+            raise ValueError(
+                f"uploaded db has only {store_rows} Store rows — looks like a "
+                "bad/partial export, refusing to replace the live mirror")
+    finally:
+        src.close()
+
+    # ── 2. preserve app-local tables ──
+    preserved: Dict[str, Any] = {}
+    work = sqlite3.connect(uploaded_path)
+    try:
+        work.executescript(APP_LOCAL_SCHEMA_SQL)
+        work.execute("ATTACH DATABASE ? AS live", (CONTACTS_DB_PATH,))
+        for t in ("contacts_outbox", "contacts_sync_requests"):
+            try:
+                work.execute(f"DELETE FROM {t}")
+                work.execute(f"INSERT INTO {t} SELECT * FROM live.{t}")
+                preserved[t] = work.execute(
+                    f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except sqlite3.OperationalError as exc:
+                # live db predates this table — nothing to carry over
+                preserved[t] = f"skipped: {exc}"
+        work.commit()
+        work.execute("DETACH DATABASE live")
+
+        # ── 3. swap (backup API: uploaded file → live path) ──
+        dest = sqlite3.connect(CONTACTS_DB_PATH)
+        try:
+            work.backup(dest)
+        finally:
+            dest.close()
+    finally:
+        work.close()
+
+    logger.info("import_contacts_db: swapped mirror (%d Store rows, preserved=%s)",
+                store_rows, preserved)
+    return {
+        "store_rows": store_rows,
+        "tables":     sorted(tables),
+        "preserved":  preserved,
+    }
 
 
 def list_outbox_rows(status: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:

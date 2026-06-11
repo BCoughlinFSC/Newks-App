@@ -19476,6 +19476,67 @@ async def contacts_outbox_retry(
     return {"id": row_id, "success": True}
 
 
+# ── Contacts: Sync-from-SQL (request → dev-jan02 fulfills → import) ─────────
+# Cloudways can't reach SQL-PROD, so the "Sync from SQL" button can't pull
+# directly. Instead: the button queues a request; the dev-jan02 drainer polls
+# it each cron cycle, and once the outbox is fully drained it runs
+# contacts_export_from_sqlserver.py and uploads the fresh contacts.db here.
+
+@app.post("/api/contacts/sync-request")
+async def contacts_sync_request_create(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Queue a 'refresh local mirror from SQL-PROD' request. Idempotent —
+    returns the existing pending request if one is already queued."""
+    who = getattr(admin_user, "email", None) or getattr(admin_user, "username", None) or "admin"
+    return contacts_db.create_sync_request(who)
+
+
+@app.get("/api/contacts/sync-request")
+async def contacts_sync_request_status(
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Pending request (drainer polls this) + last fulfilled (UI status)."""
+    return contacts_db.get_sync_request_status()
+
+
+@app.post("/api/contacts/import-db")
+def contacts_import_db(
+    file: UploadFile = File(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Receive a freshly-exported contacts.db from dev-jan02 and swap it in.
+
+    Sync def on purpose — file IO + the sqlite backup-API swap run in the
+    thread pool, off the event loop. The import validates the upload
+    (expected tables, sane Store count) and preserves the app-local
+    contacts_outbox + contacts_sync_requests tables across the swap, then
+    marks any pending sync requests fulfilled.
+    """
+    import shutil as _shutil
+    import tempfile as _tempfile
+    data_dir = os.path.dirname(contacts_db.CONTACTS_DB_PATH)
+    os.makedirs(data_dir, exist_ok=True)
+    fd, tmp_path = _tempfile.mkstemp(prefix="contacts_upload_", suffix=".db", dir=data_dir)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            _shutil.copyfileobj(file.file, out)
+        summary = contacts_db.import_contacts_db(tmp_path)
+        fulfilled = contacts_db.fulfill_sync_requests(
+            note=f"imported {summary.get('store_rows')} stores from SQL-PROD")
+        summary["sync_requests_fulfilled"] = fulfilled
+        logger.info("contacts import-db OK: %s", summary)
+        return summary
+    except ValueError as exc:
+        # Validation failure — bad/partial upload, mirror left untouched.
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
 @app.get("/api/monkey/alerts/not-accepted")
 async def monkey_alert_not_accepted():
     """Orders due within 24 hours not yet accepted."""

@@ -44,7 +44,16 @@ Paste this template, then fill in values:
 ```bash
 # Cloudways app (where the outbox queue lives)
 export APP_BASE_URL='https://phpstack-1474989-6237770.cloudwaysapps.com'
-export APP_ADMIN_TOKEN='paste-your-admin-token-here'
+
+# PREFERRED auth: the drainer logs itself in each run and mints a fresh
+# token, so token expiry can never silently kill it (which is what
+# happened 2026-06-04..12 — the static token aged out at ~30 days and
+# every hourly run 401'd until someone noticed).
+export APP_ADMIN_EMAIL='admin@newks.com'
+export APP_ADMIN_PASSWORD='get-from-keepass'
+
+# Legacy fallback (only used when email/password are unset). Expires!
+# export APP_ADMIN_TOKEN='paste-your-admin-token-here'
 
 # SQL-PROD write account — MUST have INSERT/UPDATE/DELETE permission
 # on every contacts.dbo.* table the app edits. The legacy "reports" user
@@ -69,24 +78,24 @@ Lock it down:
 chmod 600 ~/.contacts_drainer.env
 ```
 
-### 4. Get the admin token
+### 4. Auth
 
-The drainer authenticates to Cloudways using an admin bearer token.
-Easiest way to grab one:
+With `APP_ADMIN_EMAIL` + `APP_ADMIN_PASSWORD` set (preferred, see env
+template above), there's nothing else to do — the drainer logs in and
+mints a fresh token every run, and re-logins automatically if it ever
+sees a 401 mid-run.
 
-1. Open `https://phpstack-1474989-6237770.cloudwaysapps.com` in your browser
-2. Log in as your admin user
-3. Open browser devtools → Application → Local Storage
-4. Copy the value of the `auth_token` key
-5. Paste into `APP_ADMIN_TOKEN` above
+<details>
+<summary>Legacy static-token fallback (avoid)</summary>
 
-The token typically lasts 30 days. When the drainer starts failing with
-401 Unauthorized in cron logs, regenerate by re-logging-in and updating
-the env file.
+1. Open the app in a browser, log in as admin
+2. Devtools → Application → Local Storage → copy `auth_token`
+3. Paste into `APP_ADMIN_TOKEN`
 
-> **Future improvement:** create a dedicated long-lived service-account
-> token, separate from human admin sessions. Tracked in the Phase 3
-> backlog.
+Tokens last ~30 days, then every cron run 401s until someone notices —
+this is exactly the failure mode that silently killed the drainer from
+2026-06-04 to 06-12. Use email/password auth instead.
+</details>
 
 ### 5. Test with a dry run
 
@@ -129,12 +138,17 @@ crontab -e
 Append:
 
 ```cron
-# Drain Cloudways contacts outbox → SQL-PROD hourly at :15
-15 * * * * . $HOME/.contacts_drainer.env && /usr/bin/python3 $HOME/toast_net_sales_app/backend/contacts_outbox_drainer.py >> $HOME/contacts_drainer.log 2>&1
+# Drain Cloudways contacts outbox → SQL-PROD every 15 minutes
+*/15 * * * * . $HOME/.contacts_drainer.env && /usr/bin/python3 $HOME/toast_net_sales_app/backend/contacts_outbox_drainer.py >> $HOME/contacts_drainer.log 2>&1
 ```
 
 > Note: the `. $HOME/.contacts_drainer.env &&` prefix sources the env
 > file inside the cron context. Without that, cron has no env vars.
+>
+> Cadence: `*/15 * * * *` = every 15 minutes. The original deployment
+> used `15 * * * *` (hourly at :15 past) — easy to misread as
+> every-15-minutes. Pick whichever; the drainer is idempotent and a
+> run with an empty queue takes ~2 seconds.
 
 ### 7. Flip the feature flag on the Cloudways side
 
@@ -231,6 +245,35 @@ The outbox banner on `/contacts.html` will go amber as edits accumulate
 
 To pause the capture itself (no edits queued, behavior reverts to v1):
 flip `CONTACTS_OUTBOX_ENABLED=0` in the Cloudways .env and restart.
+
+## Sync from SQL (mirror refresh via the UI button)
+
+The Contacts landing page has a **⟳ Sync from SQL** button (admin only,
+in the outbox banner). Because Cloudways can't reach SQL-PROD, the
+button doesn't pull directly — it queues a request that THIS drainer
+fulfills:
+
+1. Button → `POST /api/contacts/sync-request` (idempotent; one pending
+   request at a time)
+2. Drainer, at the end of each cron run: `GET /api/contacts/sync-request`
+3. If a request is pending AND the outbox is fully drained (pending=0 —
+   so a refresh can never clobber unsynced local edits), the drainer:
+   - runs `contacts_export_from_sqlserver.py --output /tmp/...`
+     (needs `CONTACTS_SOURCE_PASSWORD` in the env; falls back to
+     `CONTACTS_SQL_PASSWORD`)
+   - uploads the fresh file to `POST /api/contacts/import-db`
+4. The app validates the upload (expected tables, sane Store count),
+   copies `contacts_outbox` + `contacts_sync_requests` into the new
+   file, swaps it in via the sqlite backup API, and marks the request
+   fulfilled. No restart needed.
+
+If fulfillment fails (exporter error, upload error), the request stays
+pending, an alert email goes out, and the next cron run retries.
+`--skip-sync` skips fulfillment for outbox-only runs.
+
+This replaces the old manual flow (run exporter → SCP to Cloudways) for
+routine refreshes. The manual flow in contacts_export_runbook.md still
+works and remains the fallback.
 
 ## What v1 does NOT do (Phase 3 backlog)
 
