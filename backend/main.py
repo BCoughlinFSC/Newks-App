@@ -10205,33 +10205,39 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 
                 # Also request modifier-level data
                 logger.info("Requesting Analytics menu report with MODIFIER groupBy...")
-            async def fetch_modifier_rows_for_chunk(chunk_start: date, chunk_end: date) -> List[Dict]:
-                # Proactively restaurant-batched (see fetch_menu_rows_batched).
-                # This used to request all ~98 stores in one report and only
-                # fall back to 25-store batches on a 5xx — but the all-stores
-                # payload is also what OOM-killed uvicorn on cold-cache menu
-                # runs (2026-06-10), so now we always batch.
-                return await fetch_menu_rows_batched(
-                    client, chunk_start, chunk_end, restaurant_ids, ["MODIFIER"]
-                )
-                
+
+                async def fetch_modifier_rows_for_chunk(chunk_start: date, chunk_end: date) -> List[Dict]:
+                    # Proactively restaurant-batched (see fetch_menu_rows_batched)
+                    # — the all-stores payload OOM-killed uvicorn on cold-cache
+                    # runs (2026-06-10), so we always batch.
+                    #
+                    # NOTE 2026-06-12: this def previously sat at the WRONG
+                    # indent (dedented out of the menu block), which swallowed
+                    # the entire modifier-merge below into its body as
+                    # unreachable code — the report silently served MENU_ITEM
+                    # rows only, losing every drink sold as a combo modifier
+                    # (~1,300/day chain-wide vs Toast PMIX).
+                    return await fetch_menu_rows_batched(
+                        client, chunk_start, chunk_end, restaurant_ids, ["MODIFIER"]
+                    )
+
+                # ── Merge modifier rows ──────────────────────────────────
+                # NO GUID-level dedup here (it used to drop every modifier row
+                # whose GUID also exists as a menu item). Drinks legitimately
+                # live on BOTH sides — standalone item sales AND combo
+                # modifier sales; Toast's own PMIX reports the two pools
+                # separately (e.g. Sweet Tea (Beverage): 699 item + 316
+                # modifier on 2026-05-01). True API-artifact duplicates
+                # (modifier-only entities like pairing choices that Toast's
+                # MENU_ITEM groupBy mirrors with identical quantities) are
+                # exact-row duplicates and get removed by the cross-chunk
+                # dedup below, keyed on (restaurantGuid, businessDate,
+                # menuItemGuid, quantitySold).
                 if _use_local_menu:
-                    # Local-DB short-circuit: modifier rows already loaded above
-                    # in _local_modifier_rows_to_merge. They've already got
-                    # menuItemGuid set (no rename needed) but we still dedup
-                    # against the menu-item section to match the live path's
-                    # behavior.
-                    menu_item_guids_set = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
-                    deduplicated_local_mods = [
-                        r for r in _local_modifier_rows_to_merge
-                        if r.get("menuItemGuid") not in menu_item_guids_set
-                    ]
-                    if len(deduplicated_local_mods) < len(_local_modifier_rows_to_merge):
-                        logger.info(
-                            "Removed %d duplicate modifiers from local DB merge",
-                            len(_local_modifier_rows_to_merge) - len(deduplicated_local_mods),
-                        )
-                    all_analytics_rows.extend(deduplicated_local_mods)
+                    # Local-DB short-circuit: modifier rows already loaded
+                    # above in _local_modifier_rows_to_merge (menuItemGuid
+                    # already set — no rename needed).
+                    all_analytics_rows.extend(_local_modifier_rows_to_merge)
                 elif days_diff > 7:
                     # Split into week-sized chunks for modifiers too
                     logger.info(f"Splitting modifier data into week-sized chunks")
@@ -10259,15 +10265,9 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                                 elif "modifierOptionName" in row:
                                     row["menuItemName"] = row.pop("modifierOptionName")
 
-                            # Before adding, check for duplicates with menu items
-                            menu_item_guids_set = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
-                            deduplicated_chunk = [
-                                r for r in modifier_chunk_rows
-                                if r.get("menuItemGuid") not in menu_item_guids_set
-                            ]
-                            if len(deduplicated_chunk) < len(modifier_chunk_rows):
-                                logger.info(f"Removed {len(modifier_chunk_rows) - len(deduplicated_chunk)} duplicate modifiers from chunk {current_start} to {chunk_end}")
-                            all_analytics_rows.extend(deduplicated_chunk)
+                            # No GUID-level dedup (see merge note above) —
+                            # exact-row duplicates die in cross-chunk dedup.
+                            all_analytics_rows.extend(modifier_chunk_rows)
 
                         current_start = chunk_end + timedelta(days=1)
                 else:
@@ -10291,15 +10291,9 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                             elif "modifierOptionName" in row:
                                 row["menuItemName"] = row.pop("modifierOptionName")
                         
-                        # Before adding, check for duplicates with menu items
-                        menu_item_guids_set = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
-                        deduplicated_modifier_rows = [
-                            r for r in modifier_rows 
-                            if r.get("menuItemGuid") not in menu_item_guids_set
-                        ]
-                        if len(deduplicated_modifier_rows) < len(modifier_rows):
-                            logger.info(f"Removed {len(modifier_rows) - len(deduplicated_modifier_rows)} duplicate modifiers from single request")
-                        all_analytics_rows.extend(deduplicated_modifier_rows)
+                        # No GUID-level dedup (see merge note above) —
+                        # exact-row duplicates die in cross-chunk dedup.
+                        all_analytics_rows.extend(modifier_rows)
                 
                 logger.info(f"Total rows after adding modifiers: {len(all_analytics_rows)} (was {menu_item_count} menu items, added {len(all_analytics_rows) - menu_item_count} modifiers)")
                 
@@ -10334,39 +10328,24 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # Count how many deduplicated rows are menu items (those with GUIDs from original menu items)
                 menu_item_count = len([r for r in all_analytics_rows if r.get("menuItemGuid") in original_menu_item_guids])
                 
-                # DEBUG: Check for duplicate GUIDs across menu items and modifiers
+                # GUIDs that appear as BOTH menu item and modifier are
+                # EXPECTED, not duplicates: drinks sell standalone (item
+                # side) AND inside combos (modifier side), and Toast's own
+                # PMIX reports the two pools separately (e.g. Sweet Tea
+                # (Beverage) 2026-05-01: 699 item + 316 modifier). The old
+                # code dropped the entire modifier section for these GUIDs,
+                # losing ~1,300 combo drinks/day chain-wide. True API-artifact
+                # mirrors (pairing-choice entities echoed into the MENU_ITEM
+                # pull with identical per-store/day quantities) were already
+                # removed by the exact-key dedup above. Log-only now.
                 menu_item_guids_section = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
                 modifier_guids_section = {r.get("menuItemGuid") for r in all_analytics_rows[menu_item_count:] if r.get("menuItemGuid")}
                 duplicate_guids = menu_item_guids_section.intersection(modifier_guids_section)
-                
                 if duplicate_guids:
-                    logger.warning(f"FOUND DUPLICATE GUIDs in both menu items and modifiers: {len(duplicate_guids)} duplicates")
-                    logger.warning(f"Sample duplicates: {list(duplicate_guids)[:10]}")
-                    
-                    # Check if target modifier is duplicated
-                    if "6d02e1aa-41c4-489e-bd72-90d12d79edf2" in duplicate_guids:
-                        logger.warning(f"TARGET MODIFIER IS DUPLICATED!")
-                        # Count total qty from both sections
-                        menu_section_qty = sum(r.get("quantitySold", 0) for r in all_analytics_rows[:menu_item_count] 
-                                              if r.get("menuItemGuid") == "6d02e1aa-41c4-489e-bd72-90d12d79edf2")
-                        mod_section_qty = sum(r.get("quantitySold", 0) for r in all_analytics_rows[menu_item_count:] 
-                                             if r.get("menuItemGuid") == "6d02e1aa-41c4-489e-bd72-90d12d79edf2")
-                        logger.warning(f"  In menu items section: {menu_section_qty}")
-                        logger.warning(f"  In modifiers section: {mod_section_qty}")
-                        logger.warning(f"  Combined (DOUBLE COUNT): {menu_section_qty + mod_section_qty}")
-                    
-                    # Deduplicate: remove modifier rows whose GUID already exists in menu items
-                    menu_item_guids_set = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
-                    deduplicated_modifier_rows = [
-                        r for r in all_analytics_rows[menu_item_count:] 
-                        if r.get("menuItemGuid") not in menu_item_guids_set
-                    ]
-                    
-                    # Replace the modifier section with deduplicated version
-                    all_analytics_rows = all_analytics_rows[:menu_item_count] + deduplicated_modifier_rows
-                    logger.warning(f"After deduplication: {len(all_analytics_rows)} total rows (removed {len(all_analytics_rows[menu_item_count:]) - len(deduplicated_modifier_rows)} duplicate modifier rows)")
-                else:
-                    logger.info("No duplicate GUIDs found between menu items and modifiers ✓")
+                    logger.info(
+                        "%d GUIDs appear as both menu item and modifier "
+                        "(expected: standalone + combo sales, e.g. drinks)",
+                        len(duplicate_guids))
                 
                 # Log sample of modifier rows to verify they're there
                 # Modifiers should be in the rows after menu_item_count
