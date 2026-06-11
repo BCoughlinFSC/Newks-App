@@ -230,17 +230,43 @@ def insert_rows(rows: Iterable[Dict[str, Any]], group_by_kind: str, menu_item_gu
     Bulk-insert Toast Analytics rows. INSERT OR REPLACE on the composite PK
     so re-runs of the same (date, store, item, kind) overwrite cleanly.
 
+    Rows that share the PK within ONE batch are AGGREGATED (quantities and
+    dollars summed) before insert. Toast's MODIFIER groupBy can return
+    several rows for the same modifier at one store/day — split by size /
+    parent item, the same splits visible in Toast Web PMIX's "Size
+    modifier" column. With a plain INSERT OR REPLACE those rows silently
+    overwrote each other and only the last survived, which ate ~210 combo
+    drinks/day chain-wide (found 2026-06-12 validating the menu report
+    against PMIX; the loss happened HERE at ingest, which is why no
+    downstream dedup change could fix it). Summing is correct because
+    every consumer treats rows per (store, day, item) additively.
+
     menu_item_guids: set of GUIDs from a MENU_ITEM-groupBy fetch, used to
                      mark MODIFIER-groupBy rows whose guid isn't a known
                      menu-item as is_modifier=1.
     """
     initialize_db()
     menu_item_guids = menu_item_guids or set()
-    tuples = []
+    agg: Dict[Tuple, list] = {}
+    collapsed = 0
     for r in rows:
         t = _row_to_tuple(r, group_by_kind, menu_item_guids)
-        if t is not None:
-            tuples.append(t)
+        if t is None:
+            continue
+        key = t[0:4]  # (business_date, restaurant_guid, menu_item_guid, kind)
+        cur = agg.get(key)
+        if cur is None:
+            agg[key] = list(t)
+        else:
+            collapsed += 1
+            cur[6] = (cur[6] or 0) + (t[6] or 0)        # quantity_sold
+            for i in (7, 8, 9):                          # gross, net, discounts
+                if t[i] is not None:
+                    cur[i] = (cur[i] or 0) + t[i]
+    tuples = [tuple(v) for v in agg.values()]
+    if collapsed:
+        logger.info("insert_rows: aggregated %d same-key %s rows (size/parent splits)",
+                    collapsed, group_by_kind)
     if not tuples:
         return 0
     with _connect() as conn:
