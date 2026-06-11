@@ -2014,6 +2014,7 @@ async def fetch_menu_rows_batched(
     """
     rows: List[Dict] = []
     batches = chunk_list(restaurant_ids, MENU_REPORT_RESTAURANT_BATCH)
+    kind = group_by[0] if group_by else ""
     for i, batch in enumerate(batches):
         if len(batches) > 1:
             logger.info(
@@ -2025,6 +2026,13 @@ async def fetch_menu_rows_batched(
         guid = await request_toast_report(client, chunk_start, chunk_end, batch, "menu", group_by)
         batch_rows = await fetch_toast_report(client, guid, "menu")
         if batch_rows:
+            # Tag each row with the pull it came from. The MENU_ITEM and
+            # MODIFIER pulls are disjoint sales pools (verified vs Toast
+            # PMIX 2026-05-01: each pull's day total matches its PMIX
+            # sheet exactly), so the dedup must never collapse rows
+            # across kinds — the kind goes into the dedup key.
+            for r in batch_rows:
+                r.setdefault("_groupByKind", kind)
             rows.extend(batch_rows)
     return rows
 
@@ -10304,16 +10312,17 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # Store the original menu item GUIDs before deduplication
                 original_menu_item_guids = {r.get("menuItemGuid") for r in all_analytics_rows[:menu_item_count] if r.get("menuItemGuid")}
                 
-                # Deduplicate exact-duplicate rows. Key includes netSales:
-                # a drink's standalone sale (full price) and its combo-
-                # modifier sale ($0/upcharge) can coincide on quantity at a
-                # store/day, but never on dollars — without netSales in the
-                # key those coincidences dropped ~210 real drinks/day
-                # (validated vs Toast PMIX 2026-05-01). True duplicates —
-                # the same sale echoed across date-chunks, or pairing-choice
-                # entities mirrored into the MENU_ITEM pull — duplicate the
-                # whole row including netSales, so they still dedup
-                # (validated: 158/159 pairing items exact vs PMIX).
+                # Deduplicate exact-duplicate rows WITHIN each pull kind.
+                # The MENU_ITEM and MODIFIER pulls are disjoint sales pools —
+                # verified against Toast PMIX 2026-05-01, where each pull's
+                # day total matches its PMIX sheet to the unit (72,477 items
+                # / 230,831 modifiers) — so rows from different kinds are
+                # NEVER the same sale and must never collapse, even when a
+                # drink's standalone qty coincides with its combo qty at a
+                # store/day (that collision ate ~210 drinks/day until kind
+                # joined the key). This dedup's real job is unchanged:
+                # the same sale re-fetched across overlapping date chunks /
+                # restaurant batches is same-kind and still dies here.
                 seen = set()
                 deduplicated_rows = []
                 for row in all_analytics_rows:
@@ -10325,6 +10334,7 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                         row.get("restaurantGuid"),
                         row.get("businessDate"),
                         row.get("menuItemGuid"),
+                        row.get("_groupByKind", ""),
                         row.get("quantitySold", 0),
                         _net,
                     )
