@@ -4299,6 +4299,7 @@
         hdr.push(c('Guest Count Tag',  S.blueR));
         hdr.push(c('Recipe Tag',       S.blueL));
         hdr.push(c('PLU',              S.blueR));
+        hdr.push(c('Aloha PLU',        S.blueR));
         dateCols.forEach(d => hdr.push(c(formatDateHeader(d), S.lBlueR)));
 
         const rows = [hdr];
@@ -4329,6 +4330,9 @@
           row.push(gcPresent ? n(r.guestCountTag,  dR) : c('', S.missR));
           row.push(r.recipe ? c(r.recipe, dL) : c('', S.missL));
           row.push(r.plu ? n(r.plu, dR) : c('', dR));
+          // Aloha PLU from the mapping table (mli_plu_attribute_map.aloha_plu);
+          // blank when the item has no Aloha mapping yet.
+          row.push(r.alohaPlu ? n(r.alohaPlu, dR) : c('', dR));
           dateCols.forEach(d => row.push(n(r.daily?.[d] || 0, dR)));
           rows.push(row);
         });

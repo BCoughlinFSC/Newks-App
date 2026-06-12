@@ -4189,10 +4189,10 @@ def pivot_menu_items_by_tag(
         if toast_config_db.db_available() else {}
     )
 
-    def _attr_for(guid: str, name: str) -> Tuple[str, float, str, float, int, str, str]:
+    def _attr_for(guid: str, name: str) -> Tuple[str, float, str, float, int, str, str, int]:
         """
         Returns: (consolidated_cat, entree_equiv_tag, recipe, guest_count_tag,
-                  toast_plu, item_classification, item_subclass)
+                  toast_plu, item_classification, item_subclass, aloha_plu)
 
         Three-tier fallback for each value:
           1. Live V3/V2 Menus API data (tags_mapping / plu_mapping)
@@ -4284,6 +4284,7 @@ def pivot_menu_items_by_tag(
             toast_plu,
             item_classification,
             item_subclass,
+            ex_aplu,
         )
 
     modifier_count_in_pivot = 0
@@ -4313,7 +4314,7 @@ def pivot_menu_items_by_tag(
     # but used to be called once per (row × matched-tag); with multi-tag items
     # that's 3-5× per row, plus PLU range classification inside. Memoizing by
     # guid collapses it to once per unique item.
-    _attr_cache: Dict[str, Tuple[str, float, str, float, int, str, str]] = {}
+    _attr_cache: Dict[str, Tuple[str, float, str, float, int, str, str, int]] = {}
 
     def _attr_for_cached(guid: str, name: str):
         if guid in _attr_cache:
@@ -4396,7 +4397,7 @@ def pivot_menu_items_by_tag(
             # Guest Count tag, Toast PLU, Item Classification, Item Subclass).
             # Memoized by guid — same guid hits the cache across all its tags
             # and across all its sales rows.
-            _cat, _ee, _recipe, _gct, _plu, _cls, _sub = _attr_for_cached(menu_item_guid, menu_item_name)
+            _cat, _ee, _recipe, _gct, _plu, _cls, _sub, _aplu = _attr_for_cached(menu_item_guid, menu_item_name)
 
             # Track item-level breakdown by tag (SAME for both menu items and modifiers)
             if canonical not in tag_item_breakdown:
@@ -4410,6 +4411,7 @@ def pivot_menu_items_by_tag(
                     "recipe": _recipe,
                     "guestCountTag": _gct,
                     "plu": _plu,
+                    "alohaPlu": _aplu,
                     "itemClassification": _cls,
                     "itemSubclass": _sub,
                 }
@@ -4428,6 +4430,7 @@ def pivot_menu_items_by_tag(
                     "recipe": _recipe,
                     "guestCountTag": _gct,
                     "plu": _plu,
+                    "alohaPlu": _aplu,
                     "itemClassification": _cls,
                     "itemSubclass": _sub,
                 }
@@ -4530,6 +4533,7 @@ def pivot_menu_items_by_tag(
                     "recipe":           item_data.get("recipe", ""),
                     "guestCountTag":    item_data.get("guestCountTag", 0.0),
                     "plu":              item_data.get("plu", 0),
+                    "alohaPlu":         item_data.get("alohaPlu", 0),
                     "itemClassification": item_data.get("itemClassification", ""),
                     "itemSubclass":       item_data.get("itemSubclass", ""),
                 })
@@ -4546,6 +4550,7 @@ def pivot_menu_items_by_tag(
                         "recipe":           daily_data.get("recipe", ""),
                         "guestCountTag":    daily_data.get("guestCountTag", 0.0),
                         "plu":              daily_data.get("plu", 0),
+                        "alohaPlu":         daily_data.get("alohaPlu", 0),
                         "itemClassification": daily_data.get("itemClassification", ""),
                         "itemSubclass":       daily_data.get("itemSubclass", ""),
                     })
@@ -4568,7 +4573,7 @@ def pivot_menu_items_by_tag(
                 if item_guid not in items_in_tag:
                     logger.info(f"  Adding zero-sales item: {item_name} (guid: {item_guid[:8]}...)")
                     items_in_tag.add(item_guid)
-                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub = _attr_for_cached(item_guid, item_name)
+                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub, _zaplu = _attr_for_cached(item_guid, item_name)
                     item_breakdown_rows.append({
                         "itemTagName": tag_name,
                         "menuItemGuid": item_guid,
@@ -4579,6 +4584,7 @@ def pivot_menu_items_by_tag(
                         "recipe": _zrec,
                         "guestCountTag": _zgct,
                         "plu": _zplu,
+                        "alohaPlu": _zaplu,
                         "itemClassification": _zcls,
                         "itemSubclass": _zsub,
                     })
@@ -4593,6 +4599,7 @@ def pivot_menu_items_by_tag(
                         "recipe": _zrec,
                         "guestCountTag": _zgct,
                         "plu": _zplu,
+                        "alohaPlu": _zaplu,
                         "itemClassification": _zcls,
                         "itemSubclass": _zsub,
                     })
@@ -4606,7 +4613,7 @@ def pivot_menu_items_by_tag(
             for item_guid, item_name in sorted(all_items_per_tag[tag_name].items()):
                 if item_guid not in items_in_tag:
                     items_in_tag.add(item_guid)
-                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub = _attr_for_cached(item_guid, item_name)
+                    _zcat, _zee, _zrec, _zgct, _zplu, _zcls, _zsub, _zaplu = _attr_for_cached(item_guid, item_name)
                     item_breakdown_rows.append({
                         "itemTagName": tag_name,
                         "menuItemGuid": item_guid,
@@ -4617,6 +4624,7 @@ def pivot_menu_items_by_tag(
                         "recipe": _zrec,
                         "guestCountTag": _zgct,
                         "plu": _zplu,
+                        "alohaPlu": _zaplu,
                         "itemClassification": _zcls,
                         "itemSubclass": _zsub,
                     })
@@ -4631,6 +4639,7 @@ def pivot_menu_items_by_tag(
                         "recipe": _zrec,
                         "guestCountTag": _zgct,
                         "plu": _zplu,
+                        "alohaPlu": _zaplu,
                         "itemClassification": _zcls,
                         "itemSubclass": _zsub,
                     })
