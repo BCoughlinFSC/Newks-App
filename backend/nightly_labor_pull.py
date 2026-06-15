@@ -1,32 +1,39 @@
 """
-nightly_labor_pull.py — Toast labor (shift) ingestion into toast.dbo.hstShift.
+nightly_labor_pull.py — Toast labor ingestion: shifts (toast.dbo.hstShift)
+AND the employee master (toast.dbo.Employees).
 
-Fills the gap left by Don's PHP labor cron, which stopped writing hstShift after
-2026-05-13. The downstream rollup (SQL Agent job "Populate tbl_LaborDataByDayPart",
-which calls toast.dbo.sp_process_pulled_labor) is still running fine — it just has
-nothing to merge.
+Fills two gaps left by Don's external pullers:
+  • The PHP labor cron stopped writing hstShift after 2026-05-13.
+  • The "API" employee puller (toast.dbo.Employees / EmployeeJobsByStore /
+    EmployeeWagesByJob) stopped after its 2026-05-14 run, freezing the
+    employee master chain-wide. New hires, rehires, and cross-store workers
+    then had shifts but no Employees row, so the payroll export
+    (sp_rpt_Company_Payroll_Export_TOAST) silently dropped them.
 
-Pulls from Toast Standard API /labor/v1/timeEntries (one call per restaurant,
-chunked at 30 days because Toast caps the window), maps each entry to a
-toast.dbo.hstShift row, DELETE+INSERTs per (Store, DateOfBusiness range), and
-then triggers sp_process_pulled_labor so tbl_LaborDataByDayPart catches up.
+Shifts: pulls /labor/v1/timeEntries per restaurant (chunked at 30 days),
+maps to hstShift, DELETE+INSERTs per (Store, date range), then triggers
+sp_process_pulled_labor so tbl_LaborDataByDayPart catches up.
+
+Employees: pulls /labor/v1/employees per restaurant (full current roster,
+NOT date-ranged) and MERGEs into toast.dbo.Employees on GUID (never deletes,
+so past-period payroll still sees people who've left). Runs every invocation
+unless --skip-employees.
 
 USAGE
 -----
-  python nightly_labor_pull.py                          # yesterday, all stores
-  python nightly_labor_pull.py 2026-05-17               # one date, all stores
+  python nightly_labor_pull.py                          # yesterday shifts + employee sync, all stores
+  python nightly_labor_pull.py 2026-05-17               # one date shifts + employee sync
   python nightly_labor_pull.py --start-date 2026-05-14 --end-date 2026-05-17
-                                                        # date range (backfill)
-  python nightly_labor_pull.py --days-back 3            # yesterday + 3 prior days
-                                                        # (4 distinct dates) —
-                                                        # rolling catch-up for
-                                                        # late-edited shifts
-  python nightly_labor_pull.py --days-back 7            # weekly catch-up
-                                                        # (8 distinct dates)
+                                                        # date range (backfill) + employee sync
+  python nightly_labor_pull.py --days-back 3            # yesterday + 3 prior days + employee sync
   python nightly_labor_pull.py 2026-05-17 --store 1051  # one date, one store
+  python nightly_labor_pull.py --employees-only         # ONLY refresh toast.dbo.Employees
+                                                        # (no shift pull, no rollup) —
+                                                        # use before payroll to land new hires
+  python nightly_labor_pull.py --skip-employees ...     # shifts only, old behavior
   python nightly_labor_pull.py --start-date 2026-05-14 --end-date 2026-05-17 \
                                                        --skip-rollup
-                                                        # backfill hstShift only
+                                                        # backfill hstShift only (+ employee sync)
 
 NOTES
 -----
@@ -376,6 +383,182 @@ async def pull_store_labor(
     return result
 
 
+# ─── Employee master sync ────────────────────────────────────────────────────
+# Don's external "API" employee puller (which fed toast.dbo.Employees,
+# EmployeeJobsByStore, EmployeeWagesByJob) stopped after its 2026-05-14 run,
+# freezing the employee master chain-wide. Symptom: new hires + rehires +
+# cross-store workers have shifts in hstShift but no Employees row, so the
+# payroll export (sp_rpt_Company_Payroll_Export_TOAST) silently drops them.
+#
+# This pulls each live store's roster from Toast Standard API
+# /labor/v1/employees and MERGEs into toast.dbo.Employees. It is NOT
+# date-ranged — it's a full current-roster snapshot — so it runs once per
+# invocation regardless of the labor date range.
+
+
+async def fetch_employees(
+    client: httpx.AsyncClient,
+    token: str,
+    store_guid: str,
+) -> tuple[list[dict], list[str]]:
+    """GET /labor/v1/employees for one restaurant. Handles page-token
+    pagination (Toast returns the next-page token in a response header).
+    Returns (employees, errors)."""
+    url = f"{TOAST_STANDARD_API_BASE_URL}/labor/v1/employees"
+    all_emps: list[dict] = []
+    errors: list[str] = []
+    page_token = None
+    for _ in range(50):  # hard cap on pages — defensive against a paging loop
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Toast-Restaurant-External-ID": store_guid,
+        }
+        params = {}
+        if page_token:
+            params["pageToken"] = page_token
+        try:
+            resp = await client.get(url, headers=headers, params=params, timeout=60.0)
+            if resp.status_code != 200:
+                errors.append(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                break
+            body = resp.json()
+            emps = body.get("employees", body) if isinstance(body, dict) else body
+            if isinstance(emps, list):
+                all_emps.extend(emps)
+            # Toast paginates labor endpoints via this response header.
+            page_token = resp.headers.get("Toast-Next-Page-Token")
+            if not page_token:
+                break
+        except Exception as exc:
+            errors.append(f"Exception: {exc}")
+            break
+    return all_emps, errors
+
+
+def map_employee(emp: dict, store_guid: str, store_num: int) -> dict | None:
+    """Map a Toast /labor/v1/employees object to a toast.dbo.Employees row.
+
+    Field names are defensive (Toast has used a few variants); run with
+    --debug-first to dump a live employee object and confirm against these.
+    """
+    guid = emp.get("guid")
+    if not guid:
+        return None
+
+    deleted_bool = bool(emp.get("deleted"))
+    phone = emp.get("phoneNumber") or emp.get("phone") or ""
+
+    return {
+        "GUID":               str(guid)[:50],
+        "StoreGUID":          store_guid,
+        "StoreID":            store_num,
+        "First":              emp.get("firstName") or emp.get("first") or "",
+        "Last":               emp.get("lastName") or emp.get("last") or "",
+        "ChosenName":         emp.get("chosenName") or "",
+        "Email":              emp.get("email") or "",
+        "Phone":              phone,
+        "ExternalId":         emp.get("externalId") or "",
+        # ExternalEmployeeId = the ADP File #. Set per-employee in Toast; blank
+        # here means HR hasn't entered a payroll ID for them (e.g. Nichols).
+        "ExternalEmployeeId": emp.get("externalEmployeeId") or "",
+        "CreatedDate":        _parse_iso(emp.get("createdDate")),
+        "Deleted":            "1" if deleted_bool else "0",
+        "DeletedDate":        _parse_iso(emp.get("deletedDate")),
+        "ModifiedDate":       _parse_iso(emp.get("modifiedDate")),
+        "v2EmployeeGuid":     str(emp.get("v2EmployeeGuid") or "")[:50],
+    }
+
+
+async def pull_store_employees(
+    client: httpx.AsyncClient,
+    token: str,
+    store_guid: str,
+    store_num: int,
+    store_name: str,
+    dry_run: bool,
+    debug_first: bool,
+) -> dict:
+    result = {"store_num": store_num, "store_name": store_name, "ok": False,
+              "fetched": 0, "inserted": 0, "updated": 0, "error": None}
+    try:
+        emps, errors = await fetch_employees(client, token, store_guid)
+        result["fetched"] = len(emps)
+        if errors and not emps:
+            result["error"] = "; ".join(errors)[:300]
+            log.error("  [%s] employees API failed: %s", store_num, errors[0])
+            return result
+
+        if debug_first and emps:
+            log.info("  [%s] Sample employee (for field-name verification):", store_num)
+            log.info("\n%s", json.dumps(emps[0], indent=2, default=str))
+
+        rows = [m for m in (map_employee(e, store_guid, store_num) for e in emps) if m]
+
+        if dry_run:
+            blank_file = sum(1 for r in rows if not r["ExternalEmployeeId"])
+            log.info("  [%s] %s — employees fetched=%d, mapped=%d, blank File#=%d (DRY RUN)",
+                     store_num, store_name, len(emps), len(rows), blank_file)
+            result["ok"] = True
+            return result
+
+        conn = db.get_toast_connection()
+        try:
+            inserted, updated = db.upsert_employees(conn, rows)
+        finally:
+            conn.close()
+        result["inserted"], result["updated"], result["ok"] = inserted, updated, True
+        blank_file = sum(1 for r in rows if not r["ExternalEmployeeId"])
+        log.info("  [%s] %s — employees: fetched=%d, new=%d, updated=%d, blank File#=%d",
+                 store_num, store_name, len(emps), inserted, updated, blank_file)
+    except Exception as exc:
+        result["error"] = str(exc)
+        log.error("  [%s] %s — employee sync error: %s", store_num, store_name, exc, exc_info=True)
+    return result
+
+
+async def run_employee_sync(
+    client: httpx.AsyncClient,
+    token: str,
+    stores: list[dict],
+    concurrency: int,
+    dry_run: bool,
+    debug_first: bool,
+) -> list[dict]:
+    """Refresh toast.dbo.Employees for every store in scope (parallel)."""
+    log.info("-" * 70)
+    log.info("EMPLOYEE MASTER SYNC — %d store(s)", len(stores))
+    sem = asyncio.Semaphore(concurrency)
+
+    async def one(idx: int, s: dict) -> dict:
+        async with sem:
+            return await pull_store_employees(
+                client, token,
+                store_guid=str(s["guid"]),
+                store_num=int(s["store_num"]),
+                store_name=s.get("name", f"Store {s['store_num']}"),
+                dry_run=dry_run,
+                debug_first=(debug_first and idx == 0),
+            )
+
+    results = await asyncio.gather(
+        *[one(i, s) for i, s in enumerate(stores)], return_exceptions=True
+    )
+    out: list[dict] = []
+    tot_new = tot_upd = 0
+    for s, r in zip(stores, results):
+        if isinstance(r, Exception):
+            out.append({"store_num": int(s["store_num"]), "ok": False,
+                        "error": f"task raised {type(r).__name__}: {r}",
+                        "inserted": 0, "updated": 0})
+            continue
+        out.append(r)
+        tot_new += r.get("inserted", 0)
+        tot_upd += r.get("updated", 0)
+    log.info("Employee sync totals: new=%d, updated=%d, failed_stores=%d",
+             tot_new, tot_upd, sum(1 for r in out if not r.get("ok")))
+    return out
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -397,6 +580,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                     help="Comma-separated store_num filter.")
     ap.add_argument("--skip-rollup", action="store_true",
                     help="Skip sp_process_pulled_labor at the end.")
+    ap.add_argument("--skip-employees", action="store_true",
+                    help="Skip the employee-master sync (toast.dbo.Employees). "
+                         "By default it runs every invocation alongside the labor pull.")
+    ap.add_argument("--employees-only", action="store_true",
+                    help="Run ONLY the employee-master sync — no shift pull, no rollup. "
+                         "Use for an immediate roster refresh (e.g. before payroll).")
     ap.add_argument("--dry-run", action="store_true",
                     help="Fetch and map but do not write to SQL.")
     ap.add_argument("--debug-first", action="store_true",
@@ -416,6 +605,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ap.error("--days-back must be 0 or greater.")
     if args.concurrency < 1:
         ap.error("--concurrency must be 1 or greater.")
+    if args.employees_only and args.skip_employees:
+        ap.error("--employees-only and --skip-employees are contradictory.")
     return args
 
 
@@ -518,32 +709,55 @@ async def main():
                 debug_first=(args.debug_first and idx == 0),
             )
 
+    emp_failures: list[dict] = []
+    emp_totals = {"new": 0, "updated": 0}
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         token = await get_token(client)
         log.info("Standard API auth: OK")
 
-        pull_tasks = [pull_with_sem(idx, s) for idx, s in enumerate(stores)]
-        results = await asyncio.gather(*pull_tasks, return_exceptions=True)
+        # ── Labor (shift) pull — skipped entirely in --employees-only mode ──
+        if not args.employees_only:
+            pull_tasks = [pull_with_sem(idx, s) for idx, s in enumerate(stores)]
+            results = await asyncio.gather(*pull_tasks, return_exceptions=True)
 
-        for s, r in zip(stores, results):
-            if isinstance(r, Exception):
-                failures.append({
-                    "store_num":  int(s["store_num"]),
-                    "store_name": s.get("name", f"Store {s['store_num']}"),
-                    "ok":         False,
-                    "error":      f"task raised {type(r).__name__}: {r}",
-                    "fetched":    0,
-                    "inserted":   0,
-                })
-                continue
-            if not r["ok"]:
-                failures.append(r)
-            totals["fetched"]  += r["fetched"]
-            totals["inserted"] += r["inserted"]
+            for s, r in zip(stores, results):
+                if isinstance(r, Exception):
+                    failures.append({
+                        "store_num":  int(s["store_num"]),
+                        "store_name": s.get("name", f"Store {s['store_num']}"),
+                        "ok":         False,
+                        "error":      f"task raised {type(r).__name__}: {r}",
+                        "fetched":    0,
+                        "inserted":   0,
+                    })
+                    continue
+                if not r["ok"]:
+                    failures.append(r)
+                totals["fetched"]  += r["fetched"]
+                totals["inserted"] += r["inserted"]
+        else:
+            log.info("--employees-only: skipping labor (shift) pull.")
 
-    # Rollup
+        # ── Employee-master sync — runs unless explicitly skipped ──
+        if not args.skip_employees:
+            emp_results = await run_employee_sync(
+                client, token, stores,
+                concurrency=args.concurrency,
+                dry_run=args.dry_run,
+                debug_first=args.debug_first,
+            )
+            for r in emp_results:
+                if not r.get("ok"):
+                    emp_failures.append(r)
+                emp_totals["new"]     += r.get("inserted", 0)
+                emp_totals["updated"] += r.get("updated", 0)
+        else:
+            log.info("--skip-employees: employee-master sync NOT run.")
+
+    # Rollup — only relevant to the labor pull; never in --employees-only mode
     rollup_ok = None
-    if args.skip_rollup or args.dry_run:
+    if args.employees_only or args.skip_rollup or args.dry_run:
         log.info("-" * 70)
         log.info("sp_process_pulled_labor SKIPPED.")
     else:
@@ -564,19 +778,29 @@ async def main():
 
     dur = time.time() - overall_start
     log.info("=" * 70)
-    log.info("LABOR PULL COMPLETE")
-    log.info("  Range    : %s..%s", start_date, end_date)
-    log.info("  Stores   : %d total / %d failed", len(stores), len(failures))
-    log.info("  Entries  : fetched=%d, inserted=%d", totals["fetched"], totals["inserted"])
-    log.info("  Rollup   : %s", "SKIPPED" if rollup_ok is None
-             else ("OK" if rollup_ok else "FAILED"))
-    log.info("  Runtime  : %.1f min", dur / 60)
+    log.info("PULL COMPLETE")
+    if not args.employees_only:
+        log.info("  Range       : %s..%s", start_date, end_date)
+        log.info("  Labor       : %d stores / %d failed — fetched=%d, inserted=%d",
+                 len(stores), len(failures), totals["fetched"], totals["inserted"])
+        log.info("  Rollup      : %s", "SKIPPED" if rollup_ok is None
+                 else ("OK" if rollup_ok else "FAILED"))
+    if not args.skip_employees:
+        log.info("  Employees   : %d stores / %d failed — new=%d, updated=%d",
+                 len(stores), len(emp_failures), emp_totals["new"], emp_totals["updated"])
+    log.info("  Runtime     : %.1f min", dur / 60)
     log.info("=" * 70)
 
     if failures:
-        log.warning("FAILED STORES (%d):", len(failures))
+        log.warning("FAILED LABOR STORES (%d):", len(failures))
         for r in failures:
             log.warning("  Store %s — %s", r["store_num"], r["error"])
+    if emp_failures:
+        log.warning("FAILED EMPLOYEE-SYNC STORES (%d):", len(emp_failures))
+        for r in emp_failures:
+            log.warning("  Store %s — %s", r["store_num"], r.get("error"))
+
+    if failures or emp_failures:
         sys.exit(1)
 
 

@@ -152,6 +152,80 @@ def _trunc(val, maxlen):
     return s[:maxlen] if len(s) > maxlen else s
 
 
+def upsert_employees(conn: pyodbc.Connection, rows: list[dict]) -> tuple[int, int]:
+    """
+    Upsert employee-master rows into toast.dbo.Employees, MERGEd on GUID.
+
+    MERGE (not DELETE+INSERT): we NEVER remove an employee record, because a
+    past payroll run still needs people who have since left. Toast's
+    /labor/v1/employees returns a restaurant's current roster; we update
+    matched rows and insert new ones, stamping LastUpdatedBy='API' to match
+    the convention Don's old puller used.
+
+    The GUID is Toast's per-restaurant employee GUID — globally unique and
+    exactly what hstShift.Employee carries — so matching on GUID alone is
+    correct, and a person who works multiple stores legitimately gets one row
+    per store (each with its own GUID + StoreGUID). That's what lets the
+    payroll export's `hs.Employee = e.GUID AND hs.Store = e.StoreGUID` join
+    resolve cross-store shifts once every store's roster is current.
+
+    Returns (inserted, updated).
+    """
+    if not rows:
+        return (0, 0)
+
+    cur = conn.cursor()
+    merge_sql = """
+    MERGE toast.dbo.Employees WITH (HOLDLOCK) AS t
+    USING (SELECT ? AS GUID) AS s
+    ON (t.GUID = s.GUID)
+    WHEN MATCHED THEN UPDATE SET
+        t.StoreGUID = ?, t.StoreID = ?, t.First = ?, t.Last = ?,
+        t.ChosenName = ?, t.Email = ?, t.Phone = ?, t.ExternalId = ?,
+        t.ExternalEmployeeId = ?, t.CreatedDate = ?, t.Deleted = ?,
+        t.DeletedDate = ?, t.ModifiedDate = ?, t.v2EmployeeGuid = ?,
+        t.LastUpdated = GETDATE(), t.LastUpdatedBy = 'API'
+    WHEN NOT MATCHED THEN INSERT
+        (GUID, StoreGUID, StoreID, First, Last, ChosenName, Email, Phone,
+         ExternalId, ExternalEmployeeId, CreatedDate, Deleted, DeletedDate,
+         ModifiedDate, v2EmployeeGuid, LastUpdated, LastUpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), 'API')
+    OUTPUT $action;
+    """
+    inserted = updated = 0
+    for r in rows:
+        guid     = _trunc(r.get("GUID"), 50)
+        store_g  = _trunc(r.get("StoreGUID"), 50)
+        store_id = r.get("StoreID")
+        first    = _trunc(r.get("First"), 100)
+        last     = _trunc(r.get("Last"), 100)
+        chosen   = _trunc(r.get("ChosenName"), 100)
+        email    = _trunc(r.get("Email"), 200)
+        phone    = _trunc(r.get("Phone"), 20)
+        ext_id   = _trunc(r.get("ExternalId"), 100)
+        ext_emp  = _trunc(r.get("ExternalEmployeeId"), 100)
+        created  = _safe_dt(r.get("CreatedDate"))
+        deleted  = _trunc(r.get("Deleted"), 10)
+        del_dt   = _safe_dt(r.get("DeletedDate"))
+        modified = _safe_dt(r.get("ModifiedDate"))
+        v2guid   = _trunc(r.get("v2EmployeeGuid"), 50)
+
+        params = (
+            guid,                                                    # USING
+            store_g, store_id, first, last, chosen, email, phone,    # UPDATE SET
+            ext_id, ext_emp, created, deleted, del_dt, modified, v2guid,
+            guid, store_g, store_id, first, last, chosen, email, phone,  # INSERT
+            ext_id, ext_emp, created, deleted, del_dt, modified, v2guid,
+        )
+        action = cur.execute(merge_sql, params).fetchone()
+        if action and str(action[0]).upper() == "INSERT":
+            inserted += 1
+        else:
+            updated += 1
+    conn.commit()
+    return (inserted, updated)
+
+
 def upsert_orders(conn: pyodbc.Connection, rows: list[dict]) -> int:
     """
     Delete existing orders for this store/date, then bulk INSERT.
@@ -210,6 +284,198 @@ def upsert_orders(conn: pyodbc.Connection, rows: list[dict]) -> int:
         cursor.execute(insert_sql, params)
     conn.commit()
     log.info("Bulk inserted %d order rows (delete + insert)", len(rows))
+    return len(rows)
+
+
+def upsert_payments(
+    conn: pyodbc.Connection,
+    rows: list[dict],
+    *,
+    store_num: int = None,
+    biz_date=None,
+) -> int:
+    """
+    Delete existing hstPayment rows for this store/date, then bulk INSERT.
+    Idempotent — safe to re-run for the same store/date.
+
+    store_num/biz_date are passed explicitly so we DELETE the scope correctly
+    even when the orders pull returned zero payments (e.g. a 100% cash day —
+    don't want to leave stale rows from a prior pull).
+    """
+    cursor = conn.cursor()
+
+    # Resolve scope — prefer kwargs, fall back to first row
+    if store_num is None and rows:
+        store_num = rows[0]["StoreNum"]
+    if biz_date is None and rows:
+        biz_date = rows[0]["DateOfBusiness"]
+    if store_num is None or biz_date is None:
+        log.warning("upsert_payments called with no rows and no scope — skipping")
+        return 0
+
+    cursor.execute(
+        "DELETE FROM dbo.hstPayment WHERE StoreNum = ? AND DateOfBusiness = ?",
+        store_num, biz_date
+    )
+
+    if not rows:
+        conn.commit()
+        log.info("Cleared hstPayment for store %s on %s (no new rows to insert)", store_num, biz_date)
+        return 0
+
+    insert_sql = """
+    INSERT INTO dbo.hstPayment (
+        PaymentID, DateOfBusiness, DayPart, StoreID, StoreNum, PaymentType,
+        OrderID, CheckID, MCARepaymentAmount, CreatedDevice, TenderTransactionGuid,
+        Last4Digits, Refund, TipRefundAmount, RefundTxn, RefundStrategy,
+        Server, SurchargeAmount, LastModifiedDevice, RefundStatus, OtherPaymentID,
+        CardEntryMode, PaymentStatus, Amount, TipAmount, AmountTendered,
+        CardType, HouseAccount, CardProcessorType, PaidTime, PaidBusinessDate,
+        RefundTime, RefundBusinessDate, PaymentMethodID
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    for row in rows:
+        params = (
+            _trunc(row["PaymentID"], 36), row["DateOfBusiness"],
+            _trunc(row.get("DayPart"), 36),
+            _trunc(row.get("StoreID"), 36), row.get("StoreNum"),
+            _trunc(row.get("PaymentType"), 50),
+            _trunc(row.get("OrderID"), 36), _trunc(row.get("CheckID"), 36),
+            row.get("MCARepaymentAmount"),
+            _trunc(row.get("CreatedDevice"), 16),
+            _trunc(row.get("TenderTransactionGuid"), 36),
+            _trunc(row.get("Last4Digits"), 4),
+            row.get("Refund", 0), row.get("TipRefundAmount", 0),
+            row.get("RefundTxn"),       # varchar(MAX)
+            row.get("RefundStrategy"),  # varchar(MAX)
+            _trunc(row.get("Server"), 36),
+            row.get("SurchargeAmount"),
+            _trunc(row.get("LastModifiedDevice"), 16),
+            _trunc(row.get("RefundStatus"), 50),
+            _trunc(row.get("OtherPaymentID"), 36),
+            _trunc(row.get("CardEntryMode"), 25),
+            _trunc(row.get("PaymentStatus"), 50),
+            row.get("Amount", 0), row.get("TipAmount", 0), row.get("AmountTendered", 0),
+            _trunc(row.get("CardType"), 50),
+            _trunc(row.get("HouseAccount"), 500),
+            _trunc(row.get("CardProcessorType"), 50),
+            _safe_dt(row.get("PaidTime")), row.get("PaidBusinessDate"),
+            _trunc(row.get("RefundTime"), 50),
+            _trunc(row.get("RefundBusinessDate"), 10),
+            _trunc(row.get("PaymentMethodID"), 36),
+        )
+        cursor.execute(insert_sql, params)
+    conn.commit()
+    log.info("Bulk inserted %d payment rows (delete + insert)", len(rows))
+    return len(rows)
+
+
+def upsert_applied_discounts(
+    conn: pyodbc.Connection,
+    rows: list[dict],
+    *,
+    store_num: int = None,
+    biz_date=None,
+) -> int:
+    """Delete existing hstAppliedDiscounts rows for this store/date, then bulk INSERT."""
+    cursor = conn.cursor()
+
+    if store_num is None and rows:
+        store_num = rows[0]["StoreNum"]
+    if biz_date is None and rows:
+        biz_date = rows[0]["DateOfBusiness"]
+    if store_num is None or biz_date is None:
+        log.warning("upsert_applied_discounts called with no rows and no scope — skipping")
+        return 0
+
+    cursor.execute(
+        "DELETE FROM dbo.hstAppliedDiscounts WHERE StoreNum = ? AND DateOfBusiness = ?",
+        store_num, biz_date
+    )
+
+    if not rows:
+        conn.commit()
+        log.info("Cleared hstAppliedDiscounts for store %s on %s (no new rows to insert)", store_num, biz_date)
+        return 0
+
+    insert_sql = """
+    INSERT INTO dbo.hstAppliedDiscounts (
+        AppliedDiscountID, DateOfBusiness, StoreID, StoreNum, OrderID, CheckID,
+        Approver, LoyaltyVendor, LoyaltyReference, DiscountID, DiscountType,
+        DiscountName, DiscountPercent, DiscountAmount, AppliedPromoCode,
+        NonTaxDiscountAmount
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    for row in rows:
+        params = (
+            _trunc(row["AppliedDiscountID"], 36), row["DateOfBusiness"],
+            _trunc(row.get("StoreID"), 36), row.get("StoreNum"),
+            _trunc(row.get("OrderID"), 36), _trunc(row.get("CheckID"), 36),
+            _trunc(row.get("Approver"), 36),
+            _trunc(row.get("LoyaltyVendor"), 100),
+            _trunc(row.get("LoyaltyReference"), 100),
+            _trunc(row.get("DiscountID"), 36),
+            _trunc(row.get("DiscountType"), 50),
+            _trunc(row.get("DiscountName"), 100),
+            row.get("DiscountPercent"),
+            row.get("DiscountAmount", 0),
+            _trunc(row.get("AppliedPromoCode"), 100),
+            row.get("NonTaxDiscountAmount", 0),
+        )
+        cursor.execute(insert_sql, params)
+    conn.commit()
+    log.info("Bulk inserted %d applied discount rows (delete + insert)", len(rows))
+    return len(rows)
+
+
+def upsert_service_charges(
+    conn: pyodbc.Connection,
+    rows: list[dict],
+    *,
+    store_num: int = None,
+    biz_date=None,
+) -> int:
+    """Delete existing hstServiceCharges rows for this store/date, then bulk INSERT."""
+    cursor = conn.cursor()
+
+    if store_num is None and rows:
+        store_num = rows[0]["StoreNum"]
+    if biz_date is None and rows:
+        biz_date = rows[0]["DateOfBusiness"]
+    if store_num is None or biz_date is None:
+        log.warning("upsert_service_charges called with no rows and no scope — skipping")
+        return 0
+
+    cursor.execute(
+        "DELETE FROM dbo.hstServiceCharges WHERE StoreNum = ? AND DateOfBusiness = ?",
+        store_num, biz_date
+    )
+
+    if not rows:
+        conn.commit()
+        log.info("Cleared hstServiceCharges for store %s on %s (no new rows to insert)", store_num, biz_date)
+        return 0
+
+    insert_sql = """
+    INSERT INTO dbo.hstServiceCharges (
+        GUID, DateOfBusiness, StoreID, StoreNum, OrderID, CheckID,
+        ChargeType, ChargeAmount
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    for row in rows:
+        params = (
+            _trunc(row["GUID"], 36), row["DateOfBusiness"],
+            _trunc(row.get("StoreID"), 36), row.get("StoreNum"),
+            _trunc(row.get("OrderID"), 36), _trunc(row.get("CheckID"), 36),
+            _trunc(row.get("ChargeType"), 75),
+            row.get("ChargeAmount", 0),
+        )
+        cursor.execute(insert_sql, params)
+    conn.commit()
+    log.info("Bulk inserted %d service charge rows (delete + insert)", len(rows))
     return len(rows)
 
 
