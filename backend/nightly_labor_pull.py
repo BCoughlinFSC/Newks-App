@@ -448,6 +448,11 @@ def map_employee(emp: dict, store_guid: str, store_num: int) -> dict | None:
     deleted_bool = bool(emp.get("deleted"))
     phone = emp.get("phoneNumber") or emp.get("phone") or ""
 
+    # Toast sends a 1970-epoch sentinel for deletedDate on non-deleted
+    # employees — store NULL instead of a bogus 1970 delete date.
+    _del_raw = _parse_iso(emp.get("deletedDate"))
+    deleted_date = _del_raw if (deleted_bool and _del_raw and _del_raw.year > 1970) else None
+
     return {
         "GUID":               str(guid)[:50],
         "StoreGUID":          store_guid,
@@ -463,7 +468,7 @@ def map_employee(emp: dict, store_guid: str, store_num: int) -> dict | None:
         "ExternalEmployeeId": emp.get("externalEmployeeId") or "",
         "CreatedDate":        _parse_iso(emp.get("createdDate")),
         "Deleted":            "1" if deleted_bool else "0",
-        "DeletedDate":        _parse_iso(emp.get("deletedDate")),
+        "DeletedDate":        deleted_date,
         "ModifiedDate":       _parse_iso(emp.get("modifiedDate")),
         "v2EmployeeGuid":     str(emp.get("v2EmployeeGuid") or "")[:50],
     }
