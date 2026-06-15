@@ -201,7 +201,7 @@ def upsert_employees(conn: pyodbc.Connection, rows: list[dict]) -> tuple[int, in
         last     = _trunc(r.get("Last"), 100)
         chosen   = _trunc(r.get("ChosenName"), 100)
         email    = _trunc(r.get("Email"), 200)
-        phone    = _trunc(r.get("Phone"), 20)
+        phone    = _trunc(r.get("Phone"), 10)   # toast.dbo.Employees.Phone is char(10)
         ext_id   = _trunc(r.get("ExternalId"), 100)
         ext_emp  = _trunc(r.get("ExternalEmployeeId"), 100)
         created  = _safe_dt(r.get("CreatedDate"))

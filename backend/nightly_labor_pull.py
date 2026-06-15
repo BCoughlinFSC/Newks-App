@@ -446,7 +446,15 @@ def map_employee(emp: dict, store_guid: str, store_num: int) -> dict | None:
         return None
 
     deleted_bool = bool(emp.get("deleted"))
-    phone = emp.get("phoneNumber") or emp.get("phone") or ""
+
+    # toast.dbo.Employees.Phone is char(10). Toast sometimes sends an
+    # 11-digit number with a leading US country-code "1"
+    # (e.g. 13182610269 -> 318-261-0269), which overflows char(10). Keep
+    # digits only, drop a leading country-code 1, cap at 10.
+    _phone_digits = "".join(ch for ch in str(emp.get("phoneNumber") or emp.get("phone") or "") if ch.isdigit())
+    if len(_phone_digits) == 11 and _phone_digits.startswith("1"):
+        _phone_digits = _phone_digits[1:]
+    phone = _phone_digits[:10]
 
     # Toast sends a 1970-epoch sentinel for deletedDate on non-deleted
     # employees — store NULL instead of a bogus 1970 delete date.
