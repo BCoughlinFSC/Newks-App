@@ -369,30 +369,38 @@ def fulfill_sync_requests(note: Optional[str] = None) -> int:
 
 
 def import_contacts_db(uploaded_path: str) -> Dict[str, Any]:
-    """Validate a freshly-exported contacts.db and swap it into place,
-    preserving the app-local tables (contacts_outbox, contacts_sync_requests)
-    which exist only on Cloudways.
+    """Refresh the live mirror's data tables from a freshly-exported
+    contacts.db, IN PLACE — without swapping the database file.
+
+    WAL-safe by design. The previous version did sqlite3 .backup() INTO the
+    live, open database; on Cloudways that blocked on a write lock for the
+    full 5-min nginx timeout (the classic WAL-swap-while-uvicorn-is-running
+    gotcha) and never completed. Instead we ATTACH the uploaded export and,
+    inside ONE short transaction on the live file, DROP+recreate+refill each
+    data table from the export. Same file (no swap, no -wal/-shm dance),
+    one write-lock acquisition, commits in well under a second for a ~1 MB
+    mirror. The app-local tables (contacts_outbox, contacts_sync_requests)
+    are NEVER touched, so the queue survives.
 
     Steps:
-      1. Open the uploaded file, verify expected tables + sane row counts
-         (refuses a truncated/empty export rather than nuking the mirror).
-      2. Recreate the app-local tables inside the uploaded file and copy the
-         live rows across (ATTACH).
-      3. Swap via the sqlite3 backup API (WAL-safe; concurrent readers see
-         either old or new state, never a torn file).
-
-    Known small window: outbox rows written between step 2's copy and step
-    3's swap would be lost. The import is an admin-triggered, seconds-long
-    operation — acceptable; the drainer also only triggers it when the
-    queue is empty.
+      1. Validate the upload (expected tables + sane Store count) — refuse a
+         truncated/empty export rather than wiping the mirror.
+      2. In one transaction on the live DB: for every data table in the
+         export, DROP the live copy and recreate it from the export's own
+         CREATE statement, then INSERT its rows.
+      3. Re-run initialize_schema() to restore indexes + guarantee the
+         app-local tables exist.
     """
-    # ── 1. validate ──
+    # Tables that live ONLY on Cloudways and must never be refreshed/dropped.
+    PRESERVE = {"contacts_outbox", "contacts_sync_requests", "sqlite_sequence"}
+
+    # ── 1. validate the upload (read-only) ──
     src = sqlite3.connect(uploaded_path)
     try:
-        tables = {r[0] for r in src.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+        up_tables = [r[0] for r in src.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
         required = {"Store", "AreaDir", "Company"}
-        missing = required - tables
+        missing = required - set(up_tables)
         if missing:
             raise ValueError(f"uploaded db is missing required tables: {sorted(missing)}")
         store_rows = src.execute("SELECT COUNT(*) FROM Store").fetchone()[0]
@@ -403,39 +411,56 @@ def import_contacts_db(uploaded_path: str) -> Dict[str, Any]:
     finally:
         src.close()
 
-    # ── 2. preserve app-local tables ──
-    preserved: Dict[str, Any] = {}
-    work = sqlite3.connect(uploaded_path)
+    refresh_tables = [t for t in up_tables if t not in PRESERVE]
+
+    # ── 2. in-place transactional refresh on the live DB ──
+    conn = sqlite3.connect(CONTACTS_DB_PATH, timeout=60)
+    refreshed: Dict[str, int] = {}
     try:
-        work.executescript(APP_LOCAL_SCHEMA_SQL)
-        work.execute("ATTACH DATABASE ? AS live", (CONTACTS_DB_PATH,))
-        for t in ("contacts_outbox", "contacts_sync_requests"):
-            try:
-                work.execute(f"DELETE FROM {t}")
-                work.execute(f"INSERT INTO {t} SELECT * FROM live.{t}")
-                preserved[t] = work.execute(
-                    f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-            except sqlite3.OperationalError as exc:
-                # live db predates this table — nothing to carry over
-                preserved[t] = f"skipped: {exc}"
-        work.commit()
-        work.execute("DETACH DATABASE live")
-
-        # ── 3. swap (backup API: uploaded file → live path) ──
-        dest = sqlite3.connect(CONTACTS_DB_PATH)
-        try:
-            work.backup(dest)
-        finally:
-            dest.close()
+        conn.execute("PRAGMA busy_timeout=60000")
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("ATTACH DATABASE ? AS src", (uploaded_path,))
+        conn.execute("BEGIN IMMEDIATE")
+        for t in refresh_tables:
+            create_sql = conn.execute(
+                "SELECT sql FROM src.sqlite_master WHERE type='table' AND name=?",
+                (t,),
+            ).fetchone()[0]
+            conn.execute(f'DROP TABLE IF EXISTS main."{t}"')
+            conn.execute(create_sql)                                  # recreate in main from export's schema
+            conn.execute(f'INSERT INTO main."{t}" SELECT * FROM src."{t}"')
+            refreshed[t] = conn.execute(f'SELECT COUNT(*) FROM main."{t}"').fetchone()[0]
+        conn.commit()
+        conn.execute("DETACH DATABASE src")
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        work.close()
+        conn.close()
 
-    logger.info("import_contacts_db: swapped mirror (%d Store rows, preserved=%s)",
-                store_rows, preserved)
+    # ── 3. restore indexes + ensure app-local tables still exist ──
+    # The transaction above already committed the refreshed data — the import
+    # has SUCCEEDED at this point. initialize_schema() is purely supplementary
+    # (rebuilds the app's named performance indexes and backfills the app-local
+    # tables for a cold-start DB). Its CREATE INDEX statements hardcode columns
+    # like Store(StoreState); if a future export ever drops such a column it
+    # would raise here — but the data is already safe and the app-local tables
+    # are preserved/never dropped, so a failure must NOT surface as a failed
+    # import. Guard it: log and move on, leaving data intact.
+    try:
+        initialize_schema()
+    except sqlite3.OperationalError as exc:
+        logger.warning(
+            "import_contacts_db: data refreshed OK, but rebuilding indexes/skeleton "
+            "hit a schema mismatch (%s) — likely an export schema change. Data is "
+            "intact; some performance indexes may be missing.", exc)
+
+    logger.info("import_contacts_db: refreshed %d tables in place (%d Store rows)",
+                len(refreshed), store_rows)
     return {
-        "store_rows": store_rows,
-        "tables":     sorted(tables),
-        "preserved":  preserved,
+        "store_rows":      store_rows,
+        "tables_refreshed": sorted(refreshed),
+        "row_counts":      refreshed,
     }
 
 
