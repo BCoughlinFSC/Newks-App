@@ -487,13 +487,22 @@ def maybe_fulfill_sync_request(dry_run: bool) -> None:
     export_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                  "contacts_export_from_sqlserver.py")
     env = dict(os.environ)
-    env.setdefault("CONTACTS_SOURCE_PASSWORD", SQL_PASSWORD)
+    # The exporter authenticates to SQL-PROD with CONTACTS_SOURCE_USER/PASSWORD
+    # (defaulting to the read-only 'reports' account). If those aren't set in
+    # the env, fall back to the drainer's own working SQL creds so it can
+    # connect as the same account that just drained successfully.
+    env.setdefault("CONTACTS_SOURCE_USER", SQL_USER or "")
+    env.setdefault("CONTACTS_SOURCE_PASSWORD", SQL_PASSWORD or "")
 
     logger.info("Running exporter: %s --output %s", export_script, out_path)
     try:
+        # NOTE: dev-jan02 runs Python 3.6 — subprocess.run's capture_output=
+        # and text= kwargs are 3.7+. Use the 3.6-compatible equivalents
+        # (stdout/stderr=PIPE + universal_newlines).
         proc = subprocess.run(
             [sys.executable, export_script, "--output", out_path],
-            env=env, capture_output=True, text=True, timeout=EXPORT_TIMEOUT,
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=EXPORT_TIMEOUT,
         )
         if proc.returncode != 0:
             raise RuntimeError(
