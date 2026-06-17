@@ -1031,6 +1031,15 @@
         rows.forEach(function(row) {
           csvRows.push(columns.map(function(c) {
             var v = row[c] == null ? '' : String(row[c]);
+            // MultiLocationId is a 19-digit integer. Excel coerces any bare
+            // numeric CSV value (even quoted) to a float, displays it in
+            // scientific notation, and silently rounds off the last digits.
+            // Emit it as an Excel text-formula ="…" so the full value survives
+            // a double-click open. (Only meaningful for rows whose DB value is
+            // still intact — legacy 'e+' rows are already truncated at source.)
+            if (c === 'MultiLocationId' && v !== '') {
+              return '"=""' + v.replace(/"/g, '""') + '"""';
+            }
             return '"' + v.replace(/"/g, '""') + '"';
           }).join(','));
         });
