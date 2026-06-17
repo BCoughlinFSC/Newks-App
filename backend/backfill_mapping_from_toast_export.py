@@ -66,6 +66,17 @@ def is_legacy(guid: str, mli: str) -> bool:
     return str(guid or "").startswith("x:") or "e+" in str(mli or "").lower()
 
 
+def _created(c) -> datetime:
+    """Parse the export's 'Created Date' (M/D/YYYY). Unparseable -> earliest."""
+    s = str(c.get("Created Date", "")).strip()
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return datetime.min
+
+
 def read_toast_csv(path: str) -> List[dict]:
     """Toast exports are Windows-1252 with a possible UTF-8 BOM. Decode robustly."""
     with open(path, "rb") as f:
@@ -172,44 +183,52 @@ def main() -> int:
     actions: List[dict] = []
     updates: List[tuple] = []          # (new_guid, new_mli, id)
     claimed_keys = set()               # (mli, guid) already assigned this run
-    n_update = n_archived = n_ambig = n_orphan = n_collide = 0
+    n_update = n_archived = n_flagged = n_orphan = n_collide = 0
 
     def pick(legacy_row) -> (Optional[dict], str):
         plu = to_int(legacy_row["toast_plu"])
         nm = norm_name(legacy_row["toast_item_name"])
-        # 1) PLU + exact name
+        # Build the candidate pool, most specific match first.
+        pool: List[dict] = []
+        how = ""
         if plu:
             exact = [c for c in csv_by_plu.get(plu, []) if norm_name(c["Name"]) == nm]
-            if len(exact) == 1:
-                return exact[0], "plu+name"
-        # 2) unique name
-        byname = csv_by_name.get(nm, [])
-        if len(byname) == 1:
-            return byname[0], "name"
-        # 3) unique PLU
-        byplu = csv_by_plu.get(plu, []) if plu else []
-        if len(byplu) == 1:
-            return byplu[0], "plu"
-        # 4) disambiguate multiple by preferring the non-archived one
-        pool = byname or byplu
-        if len(pool) > 1:
-            active = [c for c in pool if str(c["Archived"]).strip().lower() == "no"]
-            if len(active) == 1:
-                return active[0], "active-of-many"
-        return None, "ambiguous" if pool else "orphan"
+            if exact:
+                pool, how = exact, "plu+name"
+        if not pool:
+            byname = csv_by_name.get(nm, [])
+            if byname:
+                pool, how = byname, "name"
+        if not pool and plu:
+            byplu = csv_by_plu.get(plu, [])
+            if byplu:
+                pool, how = byplu, "plu"
+        if not pool:
+            return None, "orphan"
+        if len(pool) == 1:
+            return pool[0], how
+
+        # Multiple candidates. Toast keeps version history: editing an item mints
+        # a NEW guid but KEEPS its multiLocationId (the 'Number'). So if every
+        # candidate shares one MLI, they're versions of ONE item — take the
+        # newest guid (the MLI is identical either way). If they span several
+        # MLIs, the item was re-created under a new master id; take the newest
+        # and flag it ('*') for a human glance.
+        newest = sorted(pool, key=lambda c: (_created(c), str(c["GUID"])), reverse=True)[0]
+        distinct_mli = {str(c[mli_col]).strip() for c in pool}
+        if len(distinct_mli) == 1:
+            return newest, how + "/versions-newest"
+        return newest, how + "/multi-mli-newest*"
 
     for lg in legacy:
         c, how = pick(lg)
         if not c:
-            if how == "ambiguous":
-                n_ambig += 1
-            else:
-                n_orphan += 1
+            n_orphan += 1
             actions.append({
                 "action": "NO_MATCH", "how": how, "legacy_id": lg["id"],
                 "name": lg["toast_item_name"], "toast_plu": lg["toast_plu"],
                 "new_guid": "", "new_mli": "", "archived": "", "note":
-                    "no unambiguous CSV item — left as-is for manual review",
+                    "not in the export — gone from Toast; left as-is for manual review",
             })
             continue
 
@@ -233,6 +252,8 @@ def main() -> int:
         n_update += 1
         if archived.lower() == "yes":
             n_archived += 1
+        if "*" in how:
+            n_flagged += 1
         actions.append({
             "action": "FILL_KEYS", "how": how, "legacy_id": lg["id"],
             "name": lg["toast_item_name"], "toast_plu": lg["toast_plu"],
@@ -241,9 +262,8 @@ def main() -> int:
         })
 
     print(f"\nPlan: fill real GUID+MLI on {n_update} legacy rows "
-          f"({n_archived} of them archived-in-Toast), "
-          f"{n_collide} collisions skipped, "
-          f"{n_ambig} ambiguous + {n_orphan} no-match left as-is.")
+          f"({n_archived} archived-in-Toast; {n_flagged} multi-MLI picks flagged '*' to review), "
+          f"{n_collide} collisions skipped, {n_orphan} no-match left as-is.")
 
     # Audit CSV next to this script
     report = os.path.join(os.path.dirname(os.path.abspath(__file__)),
