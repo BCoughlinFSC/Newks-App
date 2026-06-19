@@ -193,7 +193,9 @@
 
       document.getElementById('grandWrap').innerHTML =
         `<span class="grand">${fmt$(data.grandSales)}</span> ` +
-        `<span class="grand-sub">deferred sales &nbsp;·&nbsp; ${fmt$(data.grandTax)} tax &nbsp;·&nbsp; ${data.itemCount || 0} item line(s)</span>`;
+        `<span class="grand-sub">deferred sales &nbsp;·&nbsp; ${fmt$(data.grandTax)} tax &nbsp;·&nbsp; ${data.itemCount || 0} item line(s)`
+        + (data.grandSalesExempt ? ` &nbsp;·&nbsp; ${fmt$(data.grandSalesExempt)} on tax-exempt checks` : '')
+        + `</span>`;
 
       if (!stores.length) {
         document.getElementById('resultsWrap').innerHTML =
@@ -203,8 +205,8 @@
 
       let html = `<table class="report"><thead><tr>
         <th class="left">Store</th><th class="left">Date</th><th class="left">Time</th>
-        <th class="left">Order #</th><th class="left">Check #</th><th class="left">Item</th>
-        <th>Qty</th><th>Sales</th><th>Tax</th>
+        <th class="left">Order #</th><th class="left">Item</th><th>Qty</th>
+        <th class="left">Tax Exempt</th><th>Sales</th><th>Tax</th>
       </tr></thead><tbody>`;
 
       for (const s of stores) {
@@ -218,9 +220,9 @@
             <td class="left">${esc(r.businessDate)}</td>
             <td class="left">${esc(fmtTime(r.time))}</td>
             <td class="left">${esc(r.orderNumber)}</td>
-            <td class="left">${esc(r.checkNumber)}</td>
             <td class="left">${esc(r.itemName)}</td>
             <td>${fmtInt(r.quantity)}</td>
+            <td class="left">${r.taxExempt ? 'Yes' : 'No'}</td>
             <td>${fmt$(r.sales)}</td>
             <td>${fmt$(r.tax)}</td></tr>`;
         }
@@ -236,11 +238,11 @@
         return (s.rows || []).map(r => ({ ...r, _store: label }));
       });
       const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-      const header = ['Store', 'Date', 'Time (UTC)', 'Order #', 'Check #', 'Item', 'Qty', 'Sales', 'Tax'];
+      const header = ['Store', 'Date', 'Time (UTC)', 'Order #', 'Item', 'Qty', 'Tax Exempt', 'Sales', 'Tax'];
       const lines = [header.map(q).join(',')];
       for (const r of rows) {
         lines.push([q(r._store), q(r.businessDate), q(fmtTime(r.time)), q(r.orderNumber),
-          q(r.checkNumber), q(r.itemName), Number(r.quantity || 0),
+          q(r.itemName), Number(r.quantity || 0), q(r.taxExempt ? 'Yes' : 'No'),
           Number(r.sales || 0).toFixed(2), Number(r.tax || 0).toFixed(2)].join(','));
       }
       lines.push([q('TOTAL'), '', '', '', '', '', '',

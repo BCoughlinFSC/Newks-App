@@ -18180,6 +18180,8 @@ async def deferred_items(body: dict = Body(...)):
         stores_out = []
         grand_sales = 0.0
         grand_tax = 0.0
+        grand_sales_exempt = 0.0
+        grand_tax_exempt = 0.0
         grand_count = 0
 
         for guid in guids:
@@ -18202,8 +18204,8 @@ async def deferred_items(body: dict = Body(...)):
                     for check in order.get("checks", []):
                         if check.get("voided") or check.get("deleted"):
                             continue
-                        check_num = _s(check.get("displayNumber"))
                         opened = check.get("openedDate") or order.get("openedDate")
+                        chk_exempt = bool(check.get("taxExempt"))
                         deferred_sels = []
                         _collect_deferred_selections(check.get("selections"), deferred_sels)
                         for sel in deferred_sels:
@@ -18218,14 +18220,17 @@ async def deferred_items(body: dict = Body(...)):
                                 "businessDate": bd_iso,
                                 "time": opened,
                                 "orderNumber": order_num,
-                                "checkNumber": check_num,
                                 "itemName": name,
                                 "quantity": sel.get("quantity") or 0,
+                                "taxExempt": chk_exempt,
                                 "sales": round(sales, 2),
                                 "tax": round(tax, 2),
                             })
                             s_sales += sales
                             s_tax += tax
+                            if chk_exempt:
+                                grand_sales_exempt += sales
+                                grand_tax_exempt += tax
                 d += timedelta(days=1)
                 if d <= end_d:
                     await asyncio.sleep(0.05)
@@ -18250,6 +18255,8 @@ async def deferred_items(body: dict = Body(...)):
         "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime()),
         "grandSales": round(grand_sales, 2),
         "grandTax": round(grand_tax, 2),
+        "grandSalesExempt": round(grand_sales_exempt, 2),
+        "grandTaxExempt": round(grand_tax_exempt, 2),
         "itemCount": grand_count,
         "storeCount": len(stores_out),
         "stores": stores_out,
