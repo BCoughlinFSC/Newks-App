@@ -18200,12 +18200,14 @@ async def tax_exempt_service_charges(body: dict = Body(...)):
                         tx_num = _s(check.get("taxExemptNumber"))
                         tx_state = _s(check.get("taxExemptState"))
                         for sc in (check.get("appliedServiceCharges") or []):
-                            # Toast's "Tax Exempt Service Charges" line counts only
-                            # *taxable* charges that were exempted.  Drop gratuities /
-                            # tips and any explicitly non-taxable charge — Toast reports
-                            # those on the separate "Non-Taxable Service Charges" line.
+                            # Toast's "Tax Exempt Service Charges" line = the taxable
+                            # charges that got exempted (e.g. delivery fees); it EXCLUDES
+                            # gratuities/tips.  Note: an applied charge's `taxable` field
+                            # reads False for EVERYTHING on a tax-exempt check (no tax was
+                            # applied), so it can't distinguish config-taxability here —
+                            # exclude by gratuity flag / name only.
                             _sc_name_l = (sc.get("name") or "").lower()
-                            if (sc.get("gratuity") is True or sc.get("taxable") is False
+                            if (sc.get("gratuity") is True
                                     or "tip" in _sc_name_l or "gratuit" in _sc_name_l):
                                 continue
                             amt = float(sc.get("chargeAmount") or 0)
