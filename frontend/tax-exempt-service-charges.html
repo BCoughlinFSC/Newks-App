@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tax-Exempt Service Charges – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c; min-height: 100vh; }
+    .header { background: #C41E3A; padding: 1.5rem 2rem; border-bottom: 3px solid #A01A2E; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.5rem; font-weight: 700; }
+    .header p { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; text-decoration: none; }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+    .container { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; padding: 1.5rem 2rem; max-width: 1800px; margin: 0 auto; }
+    @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+    .card { background: #fff; border-radius: 12px; padding: 1.5rem; border: 1px solid #e8e0d5; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .card h2 { margin: 0 0 1.25rem 0; color: #C41E3A; font-size: 1.1rem; font-weight: 700; }
+    .controls-row { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .form-group input { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+    .btn-primary { background: #C41E3A; color: #fff; border: none; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: #374151; color: #fff; border: none; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+    .btn-secondary:hover:not(:disabled) { background: #1F2937; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status-msg { padding: 0.75rem 1rem; border-radius: 8px; margin-top: 1rem; font-size: 0.85rem; display: none; }
+    .status-msg.info { background: #F0F9FF; border: 1px solid #BAE6FD; color: #0369A1; display: block; }
+    .status-msg.error { background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; display: block; }
+    .grand { font-size: 1.6rem; font-weight: 700; color: #C41E3A; }
+    .grand-sub { font-size: 0.85rem; color: #6B7280; }
+    .report-table-wrap { overflow-x: auto; margin-top: 1rem; }
+    table.report { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    table.report th, table.report td { padding: 0.4rem 0.6rem; border: 1px solid #D1D5DB; text-align: right; white-space: nowrap; }
+    table.report th { background: #F3F4F6; font-weight: 600; position: sticky; top: 0; z-index: 1; }
+    table.report td.left { text-align: left; }
+    table.report tr.store-total { background: #FFF8E1; font-weight: 700; }
+    table.report tr.detail:hover { background: #F0F9FF; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Tax-Exempt Service Charge Breakdown</h1>
+        <p>Every service charge that escaped tax because its order was tax-exempt — by store, date &amp; time</p>
+      </div>
+      <a href="/" class="home-btn">Home</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div id="shared-sidebar"></div>
+
+    <div>
+      <div class="card">
+        <h2>Report Controls</h2>
+        <div class="controls-row">
+          <div class="form-group">
+            <label for="startDate">Start (business date)</label>
+            <input type="date" id="startDate" />
+          </div>
+          <div class="form-group">
+            <label for="endDate">End (business date)</label>
+            <input type="date" id="endDate" />
+          </div>
+          <button class="btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
+          <button class="btn-secondary" id="csvBtn" onclick="downloadCsv()" disabled>Download CSV</button>
+        </div>
+        <p style="margin:0.25rem 0 0 0;font-size:0.8rem;color:#6B7280;">
+          Per-store totals should tie to the "Tax Exempt Service Charges" line on that store's Toast Tax Summary. Times are the check's opened time (UTC).
+        </p>
+        <div id="statusMsg" class="status-msg"></div>
+      </div>
+
+      <div class="card" style="margin-top:1rem;">
+        <h2>Results <span id="resultsMeta" style="font-weight:400;font-size:0.85rem;color:#6B7280;"></span></h2>
+        <div id="grandWrap" style="margin-bottom:0.5rem;"></div>
+        <div id="resultsWrap" class="report-table-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="shared-nav.js"></script>
+  <script>
+    const API_BASE = '';
+    let lastData = null;
+
+    function getAuthHeaders() {
+      const token = localStorage.getItem('auth_token');
+      return token ? { 'Authorization': 'Bearer ' + token } : {};
+    }
+
+    // Default: first-of-this-month → today
+    (function initDates() {
+      const now = new Date();
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      document.getElementById('startDate').value = first.toISOString().split('T')[0];
+      document.getElementById('endDate').value = now.toISOString().split('T')[0];
+    })();
+
+    function showStatus(msg, type) {
+      const el = document.getElementById('statusMsg');
+      el.className = 'status-msg ' + type;
+      el.textContent = msg;
+    }
+    function clearStatus() { document.getElementById('statusMsg').className = 'status-msg'; }
+
+    function fmt$(v) {
+      if (v == null) return '$0.00';
+      return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+    function fmtTime(iso) {
+      if (!iso) return '';
+      // Show YYYY-MM-DD HH:MM from the ISO timestamp (UTC, as Toast returns it)
+      const m = String(iso).match(/T(\d{2}:\d{2})/);
+      return m ? m[1] : '';
+    }
+
+    async function runReport() {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      if (!start || !end) { showStatus('Pick a start and end date.', 'error'); return; }
+      if (start > end) { showStatus('Start date must be on or before end date.', 'error'); return; }
+
+      const btn = document.getElementById('runBtn');
+      btn.disabled = true; btn.textContent = 'Loading...';
+      document.getElementById('csvBtn').disabled = true;
+      document.getElementById('resultsWrap').innerHTML = '';
+      document.getElementById('grandWrap').innerHTML = '';
+      document.getElementById('resultsMeta').textContent = '';
+      showStatus('Pulling tax-exempt orders from Toast across all stores… (a wide date range can take a minute)', 'info');
+
+      try {
+        const resp = await fetch(API_BASE + '/api/tax-exempt-service-charges', {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: start, end_date: end }),
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          let detail = resp.status + ' ' + resp.statusText;
+          try { detail = JSON.parse(text).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        lastData = JSON.parse(text);
+        renderReport(lastData);
+        document.getElementById('csvBtn').disabled = !(lastData.stores && lastData.stores.length);
+        clearStatus();
+      } catch (e) {
+        showStatus('Error: ' + e.message, 'error');
+        lastData = null;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Run Report';
+      }
+    }
+
+    function renderReport(data) {
+      const stores = data.stores || [];
+      document.getElementById('resultsMeta').textContent =
+        `${stores.length} store(s) with exempt charges | ${data.start} → ${data.end} | generated ${data.generatedAt || ''}`;
+
+      document.getElementById('grandWrap').innerHTML =
+        `<span class="grand">${fmt$(data.grandTotal)}</span> ` +
+        `<span class="grand-sub">across ${data.chargeCount || 0} charge(s) on tax-exempt checks</span>`;
+
+      if (!stores.length) {
+        document.getElementById('resultsWrap').innerHTML =
+          '<p style="color:#6B7280;">No tax-exempt service charges found in this range.</p>';
+        return;
+      }
+
+      let html = `<table class="report"><thead><tr>
+        <th class="left">Store</th><th class="left">Date</th><th class="left">Time</th>
+        <th class="left">Order #</th><th class="left">Check #</th><th class="left">Charge Type</th>
+        <th>Amount</th><th class="left">Exempt Cert</th><th class="left">State</th>
+      </tr></thead><tbody>`;
+
+      for (const s of stores) {
+        const label = s.storeId ? `${s.storeId} – ${s.storeName}` : s.storeName;
+        html += `<tr class="store-total">
+          <td class="left">${esc(label)}</td>
+          <td class="left" colspan="5">${s.count} charge(s)</td>
+          <td>${fmt$(s.total)}</td>
+          <td class="left" colspan="2"></td></tr>`;
+        for (const r of (s.rows || [])) {
+          html += `<tr class="detail">
+            <td></td>
+            <td class="left">${esc(r.businessDate)}</td>
+            <td class="left">${esc(fmtTime(r.time))}</td>
+            <td class="left">${esc(r.orderNumber)}</td>
+            <td class="left">${esc(r.checkNumber)}</td>
+            <td class="left">${esc(r.chargeType)}</td>
+            <td>${fmt$(r.amount)}</td>
+            <td class="left">${esc(r.taxExemptNumber)}</td>
+            <td class="left">${esc(r.taxExemptState)}</td></tr>`;
+        }
+      }
+      html += '</tbody></table>';
+      document.getElementById('resultsWrap').innerHTML = html;
+    }
+
+    function downloadCsv() {
+      if (!lastData || !lastData.stores) return;
+      const head = ['StoreID','StoreName','BusinessDate','Time(UTC)','OrderNumber','CheckNumber','ChargeType','Amount','ExemptCert','State'];
+      const lines = [head.join(',')];
+      const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      for (const s of lastData.stores) {
+        for (const r of (s.rows || [])) {
+          lines.push([q(s.storeId), q(s.storeName), q(r.businessDate), q(fmtTime(r.time)),
+            q(r.orderNumber), q(r.checkNumber), q(r.chargeType), r.amount,
+            q(r.taxExemptNumber), q(r.taxExemptState)].join(','));
+        }
+      }
+      const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `tax_exempt_service_charges_${lastData.start}_to_${lastData.end}.csv`;
+      a.click();
+    }
+  </script>
+</body>
+</html>

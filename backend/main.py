@@ -18125,6 +18125,123 @@ async def generate_menu_mix_report(req: MenuMixRequest):
 
 
 # ------------------------------------------------------------------
+# Tax-Exempt Service Charge Breakdown
+# ------------------------------------------------------------------
+# Reconstructs Toast's "Tax Exempt Service Charges" tax-summary line:
+# every applied service charge on a check flagged taxExempt=true.
+# Self-contained (Toast Orders API only) — one row per charge with store,
+# business date, opened time, order/check #, charge type, amount, cert.
+
+
+@app.post("/api/tax-exempt-service-charges")
+async def tax_exempt_service_charges(body: dict = Body(...)):
+    """
+    List service charges sitting on tax-exempt checks, across all stores, for a
+    business-date range.  Body: {"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD",
+    "locations":[optional store #s/guids/names]}.
+
+    Each per-store total should tie to that store's Toast Tax Summary
+    "Tax Exempt Service Charges" line.
+    """
+    body = body or {}
+    start_s = body.get("start_date")
+    end_s = body.get("end_date")
+    loc_filter = body.get("locations") or None
+    if not start_s or not end_s:
+        raise HTTPException(status_code=400, detail="start_date and end_date are required (YYYY-MM-DD)")
+    try:
+        start_d = date.fromisoformat(str(start_s))
+        end_d = date.fromisoformat(str(end_s))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if start_d > end_d:
+        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+
+    def _s(v):
+        return "" if v is None else str(v)
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        locations = await get_all_active_locations(client)
+        guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
+        guid_to_ext = {loc.restaurantGuid: (loc.externalId or "") for loc in locations}
+        guids = _ensure_all_mapped_guids([loc.restaurantGuid for loc in locations])
+        if loc_filter:
+            fs = {str(x) for x in loc_filter}
+            guids = [g for g in guids
+                     if g in fs or guid_to_ext.get(g, "") in fs or guid_to_name.get(g, "") in fs]
+
+        stores_out = []
+        grand_total = 0.0
+        grand_count = 0
+
+        for guid in guids:
+            rows = []
+            store_total = 0.0
+            d = start_d
+            while d <= end_d:
+                bd = to_business_date(d)
+                try:
+                    orders = await _fetch_orders_for_restaurant_day(client, guid, bd)
+                except HTTPException as exc:
+                    logger.warning("tax-exempt SC: orders fetch failed %s|%s: %s", guid[:8], bd, exc.detail)
+                    orders = []
+                bd_iso = d.isoformat()
+                for order in orders:
+                    if order.get("voided"):
+                        continue
+                    order_num = _s(order.get("displayNumber"))
+                    for check in order.get("checks", []):
+                        if check.get("voided") or check.get("deleted"):
+                            continue
+                        if not check.get("taxExempt"):
+                            continue
+                        check_num = _s(check.get("displayNumber"))
+                        opened = check.get("openedDate") or order.get("openedDate")
+                        tx_num = _s(check.get("taxExemptNumber"))
+                        tx_state = _s(check.get("taxExemptState"))
+                        for sc in (check.get("appliedServiceCharges") or []):
+                            amt = float(sc.get("chargeAmount") or 0)
+                            if amt <= 0:
+                                continue
+                            rows.append({
+                                "businessDate": bd_iso,
+                                "time": opened,
+                                "orderNumber": order_num,
+                                "checkNumber": check_num,
+                                "chargeType": sc.get("name") or "(unnamed)",
+                                "amount": round(amt, 2),
+                                "taxExemptNumber": tx_num,
+                                "taxExemptState": tx_state,
+                            })
+                            store_total += amt
+                d += timedelta(days=1)
+                if d <= end_d:
+                    await asyncio.sleep(0.05)
+            if rows:
+                rows.sort(key=lambda r: (r["businessDate"], r["time"] or ""))
+                stores_out.append({
+                    "storeId": guid_to_ext.get(guid, ""),
+                    "storeName": guid_to_name.get(guid, guid[:8]),
+                    "total": round(store_total, 2),
+                    "count": len(rows),
+                    "rows": rows,
+                })
+                grand_total += store_total
+                grand_count += len(rows)
+
+    stores_out.sort(key=lambda s: (s["storeId"] or "", s["storeName"]))
+    return {
+        "start": start_d.isoformat(),
+        "end": end_d.isoformat(),
+        "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime()),
+        "grandTotal": round(grand_total, 2),
+        "chargeCount": grand_count,
+        "storeCount": len(stores_out),
+        "stores": stores_out,
+    }
+
+
+# ------------------------------------------------------------------
 # Cashier vs Kiosk Report
 # ------------------------------------------------------------------
 

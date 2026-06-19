@@ -44,6 +44,7 @@
         { key: 'tip_pool',         label: 'Payroll Report',   href: '/legacy.html?report=tip_pool' },
         { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },
         { key: 'food-cost',        label: 'Food Cost (COGS)', href: '/food-cost.html' },
+        { key: 'tax-exempt-sc',    label: 'Tax-Exempt Svc Chg', href: '/tax-exempt-service-charges.html' },
       ],
     },
     {
