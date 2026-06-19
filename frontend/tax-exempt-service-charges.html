@@ -20,7 +20,7 @@
     .controls-row { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.5rem; }
     .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
     .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
-    .form-group input { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+    .form-group input, .form-group select { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
     .btn-primary { background: #C41E3A; color: #fff; border: none; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
     .btn-primary:hover:not(:disabled) { background: #A01A2E; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -67,6 +67,10 @@
             <label for="endDate">End (business date)</label>
             <input type="date" id="endDate" />
           </div>
+          <div class="form-group">
+            <label for="storeSelect">Store</label>
+            <select id="storeSelect"><option value="">All stores (slower)</option></select>
+          </div>
           <button class="btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
           <button class="btn-secondary" id="csvBtn" onclick="downloadCsv()" disabled>Download CSV</button>
         </div>
@@ -102,6 +106,25 @@
       document.getElementById('endDate').value = now.toISOString().split('T')[0];
     })();
 
+    // Populate the store dropdown from the shared locations list
+    async function loadStores() {
+      try {
+        const res = await fetch(API_BASE + '/locations', { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const locs = await res.json();
+        locs.sort((a, b) => String(a.externalId || '').localeCompare(String(b.externalId || ''), undefined, { numeric: true }));
+        const sel = document.getElementById('storeSelect');
+        for (const l of locs) {
+          const id = l.externalId || l.restaurantGuid;
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = (l.externalId ? l.externalId + ' – ' : '') + (l.restaurantName || id);
+          sel.appendChild(opt);
+        }
+      } catch (e) { /* store list optional — "All stores" still works */ }
+    }
+    loadStores();
+
     function showStatus(msg, type) {
       const el = document.getElementById('statusMsg');
       el.className = 'status-msg ' + type;
@@ -133,13 +156,18 @@
       document.getElementById('resultsWrap').innerHTML = '';
       document.getElementById('grandWrap').innerHTML = '';
       document.getElementById('resultsMeta').textContent = '';
-      showStatus('Pulling tax-exempt orders from Toast across all stores… (a wide date range can take a minute)', 'info');
+      const store = document.getElementById('storeSelect').value;
+      showStatus(store
+        ? 'Pulling tax-exempt orders for store ' + store + '…'
+        : 'Pulling tax-exempt orders across ALL stores — this can take a while for a wide range.', 'info');
 
       try {
+        const payload = { start_date: start, end_date: end };
+        if (store) payload.locations = [store];
         const resp = await fetch(API_BASE + '/api/tax-exempt-service-charges', {
           method: 'POST',
           headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ start_date: start, end_date: end }),
+          body: JSON.stringify(payload),
         });
         const text = await resp.text();
         if (!resp.ok) {
