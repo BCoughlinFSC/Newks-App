@@ -18200,16 +18200,9 @@ async def tax_exempt_service_charges(body: dict = Body(...)):
                         tx_num = _s(check.get("taxExemptNumber"))
                         tx_state = _s(check.get("taxExemptState"))
                         for sc in (check.get("appliedServiceCharges") or []):
-                            # Toast's "Tax Exempt Service Charges" line = the taxable
-                            # charges that got exempted (e.g. delivery fees); it EXCLUDES
-                            # gratuities/tips.  Note: an applied charge's `taxable` field
-                            # reads False for EVERYTHING on a tax-exempt check (no tax was
-                            # applied), so it can't distinguish config-taxability here —
-                            # exclude by gratuity flag / name only.
-                            _sc_name_l = (sc.get("name") or "").lower()
-                            if (sc.get("gratuity") is True
-                                    or "tip" in _sc_name_l or "gratuit" in _sc_name_l):
-                                continue
+                            # DIAGNOSTIC (temporary): no filter — raw flags are appended to
+                            # ChargeType below so we can see what separates a tip from a
+                            # fee on these checks. Reverted to the real filter once known.
                             amt = float(sc.get("chargeAmount") or 0)
                             if amt <= 0:
                                 continue
@@ -18218,7 +18211,11 @@ async def tax_exempt_service_charges(body: dict = Body(...)):
                                 "time": opened,
                                 "orderNumber": order_num,
                                 "checkNumber": check_num,
-                                "chargeType": sc.get("name") or "(unnamed)",
+                                "chargeType": (sc.get("name") or "(unnamed)")
+                                + " [grat=" + repr(sc.get("gratuity"))
+                                + " tax=" + repr(sc.get("taxable"))
+                                + " type=" + repr(sc.get("chargeType"))
+                                + " ntaxes=" + str(len(sc.get("appliedTaxes") or [])) + "]",
                                 "amount": round(amt, 2),
                                 "taxExemptNumber": tx_num,
                                 "taxExemptState": tx_state,
