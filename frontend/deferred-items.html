@@ -210,7 +210,7 @@
       for (const s of stores) {
         const label = s.storeId ? `${s.storeId} – ${s.storeName}` : s.storeName;
         html += `<tr class="store-total"><td class="left">${esc(label)}</td>`
-          + `<td class="left" colspan="5">${s.count} item line(s)</td>`
+          + `<td class="left" colspan="6">${s.count} item line(s)</td>`
           + `<td>${fmt$(s.salesTotal)}</td><td>${fmt$(s.taxTotal)}</td></tr>`;
         for (const r of (s.rows || [])) {
           html += `<tr class="detail">
