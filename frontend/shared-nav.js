@@ -45,6 +45,7 @@
         { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },
         { key: 'food-cost',        label: 'Food Cost (COGS)', href: '/food-cost.html' },
         { key: 'tax-exempt-sc',    label: 'Tax-Exempt Svc Chg', href: '/tax-exempt-service-charges.html' },
+        { key: 'deferred-items',   label: 'Deferred Items',     href: '/deferred-items.html' },
       ],
     },
     {

@@ -18125,6 +18125,138 @@ async def generate_menu_mix_report(req: MenuMixRequest):
 
 
 # ------------------------------------------------------------------
+# Deferred Items Breakdown
+# ------------------------------------------------------------------
+# Line items configured as DEFERRED sales (selection.deferred == True) don't
+# post to ToastWeb sales -- e.g. delivery/service/tech fees and delivery tips.
+# This lists them per order with sales $ + tax.  Self-contained: Toast Orders
+# API + SQLite cache (the same path the Tax-Exempt report uses), no SQL Server.
+
+
+def _collect_deferred_selections(selections, out):
+    """Recurse selections + their modifiers; collect non-voided deferred ones."""
+    for sel in (selections or []):
+        if not isinstance(sel, dict) or sel.get("voided"):
+            continue
+        if sel.get("deferred"):
+            out.append(sel)
+        _collect_deferred_selections(sel.get("modifiers"), out)
+
+
+@app.post("/api/deferred-items")
+async def deferred_items(body: dict = Body(...)):
+    """
+    Deferred line items across all stores for a business-date range.
+    Body: {"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","locations":[optional]}.
+    Deferred items are excluded from ToastWeb sales; this surfaces their sales $ + tax.
+    """
+    body = body or {}
+    start_s = body.get("start_date")
+    end_s = body.get("end_date")
+    loc_filter = body.get("locations") or None
+    if not start_s or not end_s:
+        raise HTTPException(status_code=400, detail="start_date and end_date are required (YYYY-MM-DD)")
+    try:
+        start_d = date.fromisoformat(str(start_s))
+        end_d = date.fromisoformat(str(end_s))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if start_d > end_d:
+        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+
+    def _s(v):
+        return "" if v is None else str(v)
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        locations = await get_all_active_locations(client)
+        guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
+        guid_to_ext = {loc.restaurantGuid: (loc.externalId or "") for loc in locations}
+        guids = _ensure_all_mapped_guids([loc.restaurantGuid for loc in locations])
+        if loc_filter:
+            fs = {str(x) for x in loc_filter}
+            guids = [g for g in guids
+                     if g in fs or guid_to_ext.get(g, "") in fs or guid_to_name.get(g, "") in fs]
+
+        stores_out = []
+        grand_sales = 0.0
+        grand_tax = 0.0
+        grand_count = 0
+
+        for guid in guids:
+            rows = []
+            s_sales = 0.0
+            s_tax = 0.0
+            d = start_d
+            while d <= end_d:
+                bd = to_business_date(d)
+                try:
+                    orders = await _fetch_orders_for_restaurant_day(client, guid, bd)
+                except HTTPException as exc:
+                    logger.warning("deferred-items: orders fetch failed %s|%s: %s", guid[:8], bd, exc.detail)
+                    orders = []
+                bd_iso = d.isoformat()
+                for order in orders:
+                    if order.get("voided"):
+                        continue
+                    order_num = _s(order.get("displayNumber"))
+                    for check in order.get("checks", []):
+                        if check.get("voided") or check.get("deleted"):
+                            continue
+                        check_num = _s(check.get("displayNumber"))
+                        opened = check.get("openedDate") or order.get("openedDate")
+                        deferred_sels = []
+                        _collect_deferred_selections(check.get("selections"), deferred_sels)
+                        for sel in deferred_sels:
+                            sales = float(sel.get("price") or 0)
+                            tax = float(sel.get("tax") or 0)
+                            if sales == 0 and tax == 0:
+                                continue
+                            name = (sel.get("displayName")
+                                    or (sel.get("item") or {}).get("name")
+                                    or "(unnamed)")
+                            rows.append({
+                                "businessDate": bd_iso,
+                                "time": opened,
+                                "orderNumber": order_num,
+                                "checkNumber": check_num,
+                                "itemName": name,
+                                "quantity": sel.get("quantity") or 0,
+                                "sales": round(sales, 2),
+                                "tax": round(tax, 2),
+                            })
+                            s_sales += sales
+                            s_tax += tax
+                d += timedelta(days=1)
+                if d <= end_d:
+                    await asyncio.sleep(0.05)
+            if rows:
+                rows.sort(key=lambda r: (r["businessDate"], r["time"] or "", r["itemName"]))
+                stores_out.append({
+                    "storeId": guid_to_ext.get(guid, ""),
+                    "storeName": guid_to_name.get(guid, guid[:8]),
+                    "salesTotal": round(s_sales, 2),
+                    "taxTotal": round(s_tax, 2),
+                    "count": len(rows),
+                    "rows": rows,
+                })
+                grand_sales += s_sales
+                grand_tax += s_tax
+                grand_count += len(rows)
+
+    stores_out.sort(key=lambda s: (s["storeId"] or "", s["storeName"]))
+    return {
+        "start": start_d.isoformat(),
+        "end": end_d.isoformat(),
+        "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime()),
+        "grandSales": round(grand_sales, 2),
+        "grandTax": round(grand_tax, 2),
+        "itemCount": grand_count,
+        "storeCount": len(stores_out),
+        "stores": stores_out,
+    }
+
+
+# ------------------------------------------------------------------
 # Tax-Exempt Service Charge Breakdown
 # ------------------------------------------------------------------
 # Reconstructs Toast's "Tax Exempt Service Charges" tax-summary line:
