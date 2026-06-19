@@ -202,30 +202,31 @@
         return;
       }
 
-      let html = `<table class="report"><thead><tr>
-        <th class="left">Store</th><th class="left">Date</th><th class="left">Time</th>
-        <th class="left">Order #</th><th class="left">Check #</th><th class="left">Charge Type</th>
-        <th>Amount</th><th class="left">Exempt Cert</th><th class="left">State</th>
-      </tr></thead><tbody>`;
+      // Only render the optional columns that actually carry data
+      const allRows = stores.flatMap(s => s.rows || []);
+      const hasCert  = allRows.some(r => r.taxExemptNumber);
+      const hasState = allRows.some(r => r.taxExemptState);
+      const optCols  = (hasCert ? 1 : 0) + (hasState ? 1 : 0);
 
+      let head = `<th class="left">Store</th><th class="left">Date</th><th class="left">Time</th>`
+        + `<th class="left">Order #</th><th class="left">Check #</th><th class="left">Charge Type</th><th>Amount</th>`;
+      if (hasCert)  head += '<th class="left">Exempt Cert</th>';
+      if (hasState) head += '<th class="left">State</th>';
+
+      let html = `<table class="report"><thead><tr>${head}</tr></thead><tbody>`;
       for (const s of stores) {
         const label = s.storeId ? `${s.storeId} – ${s.storeName}` : s.storeName;
-        html += `<tr class="store-total">
-          <td class="left">${esc(label)}</td>
-          <td class="left" colspan="5">${s.count} charge(s)</td>
-          <td>${fmt$(s.total)}</td>
-          <td class="left" colspan="2"></td></tr>`;
+        html += `<tr class="store-total"><td class="left">${esc(label)}</td>`
+          + `<td class="left" colspan="5">${s.count} charge(s)</td><td>${fmt$(s.total)}</td>`
+          + (optCols ? `<td colspan="${optCols}"></td>` : '') + `</tr>`;
         for (const r of (s.rows || [])) {
-          html += `<tr class="detail">
-            <td></td>
-            <td class="left">${esc(r.businessDate)}</td>
-            <td class="left">${esc(fmtTime(r.time))}</td>
-            <td class="left">${esc(r.orderNumber)}</td>
-            <td class="left">${esc(r.checkNumber)}</td>
-            <td class="left">${esc(r.chargeType)}</td>
-            <td>${fmt$(r.amount)}</td>
-            <td class="left">${esc(r.taxExemptNumber)}</td>
-            <td class="left">${esc(r.taxExemptState)}</td></tr>`;
+          let cells = `<td></td><td class="left">${esc(r.businessDate)}</td>`
+            + `<td class="left">${esc(fmtTime(r.time))}</td><td class="left">${esc(r.orderNumber)}</td>`
+            + `<td class="left">${esc(r.checkNumber)}</td><td class="left">${esc(r.chargeType)}</td>`
+            + `<td>${fmt$(r.amount)}</td>`;
+          if (hasCert)  cells += `<td class="left">${esc(r.taxExemptNumber)}</td>`;
+          if (hasState) cells += `<td class="left">${esc(r.taxExemptState)}</td>`;
+          html += `<tr class="detail">${cells}</tr>`;
         }
       }
       html += '</tbody></table>';
@@ -233,17 +234,32 @@
     }
 
     function downloadCsv() {
-      if (!lastData || !lastData.stores) return;
-      const head = ['StoreID','StoreName','BusinessDate','Time(UTC)','OrderNumber','CheckNumber','ChargeType','Amount','ExemptCert','State'];
-      const lines = [head.join(',')];
+      if (!lastData || !lastData.stores || !lastData.stores.length) return;
+      const rows = lastData.stores.flatMap(s => {
+        const label = s.storeId ? s.storeId + ' - ' + s.storeName : s.storeName;
+        return (s.rows || []).map(r => ({ ...r, _store: label }));
+      });
+      const hasCert  = rows.some(r => r.taxExemptNumber);
+      const hasState = rows.some(r => r.taxExemptState);
       const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-      for (const s of lastData.stores) {
-        for (const r of (s.rows || [])) {
-          lines.push([q(s.storeId), q(s.storeName), q(r.businessDate), q(fmtTime(r.time)),
-            q(r.orderNumber), q(r.checkNumber), q(r.chargeType), r.amount,
-            q(r.taxExemptNumber), q(r.taxExemptState)].join(','));
-        }
+
+      const header = ['Store', 'Date', 'Time (UTC)', 'Order #', 'Check #', 'Charge Type', 'Amount'];
+      if (hasCert)  header.push('Exempt Cert');
+      if (hasState) header.push('State');
+      const lines = [header.map(q).join(',')];
+
+      for (const r of rows) {
+        const cols = [q(r._store), q(r.businessDate), q(fmtTime(r.time)), q(r.orderNumber),
+                      q(r.checkNumber), q(r.chargeType), Number(r.amount || 0).toFixed(2)];
+        if (hasCert)  cols.push(q(r.taxExemptNumber));
+        if (hasState) cols.push(q(r.taxExemptState));
+        lines.push(cols.join(','));
       }
+      const totalCols = [q('TOTAL'), '', '', '', '', '', Number(lastData.grandTotal || 0).toFixed(2)];
+      if (hasCert)  totalCols.push('');
+      if (hasState) totalCols.push('');
+      lines.push(totalCols.join(','));
+
       const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
