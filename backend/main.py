@@ -18197,6 +18197,26 @@ async def integrations_agent_result(body: dict = Body(...), x_agent_token: Optio
     return {"ok": True}
 
 
+@app.post("/api/integrations/record")
+async def integrations_record(body: dict = Body(...), x_agent_token: Optional[str] = Header(default=None)):
+    """Record a run that happened OUTSIDE the dashboard (e.g. a scheduled cron job
+    via run_and_record.py), so it appears in Recent Runs + updates the last-run badge."""
+    _check_agent_token(x_agent_token)
+    body = body or {}
+    key = body.get("job_key")
+    if not key:
+        raise HTTPException(status_code=400, detail="missing job_key")
+    jobs_db.record_run(
+        key,
+        requested_by=body.get("requested_by") or "cron",
+        status=body.get("status", "failed"),
+        exit_code=body.get("exit_code"),
+        log=body.get("log", ""),
+        args=body.get("args", ""),
+    )
+    return {"ok": True}
+
+
 # ------------------------------------------------------------------
 # Deferred Items Breakdown
 # ------------------------------------------------------------------

@@ -91,6 +91,23 @@ def post_result(job_id: int, status: str, exit_code: Optional[int], log: str,
         conn.commit()
 
 
+def record_run(job_key: str, requested_by: str, status: str, exit_code: Optional[int],
+               log: str, args: str = "", db_path: str = JOBS_DB_PATH) -> int:
+    """Insert an ALREADY-FINISHED run (e.g. a cron job reporting in via the wrapper)
+    so it shows in Recent Runs and updates the last-run badge."""
+    initialize_db(db_path)
+    status = status if status in ("success", "failed") else "failed"
+    now = _now()
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO jobs (job_key, status, requested_by, args, created_at, started_at, finished_at, exit_code, log) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_key, status, requested_by, args, now, now, now, exit_code, (log or "")[-20000:]),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
 def list_recent(limit: int = 50, db_path: str = JOBS_DB_PATH) -> List[Dict]:
     initialize_db(db_path)
     with get_connection(db_path) as conn:
