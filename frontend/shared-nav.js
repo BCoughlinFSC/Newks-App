@@ -63,6 +63,7 @@
     { key: 'toast-pricing',    label: 'Toast Pricing Export',         href: '#', action: 'toastPricing' },
     { key: 'olo',              label: 'Digital Orders by Platform',   href: '/olo.html' },
     { key: 'contacts',         label: 'Contacts (forms.nfc.local)',   href: '/contacts.html' },
+    { key: 'integrations',     label: 'Integrations / Re-run',        href: '/integrations.html' },
   ];
 
   // ─── Detect active page ─────────────────────────

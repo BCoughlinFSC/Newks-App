@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Integrations / Re-run – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui,-apple-system,sans-serif; margin:0; background:#F8FAFC; color:#2c2c2c; min-height:100vh; }
+    .header { background:#C41E3A; padding:1.5rem 2rem; border-bottom:3px solid #A01A2E; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+    .header-content { display:flex; justify-content:space-between; align-items:center; }
+    .header h1 { margin:0; color:#fff; font-size:1.5rem; font-weight:700; }
+    .header p { margin:.25rem 0 0 0; color:rgba(255,255,255,.85); font-size:.85rem; }
+    .home-btn { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.3); padding:.4rem .8rem; border-radius:6px; font-size:.85rem; text-decoration:none; }
+    .container { display:grid; grid-template-columns:280px 1fr; gap:1.5rem; padding:1.5rem 2rem; max-width:1800px; margin:0 auto; }
+    @media (max-width:900px){ .container{ grid-template-columns:1fr; } }
+    .card { background:#fff; border-radius:12px; padding:1.5rem; border:1px solid #e8e0d5; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+    .card h2 { margin:0 0 1rem 0; color:#C41E3A; font-size:1.1rem; font-weight:700; }
+    .script-row { display:flex; align-items:center; gap:1rem; padding:.75rem 0; border-bottom:1px solid #eee; }
+    .script-row:last-child { border-bottom:none; }
+    .script-main { flex:1; min-width:0; }
+    .script-main .name { font-weight:600; }
+    .script-main .desc { font-size:.8rem; color:#6B7280; }
+    .script-last { font-size:.78rem; color:#6B7280; min-width:190px; text-align:right; }
+    .btn-run { background:#C41E3A; color:#fff; border:none; padding:.45rem 1rem; border-radius:6px; font-weight:600; cursor:pointer; font-size:.85rem; }
+    .btn-run:hover:not(:disabled){ background:#A01A2E; }
+    .btn-run:disabled { opacity:.5; cursor:not-allowed; }
+    .badge { display:inline-block; padding:.1rem .5rem; border-radius:99px; font-size:.72rem; font-weight:700; }
+    .badge.queued { background:#FEF9C3; color:#854D0E; }
+    .badge.running { background:#DBEAFE; color:#1E40AF; }
+    .badge.success { background:#DCFCE7; color:#166534; }
+    .badge.failed { background:#FEE2E2; color:#991B1B; }
+    .badge.outbound { background:#FFE4E6; color:#9F1239; margin-left:.4rem; }
+    table.runs { width:100%; border-collapse:collapse; font-size:.82rem; margin-top:.5rem; }
+    table.runs th, table.runs td { padding:.35rem .5rem; border-bottom:1px solid #eee; text-align:left; white-space:nowrap; }
+    table.runs th { color:#6B7280; font-weight:600; }
+    .logbtn { color:#2563EB; cursor:pointer; text-decoration:underline; font-size:.78rem; }
+    pre.log { white-space:pre-wrap; background:#0B1020; color:#D1D5DB; padding:.75rem; border-radius:8px; font-size:.75rem; max-height:320px; overflow:auto; margin:.4rem 0 0 0; }
+    .status-msg { padding:.6rem .9rem; border-radius:8px; margin-bottom:1rem; font-size:.85rem; display:none; }
+    .status-msg.error { background:#FEF2F2; border:1px solid #FCA5A5; color:#B91C1C; display:block; }
+    .status-msg.info { background:#F0F9FF; border:1px solid #BAE6FD; color:#0369A1; display:block; }
+  </style>
+</head>
+<body>
+  <div class="header"><div class="header-content">
+    <div><h1>Integrations / Re-run</h1><p>Press-button re-run of vendor FTP &amp; integration scripts (execute on dev-jan02)</p></div>
+    <a href="/" class="home-btn">Home</a>
+  </div></div>
+  <div class="container">
+    <div id="shared-sidebar"></div>
+    <div>
+      <div id="statusMsg" class="status-msg"></div>
+      <div class="card">
+        <h2>Scripts</h2>
+        <div id="scriptsWrap"><p style="color:#6B7280;">Loading…</p></div>
+      </div>
+      <div class="card" style="margin-top:1rem;">
+        <h2>Recent Runs <span id="agentNote" style="font-weight:400;font-size:.8rem;color:#6B7280;"></span></h2>
+        <div id="runsWrap"></div>
+      </div>
+    </div>
+  </div>
+  <script src="shared-nav.js"></script>
+  <script>
+    const API_BASE = '';
+    function getAuthHeaders(){ const t=localStorage.getItem('auth_token'); return t?{'Authorization':'Bearer '+t}:{}; }
+    function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+    function showStatus(m,t){ const e=document.getElementById('statusMsg'); e.className='status-msg '+t; e.textContent=m; }
+    function clearStatus(){ document.getElementById('statusMsg').className='status-msg'; }
+    function fmtTime(iso){ if(!iso) return ''; return String(iso).replace('T',' ').replace(/(\+\d\d:\d\d|Z)$/,''); }
+    function badge(s){ return `<span class="badge ${s||''}">${esc(s||'—')}</span>`; }
+
+    async function load(){
+      try{
+        const r = await fetch(API_BASE+'/api/integrations/jobs', { headers: getAuthHeaders() });
+        if(!r.ok){ throw new Error((await r.json().catch(()=>({}))).detail || (r.status+' '+r.statusText)); }
+        render(await r.json());
+        clearStatus();
+      }catch(e){ showStatus('Error: '+e.message,'error'); }
+    }
+
+    function render(d){
+      const scripts = d.scripts || [];
+      let s = '';
+      for(const sc of scripts){
+        const lr = sc.lastRun;
+        const last = lr
+          ? `${badge(lr.status)} <span>${esc(fmtTime(lr.finished_at||lr.started_at||lr.created_at))}</span>`
+          : '<span>never run</span>';
+        const active = lr && (lr.status==='queued' || lr.status==='running');
+        s += `<div class="script-row">
+          <div class="script-main">
+            <div class="name">${esc(sc.label)} ${sc.outbound?'<span class="badge outbound">outbound</span>':''}</div>
+            <div class="desc">${esc(sc.description)} <span style="color:#9CA3AF">· ${esc(sc.key)}</span></div>
+          </div>
+          <div class="script-last">${last}</div>
+          <button class="btn-run" ${active?'disabled':''}
+            onclick="runJob('${esc(sc.key)}', ${sc.outbound?'true':'false'}, '${esc(sc.label).replace(/'/g,"\\'")}')">Run</button>
+        </div>`;
+      }
+      document.getElementById('scriptsWrap').innerHTML = s || '<p style="color:#6B7280;">No scripts configured.</p>';
+
+      const recent = d.recent || [];
+      let rows = '';
+      for(const j of recent){
+        rows += `<tr>
+          <td>#${j.id}</td><td>${esc(j.job_key)}</td><td>${badge(j.status)}</td>
+          <td>${esc(j.requested_by||'')}</td><td>${esc(fmtTime(j.created_at))}</td>
+          <td>${esc(fmtTime(j.finished_at))}</td><td>${j.exit_code==null?'':j.exit_code}</td>
+          <td>${j.log?`<span class="logbtn" onclick="toggleLog(${j.id})">log</span>`:''}</td>
+        </tr><tr id="logrow-${j.id}" style="display:none;"><td colspan="8"><pre class="log">${esc(j.log||'')}</pre></td></tr>`;
+      }
+      document.getElementById('runsWrap').innerHTML = recent.length
+        ? `<table class="runs"><thead><tr><th>#</th><th>Script</th><th>Status</th><th>By</th><th>Queued</th><th>Finished</th><th>Exit</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+        : '<p style="color:#6B7280;">No runs yet.</p>';
+      document.getElementById('agentNote').textContent =
+        recent.some(j=>j.status==='queued'||j.status==='running') ? '· a job is queued/running…' : '';
+    }
+
+    function toggleLog(id){ const r=document.getElementById('logrow-'+id); if(r) r.style.display = (r.style.display==='none'?'table-row':'none'); }
+
+    async function runJob(key, outbound, label){
+      if(outbound && !confirm(`"${label}" SENDS data to a vendor. Run it now?`)) return;
+      showStatus(`Queuing ${label}…`,'info');
+      try{
+        const r = await fetch(API_BASE+'/api/integrations/run', {
+          method:'POST', headers:{ ...getAuthHeaders(), 'Content-Type':'application/json' },
+          body: JSON.stringify({ job_key: key }),
+        });
+        if(!r.ok){ throw new Error((await r.json().catch(()=>({}))).detail || (r.status+' '+r.statusText)); }
+        showStatus(`Queued ${label} — watch Recent Runs for status.`,'info');
+        await load();
+      }catch(e){ showStatus('Error: '+e.message,'error'); }
+    }
+
+    load();
+    setInterval(load, 5000);   // live status while jobs run
+  </script>
+</body>
+</html>

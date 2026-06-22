@@ -18125,6 +18125,70 @@ async def generate_menu_mix_report(req: MenuMixRequest):
 
 
 # ------------------------------------------------------------------
+# Integrations / Re-run Dashboard
+# ------------------------------------------------------------------
+# Press-button re-run of the vendor FTP/integration scripts. The UI (Run button)
+# enqueues a job; a small agent on dev-jan02 polls /agent/next, runs the
+# allowlisted script, and posts the outcome to /agent/result. dev-jan02 reaches
+# OUT to this app (it already calls Toast), so no inbound access is needed.
+from fastapi import Header
+import jobs_db
+
+# UI catalog only. The AGENT holds the actual key->command map locally, so the
+# cloud never transmits a command — only a known job_key. Add scripts here as
+# they're ported to Python on dev-jan02 (and to the agent's allowlist).
+INTEGRATION_JOBS = {
+    "sysco_invoices": {"label": "Sysco — Get Invoices", "description": "Pull Sysco invoice files.",       "outbound": False},
+    "sysco_pos":      {"label": "Sysco — Get POs",      "description": "Pull Sysco purchase orders.",     "outbound": False},
+    "esite_send":     {"label": "eSite — Send Files",   "description": "Send eSite files to the vendor.", "outbound": True},
+}
+
+
+def _check_agent_token(token):
+    expected = os.getenv("INTEGRATIONS_AGENT_TOKEN", "")
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="invalid or missing agent token")
+
+
+@app.get("/api/integrations/jobs")
+async def integrations_jobs(admin_user: User = Depends(get_current_admin_user)):
+    """Catalog (with last run per script) + recent run history, for the dashboard."""
+    last = jobs_db.last_run_by_key()
+    scripts = [{"key": k, **meta, "lastRun": last.get(k)} for k, meta in INTEGRATION_JOBS.items()]
+    return {"scripts": scripts, "recent": jobs_db.list_recent(50)}
+
+
+@app.post("/api/integrations/run")
+async def integrations_run(body: dict = Body(...), admin_user: User = Depends(get_current_admin_user)):
+    """Enqueue a run of an allowlisted script (the Run button)."""
+    key = (body or {}).get("job_key")
+    if key not in INTEGRATION_JOBS:
+        raise HTTPException(status_code=400, detail=f"unknown job_key: {key}")
+    who = getattr(admin_user, "username", None) or getattr(admin_user, "email", None) or "admin"
+    job_id = jobs_db.enqueue(key, requested_by=who)
+    return {"id": job_id, "job_key": key, "status": "queued"}
+
+
+@app.get("/api/integrations/agent/next")
+async def integrations_agent_next(x_agent_token: Optional[str] = Header(default=None)):
+    """Agent polls this: atomically claims + returns the next queued job, or {}."""
+    _check_agent_token(x_agent_token)
+    return jobs_db.claim_next() or {}
+
+
+@app.post("/api/integrations/agent/result")
+async def integrations_agent_result(body: dict = Body(...), x_agent_token: Optional[str] = Header(default=None)):
+    """Agent posts the outcome of a job here."""
+    _check_agent_token(x_agent_token)
+    body = body or {}
+    jid = body.get("id")
+    if not jid:
+        raise HTTPException(status_code=400, detail="missing job id")
+    jobs_db.post_result(int(jid), body.get("status", "failed"), body.get("exit_code"), body.get("log", ""))
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------
 # Deferred Items Breakdown
 # ------------------------------------------------------------------
 # Line items configured as DEFERRED sales (selection.deferred == True) don't
