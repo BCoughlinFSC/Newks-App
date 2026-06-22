@@ -16,12 +16,13 @@
     @media (max-width:900px){ .container{ grid-template-columns:1fr; } }
     .card { background:#fff; border-radius:12px; padding:1.5rem; border:1px solid #e8e0d5; box-shadow:0 2px 8px rgba(0,0,0,.08); }
     .card h2 { margin:0 0 1rem 0; color:#C41E3A; font-size:1.1rem; font-weight:700; }
-    .script-row { display:flex; align-items:center; gap:1rem; padding:.75rem 0; border-bottom:1px solid #eee; }
+    .script-row { display:flex; align-items:center; gap:.75rem; padding:.75rem 0; border-bottom:1px solid #eee; }
     .script-row:last-child { border-bottom:none; }
     .script-main { flex:1; min-width:0; }
     .script-main .name { font-weight:600; }
     .script-main .desc { font-size:.8rem; color:#6B7280; }
-    .script-last { font-size:.78rem; color:#6B7280; min-width:190px; text-align:right; }
+    .script-last { font-size:.78rem; color:#6B7280; min-width:170px; text-align:right; }
+    .date-box { padding:.35rem .5rem; border:1px solid #D1D5DB; border-radius:6px; font-size:.82rem; font-family:inherit; }
     .btn-run { background:#C41E3A; color:#fff; border:none; padding:.45rem 1rem; border-radius:6px; font-weight:600; cursor:pointer; font-size:.85rem; }
     .btn-run:hover:not(:disabled){ background:#A01A2E; }
     .btn-run:disabled { opacity:.5; cursor:not-allowed; }
@@ -69,6 +70,7 @@
     function clearStatus(){ document.getElementById('statusMsg').className='status-msg'; }
     function fmtTime(iso){ if(!iso) return ''; return String(iso).replace('T',' ').replace(/(\+\d\d:\d\d|Z)$/,''); }
     function badge(s){ return `<span class="badge ${s||''}">${esc(s||'—')}</span>`; }
+    function todayISO(){ return new Date().toISOString().split('T')[0]; }
 
     async function load(){
       try{
@@ -88,14 +90,19 @@
           ? `${badge(lr.status)} <span>${esc(fmtTime(lr.finished_at||lr.started_at||lr.created_at))}</span>`
           : '<span>never run</span>';
         const active = lr && (lr.status==='queued' || lr.status==='running');
+        const dateBox = sc.needs_date
+          ? `<input type="date" id="date-${esc(sc.key)}" class="date-box" value="${todayISO()}">`
+          : '';
+        const lbl = esc(sc.label).replace(/'/g, "\\'");
         s += `<div class="script-row">
           <div class="script-main">
             <div class="name">${esc(sc.label)} ${sc.outbound?'<span class="badge outbound">outbound</span>':''}</div>
             <div class="desc">${esc(sc.description)} <span style="color:#9CA3AF">· ${esc(sc.key)}</span></div>
           </div>
           <div class="script-last">${last}</div>
+          ${dateBox}
           <button class="btn-run" ${active?'disabled':''}
-            onclick="runJob('${esc(sc.key)}', ${sc.outbound?'true':'false'}, '${esc(sc.label).replace(/'/g,"\\'")}')">Run</button>
+            onclick="runJob('${esc(sc.key)}', ${sc.outbound?'true':'false'}, ${sc.needs_date?'true':'false'}, '${lbl}')">Run</button>
         </div>`;
       }
       document.getElementById('scriptsWrap').innerHTML = s || '<p style="color:#6B7280;">No scripts configured.</p>';
@@ -103,8 +110,9 @@
       const recent = d.recent || [];
       let rows = '';
       for(const j of recent){
+        const script = esc(j.job_key) + (j.args ? ` <span style="color:#9CA3AF">${esc(j.args)}</span>` : '');
         rows += `<tr>
-          <td>#${j.id}</td><td>${esc(j.job_key)}</td><td>${badge(j.status)}</td>
+          <td>#${j.id}</td><td>${script}</td><td>${badge(j.status)}</td>
           <td>${esc(j.requested_by||'')}</td><td>${esc(fmtTime(j.created_at))}</td>
           <td>${esc(fmtTime(j.finished_at))}</td><td>${j.exit_code==null?'':j.exit_code}</td>
           <td>${j.log?`<span class="logbtn" onclick="toggleLog(${j.id})">log</span>`:''}</td>
@@ -119,13 +127,20 @@
 
     function toggleLog(id){ const r=document.getElementById('logrow-'+id); if(r) r.style.display = (r.style.display==='none'?'table-row':'none'); }
 
-    async function runJob(key, outbound, label){
+    async function runJob(key, outbound, needsDate, label){
+      const payload = { job_key: key };
+      if(needsDate){
+        const el = document.getElementById('date-'+key);
+        const d = el ? el.value : '';
+        if(!d){ showStatus('Pick a date for '+label+'.','error'); return; }
+        payload.date = d;
+      }
       if(outbound && !confirm(`"${label}" SENDS data to a vendor. Run it now?`)) return;
       showStatus(`Queuing ${label}…`,'info');
       try{
         const r = await fetch(API_BASE+'/api/integrations/run', {
           method:'POST', headers:{ ...getAuthHeaders(), 'Content-Type':'application/json' },
-          body: JSON.stringify({ job_key: key }),
+          body: JSON.stringify(payload),
         });
         if(!r.ok){ throw new Error((await r.json().catch(()=>({}))).detail || (r.status+' '+r.statusText)); }
         showStatus(`Queued ${label} — watch Recent Runs for status.`,'info');
@@ -134,7 +149,7 @@
     }
 
     load();
-    setInterval(load, 5000);   // live status while jobs run
+    setInterval(load, 5000);
   </script>
 </body>
 </html>

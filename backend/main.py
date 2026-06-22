@@ -18132,15 +18132,18 @@ async def generate_menu_mix_report(req: MenuMixRequest):
 # allowlisted script, and posts the outcome to /agent/result. dev-jan02 reaches
 # OUT to this app (it already calls Toast), so no inbound access is needed.
 from fastapi import Header
+import re
 import jobs_db
 
-# UI catalog only. The AGENT holds the actual key->command map locally, so the
-# cloud never transmits a command — only a known job_key. Add scripts here as
-# they're ported to Python on dev-jan02 (and to the agent's allowlist).
+# UI catalog. The AGENT holds the actual key->command map locally, so the cloud
+# never transmits a command — only a known job_key (+ optional date). Add scripts
+# here as they're wired into the agent's allowlist.
 INTEGRATION_JOBS = {
-    "sysco_invoices": {"label": "Sysco — Get Invoices", "description": "Pull Sysco invoice files.",       "outbound": False},
-    "sysco_pos":      {"label": "Sysco — Get POs",      "description": "Pull Sysco purchase orders.",     "outbound": False},
-    "esite_send":     {"label": "eSite — Send Files",   "description": "Send eSite files to the vendor.", "outbound": True},
+    "sysco_invoices_dryrun": {"label": "Sysco — Invoices (dry run)", "description": "Preview Sysco invoices waiting on the FTP — no download.", "needs_date": False, "outbound": False},
+    "sysco_invoices":        {"label": "Sysco — Invoices (pull)",    "description": "Pull + process Sysco invoices.",                          "needs_date": False, "outbound": False},
+    "sysco_pos_dryrun":      {"label": "Sysco — POs (dry run)",      "description": "Preview Sysco POs waiting on the FTP — no download.",      "needs_date": False, "outbound": False},
+    "sysco_pos":             {"label": "Sysco — POs (pull)",         "description": "Pull + process Sysco POs.",                               "needs_date": False, "outbound": False},
+    "repoll_sales":          {"label": "Repoll Sales (one date)",    "description": "nightly_pull for a business date — all stores (~25-35 min).", "needs_date": True,  "outbound": False},
 }
 
 
@@ -18161,11 +18164,17 @@ async def integrations_jobs(admin_user: User = Depends(get_current_admin_user)):
 @app.post("/api/integrations/run")
 async def integrations_run(body: dict = Body(...), admin_user: User = Depends(get_current_admin_user)):
     """Enqueue a run of an allowlisted script (the Run button)."""
-    key = (body or {}).get("job_key")
+    body = body or {}
+    key = body.get("job_key")
     if key not in INTEGRATION_JOBS:
         raise HTTPException(status_code=400, detail=f"unknown job_key: {key}")
+    args = ""
+    if INTEGRATION_JOBS[key].get("needs_date"):
+        args = (body.get("date") or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args):
+            raise HTTPException(status_code=400, detail="this job needs a date (YYYY-MM-DD)")
     who = getattr(admin_user, "username", None) or getattr(admin_user, "email", None) or "admin"
-    job_id = jobs_db.enqueue(key, requested_by=who)
+    job_id = jobs_db.enqueue(key, requested_by=who, args=args)
     return {"id": job_id, "job_key": key, "status": "queued"}
 
 

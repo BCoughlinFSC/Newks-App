@@ -2,7 +2,8 @@
 jobs_db.py — tiny SQLite job queue for the Integrations / Re-run dashboard.
 
 The Cloudways app enqueues jobs (a Run button); the dev-jan02 agent claims them,
-runs the allowlisted script, and posts the result back. One row per run.
+runs the allowlisted command, and posts the result back. One row per run.
+`args` carries an optional parameter (e.g. a YYYY-MM-DD date for repolls).
 See main.py  /api/integrations/*  and  backend/integrations_agent.py.
 """
 import os
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_key      TEXT    NOT NULL,
     status       TEXT    NOT NULL DEFAULT 'queued',   -- queued | running | success | failed
     requested_by TEXT,
+    args         TEXT,
     created_at   TEXT    NOT NULL,
     started_at   TEXT,
     finished_at  TEXT,
@@ -43,34 +45,39 @@ def get_connection(db_path: str = JOBS_DB_PATH) -> sqlite3.Connection:
 def initialize_db(db_path: str = JOBS_DB_PATH) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(_SCHEMA)
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN args TEXT")  # migrate older tables
+        except sqlite3.OperationalError:
+            pass  # column already exists
         conn.commit()
 
 
-def enqueue(job_key: str, requested_by: str = "", db_path: str = JOBS_DB_PATH) -> int:
+def enqueue(job_key: str, requested_by: str = "", args: str = "", db_path: str = JOBS_DB_PATH) -> int:
     initialize_db(db_path)
     with get_connection(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO jobs (job_key, status, requested_by, created_at) VALUES (?, 'queued', ?, ?)",
-            (job_key, requested_by, _now()),
+            "INSERT INTO jobs (job_key, status, requested_by, args, created_at) "
+            "VALUES (?, 'queued', ?, ?, ?)",
+            (job_key, requested_by, args, _now()),
         )
         conn.commit()
         return int(cur.lastrowid)
 
 
 def claim_next(db_path: str = JOBS_DB_PATH) -> Optional[Dict]:
-    """Atomically grab the oldest queued job, mark it running, and return it (or None)."""
+    """Atomically grab the oldest queued job, mark it running, return it (or None)."""
     initialize_db(db_path)
     with get_connection(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT id, job_key FROM jobs WHERE status='queued' ORDER BY id LIMIT 1"
+            "SELECT id, job_key, args FROM jobs WHERE status='queued' ORDER BY id LIMIT 1"
         ).fetchone()
         if not row:
             conn.execute("COMMIT")
             return None
         conn.execute("UPDATE jobs SET status='running', started_at=? WHERE id=?", (_now(), row["id"]))
         conn.execute("COMMIT")
-        return {"id": int(row["id"]), "job_key": row["job_key"]}
+        return {"id": int(row["id"]), "job_key": row["job_key"], "args": row["args"] or ""}
 
 
 def post_result(job_id: int, status: str, exit_code: Optional[int], log: str,
