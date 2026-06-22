@@ -18143,7 +18143,8 @@ INTEGRATION_JOBS = {
     "sysco_invoices":        {"label": "Sysco — Invoices (pull)",    "description": "Pull + process Sysco invoices.",                          "needs_date": False, "outbound": False},
     "sysco_pos_dryrun":      {"label": "Sysco — POs (dry run)",      "description": "Preview Sysco POs waiting on the FTP — no download.",      "needs_date": False, "outbound": False},
     "sysco_pos":             {"label": "Sysco — POs (pull)",         "description": "Pull + process Sysco POs.",                               "needs_date": False, "outbound": False},
-    "repoll_sales":          {"label": "Repoll Sales (one date)",    "description": "nightly_pull for a business date — all stores (~25-35 min).", "needs_date": True,  "outbound": False},
+    "repoll_sales":          {"label": "Repoll Sales (one date)",    "description": "nightly_pull for a business date — all stores (~25-35 min).",  "needs_date": True,  "outbound": False},
+    "repoll_labor":          {"label": "Repoll Labor (one date)",    "description": "nightly_labor_pull for a business date — all stores.",          "needs_date": True,  "outbound": False},
 }
 
 

@@ -36,9 +36,8 @@ JOBS = {
     "sysco_invoices":        {"cmd": ["python3", "sysco_ftp.py", "invoices"],              "cwd": "/opt/sysco"},
     "sysco_pos_dryrun":      {"cmd": ["python3", "sysco_ftp.py", "pos", "--dry-run"],       "cwd": "/opt/sysco"},
     "sysco_pos":             {"cmd": ["python3", "sysco_ftp.py", "pos"],                    "cwd": "/opt/sysco"},
-    "repoll_sales":          {"cmd": [VENV_PY, "nightly_pull.py"], "cwd": "/opt/toast_backfill/backend", "date_arg": True},
-    # Add once confirmed:
-    # "repoll_labor":        {"cmd": [VENV_PY, "<labor_script>.py"], "cwd": "/opt/toast_backfill/backend", "date_arg": True},
+    "repoll_sales":          {"cmd": [VENV_PY, "nightly_pull.py"],       "cwd": "/opt/toast_backfill/backend", "date_arg": True},
+    "repoll_labor":          {"cmd": [VENV_PY, "nightly_labor_pull.py"], "cwd": "/opt/toast_backfill/backend", "date_arg": True},
 }
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
