@@ -18143,8 +18143,8 @@ INTEGRATION_JOBS = {
     "sysco_invoices":        {"label": "Sysco — Invoices (pull)",    "description": "Pull + process Sysco invoices.",                          "needs_date": False, "outbound": False},
     "sysco_pos_dryrun":      {"label": "Sysco — POs (dry run)",      "description": "Preview Sysco POs waiting on the FTP — no download.",      "needs_date": False, "outbound": False},
     "sysco_pos":             {"label": "Sysco — POs (pull)",         "description": "Pull + process Sysco POs.",                               "needs_date": False, "outbound": False},
-    "repoll_sales":          {"label": "Repoll Sales (one date)",    "description": "nightly_pull for a business date — all stores (~25-35 min).",  "needs_date": True,  "outbound": False},
-    "repoll_labor":          {"label": "Repoll Labor (one date)",    "description": "nightly_labor_pull for a business date — all stores.",          "needs_date": True,  "outbound": False},
+    "repoll_sales":          {"label": "Repoll Sales (one date)",    "description": "nightly_pull for a business date — all stores (~25-35 min), or pick one store (~1-2 min).",  "needs_date": True,  "needs_store": True, "outbound": False},
+    "repoll_labor":          {"label": "Repoll Labor (one date)",    "description": "nightly_labor_pull for a business date — all stores, or pick one store.",          "needs_date": True,  "needs_store": True, "outbound": False},
 }
 
 
@@ -18171,9 +18171,19 @@ async def integrations_run(body: dict = Body(...), admin_user: User = Depends(ge
         raise HTTPException(status_code=400, detail=f"unknown job_key: {key}")
     args = ""
     if INTEGRATION_JOBS[key].get("needs_date"):
-        args = (body.get("date") or "").strip()
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args):
+        date_s = (body.get("date") or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_s):
             raise HTTPException(status_code=400, detail="this job needs a date (YYYY-MM-DD)")
+        args = date_s
+        # Optional store filter (store_num, or comma-separated list). When set,
+        # the agent appends `--store <store>` so the puller hits just that store
+        # (~1-2 min) instead of all stores (~25-35 min). args = "DATE [STORE]".
+        if INTEGRATION_JOBS[key].get("needs_store"):
+            store_s = (body.get("store") or "").strip()
+            if store_s:
+                if not re.fullmatch(r"\d{3,6}(,\d{3,6})*", store_s):
+                    raise HTTPException(status_code=400, detail="store must be a store number (or comma-separated list)")
+                args = f"{date_s} {store_s}"
     who = getattr(admin_user, "username", None) or getattr(admin_user, "email", None) or "admin"
     job_id = jobs_db.enqueue(key, requested_by=who, args=args)
     return {"id": job_id, "job_key": key, "status": "queued"}

@@ -30,17 +30,20 @@ JOB_TIMEOUT = int(os.getenv("INTEGRATIONS_JOB_TIMEOUT", "5400"))
 #   cmd      : argv list, run from `cwd`
 #   cwd      : working directory
 #   date_arg : if True, a validated YYYY-MM-DD is appended to cmd
+#   store_arg: if True, an optional store filter from args is appended as
+#              `--store <num>`  (args format: "YYYY-MM-DD [store[,store...]]")
 VENV_PY = "/opt/toast_backfill/backend/venv/bin/python"
 JOBS = {
     "sysco_invoices_dryrun": {"cmd": ["python3", "sysco_ftp.py", "invoices", "--dry-run"], "cwd": "/opt/sysco"},
     "sysco_invoices":        {"cmd": ["python3", "sysco_ftp.py", "invoices"],              "cwd": "/opt/sysco"},
     "sysco_pos_dryrun":      {"cmd": ["python3", "sysco_ftp.py", "pos", "--dry-run"],       "cwd": "/opt/sysco"},
     "sysco_pos":             {"cmd": ["python3", "sysco_ftp.py", "pos"],                    "cwd": "/opt/sysco"},
-    "repoll_sales":          {"cmd": [VENV_PY, "nightly_pull.py"],       "cwd": "/opt/toast_backfill/backend", "date_arg": True},
-    "repoll_labor":          {"cmd": [VENV_PY, "nightly_labor_pull.py"], "cwd": "/opt/toast_backfill/backend", "date_arg": True},
+    "repoll_sales":          {"cmd": [VENV_PY, "nightly_pull.py"],       "cwd": "/opt/toast_backfill/backend", "date_arg": True, "store_arg": True},
+    "repoll_labor":          {"cmd": [VENV_PY, "nightly_labor_pull.py"], "cwd": "/opt/toast_backfill/backend", "date_arg": True, "store_arg": True},
 }
 
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_RE  = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_STORE_RE = re.compile(r"^\d{3,6}(,\d{3,6})*$")
 
 
 def _headers():
@@ -53,10 +56,21 @@ def run_job(job_key: str, args: str):
     if not spec:
         return "failed", None, f"Unknown job_key '{job_key}' — not in agent allowlist."
     cmd = list(spec["cmd"])
+    # args carries the date and, optionally, a store filter:
+    #   "YYYY-MM-DD"            -> date only (all stores)
+    #   "YYYY-MM-DD 1188"       -> that date, one store (~1-2 min)
+    #   "YYYY-MM-DD 1188,1020"  -> that date, several stores
+    tokens = (args or "").split()
     if spec.get("date_arg"):
-        if not _DATE_RE.match(args or ""):
+        date_val = tokens[0] if tokens else ""
+        if not _DATE_RE.match(date_val):
             return "failed", None, f"This job needs a date (YYYY-MM-DD); got '{args}'."
-        cmd.append(args)
+        cmd.append(date_val)
+        if spec.get("store_arg") and len(tokens) > 1:
+            store_val = tokens[1]
+            if not _STORE_RE.match(store_val):
+                return "failed", None, f"Invalid store filter '{store_val}' — digits, comma-separated."
+            cmd += ["--store", store_val]
     header = f"$ {' '.join(cmd)}   (cwd={spec.get('cwd')})\n\n"
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=JOB_TIMEOUT, cwd=spec.get("cwd"))
