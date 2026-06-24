@@ -135,6 +135,9 @@
       // restore any values the user had entered before this 5s re-render
       for(const id in prev){ const el=document.getElementById(id); if(el) el.value = prev[id]; }
 
+      // keep any expanded log rows open across the 5s refresh
+      const openLogs = new Set();
+      document.querySelectorAll('#runsWrap tr[id^="logrow-"]').forEach(r => { if(r.style.display !== 'none') openLogs.add(r.id); });
       const recent = d.recent || [];
       let rows = '';
       for(const j of recent){
@@ -149,6 +152,7 @@
       document.getElementById('runsWrap').innerHTML = recent.length
         ? `<table class="runs"><thead><tr><th>#</th><th>Script</th><th>Status</th><th>By</th><th>Queued</th><th>Finished</th><th>Exit</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
         : '<p style="color:#6B7280;">No runs yet.</p>';
+      openLogs.forEach(id => { const r = document.getElementById(id); if(r) r.style.display = 'table-row'; });
       document.getElementById('agentNote').textContent =
         recent.some(j=>j.status==='queued'||j.status==='running') ? '· a job is queued/running…' : '';
     }

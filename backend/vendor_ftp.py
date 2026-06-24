@@ -202,7 +202,22 @@ class VendorFetcher:
 
     def list_matching(self) -> List[str]:
         assert self.sftp is not None
-        entries = self.sftp.listdir(self.remote_inbox)
+        try:
+            entries = self.sftp.listdir(self.remote_inbox)
+        except IOError as exc:
+            # Path not found / not accessible. Log what IS visible from the
+            # login directory so we can see the real folder structure (paramiko
+            # takes paths literally — a vendor may land you in your home dir, so
+            # a relative path like "Bid Files" works where "/Bid Files" 404s).
+            try:
+                cwd = self.sftp.getcwd() or "."
+                visible = sorted(self.sftp.listdir("."))
+                self.log.error("remote_inbox %r not found (%s). Login dir %r contains: %s",
+                               self.remote_inbox, exc, cwd, ", ".join(visible) or "(empty)")
+            except Exception as e2:
+                self.log.error("remote_inbox %r not found (%s); also couldn't list login dir: %s",
+                               self.remote_inbox, exc, e2)
+            raise
         matches = sorted(f for f in entries
                          if any(fnmatch.fnmatch(f.lower(), m.lower()) for m in self.masks))
         self.log.info("Listing %s: %d matching (%s) of %d entries",
