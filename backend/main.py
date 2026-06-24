@@ -18145,6 +18145,12 @@ INTEGRATION_JOBS = {
     "sysco_pos":             {"label": "Sysco — POs (pull)",         "description": "Pull + process Sysco POs.",                               "needs_date": False, "outbound": False},
     "repoll_sales":          {"label": "Repoll Sales (one date)",    "description": "nightly_pull for a business date — all stores (~25-35 min), or pick one store (~1-2 min).",  "needs_date": True,  "needs_store": True, "outbound": False},
     "repoll_labor":          {"label": "Repoll Labor (one date)",    "description": "nightly_labor_pull for a business date — all stores, or pick one store.",          "needs_date": True,  "needs_store": True, "outbound": False},
+    "plateiq_dryrun":        {"label": "PlateIQ — Invoices (dry run)",  "description": "Preview PlateIQ invoice files waiting on the FTP — no download.", "needs_date": False, "outbound": False},
+    "plateiq":               {"label": "PlateIQ — Invoices (pull)",     "description": "Pull + archive PlateIQ invoice files.",                          "needs_date": False, "outbound": False},
+    "nproduce_dryrun":       {"label": "nProduce — Bid Files (dry run)","description": "Preview nProduce bid files waiting on the FTP — no download.",   "needs_date": False, "outbound": False},
+    "nproduce":              {"label": "nProduce — Bid Files (pull)",   "description": "Pull + archive nProduce bid files (txt/xls/xlsx).",              "needs_date": False, "outbound": False},
+    "punchh_dryrun":         {"label": "Punchh — Files (dry run)",      "description": "Preview Punchh CSV files waiting on the FTP — no download.",      "needs_date": False, "outbound": False},
+    "punchh":                {"label": "Punchh — Files (pull)",         "description": "Pull + archive Punchh CSV files.",                               "needs_date": False, "outbound": False},
 }
 
 

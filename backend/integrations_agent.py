@@ -40,6 +40,13 @@ JOBS = {
     "sysco_pos":             {"cmd": ["python3", "sysco_ftp.py", "pos"],                    "cwd": "/opt/sysco"},
     "repoll_sales":          {"cmd": [VENV_PY, "nightly_pull.py"],       "cwd": "/opt/toast_backfill/backend", "date_arg": True, "store_arg": True},
     "repoll_labor":          {"cmd": [VENV_PY, "nightly_labor_pull.py"], "cwd": "/opt/toast_backfill/backend", "date_arg": True, "store_arg": True},
+    # Vendor FTP pulls — generic vendor_ftp.py lives in /opt/sysco (shares that .env).
+    "plateiq_dryrun":        {"cmd": ["python3", "vendor_ftp.py", "plateiq",  "--dry-run"], "cwd": "/opt/sysco"},
+    "plateiq":               {"cmd": ["python3", "vendor_ftp.py", "plateiq"],               "cwd": "/opt/sysco"},
+    "nproduce_dryrun":       {"cmd": ["python3", "vendor_ftp.py", "nproduce", "--dry-run"], "cwd": "/opt/sysco"},
+    "nproduce":              {"cmd": ["python3", "vendor_ftp.py", "nproduce"],              "cwd": "/opt/sysco"},
+    "punchh_dryrun":         {"cmd": ["python3", "vendor_ftp.py", "punchh",   "--dry-run"], "cwd": "/opt/sysco"},
+    "punchh":                {"cmd": ["python3", "vendor_ftp.py", "punchh"],                "cwd": "/opt/sysco"},
 }
 
 _DATE_RE  = re.compile(r"^\d{4}-\d{2}-\d{2}$")
