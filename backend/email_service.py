@@ -1,19 +1,78 @@
 """
-Gmail SMTP email service for sending user invitations and operational alerts.
-Uses App Passwords (not regular Gmail password).
+SMTP email service for user invitations and operational alerts.
+
+Transport is env-driven so it can be re-pointed at any relay without code
+changes. Defaults to the Exchange Online relay used after the 2026-06 Google ->
+Microsoft cutover (no-auth, IP-allowlisted, port 25, any @newks.com sender).
+To use authenticated submission instead (Gmail / O365), set SMTP_USER +
+SMTP_PASSWORD (+ SMTP_SECURITY).
+
+NOTE: the no-auth Exchange relay only accepts mail from IPs allowlisted on the
+connector — this host's public IP must be on Adam's list, or sends will be
+rejected. (Authenticated submission is not IP-restricted.)
 """
 
 import logging
 import os
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS", "")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
+# --- SMTP transport (env-driven) ---------------------------------------------
+SMTP_HOST      = os.getenv("SMTP_HOST", "newks-com.mail.protection.outlook.com")
+SMTP_PORT      = int(os.getenv("SMTP_PORT", "25"))
+SMTP_FROM      = os.getenv("SMTP_FROM", "reports@newks.com")   # any @newks.com address
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Newk's Reports")
+SMTP_USER      = os.getenv("SMTP_USER", "")          # blank => no auth (the relay)
+SMTP_PASSWORD  = os.getenv("SMTP_PASSWORD", "")
+# Transport security: "none" (plain submission — the relay) · "starttls" · "ssl"
+SMTP_SECURITY  = os.getenv("SMTP_SECURITY", "starttls" if os.getenv("SMTP_USER") else "none").lower()
+
+# Back-compat: if the legacy GMAIL_* vars are set and SMTP_HOST has NOT been
+# explicitly overridden, keep sending via authenticated Gmail so nothing breaks
+# mid-migration. Set SMTP_HOST (or clear GMAIL_*) to switch to the relay.
+_GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS", "")
+_GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
+if _GMAIL_ADDRESS and _GMAIL_APP_PASSWORD and not os.getenv("SMTP_HOST"):
+    SMTP_HOST = "smtp.gmail.com"
+    SMTP_PORT = 465
+    SMTP_SECURITY = "ssl"
+    SMTP_USER = _GMAIL_ADDRESS
+    SMTP_PASSWORD = _GMAIL_APP_PASSWORD
+    SMTP_FROM = _GMAIL_ADDRESS
+
+FROM_HEADER = f"{SMTP_FROM_NAME} <{SMTP_FROM}>"
+
+
+def _send(msg: MIMEMultipart, recipients) -> bool:
+    """Send a prepared message via the configured SMTP transport.
+    Returns True on success, False on failure (logged). Never raises."""
+    if isinstance(recipients, str):
+        recipients = [recipients]
+    if not SMTP_HOST:
+        logger.error("SMTP_HOST not configured — cannot send email")
+        return False
+    try:
+        if SMTP_SECURITY == "ssl":
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30)
+        else:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30)
+        with server:
+            server.ehlo()
+            if SMTP_SECURITY == "starttls":
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+            if SMTP_USER:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, recipients, msg.as_string())
+        return True
+    except Exception as e:
+        logger.error("SMTP send to %s failed: %s", recipients, e)
+        return False
 
 
 def send_invite_email(to_email: str, user_name: str, invite_url: str) -> bool:
@@ -21,13 +80,13 @@ def send_invite_email(to_email: str, user_name: str, invite_url: str) -> bool:
 
     Returns True on success, False on failure (logs the error).
     """
-    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
-        logger.error("GMAIL_ADDRESS or GMAIL_APP_PASSWORD not configured — cannot send invite email")
+    if not SMTP_HOST:
+        logger.error("SMTP not configured — cannot send invite email")
         return False
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = "You're invited to Newk's Reporting Platform"
-    msg["From"] = f"Newk's Reports <{GMAIL_ADDRESS}>"
+    msg["From"] = FROM_HEADER
     msg["To"] = to_email
 
     plain = (
@@ -78,15 +137,11 @@ def send_invite_email(to_email: str, user_name: str, invite_url: str) -> bool:
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html, "html"))
 
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
+    if _send(msg, to_email):
         logger.info(f"Invite email sent to {to_email}")
         return True
-    except Exception as e:
-        logger.error(f"Failed to send invite email to {to_email}: {e}")
-        return False
+    logger.error(f"Failed to send invite email to {to_email}")
+    return False
 
 
 def send_password_reset_email(to_email: str, user_name: str, reset_url: str) -> bool:
@@ -94,13 +149,13 @@ def send_password_reset_email(to_email: str, user_name: str, reset_url: str) -> 
 
     Returns True on success, False on failure (logs the error).
     """
-    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
-        logger.error("GMAIL_ADDRESS or GMAIL_APP_PASSWORD not configured — cannot send password reset email")
+    if not SMTP_HOST:
+        logger.error("SMTP not configured — cannot send password reset email")
         return False
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = "Reset your Newk's Reporting password"
-    msg["From"] = f"Newk's Reports <{GMAIL_ADDRESS}>"
+    msg["From"] = FROM_HEADER
     msg["To"] = to_email
 
     plain = (
@@ -151,15 +206,11 @@ def send_password_reset_email(to_email: str, user_name: str, reset_url: str) -> 
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html, "html"))
 
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
+    if _send(msg, to_email):
         logger.info(f"Password reset email sent to {to_email}")
         return True
-    except Exception as e:
-        logger.error(f"Failed to send password reset email to {to_email}: {e}")
-        return False
+    logger.error(f"Failed to send password reset email to {to_email}")
+    return False
 
 
 def send_reconciliation_alert_email(
@@ -193,8 +244,8 @@ def send_reconciliation_alert_email(
     if not recipients:
         logger.warning("Reconciliation alert: no recipients configured, skipping send")
         return False
-    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
-        logger.error("GMAIL_ADDRESS or GMAIL_APP_PASSWORD not configured — cannot send reconciliation alert")
+    if not SMTP_HOST:
+        logger.error("SMTP not configured — cannot send reconciliation alert")
         return False
 
     subject = f"[Newk's Reports] {len(changes)} past-day sales amendment{'s' if len(changes) != 1 else ''} detected"
@@ -296,20 +347,16 @@ def send_reconciliation_alert_email(
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"Newk's Reports <{GMAIL_ADDRESS}>"
+    msg["From"] = FROM_HEADER
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html, "html"))
 
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
+    if _send(msg, recipients):
         logger.info(
             "Reconciliation alert sent to %d recipient(s) covering %d changes",
             len(recipients), len(changes),
         )
         return True
-    except Exception as e:
-        logger.error(f"Failed to send reconciliation alert email: {e}")
-        return False
+    logger.error("Failed to send reconciliation alert email")
+    return False
