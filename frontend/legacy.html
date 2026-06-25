@@ -4956,12 +4956,14 @@
           if (isMultiStore) {
             addWS(WB, buildFinanceSummarySheet(itemBreakdownDaily, sortedDates, hasAloha),
               'Finance Summary');
-            // Sheet 2b: Recipe Mix Summary — entrée-equiv split (Full / Half / All).
-            // Mirrors the P12 FY24 reference layout, restricted to the 7
-            // entrée-bearing consolidated categories.
-            addWS(WB, buildFinanceSummaryByRecipeSheet(itemBreakdownDaily, sortedDates, hasAloha),
-              'Recipe Mix Summary');
           }
+
+          // Sheet 2b: Recipe Mix Summary — entrée-equiv split (Full / Half / All).
+          // Mirrors the P12 FY24 reference layout, restricted to the 7
+          // entrée-bearing consolidated categories. Included for single-location
+          // runs too — the Per-Store-Per-Day denominator handles numStores = 1.
+          addWS(WB, buildFinanceSummaryByRecipeSheet(itemBreakdownDaily, sortedDates, hasAloha),
+            'Recipe Mix Summary');
 
           // Sheet 3: All Items (always) — flat table so Excel can sort/filter freely
           addWS(WB, buildAllItemsFlatSheet(itemBreakdownDaily, sortedDates, hasAloha, collapseAloha, includeDaily),
