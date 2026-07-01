@@ -3393,47 +3393,59 @@
             html += '</tr>';
           });
 
-          // ── Royalty Net transparency + historical deferred add-back ──
+          // ── Royalty Net transparency (CY vs PY) + historical deferred add-back ──
           // Net Sales (Toast) − restaurant service charges (by name) = Royalty Net
           // Net Sales (Toast) + specific deferred items (post-7/6 add-back) = Accurate Net Sales
+          // PY = same pipeline on prior-year dates when the store was on Toast then.
           if (results.royaltyDetail) {
             const rd = results.royaltyDetail;
+            const meta = rd.meta || {};
             const money = v => formatCell('Sales', v||0);
-            const buildWaterfall = (d) => {
-              let w = '<table style="width:100%;max-width:660px;border-collapse:collapse;font-size:0.85rem;margin:0.4rem 0 0.3rem 0;">';
-              w += `<tr><td style="padding:0.3rem 0.6rem;">Net Sales (Toast)</td><td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;">${money(d.toastNetSales)}</td></tr>`;
-              const scNames = Object.keys(d.scByName||{});
-              if (scNames.length) {
-                w += '<tr><td colspan="2" style="padding:0.3rem 0.6rem;color:#6B7280;font-style:italic;">Less service charges that go to the restaurant (in Toast net, excluded from Royalty Net):</td></tr>';
-                scNames.forEach(nm => {
-                  w += `<tr><td style="padding:0.15rem 0.6rem 0.15rem 1.5rem;">${nm}</td><td style="padding:0.15rem 0.6rem;text-align:right;color:#B91C1C;">(${money(d.scByName[nm])})</td></tr>`;
-                });
+            const fmtD = iso => { if(!iso) return ''; const p=String(iso).split('-'); return p.length===3?`${+p[1]}/${+p[2]}/${p[0].slice(2)}`:iso; };
+            const rangeLabel = (s,e) => !s ? '' : (s===e ? fmtD(s) : `${fmtD(s)}–${fmtD(e)}`);
+            const cyRange = rangeLabel(meta.cyStart, meta.cyEnd);
+            const pyRange = rangeLabel(meta.pyStart, meta.pyEnd);
+            const cyNorm = d => ({toast:d.toastNetSales, scTotal:d.serviceChargeTotal, scByName:d.scByName||{}, royalty:d.royaltyNet, defTotal:d.deferredTotal, defByName:d.deferredByName||{}, accurate:d.accurateNetSales});
+            const pyNorm = d => ({toast:d.pyToastNetSales, scTotal:d.pyServiceChargeTotal, scByName:d.pyScByName||{}, royalty:d.pyRoyaltyNet, defTotal:d.pyDeferredTotal, defByName:d.pyDeferredByName||{}, accurate:d.pyAccurateNetSales});
+            const pyToastAvail = d => d.pySource === 'toast' && d.pyToastNetSales != null;
+            const pyAlohaAvail = d => d.pySource === 'aloha' && d.pyAlohaNetSales != null;
+            const buildWaterfall = (n, title, accent) => {
+              let w = `<div style="min-width:300px;flex:1;"><div style="font-weight:700;color:${accent};margin-bottom:0.25rem;">${title}</div>`;
+              w += '<table style="width:100%;border-collapse:collapse;font-size:0.83rem;">';
+              w += `<tr><td style="padding:0.25rem 0.6rem;">Net Sales (Toast)</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;">${money(n.toast)}</td></tr>`;
+              Object.keys(n.scByName||{}).forEach(nm => { w += `<tr><td style="padding:0.12rem 0.6rem 0.12rem 1.4rem;color:#6B7280;">${nm}</td><td style="padding:0.12rem 0.6rem;text-align:right;color:#B91C1C;">(${money(n.scByName[nm])})</td></tr>`; });
+              w += `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:0.25rem 0.6rem;font-weight:600;">Total Service Charges</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;color:#B91C1C;">(${money(n.scTotal)})</td></tr>`;
+              w += `<tr style="background:#ECFDF5;border-top:2px solid #065F46;"><td style="padding:0.35rem 0.6rem;font-weight:700;color:#065F46;">= Royalty Net</td><td style="padding:0.35rem 0.6rem;text-align:right;font-weight:700;color:#065F46;">${money(n.royalty)}</td></tr>`;
+              const defNames = Object.keys(n.defByName||{});
+              if ((n.defTotal||0) > 0 || defNames.length) {
+                defNames.forEach(nm => { w += `<tr><td style="padding:0.12rem 0.6rem 0.12rem 1.4rem;color:#6B7280;">+ ${nm}</td><td style="padding:0.12rem 0.6rem;text-align:right;color:#1D4ED8;">+${money(n.defByName[nm])}</td></tr>`; });
+                w += `<tr><td style="padding:0.25rem 0.6rem;font-weight:600;">Total Deferred Add-back</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;color:#1D4ED8;">+${money(n.defTotal)}</td></tr>`;
+                w += `<tr style="background:#EFF6FF;border-top:2px solid #1D4ED8;"><td style="padding:0.35rem 0.6rem;font-weight:700;color:#1E3A8A;">= Accurate Net Sales</td><td style="padding:0.35rem 0.6rem;text-align:right;font-weight:700;color:#1E3A8A;">${money(n.accurate)}</td></tr>`;
               }
-              w += `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:0.3rem 0.6rem;font-weight:600;">Total Service Charges</td><td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;color:#B91C1C;">(${money(d.serviceChargeTotal)})</td></tr>`;
-              w += `<tr style="background:#ECFDF5;border-top:2px solid #065F46;"><td style="padding:0.4rem 0.6rem;font-weight:700;color:#065F46;">= Royalty Net</td><td style="padding:0.4rem 0.6rem;text-align:right;font-weight:700;color:#065F46;">${money(d.royaltyNet)}</td></tr>`;
-              const defNames = Object.keys(d.deferredByName||{});
-              if ((d.deferredTotal||0) > 0 || defNames.length) {
-                w += '<tr><td colspan="2" style="padding:0.55rem 0.6rem 0.2rem;color:#6B7280;font-style:italic;">Historical add-back &mdash; deferred items that stop being deferred 7/6/2026 (added to Toast net so prior periods stay comparable):</td></tr>';
-                defNames.forEach(nm => {
-                  w += `<tr><td style="padding:0.15rem 0.6rem 0.15rem 1.5rem;">${nm}</td><td style="padding:0.15rem 0.6rem;text-align:right;color:#1D4ED8;">+${money(d.deferredByName[nm])}</td></tr>`;
-                });
-                w += `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:0.3rem 0.6rem;font-weight:600;">Total Deferred Add-back</td><td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;color:#1D4ED8;">+${money(d.deferredTotal)}</td></tr>`;
-                w += `<tr style="background:#EFF6FF;border-top:2px solid #1D4ED8;"><td style="padding:0.4rem 0.6rem;font-weight:700;color:#1E3A8A;">= Accurate Net Sales (historical)</td><td style="padding:0.4rem 0.6rem;text-align:right;font-weight:700;color:#1E3A8A;">${money(d.accurateNetSales)}</td></tr>`;
-              }
-              w += '</table>';
+              w += '</table></div>';
               return w;
             };
+            const pyPanel = d => {
+              if (pyAlohaAvail(d)) {
+                return `<div style="min-width:300px;flex:1;"><div style="font-weight:700;color:#92400E;margin-bottom:0.25rem;">Prior Year (Aloha)${pyRange?' · '+pyRange:''}</div><table style="width:100%;border-collapse:collapse;font-size:0.83rem;"><tr><td style="padding:0.25rem 0.6rem;">Net Sales (Aloha)</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:700;">${money(d.pyAlohaNetSales)}</td></tr></table><div style="font-size:0.78rem;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;padding:0.4rem 0.6rem;border-radius:4px;margin-top:0.35rem;">Source: <strong>Aloha</strong>. Royalty Net / service-charge detail pending — Aloha PY methodology still being worked out.</div></div>`;
+              }
+              return `<div style="min-width:300px;flex:1;"><div style="font-weight:700;color:#6B7280;margin-bottom:0.25rem;">Prior Year${pyRange?' · '+pyRange:''}</div><div style="font-size:0.83rem;color:#6B7280;background:#F9FAFB;border:1px solid #E5E7EB;padding:0.5rem 0.6rem;border-radius:4px;">No prior-year data for this location.</div></div>`;
+            };
+            const detailBlock = d => `<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin:0.4rem 0 0.3rem 0;">${buildWaterfall(cyNorm(d), 'Current Year (Toast)'+(cyRange?' · '+cyRange:''), '#065F46')}${pyToastAvail(d)?buildWaterfall(pyNorm(d), 'Prior Year (Toast)'+(pyRange?' · '+pyRange:''), '#1E3A8A'):pyPanel(d)}</div>`;
             const summaryLine = (label, d) => {
-              let s = `<strong>${label}</strong> &mdash; Toast ${money(d.toastNetSales)} &minus; SC ${money(d.serviceChargeTotal)} = <span style="color:#065F46;font-weight:700;">Royalty Net ${money(d.royaltyNet)}</span>`;
-              if ((d.deferredTotal||0) > 0) s += ` &nbsp;&middot;&nbsp; +Deferred ${money(d.deferredTotal)} = <span style="color:#1E3A8A;font-weight:600;">Accurate ${money(d.accurateNetSales)}</span>`;
+              let s = `<strong>${label}</strong> &mdash; CY Royalty Net <span style="color:#065F46;font-weight:700;">${money(d.royaltyNet)}</span>`;
+              if (pyToastAvail(d)) s += ` &nbsp;vs&nbsp; PY (Toast) Royalty Net <span style="color:#1E3A8A;font-weight:700;">${money(d.pyRoyaltyNet)}</span>`;
+              else if (pyAlohaAvail(d)) s += ` &nbsp;vs&nbsp; <span style="color:#92400E;">PY (Aloha) Net ${money(d.pyAlohaNetSales)} · royalty pending</span>`;
+              else s += ` &nbsp;vs&nbsp; <span style="color:#6B7280;">PY: no data</span>`;
+              if ((d.deferredTotal||0) > 0) s += ` &nbsp;&middot;&nbsp; CY +Deferred ${money(d.deferredTotal)} = Accurate <span style="color:#1E3A8A;">${money(d.accurateNetSales)}</span>`;
               return s;
             };
             html += '<tr><td colspan="100" style="height:18px;border:none;"></td></tr>';
-            html += '<tr><th colspan="100" style="background:#065F46;color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #047857;">ROYALTY NET &mdash; TRANSPARENCY &amp; HISTORICAL ADD-BACK</th></tr>';
-            html += `<tr><td colspan="100" style="padding:0;border:1px solid #E5E7EB;background:#F0FDF4;"><details open style="padding:0.5rem 0.75rem;"><summary style="cursor:pointer;">${summaryLine('All Locations', rd.chain)}</summary>${buildWaterfall(rd.chain)}</details></td></tr>`;
+            html += `<tr><th colspan="100" style="background:#065F46;color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #047857;">ROYALTY NET &mdash; TRANSPARENCY &amp; HISTORICAL ADD-BACK${cyRange?' &nbsp;('+cyRange+(pyRange?' vs PY '+pyRange:'')+')':''}</th></tr>`;
+            html += `<tr><td colspan="100" style="padding:0;border:1px solid #E5E7EB;background:#F0FDF4;"><details open style="padding:0.5rem 0.75rem;"><summary style="cursor:pointer;">${summaryLine('All Locations', rd.chain)}</summary>${detailBlock(rd.chain)}</details></td></tr>`;
             Object.keys(rd.byLocation||{}).sort().forEach(loc => {
               const d = rd.byLocation[loc];
-              html += `<tr><td colspan="100" style="padding:0;border:1px solid #E5E7EB;"><details style="padding:0.5rem 0.75rem;"><summary style="cursor:pointer;">${summaryLine(loc, d)}</summary>${buildWaterfall(d)}</details></td></tr>`;
+              html += `<tr><td colspan="100" style="padding:0;border:1px solid #E5E7EB;"><details style="padding:0.5rem 0.75rem;"><summary style="cursor:pointer;">${summaryLine(loc, d)}</summary>${detailBlock(d)}</details></td></tr>`;
             });
           }
         } else {
@@ -5171,17 +5183,33 @@
           }
           addWS(WB, rows, isMetrics ? 'Sales' : 'Summary');
 
-          // ── Royalty Net Detail sheet (Toast → service charges → Royalty Net → deferred add-back) ──
+          // ── Royalty Net Detail sheet — CY vs PY (Toast → service charges → Royalty Net → deferred) ──
           if (isMetrics && currentResults.royaltyDetail) {
             const rd = currentResults.royaltyDetail;
+            const meta = rd.meta || {};
+            const fmtD = iso => { if(!iso) return ''; const p=String(iso).split('-'); return p.length===3?`${+p[1]}/${+p[2]}/${p[0].slice(2)}`:iso; };
+            const rangeLabel = (s,e)=> !s?'':(s===e?fmtD(s):`${fmtD(s)}–${fmtD(e)}`);
+            const cyt = rangeLabel(meta.cyStart, meta.cyEnd); const pyt = rangeLabel(meta.pyStart, meta.pyEnd);
+            const cyL = cyt ? ` (${cyt})` : ''; const pyL = pyt ? ` (${pyt})` : '';
             const detailStr = obj => Object.keys(obj || {}).map(k => `${k}: ${(obj[k] || 0).toFixed(2)}`).join('; ');
-            const rHdr = [c('Location', S.navyL), c('Net Sales (Toast)', S.navyR), c('Total Service Charges', S.navyR),
-                          c('Royalty Net', S.navyR), c('Deferred Add-back', S.navyR), c('Accurate Net Sales (historical)', S.navyR),
-                          c('Service Charge Detail', S.navyL), c('Deferred Detail', S.navyL)];
+            const pyOn = d => d.pySource === 'toast' && d.pyToastNetSales != null;
+            const pyAloha = d => d.pySource === 'aloha' && d.pyAlohaNetSales != null;
+            const rHdr = [c('Location', S.navyL),
+                          c('CY Net Sales (Toast)'+cyL, S.navyR), c('CY Royalty Net', S.navyR),
+                          c('PY Source', S.navyL), c('PY Net Sales'+pyL, S.navyR), c('PY Royalty Net', S.navyR),
+                          c('CY Service Charges (detail)', S.navyL), c('PY Service Charges (detail)', S.navyL),
+                          c('CY Deferred Add-back', S.navyR), c('PY Deferred Add-back', S.navyR)];
             const rRows = [rHdr];
-            const mkRow = (label, d, style) => [c(label, style || S.dL), n(d.toastNetSales || 0, S.dR), n(d.serviceChargeTotal || 0, S.dR),
-                          n(d.royaltyNet || 0, S.dR), n(d.deferredTotal || 0, S.dR), n(d.accurateNetSales || 0, S.dR),
-                          c(detailStr(d.scByName), S.dL), c(detailStr(d.deferredByName), S.dL)];
+            const mkRow = (label, d, style) => {
+              const py = pyOn(d), pa = pyAloha(d);
+              const pySrc = py ? 'Toast' : (pa ? 'Aloha' : '—');
+              const pyNet = py ? n(d.pyToastNetSales || 0, S.dR) : (pa ? n(d.pyAlohaNetSales || 0, S.dR) : c('—', S.dR));
+              return [c(label, style || S.dL),
+                      n(d.toastNetSales || 0, S.dR), n(d.royaltyNet || 0, S.dR),
+                      c(pySrc, style || S.dL), pyNet, py ? n(d.pyRoyaltyNet || 0, S.dR) : c('—', S.dR),
+                      c(detailStr(d.scByName), S.dL), py ? c(detailStr(d.pyScByName), S.dL) : c('—', S.dL),
+                      n(d.deferredTotal || 0, S.dR), py ? n(d.pyDeferredTotal || 0, S.dR) : c('—', S.dR)];
+            };
             rRows.push(mkRow('ALL LOCATIONS', rd.chain, S.navyL));
             Object.keys(rd.byLocation || {}).sort().forEach((loc, i) => rRows.push(mkRow(loc, rd.byLocation[loc], i % 2 ? S.dLalt : S.dL)));
             addWS(WB, rRows, 'Royalty Net Detail');

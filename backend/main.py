@@ -3931,6 +3931,73 @@ def pivot_metrics_by_location_and_date(
 
     return result
 
+
+async def _build_toast_netsales_pivot(
+    client: httpx.AsyncClient,
+    start_d: date,
+    end_d: date,
+    restaurant_ids: list,
+    report_type: str = "metrics",
+    group_by=None,
+) -> dict:
+    """
+    Run the same ERA net-sales + Orders-detail pipeline for an arbitrary date range.
+    Used to build PRIOR-YEAR Toast figures (net, Royalty Net, service charges, deferred)
+    for stores that were on Toast on the prior-year date — so PY is a true Toast
+    Royalty Net, not an Aloha number.  Returns a pivot dict incl. royaltyDetail.
+    """
+    guid = await request_toast_report(client, start_d, end_d, restaurant_ids, report_type, group_by)
+    rows = await fetch_toast_report(client, guid, report_type)
+    if not rows:
+        return {"pivotTable": [], "totals": []}
+    combos = {
+        (r.get("restaurantGuid", ""), r.get("businessDate", ""))
+        for r in rows if r.get("restaurantGuid") and r.get("businessDate")
+    }
+    sem = asyncio.Semaphore(10)
+
+    async def _one(g: str, b: str):
+        async with sem:
+            try:
+                return f"{g}|{b}", await _compute_netsales_detail_for_day(client, g, b)
+            except Exception:
+                return f"{g}|{b}", {"scTotal": 0.0, "scByName": {}, "deferredTotal": 0.0, "deferredByName": {}}
+
+    det = dict(await asyncio.gather(*[_one(g, b) for g, b in combos]))
+    sc = {k: v.get("scTotal", 0.0) for k, v in det.items()}
+    return pivot_metrics_by_location_and_date(rows, sc, det)
+
+
+def _merge_py_royalty_detail(cy_rd: dict, py_rd: Optional[dict], py_start: date, py_end: date) -> None:
+    """Fold prior-year Toast royalty figures into the current-year royaltyDetail, matched by
+    location name.  Stores with no PY Toast data (were on Aloha then) get pySource='none'."""
+    py_by = (py_rd or {}).get("byLocation", {}) or {}
+    py_chain = (py_rd or {}).get("chain", {}) or {}
+
+    def _py_fields(d: dict) -> dict:
+        return {
+            "pyToastNetSales":      d.get("toastNetSales"),
+            "pyServiceChargeTotal": d.get("serviceChargeTotal"),
+            "pyScByName":           d.get("scByName", {}),
+            "pyRoyaltyNet":         d.get("royaltyNet"),
+            "pyDeferredTotal":      d.get("deferredTotal"),
+            "pyDeferredByName":     d.get("deferredByName", {}),
+            "pyAccurateNetSales":   d.get("accurateNetSales"),
+            "pySource":             "toast",
+        }
+
+    for loc, d in (cy_rd.get("byLocation") or {}).items():
+        if loc in py_by:
+            d.update(_py_fields(py_by[loc]))
+        else:
+            d["pySource"] = "none"
+    if py_chain:
+        cy_rd.setdefault("chain", {}).update(_py_fields(py_chain))
+    meta = cy_rd.setdefault("meta", {})
+    meta["pyStart"] = py_start.isoformat()
+    meta["pyEnd"] = py_end.isoformat()
+
+
 async def _fetch_catering_item_data(
     client: httpx.AsyncClient,
     start_date: date,
@@ -11035,7 +11102,54 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     sum(1 for v in service_charges.values() if v > 0),
                 )
                 pivot_data = pivot_metrics_by_location_and_date(raw_rows, service_charges, details_by_key)
+                if pivot_data.get("royaltyDetail"):
+                    m = pivot_data["royaltyDetail"].setdefault("meta", {})
+                    m["cyStart"] = start_date.isoformat()
+                    m["cyEnd"] = end_date.isoformat()
                 pivot_data = apply_yoy_aloha_sales(pivot_data, "metrics", raw_rows, report_config, start_date, end_date)
+                # Prior-year Toast Royalty Net: rerun the same pipeline on the shifted PY dates so
+                # stores on Toast a year ago get a real PY Royalty Net (net − PY service charges).
+                if report_config.yoyEnabled and pivot_data.get("royaltyDetail"):
+                    yoy_mode = getattr(report_config, "yoyMode", "same_date")
+                    if yoy_mode in ("same_day", "same_date"):
+                        offset = 364 if yoy_mode == "same_day" else 365
+                        py_start = start_date - timedelta(days=offset)
+                        py_end = end_date - timedelta(days=offset)
+                        try:
+                            py_pivot = await _build_toast_netsales_pivot(
+                                client, py_start, py_end, restaurant_ids, "metrics", None
+                            )
+                            _merge_py_royalty_detail(
+                                pivot_data["royaltyDetail"], py_pivot.get("royaltyDetail"), py_start, py_end
+                            )
+                        except Exception as exc:
+                            logger.warning("PY Toast royalty detail failed: %s", exc, exc_info=True)
+                    else:
+                        pivot_data["royaltyDetail"].setdefault("meta", {})["pyNote"] = \
+                            "PY Toast royalty not yet computed for fiscal YoY mode"
+                    # Tag PY source per location. Toast-live PY stays 'toast'; otherwise fall back
+                    # to the Aloha prior-year net (from apply_yoy) so PY Net Sales shows its source.
+                    rd = pivot_data["royaltyDetail"]
+                    aloha_by_name = {}
+                    for prow in pivot_data.get("pivotTable", []):
+                        nm = prow.get("restaurantName", "")
+                        if nm:
+                            aloha_by_name[nm] = round(
+                                sum(v for k, v in prow.items()
+                                    if k.endswith("_aloha") and isinstance(v, (int, float))), 2)
+                    for loc, d in (rd.get("byLocation") or {}).items():
+                        if d.get("pySource") == "toast":
+                            continue
+                        a = aloha_by_name.get(loc) or 0
+                        if a:
+                            d["pyAlohaNetSales"] = a
+                            d["pySource"] = "aloha"
+                        else:
+                            d.setdefault("pySource", "none")
+                    chain_aloha = round(sum((t.get("totalNetSalesAloha") or 0) for t in pivot_data.get("totals", [])), 2)
+                    if rd.get("chain") and rd["chain"].get("pySource") != "toast" and chain_aloha:
+                        rd["chain"]["pyAlohaNetSales"] = chain_aloha
+                        rd["chain"]["pySource"] = "aloha"
                 return pivot_data
 
             if report_config.reportType == "sales_summary" and not report_config.groupBy:
