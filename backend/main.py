@@ -3939,15 +3939,21 @@ async def _build_toast_netsales_pivot(
     restaurant_ids: list,
     report_type: str = "metrics",
     group_by=None,
+    allowed_dates: Optional[set] = None,
 ) -> dict:
     """
     Run the same ERA net-sales + Orders-detail pipeline for an arbitrary date range.
     Used to build PRIOR-YEAR Toast figures (net, Royalty Net, service charges, deferred)
     for stores that were on Toast on the prior-year date — so PY is a true Toast
     Royalty Net, not an Aloha number.  Returns a pivot dict incl. royaltyDetail.
+
+    allowed_dates: optional set of 'YYYYMMDD' strings to keep (fiscal YoY maps each
+    current day to a specific prior-year day, so we fetch the enclosing range then filter).
     """
     guid = await request_toast_report(client, start_d, end_d, restaurant_ids, report_type, group_by)
     rows = await fetch_toast_report(client, guid, report_type)
+    if allowed_dates:
+        rows = [r for r in rows if str(r.get("businessDate", "")) in allowed_dates]
     if not rows:
         return {"pivotTable": [], "totals": []}
     combos = {
@@ -11111,22 +11117,31 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                 # stores on Toast a year ago get a real PY Royalty Net (net − PY service charges).
                 if report_config.yoyEnabled and pivot_data.get("royaltyDetail"):
                     yoy_mode = getattr(report_config, "yoyMode", "same_date")
-                    if yoy_mode in ("same_day", "same_date"):
+                    py_start = py_end = None
+                    py_allowed = None  # set of 'YYYYMMDD' for fiscal (maps each day to a specific PY day)
+                    if yoy_mode == "fiscal":
+                        try:
+                            fmap = aloha_sales_db.get_fiscal_ly_dates(start_date.isoformat(), end_date.isoformat())
+                        except Exception:
+                            fmap = None
+                        if fmap:
+                            ly = sorted(set(fmap.values()))
+                            py_start = date.fromisoformat(ly[0])
+                            py_end = date.fromisoformat(ly[-1])
+                            py_allowed = {d.replace("-", "") for d in ly}
+                    if py_start is None:  # same_day / same_date (and fiscal fallback)
                         offset = 364 if yoy_mode == "same_day" else 365
                         py_start = start_date - timedelta(days=offset)
                         py_end = end_date - timedelta(days=offset)
-                        try:
-                            py_pivot = await _build_toast_netsales_pivot(
-                                client, py_start, py_end, restaurant_ids, "metrics", None
-                            )
-                            _merge_py_royalty_detail(
-                                pivot_data["royaltyDetail"], py_pivot.get("royaltyDetail"), py_start, py_end
-                            )
-                        except Exception as exc:
-                            logger.warning("PY Toast royalty detail failed: %s", exc, exc_info=True)
-                    else:
-                        pivot_data["royaltyDetail"].setdefault("meta", {})["pyNote"] = \
-                            "PY Toast royalty not yet computed for fiscal YoY mode"
+                    try:
+                        py_pivot = await _build_toast_netsales_pivot(
+                            client, py_start, py_end, restaurant_ids, "metrics", None, py_allowed
+                        )
+                        _merge_py_royalty_detail(
+                            pivot_data["royaltyDetail"], py_pivot.get("royaltyDetail"), py_start, py_end
+                        )
+                    except Exception as exc:
+                        logger.warning("PY Toast royalty detail failed: %s", exc, exc_info=True)
                     # Tag PY source per location. Toast-live PY stays 'toast'; otherwise fall back
                     # to the Aloha prior-year net (from apply_yoy) so PY Net Sales shows its source.
                     rd = pivot_data["royaltyDetail"]
