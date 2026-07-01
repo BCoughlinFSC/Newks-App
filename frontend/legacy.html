@@ -5198,7 +5198,8 @@
                           c('CY Net Sales (Toast)'+cyL, S.navyR), c('CY Royalty Net', S.navyR),
                           c('PY Source', S.navyL), c('PY Net Sales'+pyL, S.navyR), c('PY Royalty Net', S.navyR),
                           c('CY Service Charges (detail)', S.navyL), c('PY Service Charges (detail)', S.navyL),
-                          c('CY Deferred Add-back', S.navyR), c('PY Deferred Add-back', S.navyR)];
+                          c('CY Deferred Add-back', S.navyR), c('CY Deferred (detail)', S.navyL),
+                          c('PY Deferred Add-back', S.navyR), c('PY Deferred (detail)', S.navyL)];
             const rRows = [rHdr];
             const mkRow = (label, d, style) => {
               const py = pyOn(d), pa = pyAloha(d);
@@ -5208,7 +5209,8 @@
                       n(d.toastNetSales || 0, S.dR), n(d.royaltyNet || 0, S.dR),
                       c(pySrc, style || S.dL), pyNet, py ? n(d.pyRoyaltyNet || 0, S.dR) : c('—', S.dR),
                       c(detailStr(d.scByName), S.dL), py ? c(detailStr(d.pyScByName), S.dL) : c('—', S.dL),
-                      n(d.deferredTotal || 0, S.dR), py ? n(d.pyDeferredTotal || 0, S.dR) : c('—', S.dR)];
+                      n(d.deferredTotal || 0, S.dR), c(detailStr(d.deferredByName), S.dL),
+                      py ? n(d.pyDeferredTotal || 0, S.dR) : c('—', S.dR), py ? c(detailStr(d.pyDeferredByName), S.dL) : c('—', S.dL)];
             };
             Object.keys(rd.byLocation || {}).sort().forEach((loc, i) => rRows.push(mkRow(loc, rd.byLocation[loc], i % 2 ? S.dLalt : S.dL)));
             addWS(WB, rRows, 'Royalty Net Detail');
