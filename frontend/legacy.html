@@ -5210,7 +5210,6 @@
                       c(detailStr(d.scByName), S.dL), py ? c(detailStr(d.pyScByName), S.dL) : c('—', S.dL),
                       n(d.deferredTotal || 0, S.dR), py ? n(d.pyDeferredTotal || 0, S.dR) : c('—', S.dR)];
             };
-            rRows.push(mkRow('ALL LOCATIONS', rd.chain, S.navyL));
             Object.keys(rd.byLocation || {}).sort().forEach((loc, i) => rRows.push(mkRow(loc, rd.byLocation[loc], i % 2 ? S.dLalt : S.dL)));
             addWS(WB, rRows, 'Royalty Net Detail');
           }
