@@ -2286,16 +2286,21 @@ async def _compute_restaurant_service_charges(
 #   Net Sales (Toast) + specific deferred-item sales        = Accurate Net Sales (historical)
 _netsales_detail_cache: Dict[str, dict] = {}
 
-# Deferred line items that are TIPS/GRATUITY are not sales, so they are NOT part of the
-# historical add-back.  Everything else that was deferred (delivery/service/tech fees) is.
-# Adjust these keywords if accounting un-defers a different set on 2026-07-06.
-_DEFERRED_ADDBACK_EXCLUDE_KEYWORDS = ("tip", "gratuity")
+# The EXACT deferred line items accounting is un-deferring on 2026-07-06.  ONLY these are
+# added back to Toast net for historical comparability (an explicit allowlist, not a
+# keyword filter — so gift-card / house-account / "other" deferrals are never swept in).
+# Matched case-insensitively (trimmed) against the selection's displayName.  If a catering
+# or 3rd-party fee variant surfaces under a different name, add it here.
+_DEFERRED_ADDBACK_ITEMS = {
+    "tech fee",
+    "delivery fee (d)",
+    "service fee (d)",
+}
 
 
 def _is_addback_deferred_item(name: str) -> bool:
-    """True if a deferred line item should be added back to Toast net for historical parity."""
-    n = (name or "").lower()
-    return not any(kw in n for kw in _DEFERRED_ADDBACK_EXCLUDE_KEYWORDS)
+    """True only for the specific deferred fee items being un-deferred on 2026-07-06."""
+    return (name or "").strip().lower() in _DEFERRED_ADDBACK_ITEMS
 
 
 async def _compute_netsales_detail_for_day(
