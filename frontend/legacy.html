@@ -3335,7 +3335,7 @@
             sortedColumns.forEach(() => {
               if (hasNewks) {
                 html += `<th class="toast-col" style="background:#EFF6FF;color:#1E40AF;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #BFDBFE;">Toast Net Sales</th>`;
-                html += `<th style="background:#ECFDF5;color:#065F46;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #A7F3D0;">Newk's Net Sales</th>`;
+                html += `<th style="background:#ECFDF5;color:#065F46;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #A7F3D0;">Royalty Net</th>`;
               } else {
                 html += `<th class="toast-col" style="background:#EFF6FF;color:#1E40AF;font-size:0.7rem;font-weight:600;text-align:center;padding:0.2rem 0.5rem;border:1px solid #BFDBFE;">Toast Net Sales</th>`;
               }
@@ -3392,6 +3392,50 @@
             });
             html += '</tr>';
           });
+
+          // ── Royalty Net transparency + historical deferred add-back ──
+          // Net Sales (Toast) − restaurant service charges (by name) = Royalty Net
+          // Net Sales (Toast) + specific deferred items (post-7/6 add-back) = Accurate Net Sales
+          if (results.royaltyDetail) {
+            const rd = results.royaltyDetail;
+            const money = v => formatCell('Sales', v||0);
+            const buildWaterfall = (d) => {
+              let w = '<table style="width:100%;max-width:660px;border-collapse:collapse;font-size:0.85rem;margin:0.4rem 0 0.3rem 0;">';
+              w += `<tr><td style="padding:0.3rem 0.6rem;">Net Sales (Toast)</td><td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;">${money(d.toastNetSales)}</td></tr>`;
+              const scNames = Object.keys(d.scByName||{});
+              if (scNames.length) {
+                w += '<tr><td colspan="2" style="padding:0.3rem 0.6rem;color:#6B7280;font-style:italic;">Less service charges that go to the restaurant (in Toast net, excluded from Royalty Net):</td></tr>';
+                scNames.forEach(nm => {
+                  w += `<tr><td style="padding:0.15rem 0.6rem 0.15rem 1.5rem;">${nm}</td><td style="padding:0.15rem 0.6rem;text-align:right;color:#B91C1C;">(${money(d.scByName[nm])})</td></tr>`;
+                });
+              }
+              w += `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:0.3rem 0.6rem;font-weight:600;">Total Service Charges</td><td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;color:#B91C1C;">(${money(d.serviceChargeTotal)})</td></tr>`;
+              w += `<tr style="background:#ECFDF5;border-top:2px solid #065F46;"><td style="padding:0.4rem 0.6rem;font-weight:700;color:#065F46;">= Royalty Net</td><td style="padding:0.4rem 0.6rem;text-align:right;font-weight:700;color:#065F46;">${money(d.royaltyNet)}</td></tr>`;
+              const defNames = Object.keys(d.deferredByName||{});
+              if ((d.deferredTotal||0) > 0 || defNames.length) {
+                w += '<tr><td colspan="2" style="padding:0.55rem 0.6rem 0.2rem;color:#6B7280;font-style:italic;">Historical add-back &mdash; deferred items that stop being deferred 7/6/2026 (added to Toast net so prior periods stay comparable):</td></tr>';
+                defNames.forEach(nm => {
+                  w += `<tr><td style="padding:0.15rem 0.6rem 0.15rem 1.5rem;">${nm}</td><td style="padding:0.15rem 0.6rem;text-align:right;color:#1D4ED8;">+${money(d.deferredByName[nm])}</td></tr>`;
+                });
+                w += `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:0.3rem 0.6rem;font-weight:600;">Total Deferred Add-back</td><td style="padding:0.3rem 0.6rem;text-align:right;font-weight:600;color:#1D4ED8;">+${money(d.deferredTotal)}</td></tr>`;
+                w += `<tr style="background:#EFF6FF;border-top:2px solid #1D4ED8;"><td style="padding:0.4rem 0.6rem;font-weight:700;color:#1E3A8A;">= Accurate Net Sales (historical)</td><td style="padding:0.4rem 0.6rem;text-align:right;font-weight:700;color:#1E3A8A;">${money(d.accurateNetSales)}</td></tr>`;
+              }
+              w += '</table>';
+              return w;
+            };
+            const summaryLine = (label, d) => {
+              let s = `<strong>${label}</strong> &mdash; Toast ${money(d.toastNetSales)} &minus; SC ${money(d.serviceChargeTotal)} = <span style="color:#065F46;font-weight:700;">Royalty Net ${money(d.royaltyNet)}</span>`;
+              if ((d.deferredTotal||0) > 0) s += ` &nbsp;&middot;&nbsp; +Deferred ${money(d.deferredTotal)} = <span style="color:#1E3A8A;font-weight:600;">Accurate ${money(d.accurateNetSales)}</span>`;
+              return s;
+            };
+            html += '<tr><td colspan="100" style="height:18px;border:none;"></td></tr>';
+            html += '<tr><th colspan="100" style="background:#065F46;color:white;text-align:left;font-weight:700;padding:0.6rem 0.75rem;border:1px solid #047857;">ROYALTY NET &mdash; TRANSPARENCY &amp; HISTORICAL ADD-BACK</th></tr>';
+            html += `<tr><td colspan="100" style="padding:0;border:1px solid #E5E7EB;background:#F0FDF4;"><details open style="padding:0.5rem 0.75rem;"><summary style="cursor:pointer;">${summaryLine('All Locations', rd.chain)}</summary>${buildWaterfall(rd.chain)}</details></td></tr>`;
+            Object.keys(rd.byLocation||{}).sort().forEach(loc => {
+              const d = rd.byLocation[loc];
+              html += `<tr><td colspan="100" style="padding:0;border:1px solid #E5E7EB;"><details style="padding:0.5rem 0.75rem;"><summary style="cursor:pointer;">${summaryLine(loc, d)}</summary>${buildWaterfall(d)}</details></td></tr>`;
+            });
+          }
         } else {
           html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">Location</th>';
           sortedColumns.forEach(col => { html += `<th style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;border:1px solid #1E3A8A;">${col}</th>`; });
@@ -3415,7 +3459,7 @@
           const showAlohaCol = results.yoySalesInfo && results.yoySalesInfo.status === 'ok' && totals.some(r => r.totalNetSalesAloha != null);
           html += '<tr><th style="background:#1E40AF;color:white;text-align:left;font-weight:700;padding:0.75rem;">Date</th>';
           html += '<th class="toast-col" style="background:#1E40AF;color:white;text-align:right;font-weight:700;padding:0.75rem;">🍞 Toast Net Sales</th>';
-          if (showNewksCol) html += '<th style="background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;">🥗 Newk\'s Net Sales</th>';
+          if (showNewksCol) html += '<th style="background:#065F46;color:white;text-align:right;font-weight:700;padding:0.75rem;">🥗 Royalty Net</th>';
           if (showAlohaCol) html += '<th style="background:#92400E;color:white;text-align:right;font-weight:700;padding:0.75rem;">📊 Prior Year (Aloha)</th>';
           html += '</tr>';
           totals.forEach(row => {
@@ -5126,6 +5170,22 @@
             rows.push(totRow);
           }
           addWS(WB, rows, isMetrics ? 'Sales' : 'Summary');
+
+          // ── Royalty Net Detail sheet (Toast → service charges → Royalty Net → deferred add-back) ──
+          if (isMetrics && currentResults.royaltyDetail) {
+            const rd = currentResults.royaltyDetail;
+            const detailStr = obj => Object.keys(obj || {}).map(k => `${k}: ${(obj[k] || 0).toFixed(2)}`).join('; ');
+            const rHdr = [c('Location', S.navyL), c('Net Sales (Toast)', S.navyR), c('Total Service Charges', S.navyR),
+                          c('Royalty Net', S.navyR), c('Deferred Add-back', S.navyR), c('Accurate Net Sales (historical)', S.navyR),
+                          c('Service Charge Detail', S.navyL), c('Deferred Detail', S.navyL)];
+            const rRows = [rHdr];
+            const mkRow = (label, d, style) => [c(label, style || S.dL), n(d.toastNetSales || 0, S.dR), n(d.serviceChargeTotal || 0, S.dR),
+                          n(d.royaltyNet || 0, S.dR), n(d.deferredTotal || 0, S.dR), n(d.accurateNetSales || 0, S.dR),
+                          c(detailStr(d.scByName), S.dL), c(detailStr(d.deferredByName), S.dL)];
+            rRows.push(mkRow('ALL LOCATIONS', rd.chain, S.navyL));
+            Object.keys(rd.byLocation || {}).sort().forEach((loc, i) => rRows.push(mkRow(loc, rd.byLocation[loc], i % 2 ? S.dLalt : S.dL)));
+            addWS(WB, rRows, 'Royalty Net Detail');
+          }
 
           // ── Performance Summary sheet (metrics reports only) ──────────────
           if (isMetrics) {

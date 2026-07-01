@@ -2280,6 +2280,96 @@ async def _compute_restaurant_service_charges(
     return total_restaurant_sc
 
 
+# Combined net-sales detail (restaurant-destination SC breakdown + deferred add-back)
+# per restaurant|business_date.  Powers the transparent Net Sales report:
+#   Net Sales (Toast) − restaurant service charges (by name) = Royalty Net
+#   Net Sales (Toast) + specific deferred-item sales        = Accurate Net Sales (historical)
+_netsales_detail_cache: Dict[str, dict] = {}
+
+# Deferred line items that are TIPS/GRATUITY are not sales, so they are NOT part of the
+# historical add-back.  Everything else that was deferred (delivery/service/tech fees) is.
+# Adjust these keywords if accounting un-defers a different set on 2026-07-06.
+_DEFERRED_ADDBACK_EXCLUDE_KEYWORDS = ("tip", "gratuity")
+
+
+def _is_addback_deferred_item(name: str) -> bool:
+    """True if a deferred line item should be added back to Toast net for historical parity."""
+    n = (name or "").lower()
+    return not any(kw in n for kw in _DEFERRED_ADDBACK_EXCLUDE_KEYWORDS)
+
+
+async def _compute_netsales_detail_for_day(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+    business_date_yyyymmdd: str,
+) -> dict:
+    """
+    One-pass net-sales detail for a single restaurant/day (orders fetched once, cached):
+
+      scByName / scTotal        – restaurant-destination service charges, itemized by name.
+                                  Toast INCLUDES these in netSalesAmount; Newk's excludes them
+                                  from Royalty Net, so they are subtracted (shown transparently).
+      deferredByName / deferredTotal – deferred line-item SALES (excluding tips/gratuity).
+                                  These do NOT post to ToastWeb sales today; once accounting
+                                  stops deferring them (2026-07-06) Toast net will jump, so for
+                                  pre-cutover history we add them back to keep comparisons valid.
+    """
+    key = f"{restaurant_guid}|{business_date_yyyymmdd}"
+    if key in _netsales_detail_cache:
+        return _netsales_detail_cache[key]
+
+    configs = await _fetch_service_charge_configs(client, restaurant_guid)
+    orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
+
+    sc_by: Dict[str, float] = {}
+    deferred_by: Dict[str, float] = {}
+    sc_total = 0.0
+    deferred_total = 0.0
+
+    for order in orders:
+        if order.get("voided"):
+            continue
+        for check in order.get("checks", []):
+            if check.get("voided") or check.get("deleted"):
+                continue
+            # Restaurant-destination service charges (subtracted for Royalty Net)
+            for applied_sc in check.get("appliedServiceCharges", []):
+                amt = float(applied_sc.get("chargeAmount") or 0)
+                if amt <= 0:
+                    continue
+                if (applied_sc.get("destination") or "RESTAURANT") != "RESTAURANT":
+                    continue
+                sc_guid = (applied_sc.get("serviceCharge") or {}).get("guid", "")
+                nm = (applied_sc.get("name")
+                      or (configs.get(sc_guid) or {}).get("name")
+                      or "Service Charge")
+                sc_by[nm] = sc_by.get(nm, 0.0) + amt
+                sc_total += amt
+            # Deferred line-item sales (added back for historical parity, tips excluded)
+            deferred_sels: list = []
+            _collect_deferred_selections(check.get("selections"), deferred_sels)
+            for sel in deferred_sels:
+                sales = float(sel.get("price") or 0)
+                if sales == 0:
+                    continue
+                nm = (sel.get("displayName")
+                      or (sel.get("item") or {}).get("name")
+                      or "(unnamed)")
+                if not _is_addback_deferred_item(nm):
+                    continue
+                deferred_by[nm] = deferred_by.get(nm, 0.0) + sales
+                deferred_total += sales
+
+    result = {
+        "scTotal": round(sc_total, 2),
+        "scByName": {k: round(v, 2) for k, v in sc_by.items()},
+        "deferredTotal": round(deferred_total, 2),
+        "deferredByName": {k: round(v, 2) for k, v in deferred_by.items()},
+    }
+    _netsales_detail_cache[key] = result
+    return result
+
+
 async def _compute_sales_metrics_for_day(
     client: httpx.AsyncClient,
     restaurant_guid: str,
@@ -3688,6 +3778,7 @@ def save_store_groups(groups: List[StoreGroup]) -> None:
 def pivot_metrics_by_location_and_date(
     raw_rows: list,
     service_charges: Optional[Dict[str, float]] = None,
+    details: Optional[Dict[str, dict]] = None,
 ) -> dict:
     """
     Transform metrics data into pivot table format:
@@ -3725,6 +3816,10 @@ def pivot_metrics_by_location_and_date(
     date_totals_newks = {} # date -> total Newk's net sales
     date_totals_sc = {}    # date -> total SC add-on (for display)
 
+    # Royalty Net transparency + deferred add-back, aggregated per location over the range.
+    have_details = bool(details)
+    loc_detail: Dict[str, dict] = {}  # location -> {toast, scTotal, scByName, deferredTotal, deferredByName}
+
     for row in raw_rows:
         restaurant_name = row.get("restaurantName", "Unknown")
         restaurant_guid = row.get("restaurantGuid", "")
@@ -3752,6 +3847,20 @@ def pivot_metrics_by_location_and_date(
         date_totals_newks[business_date] += newks_net_sales
         date_totals_sc[business_date] += sc_addon
 
+        if have_details:
+            det = details.get(sc_key) or {}
+            ld = loc_detail.setdefault(
+                restaurant_name,
+                {"toast": 0.0, "scTotal": 0.0, "scByName": {}, "deferredTotal": 0.0, "deferredByName": {}},
+            )
+            ld["toast"] += toast_net_sales
+            ld["scTotal"] += det.get("scTotal", 0.0)
+            for nm, amt in (det.get("scByName") or {}).items():
+                ld["scByName"][nm] = ld["scByName"].get(nm, 0.0) + amt
+            ld["deferredTotal"] += det.get("deferredTotal", 0.0)
+            for nm, amt in (det.get("deferredByName") or {}).items():
+                ld["deferredByName"][nm] = ld["deferredByName"].get(nm, 0.0) + amt
+
     sorted_dates = sorted(list(all_dates))
     sorted_locations = sorted(location_data.keys())
 
@@ -3776,10 +3885,51 @@ def pivot_metrics_by_location_and_date(
         for d in sorted_dates
     ]
     
-    return {
+    result = {
         "pivotTable": pivot_rows,
         "totals": totals_rows
     }
+
+    # Royalty Net transparency + historical deferred add-back, per location and chain-wide.
+    if have_details:
+        def _sorted_round(d: dict) -> dict:
+            return {k: round(v, 2) for k, v in sorted(d.items(), key=lambda kv: -kv[1])}
+
+        by_location: Dict[str, dict] = {}
+        chain_sc: Dict[str, float] = {}
+        chain_def: Dict[str, float] = {}
+        chain_toast = chain_sc_total = chain_def_total = 0.0
+        for loc, ld in loc_detail.items():
+            by_location[loc] = {
+                "toastNetSales":      round(ld["toast"], 2),
+                "serviceChargeTotal": round(ld["scTotal"], 2),
+                "scByName":           _sorted_round(ld["scByName"]),
+                "royaltyNet":         round(ld["toast"] - ld["scTotal"], 2),
+                "deferredTotal":      round(ld["deferredTotal"], 2),
+                "deferredByName":     _sorted_round(ld["deferredByName"]),
+                "accurateNetSales":   round(ld["toast"] + ld["deferredTotal"], 2),
+            }
+            chain_toast += ld["toast"]
+            chain_sc_total += ld["scTotal"]
+            chain_def_total += ld["deferredTotal"]
+            for k, v in ld["scByName"].items():
+                chain_sc[k] = chain_sc.get(k, 0.0) + v
+            for k, v in ld["deferredByName"].items():
+                chain_def[k] = chain_def.get(k, 0.0) + v
+        result["royaltyDetail"] = {
+            "byLocation": by_location,
+            "chain": {
+                "toastNetSales":      round(chain_toast, 2),
+                "serviceChargeTotal": round(chain_sc_total, 2),
+                "scByName":           _sorted_round(chain_sc),
+                "royaltyNet":         round(chain_toast - chain_sc_total, 2),
+                "deferredTotal":      round(chain_def_total, 2),
+                "deferredByName":     _sorted_round(chain_def),
+                "accurateNetSales":   round(chain_toast + chain_def_total, 2),
+            },
+        }
+
+    return result
 
 async def _fetch_catering_item_data(
     client: httpx.AsyncClient,
@@ -10856,32 +11006,35 @@ async def run_report(report_config: ReportConfig = Body(...), response: Response
                     sample_guid,
                 )
 
-                async def _fetch_sc_for_combo(guid: str, bd: str) -> Tuple[str, float]:
+                async def _fetch_detail_for_combo(guid: str, bd: str) -> Tuple[str, Dict]:
                     async with sem:
                         try:
-                            amount = await _compute_restaurant_service_charges(client, guid, bd)
-                            return f"{guid}|{bd}", amount
+                            d = await _compute_netsales_detail_for_day(client, guid, bd)
+                            return f"{guid}|{bd}", d
                         except Exception as exc:
                             logger.warning(
-                                "SC fetch failed for %s|%s: %s — defaulting to 0",
+                                "Net sales detail fetch failed for %s|%s: %s — defaulting to 0",
                                 guid, bd, exc,
                                 exc_info=True,
                             )
-                            return f"{guid}|{bd}", 0.0
+                            return f"{guid}|{bd}", {"scTotal": 0.0, "scByName": {}, "deferredTotal": 0.0, "deferredByName": {}}
 
-                sc_results = await asyncio.gather(
-                    *[_fetch_sc_for_combo(g, b) for g, b in unique_combos]
+                detail_results = await asyncio.gather(
+                    *[_fetch_detail_for_combo(g, b) for g, b in unique_combos]
                 )
-                service_charges: Dict[str, float] = dict(sc_results)
+                details_by_key: Dict[str, Dict] = dict(detail_results)
+                service_charges: Dict[str, float] = {k: v.get("scTotal", 0.0) for k, v in details_by_key.items()}
                 total_sc = sum(service_charges.values())
+                total_deferred = sum(v.get("deferredTotal", 0.0) for v in details_by_key.values())
                 logger.info(
-                    "Net sales SC fetch complete: %d combos, total_restaurant_sc=%.2f, "
-                    "non_zero_combos=%d",
-                    len(service_charges),
+                    "Net sales detail fetch complete: %d combos, total_restaurant_sc=%.2f, "
+                    "total_deferred_addback=%.2f, non_zero_sc_combos=%d",
+                    len(details_by_key),
                     total_sc,
+                    total_deferred,
                     sum(1 for v in service_charges.values() if v > 0),
                 )
-                pivot_data = pivot_metrics_by_location_and_date(raw_rows, service_charges)
+                pivot_data = pivot_metrics_by_location_and_date(raw_rows, service_charges, details_by_key)
                 pivot_data = apply_yoy_aloha_sales(pivot_data, "metrics", raw_rows, report_config, start_date, end_date)
                 return pivot_data
 
