@@ -97,6 +97,12 @@ SMTP_USER       = os.getenv("SMTP_USER",     "")
 SMTP_PASSWORD   = os.getenv("SMTP_PASSWORD", "")
 ALERT_TO        = os.getenv("ALERT_TO",      "")
 
+# SQL→app mirror refresh (Sync-from-SQL fulfillment). RETIRED 2026-07-07: the
+# Cloudways edge proxy blocks the file upload, and ongoing edits already flow
+# App→SQL via the outbox, so the reverse sync is only an initial/manual task.
+# Kept behind a flag in case we ever build a chunked upload to re-enable it.
+SYNC_FROM_SQL_ENABLED = os.getenv("CONTACTS_SYNC_FROM_SQL_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
 MAX_ATTEMPTS    = 3
 DEFAULT_BATCH   = 100
 HTTP_TIMEOUT    = 30   # seconds
@@ -461,6 +467,12 @@ EXPORT_TIMEOUT = 1800  # seconds — the full export takes a few minutes
 
 
 def maybe_fulfill_sync_request(dry_run: bool) -> None:
+    if not SYNC_FROM_SQL_ENABLED:
+        logger.info("SQL→app mirror refresh is DISABLED (set "
+                    "CONTACTS_SYNC_FROM_SQL_ENABLED=1 to re-enable) — skipping. "
+                    "App→SQL outbox drain is unaffected.")
+        return
+
     import subprocess
     import tempfile
     import gzip
