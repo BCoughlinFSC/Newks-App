@@ -465,6 +465,8 @@ def maybe_fulfill_sync_request(dry_run: bool) -> None:
     import tempfile
     import gzip
     import shutil
+    import time
+    import requests
 
     status = _api("GET", "/api/contacts/sync-request").json()
     pending_req = status.get("pending")
@@ -513,20 +515,49 @@ def maybe_fulfill_sync_request(dry_run: bool) -> None:
                 f"{(proc.stderr or proc.stdout or '')[-500:]}")
 
         raw_mb = os.path.getsize(out_path) / (1024 * 1024)
-        # gzip before upload: the Cloudways edge proxy stalls large multipart
-        # bodies — a raw ~1.3 MB .db hangs for the full 5-min timeout and never
-        # reaches uvicorn. ~1.3 MB → ~0.35 MB sails through. The import endpoint
-        # auto-detects gzip by magic bytes, so this stays backward-compatible.
+        # gzip before upload: shrinks the ~1.3 MB export to ~0.2 MB. The import
+        # endpoint auto-detects gzip by magic bytes, so this is backward-compat.
         with open(out_path, "rb") as fin, gzip.open(gz_path, "wb") as fout:
             shutil.copyfileobj(fin, fout)
         gz_mb = os.path.getsize(gz_path) / (1024 * 1024)
         logger.info("Export complete (%.1f MB → %.2f MB gzipped). Uploading to %s ...",
                     raw_mb, gz_mb, APP_BASE_URL)
-        with open(gz_path, "rb") as fh:
-            r = _api("POST", "/api/contacts/import-db",
-                     files={"file": ("contacts.db.gz", fh, "application/gzip")},
-                     timeout=300)
-        logger.info("Sync-from-SQL fulfilled: %s", r.json())
+
+        # The Cloudways edge proxy SWALLOWS this endpoint's response: uvicorn
+        # receives the upload, imports it in <1s, and marks the sync request
+        # fulfilled — but the proxy holds the connection and returns a 504 /
+        # garbage body ~300s later regardless. So we can't trust the POST
+        # response. Upload with a short timeout, then CONFIRM the import landed
+        # via the sync-request status side-channel (a tiny GET the proxy relays
+        # fine). Turns a 5-min hang + false failure into a fast, correct OK.
+        UPLOAD_TIMEOUT = 45
+        detail = None
+        try:
+            with open(gz_path, "rb") as fh:
+                r = _api("POST", "/api/contacts/import-db",
+                         files={"file": ("contacts.db.gz", fh, "application/gzip")},
+                         timeout=UPLOAD_TIMEOUT)
+            detail = r.json()
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            logger.warning("import-db response lost/unreadable at the edge (%s) — "
+                           "confirming via sync-request status instead.",
+                           exc.__class__.__name__)
+
+        fulfilled_ok = detail is not None
+        for _ in range(6):                       # up to ~30s for a slow import
+            if fulfilled_ok:
+                break
+            status2 = _api("GET", "/api/contacts/sync-request").json()
+            pend = status2.get("pending")
+            if not (pend and pend.get("id") == pending_req.get("id")):
+                fulfilled_ok = True
+                detail = detail or status2.get("last_fulfilled")
+                break
+            time.sleep(5)
+        if not fulfilled_ok:
+            raise RuntimeError("import-db upload did not fulfill the sync request "
+                               "(still pending after polling) — genuine failure.")
+        logger.info("Sync-from-SQL fulfilled: %s", detail or "confirmed via status")
     except Exception:
         logger.error("Sync-from-SQL fulfillment FAILED:\n%s", traceback.format_exc())
         _send_alert(
