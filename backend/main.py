@@ -20192,10 +20192,25 @@ def contacts_import_db(
     data_dir = os.path.dirname(contacts_db.CONTACTS_DB_PATH)
     os.makedirs(data_dir, exist_ok=True)
     fd, tmp_path = _tempfile.mkstemp(prefix="contacts_upload_", suffix=".db", dir=data_dir)
+    inflated_path = None
     try:
         with os.fdopen(fd, "wb") as out:
             _shutil.copyfileobj(file.file, out)
-        summary = contacts_db.import_contacts_db(tmp_path)
+        # The drainer gzips the export so it slips under the Cloudways edge
+        # proxy's request-body limit — a raw ~1.3 MB .db stalls at the proxy
+        # (Varnish/nginx) for the full 5-min timeout and never reaches uvicorn.
+        # Auto-detect gzip by magic bytes and inflate; a raw .db still works.
+        import gzip as _gzip
+        with open(tmp_path, "rb") as _fh:
+            is_gzip = _fh.read(2) == b"\x1f\x8b"
+        import_path = tmp_path
+        if is_gzip:
+            ifd, inflated_path = _tempfile.mkstemp(
+                prefix="contacts_inflated_", suffix=".db", dir=data_dir)
+            with os.fdopen(ifd, "wb") as _out, _gzip.open(tmp_path, "rb") as _in:
+                _shutil.copyfileobj(_in, _out)
+            import_path = inflated_path
+        summary = contacts_db.import_contacts_db(import_path)
         fulfilled = contacts_db.fulfill_sync_requests(
             note=f"imported {summary.get('store_rows')} stores from SQL-PROD")
         summary["sync_requests_fulfilled"] = fulfilled
@@ -20205,10 +20220,12 @@ def contacts_import_db(
         # Validation failure — bad/partial upload, mirror left untouched.
         raise HTTPException(status_code=400, detail=str(exc))
     finally:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+        for _p in (tmp_path, inflated_path):
+            if _p:
+                try:
+                    os.remove(_p)
+                except OSError:
+                    pass
 
 
 @app.get("/api/monkey/alerts/not-accepted")

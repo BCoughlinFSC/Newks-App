@@ -463,6 +463,8 @@ EXPORT_TIMEOUT = 1800  # seconds — the full export takes a few minutes
 def maybe_fulfill_sync_request(dry_run: bool) -> None:
     import subprocess
     import tempfile
+    import gzip
+    import shutil
 
     status = _api("GET", "/api/contacts/sync-request").json()
     pending_req = status.get("pending")
@@ -484,6 +486,7 @@ def maybe_fulfill_sync_request(dry_run: bool) -> None:
         return
 
     out_path = os.path.join(tempfile.gettempdir(), f"contacts_sync_{os.getpid()}.db")
+    gz_path = out_path + ".gz"
     export_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                  "contacts_export_from_sqlserver.py")
     env = dict(os.environ)
@@ -509,11 +512,19 @@ def maybe_fulfill_sync_request(dry_run: bool) -> None:
                 f"exporter exited {proc.returncode}: "
                 f"{(proc.stderr or proc.stdout or '')[-500:]}")
 
-        size_mb = os.path.getsize(out_path) / (1024 * 1024)
-        logger.info("Export complete (%.1f MB). Uploading to %s ...", size_mb, APP_BASE_URL)
-        with open(out_path, "rb") as fh:
+        raw_mb = os.path.getsize(out_path) / (1024 * 1024)
+        # gzip before upload: the Cloudways edge proxy stalls large multipart
+        # bodies — a raw ~1.3 MB .db hangs for the full 5-min timeout and never
+        # reaches uvicorn. ~1.3 MB → ~0.35 MB sails through. The import endpoint
+        # auto-detects gzip by magic bytes, so this stays backward-compatible.
+        with open(out_path, "rb") as fin, gzip.open(gz_path, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+        gz_mb = os.path.getsize(gz_path) / (1024 * 1024)
+        logger.info("Export complete (%.1f MB → %.2f MB gzipped). Uploading to %s ...",
+                    raw_mb, gz_mb, APP_BASE_URL)
+        with open(gz_path, "rb") as fh:
             r = _api("POST", "/api/contacts/import-db",
-                     files={"file": ("contacts.db", fh, "application/octet-stream")},
+                     files={"file": ("contacts.db.gz", fh, "application/gzip")},
                      timeout=300)
         logger.info("Sync-from-SQL fulfilled: %s", r.json())
     except Exception:
@@ -525,10 +536,11 @@ def maybe_fulfill_sync_request(dry_run: bool) -> None:
                  f"The request stays pending; the next cron run will retry.",
         )
     finally:
-        try:
-            os.remove(out_path)
-        except OSError:
-            pass
+        for _p in (out_path, gz_path):
+            try:
+                os.remove(_p)
+            except OSError:
+                pass
 
 
 def main():
