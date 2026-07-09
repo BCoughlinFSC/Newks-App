@@ -87,6 +87,27 @@ CREATE TABLE IF NOT EXISTS contacts_sync_requests (
     fulfilled_at  TEXT,
     note          TEXT
 );
+
+-- StoreOLOVendor: per-store OLO Vendor ID (e.g. Oxford MS = 33030).
+--
+-- This is a CLOUDWAYS-ONLY, APP-OWNED attribute — it does NOT exist in the
+-- SQL Server `contacts` schema. It used to live in SQL Server's
+-- OLO.dbo.OLOVendors, populated by a licensed ZappySys SSIS package on
+-- NEWKS-SQL whose sole remaining consumer was the SSRS "Restaurant Contact
+-- Information Sheet" report. That report now lives in this app, so the OLO
+-- Vendor ID lives here too and the ETL + its paid ZappySys dependency can be
+-- retired.
+--
+-- Because it is app-owned it is listed in import_contacts_db()'s PRESERVE set
+-- (never dropped on a mirror refresh) and its edits are NOT recorded to the
+-- outbox (there is no SQL Server column to replay them into). Seed it once
+-- with backend/seed_olo_vendor_ids.py.
+CREATE TABLE IF NOT EXISTS StoreOLOVendor (
+    StoreID       INTEGER PRIMARY KEY,
+    OLOVendorID   TEXT,
+    LastUpdatedBy TEXT,
+    LastUpdated   TEXT
+);
 """
 
 
@@ -392,7 +413,11 @@ def import_contacts_db(uploaded_path: str) -> Dict[str, Any]:
          app-local tables exist.
     """
     # Tables that live ONLY on Cloudways and must never be refreshed/dropped.
-    PRESERVE = {"contacts_outbox", "contacts_sync_requests", "sqlite_sequence"}
+    # StoreOLOVendor is app-owned (no SQL Server counterpart) — dropping it on a
+    # mirror refresh would wipe the OLO Vendor IDs that used to come from the
+    # now-retired SQL Server OLO ETL.
+    PRESERVE = {"contacts_outbox", "contacts_sync_requests", "sqlite_sequence",
+                "StoreOLOVendor"}
 
     # ── 1. validate the upload (read-only) ──
     src = sqlite3.connect(uploaded_path)
@@ -1002,6 +1027,70 @@ def list_delivery_partners_by_store(store_id: int) -> List[Dict[str, Any]]:
             return []
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# StoreOLOVendor — app-owned per-store OLO Vendor ID (see APP_LOCAL_SCHEMA_SQL).
+#
+# NOT synced to SQL Server (no column there) so these helpers never touch the
+# outbox. The table is in the PRESERVE set so it survives a mirror refresh.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_store_olo_vendor(store_id: int) -> Optional[str]:
+    """Return the OLO Vendor ID string for a store, or None if unset."""
+    with get_connection() as conn:
+        try:
+            row = conn.execute(
+                "SELECT OLOVendorID FROM StoreOLOVendor WHERE StoreID = ?",
+                (store_id,),
+            ).fetchone()
+            return row["OLOVendorID"] if row else None
+        except sqlite3.OperationalError:
+            return None
+
+
+def get_olo_vendor_map() -> Dict[int, str]:
+    """Return {StoreID: OLOVendorID} for every store that has one — feeds the
+    Contact Information report so it doesn't do an N+1 per-store lookup."""
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(
+                "SELECT StoreID, OLOVendorID FROM StoreOLOVendor "
+                "WHERE OLOVendorID IS NOT NULL AND OLOVendorID <> ''"
+            ).fetchall()
+            return {int(r["StoreID"]): r["OLOVendorID"] for r in rows}
+        except sqlite3.OperationalError:
+            return {}
+
+
+def set_store_olo_vendor(store_id: int, olo_vendor_id: Optional[str],
+                         updated_by: str) -> bool:
+    """Upsert (or clear) a store's OLO Vendor ID.
+
+    A blank/None value deletes the row rather than storing an empty string,
+    keeping get_olo_vendor_map() clean. Returns True on any successful write.
+    App-owned data: intentionally does NOT record to the outbox.
+    """
+    normalized = (str(olo_vendor_id).strip() if olo_vendor_id is not None else "")
+    with get_connection() as conn:
+        if normalized == "":
+            conn.execute("DELETE FROM StoreOLOVendor WHERE StoreID = ?", (store_id,))
+            conn.commit()
+            return True
+        # SQLite UPSERT — insert or update the single row for this store.
+        conn.execute(
+            """
+            INSERT INTO StoreOLOVendor (StoreID, OLOVendorID, LastUpdatedBy, LastUpdated)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(StoreID) DO UPDATE SET
+                OLOVendorID   = excluded.OLOVendorID,
+                LastUpdatedBy = excluded.LastUpdatedBy,
+                LastUpdated   = datetime('now')
+            """,
+            (store_id, normalized, updated_by),
+        )
+        conn.commit()
+        return True
+
+
 def _resolve_lookup_full(name: str, row_id: Any) -> Optional[Dict[str, Any]]:
     """Look up a single lookup-table row by PK, return the FULL row dict
     (not just id/label). Used by get_store_full() so the profile page can
@@ -1033,6 +1122,10 @@ def get_store_full(store_id: int) -> Optional[Dict[str, Any]]:
     base = get_store(store_id)
     if not base:
         return None
+    # OLO Vendor ID is app-owned (StoreOLOVendor table), not a Store column.
+    # Fold it into the store dict so the edit form + profile page can treat it
+    # like any other Store field for display/populate purposes.
+    base["OLOVendorID"] = get_store_olo_vendor(store_id)
     physical          = get_store_physical(store_id)        or {}
     technical         = get_store_technical(store_id)       or {}
     closures          = list_store_closures(store_id)
@@ -1469,6 +1562,231 @@ def list_companies() -> List[Dict[str, Any]]:
         except sqlite3.OperationalError as exc:
             logger.warning("Company table missing or unreadable: %s", exc)
             return []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Restaurant Contact Information report
+#
+# Rebuilds the legacy SSRS "Restaurant Contact Information Sheet" entirely from
+# the app's own contacts mirror + the app-owned StoreOLOVendor table + the
+# app's Toast location mapping. This is what lets the SQL Server OLO ETL (and
+# its licensed ZappySys SSIS package on NEWKS-SQL) be retired — the report no
+# longer touches SQL Server at all.
+#
+# 26 columns, matching the SSRS layout / the "Restaurant Contact Information
+# Sheet" xlsx export the office has always used.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Column order + header labels for the report (drives both the JSON payload
+# key order and the CSV/print export). Kept in one place so the frontend table
+# and any CSV stay in lock-step with the SSRS original.
+CONTACT_REPORT_COLUMNS = [
+    ("restaurant_id",         "Restaurant ID"),
+    ("restaurant_name",       "Restaurant Name"),
+    ("olo_vendor_id",         "OLO Vendor ID"),
+    ("toast_guid",            "Toast GUID"),
+    ("restaurant_status",     "Restaurant Status"),
+    ("ownership",             "Ownership"),
+    ("group_name",            "Group Name"),
+    ("address",               "Address"),
+    ("city",                  "City"),
+    ("state",                 "State"),
+    ("zip",                   "Zip"),
+    ("phone",                 "Phone"),
+    ("restaurant_email",      "Restaurant Email"),
+    ("general_manager",       "General Manager"),
+    ("gm_email",              "GM Email"),
+    ("gm_cell_phone",         "GM Cell Phone"),
+    ("primary_contact",       "Primary Contact"),
+    ("primary_contact_email", "Primary Contact Email"),
+    ("primary_contact_phone", "Primary Contact Phone"),
+    ("area_director",         "Area Director Name"),
+    ("area_director_email",   "Area Director Email"),
+    ("billing_name",          "Billing Name"),
+    ("billing_email",         "Billing Email"),
+    ("billing_phone",         "Billing Phone"),
+    ("sysco_market",          "Sysco Market"),
+    ("dma",                   "DMA"),
+]
+
+
+def _load_lookup_full_by_pk(name: str) -> Dict[Any, Dict[str, Any]]:
+    """Return {pk_value: full_row_dict} for a lookup table — one query, so the
+    report can resolve FKs without an N+1 per store. Empty on any error."""
+    spec = _lookup_spec(name)
+    if not spec:
+        return {}
+    table, pk = spec["table"], spec["pk"]
+    out: Dict[Any, Dict[str, Any]] = {}
+    with get_connection() as conn:
+        try:
+            for r in conn.execute(f"SELECT * FROM {table}").fetchall():
+                d = _row_to_dict(r)
+                out[d.get(pk)] = d
+        except sqlite3.OperationalError as exc:
+            logger.warning("report: lookup %s (%s) load failed: %s", name, table, exc)
+    return out
+
+
+def _all_gms_by_store() -> Dict[int, List[Dict[str, Any]]]:
+    """Return {StoreID: [gm_row, ...]} for every store in one query."""
+    out: Dict[int, List[Dict[str, Any]]] = {}
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(
+                "SELECT * FROM GeneralManagers "
+                "ORDER BY LOWER(COALESCE(GeneralMgrName, LastName, ''))"
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            logger.warning("report: GeneralManagers load failed: %s", exc)
+            return out
+    for r in rows:
+        d = _row_to_dict(r)
+        sid = d.get("StoreID")
+        if sid is None:
+            continue
+        out.setdefault(int(sid), []).append(d)
+    return out
+
+
+def _toast_guid_map() -> Dict[int, str]:
+    """Return {StoreID: Toast restaurant GUID}.
+
+    Combines two sources so no store is dropped: the app's canonical
+    Aloha→Toast location mapping (data/aloha/aloha_location_mapping.json,
+    keyed guid→id) as the base, then overlays any GUID column the Store
+    mirror happens to carry (more authoritative when present).
+    """
+    out: Dict[int, str] = {}
+
+    # 1) Base: the location mapping file (guid -> store id string).
+    path = os.path.join(os.path.dirname(__file__), "data", "aloha",
+                        "aloha_location_mapping.json")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for guid, sid in (json.load(fh) or {}).items():
+                try:
+                    out[int(sid)] = guid
+                except (ValueError, TypeError):
+                    continue
+    except (OSError, ValueError) as exc:
+        logger.warning("report: location mapping load failed: %s", exc)
+
+    # 2) Overlay: a Store-table GUID column, if this mirror has one.
+    guid_col = next((c for c in _store_columns() if "guid" in c.lower()), None)
+    if guid_col:
+        with get_connection() as conn:
+            try:
+                rows = conn.execute(
+                    f"SELECT StoreID, {guid_col} AS guid FROM Store "
+                    f"WHERE {guid_col} IS NOT NULL AND {guid_col} <> ''"
+                ).fetchall()
+                for r in rows:
+                    try:
+                        out[int(r["StoreID"])] = r["guid"]
+                    except (ValueError, TypeError):
+                        continue
+            except sqlite3.OperationalError:
+                pass
+    return out
+
+
+def _pick(row: Optional[Dict[str, Any]], *keys: str) -> Optional[str]:
+    """Return the first non-empty value among keys in row, else None."""
+    if not row:
+        return None
+    for k in keys:
+        v = row.get(k)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def get_contact_information_report() -> Dict[str, Any]:
+    """Build the full Restaurant Contact Information dataset.
+
+    Returns {"columns": [{key, label}...], "rows": [{key: value, ...}...]}.
+    One pass over Store + a handful of bulk lookup loads (no N+1).
+    """
+    stores = list_stores()
+
+    company_by  = _load_lookup_full_by_pk("company")
+    owner_by    = _load_lookup_full_by_pk("ownership")
+    areadir_by  = _load_lookup_full_by_pk("areadir")
+    primary_by  = _load_lookup_full_by_pk("primarycontact")
+    billing_by  = _load_lookup_full_by_pk("billing")
+    sysco_by    = _load_lookup_full_by_pk("sysco")
+    dma_by      = _load_lookup_full_by_pk("dma")
+
+    gms_by      = _all_gms_by_store()
+    olo_by      = get_olo_vendor_map()
+    guid_by     = _toast_guid_map()
+
+    def _addr(s: Dict[str, Any]) -> Optional[str]:
+        parts = [s.get("StoreAdd1"), s.get("StoreAdd2"), s.get("StoreAdd3")]
+        parts = [str(p).strip() for p in parts if p not in (None, "") and str(p).strip()]
+        return ", ".join(parts) if parts else None
+
+    def _gm_name(g: Dict[str, Any]) -> Optional[str]:
+        return (g.get("GeneralMgrName")
+                or " ".join(x for x in [g.get("FirstName"), g.get("LastName")] if x).strip()
+                or None)
+
+    rows: List[Dict[str, Any]] = []
+    for s in stores:
+        sid = s.get("StoreID")
+        company = company_by.get(s.get("StoreCompany"))
+        owner   = owner_by.get(s.get("StoreOwnershipID"))
+        areadir = areadir_by.get(s.get("StoreAreaDirID"))
+        primary = primary_by.get(s.get("StorePrimaryContact"))
+        billing = billing_by.get(s.get("StoreBillingID"))
+        sysco   = sysco_by.get(s.get("StoreSyscoID"))
+        dma     = dma_by.get(s.get("StoreDMAID"))
+        gms     = gms_by.get(int(sid), []) if sid is not None else []
+        gm      = gms[0] if gms else None
+
+        rows.append({
+            "restaurant_id":         sid,
+            "restaurant_name":       s.get("StoreName"),
+            "olo_vendor_id":         olo_by.get(int(sid)) if sid is not None else None,
+            "toast_guid":            guid_by.get(int(sid)) if sid is not None else None,
+            "restaurant_status":     s.get("StoreStatus"),
+            "ownership":             _pick(company, "CompanyName"),
+            "group_name":            _pick(owner, "OwnerShipName"),
+            "address":               _addr(s),
+            "city":                  s.get("StoreCity"),
+            "state":                 s.get("StoreState"),
+            "zip":                   s.get("StoreZip"),
+            "phone":                 s.get("StorePhone"),
+            "restaurant_email":      _pick(s, "StoreEmail", "StoreEmail2"),
+            "general_manager":       _gm_name(gm) if gm else None,
+            "gm_email":              _pick(gm, "EmailAddress", "Email"),
+            "gm_cell_phone":         _pick(gm, "CellPhone", "Phone"),
+            "primary_contact":       _pick(primary, "PrimaryName"),
+            "primary_contact_email": _pick(primary, "PrimaryEmail", "EmailAddress", "Email"),
+            "primary_contact_phone": _pick(primary, "PrimaryPhone", "Phone"),
+            "area_director":         _pick(areadir, "AreaDirName"),
+            "area_director_email":   _pick(areadir, "AreaDirEmail", "AreaDirSMGEmail"),
+            "billing_name":          _pick(billing, "BillingName"),
+            "billing_email":         _pick(billing, "BillingEmail", "EmailAddress", "Email"),
+            "billing_phone":         _pick(billing, "BillingPhone", "Phone"),
+            "sysco_market":          _pick(sysco, "SyscoMarket"),
+            "dma":                   _pick(dma, "DMAName"),
+        })
+
+    # Sort by numeric Restaurant ID where possible (falls back to string).
+    def _sort_key(r):
+        v = r.get("restaurant_id")
+        try:
+            return (0, int(v))
+        except (ValueError, TypeError):
+            return (1, str(v))
+    rows.sort(key=_sort_key)
+
+    return {
+        "columns": [{"key": k, "label": lbl} for k, lbl in CONTACT_REPORT_COLUMNS],
+        "rows":    rows,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────

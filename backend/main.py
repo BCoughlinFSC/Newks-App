@@ -19743,6 +19743,29 @@ async def contacts_update_store_technical(
         raise HTTPException(status_code=500, detail=f"DB error: {exc}")
 
 
+@app.put("/api/contacts/stores/{store_id}/olo-vendor")
+async def contacts_set_store_olo_vendor(
+    store_id: int,
+    body: Dict[str, Any] = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """Set (or clear) a store's OLO Vendor ID. Admin only.
+
+    Body: {"OLOVendorID": "33030"} — an empty/missing value clears it.
+    This is app-owned data (StoreOLOVendor table); it has no SQL Server
+    counterpart and is not replayed to the outbox."""
+    if not contacts_db.get_store(store_id):
+        raise HTTPException(status_code=404, detail=f"Store {store_id} not found")
+    try:
+        ok = contacts_db.set_store_olo_vendor(
+            store_id, body.get("OLOVendorID"), updated_by=admin_user.name)
+        logger.info("StoreOLOVendor set store=%s by %s", store_id, admin_user.email)
+        return {"StoreID": store_id, "success": ok}
+    except Exception as exc:
+        logger.error("contacts.set_store_olo_vendor failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
 @app.get("/api/contacts/stores/{store_id}/closures")
 async def contacts_list_store_closures(store_id: int, _user: User = Depends(get_current_user)):
     """Read-only closure history for a store. Editing UI comes later."""
@@ -19767,6 +19790,51 @@ async def contacts_list_store_gms(
     """Read-only list of General Managers assigned to this store.
     Source: GeneralManagers table with StoreID FK."""
     return contacts_db.list_general_managers_by_store(store_id)
+
+
+# ─── Restaurant Contact Information report ────────────────────────────────────
+# Rebuild of the legacy SSRS "Restaurant Contact Information Sheet". Assembles
+# 26 columns per store from the app's contacts mirror + the app-owned
+# StoreOLOVendor table — no SQL Server dependency, which lets the SQL Server
+# OLO ETL (and its licensed ZappySys package) be retired.
+
+@app.get("/api/contacts/report/contact-information-sheet")
+async def contacts_report_contact_information_sheet(
+    format: str = "json",
+    _user: User = Depends(get_current_user),
+):
+    """Restaurant Contact Information Sheet.
+
+    ?format=json (default) → {columns, rows} for the on-screen table.
+    ?format=csv            → downloadable CSV matching the SSRS export layout.
+    """
+    try:
+        report = contacts_db.get_contact_information_report()
+    except Exception as exc:
+        logger.error("contacts.contact_information_report failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+    if (format or "").lower() != "csv":
+        return report
+
+    import csv as _csv
+    import io as _io
+    from starlette.responses import Response as _Response
+
+    cols = report["columns"]
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow([c["label"] for c in cols])
+    for row in report["rows"]:
+        writer.writerow(["" if row.get(c["key"]) is None else row.get(c["key"]) for c in cols])
+    # Excel-friendly UTF-8 BOM so accented names render correctly on open.
+    data = "﻿" + buf.getvalue()
+    return _Response(
+        content=data,
+        media_type="text/csv",
+        headers={"Content-Disposition":
+                 'attachment; filename="restaurant_contact_information_sheet.csv"'},
+    )
 
 
 # ─── Toast Device Details (live API call) ─────────────────────────────────────

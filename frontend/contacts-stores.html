@@ -266,6 +266,11 @@
           help: 'Newk\'s internal ID (e.g. 1042). Can\'t be changed.' },
         { col: 'StoreName',     label: 'Store Name',  type: 'text' },
         { col: 'StoreTagline',  label: 'Tagline',     type: 'text', span: 2 },
+        // OLO Vendor ID is app-owned (StoreOLOVendor table), NOT a Store column.
+        // It's saved via its own endpoint in onSave(); readForm() pulls it out
+        // of the store payload so the Store PUT never sees it. See OLO_VENDOR_COL.
+        { col: 'OLOVendorID',   label: 'OLO Vendor ID', type: 'text',
+          help: 'Static per-store OLO identifier (e.g. 33030). Replaces the retired SQL Server OLO feed.' },
       ]},
       { title: 'Address', fields: [
         { col: 'StoreAdd1', label: 'Address Line 1', type: 'text', span: 2 },
@@ -967,10 +972,15 @@
       if (storeIdEl && storeIdEl.value.trim() !== '') {
         storePayload.StoreID = Number(storeIdEl.value.trim());
       }
+      // OLO Vendor ID isn't a Store column — pull it out of the store payload
+      // so the Store PUT never sees it; it saves via its own endpoint.
+      const oloVendorId = storePayload.OLOVendorID ?? null;
+      delete storePayload.OLOVendorID;
       return {
-        store:     storePayload,
-        physical:  readGroup(STORE_PHYSICAL_FIELDS,  'phys', false),
-        technical: readGroup(STORE_TECHNICAL_FIELDS, 'tech', false),
+        store:       storePayload,
+        oloVendorId: oloVendorId,
+        physical:    readGroup(STORE_PHYSICAL_FIELDS,  'phys', false),
+        technical:   readGroup(STORE_TECHNICAL_FIELDS, 'tech', false),
       };
     }
 
@@ -999,6 +1009,12 @@
         // empty satellite rows for stores that don't have any data yet.
         const hasData = obj => Object.values(obj).some(v => v !== null && v !== '');
         const sideTasks = [];
+        // OLO Vendor ID — app-owned, saved via its own endpoint. Always sent
+        // (even when blank) so clearing the field deletes the stored value.
+        sideTasks.push(fetch(`/api/contacts/stores/${storeId}/olo-vendor`, {
+          method: 'PUT', headers: authHeaders(),
+          body: JSON.stringify({ OLOVendorID: payload.oloVendorId }),
+        }));
         if (hasData(payload.physical)) {
           sideTasks.push(fetch(`/api/contacts/stores/${storeId}/physical`, {
             method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload.physical),
