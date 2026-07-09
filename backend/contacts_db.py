@@ -714,6 +714,32 @@ def list_stores() -> List[Dict[str, Any]]:
         return [_row_to_dict(r) for r in rows]
 
 
+def list_comping_store_ids() -> List[str]:
+    """
+    Return the StoreIDs (as strings) of every store whose master
+    StoreIsComping flag is set. This is the single source of truth for the
+    Daily Sales Flash "comp restaurants" set — mirrors the SQL-PROD
+    contacts.dbo.Store.StoreIsComping bit that Ops maintains in the app's
+    store-detail page. Truthy convention matches the frontend flagOn():
+    1 / '1' / true / 'true' / 'Y'.
+    Returns [] if the column is absent (older schema) rather than erroring.
+    """
+    if "StoreIsComping" not in _store_columns():
+        return []
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT StoreID, StoreIsComping FROM Store"
+        ).fetchall()
+    ids: List[str] = []
+    for r in rows:
+        v = r["StoreIsComping"]
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v in (1, True, "1", "true", "y"):
+            ids.append(str(r["StoreID"]))
+    return ids
+
+
 def get_store(store_id: int) -> Optional[Dict[str, Any]]:
     with get_connection() as conn:
         row = conn.execute(

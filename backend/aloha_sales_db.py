@@ -388,6 +388,23 @@ def query_date_range_daily(
         raise RuntimeError(f"Aloha Sales DB daily query failed: {exc}") from exc
 
 
+def get_closed_location_ids(db_path: str = ALOHA_SALES_DB_PATH) -> set:
+    """
+    Return the set of location ids flagged as closed. Closed stores carry a
+    'zClosed' marker in their restaurant_name (Aloha naming convention); if
+    ANY row for a location is so flagged, the location is treated as closed
+    so it drops out of the Flash location picker and the report totals.
+    """
+    if not db_available(db_path):
+        return set()
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT location FROM aloha_sales_data "
+            "WHERE restaurant_name LIKE '%zClosed%'"
+        ).fetchall()
+    return {str(r[0]).strip() for r in rows}
+
+
 def get_stats(db_path: str = ALOHA_SALES_DB_PATH) -> dict:
     """
     Return summary statistics about the database contents.

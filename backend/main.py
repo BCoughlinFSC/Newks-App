@@ -6669,37 +6669,96 @@ async def nightly_flash_import_job():
             "status": "success",
         })
 
-        # ── Auto-backfill: check last 14 days for missing/partial data ──
+        # ── Auto-backfill: per-STORE gap detection over the last 14 days ──
+        # A date can look "full" by row-count yet still be missing an individual
+        # store — e.g. a store mapped AFTER those dates were imported (a fresh
+        # Toast cutover like Lubbock 1188). The old check only fired when a whole
+        # day was short (< 80 rows), so single-store holes stayed invisible.
+        # Now we compare each date's store set against yesterday's freshly
+        # imported set and re-import any date missing a store that is otherwise
+        # reporting. A small state file records which stores are STILL missing
+        # after an honest re-import (genuinely no sales that day) so we don't
+        # re-pull the same closed-store days every single night.
         try:
             backfilled = 0
             max_backfill = 7  # Cap per nightly run to avoid overloading
             check_start = date.today() - timedelta(days=14)
             check_end = date.today() - timedelta(days=2)  # Skip yesterday (just imported)
+
+            selfheal_path = os.path.join(
+                os.path.dirname(aloha_sales_db.ALOHA_SALES_DB_PATH), "flash_selfheal.json"
+            )
+            try:
+                with open(selfheal_path) as f:
+                    selfheal_state = json.load(f)
+            except Exception:
+                selfheal_state = {}
+
+            def _stores_on(d_str):
+                # Fresh connection each call so it reflects rows just committed
+                # by _run_flash_import_for_date (which uses its own connection).
+                conn = aloha_sales_db.get_connection()
+                try:
+                    return {r[0] for r in conn.execute(
+                        "SELECT DISTINCT location FROM aloha_sales_data WHERE business_date = ?",
+                        (d_str,)
+                    ).fetchall()}
+                finally:
+                    conn.close()
+
+            # Baseline = stores that reported on yesterday's fresh import.
+            baseline = _stores_on(yesterday_str)
+            # Per-date store sets across the window (one bulk read).
+            present = {}
             conn_check = aloha_sales_db.get_connection()
             try:
-                gap_rows = conn_check.execute(
-                    "SELECT business_date, COUNT(*) as cnt "
-                    "FROM aloha_sales_data "
-                    "WHERE business_date BETWEEN ? AND ? "
-                    "GROUP BY business_date",
+                for bdate, loc in conn_check.execute(
+                    "SELECT business_date, location FROM aloha_sales_data "
+                    "WHERE business_date BETWEEN ? AND ?",
                     (check_start.isoformat(), check_end.isoformat())
-                ).fetchall()
+                ).fetchall():
+                    present.setdefault(bdate, set()).add(loc)
             finally:
                 conn_check.close()
 
-            existing = {row[0]: row[1] for row in gap_rows}
             d = check_start
             while d <= check_end and backfilled < max_backfill:
                 d_str = d.isoformat()
-                row_count = existing.get(d_str, 0)
-                if row_count < 80:
-                    logger.info("Flash auto-backfill: %s has %d rows (< 80), re-importing", d_str, row_count)
+                day_stores = present.get(d_str, set())
+                # Stores reporting elsewhere but absent here, minus those a prior
+                # honest re-import already proved have no data that day.
+                known_empty = set(selfheal_state.get(d_str, []))
+                missing = (baseline - day_stores) - known_empty
+                if len(day_stores) < 80 or missing:
+                    logger.info(
+                        "Flash auto-backfill: %s (%d stores%s), re-importing",
+                        d_str, len(day_stores),
+                        f", missing {sorted(missing)[:5]}" if missing else "",
+                    )
                     try:
                         await _run_flash_import_for_date(d)
                         backfilled += 1
+                        # Record whichever baseline stores are STILL missing after
+                        # the re-import so we don't chase them nightly.
+                        still_missing = sorted(baseline - _stores_on(d_str))
+                        if still_missing:
+                            selfheal_state[d_str] = still_missing
+                        else:
+                            selfheal_state.pop(d_str, None)
                     except Exception as bf_exc:
                         logger.warning("Flash auto-backfill failed for %s: %s", d_str, bf_exc)
                 d += timedelta(days=1)
+
+            # Prune state to the active window and persist.
+            selfheal_state = {
+                k: v for k, v in selfheal_state.items()
+                if check_start.isoformat() <= k <= check_end.isoformat()
+            }
+            try:
+                with open(selfheal_path, "w") as f:
+                    json.dump(selfheal_state, f)
+            except Exception as save_exc:
+                logger.warning("Flash auto-backfill: could not save self-heal state: %s", save_exc)
 
             if backfilled > 0:
                 logger.info("Flash auto-backfill: filled %d gap dates", backfilled)
@@ -15602,12 +15661,30 @@ def _load_store_ownership() -> dict:
     return {}
 
 
+def _contacts_comping_ids() -> set:
+    """
+    Set of location ids (strings) that are 'comping' per the master
+    contacts.dbo.Store.StoreIsComping flag. Single source of truth for the
+    Daily Sales Flash comp set (picker group + report subtotal). Returns an
+    empty set if contacts is unavailable so callers degrade gracefully.
+    """
+    try:
+        import contacts_db
+        return set(contacts_db.list_comping_store_ids())
+    except Exception as exc:
+        logger.warning(f"Could not load comping stores from contacts DB: {exc}")
+        return set()
+
+
 @app.get("/api/aloha-sales/locations")
 async def list_aloha_sales_locations():
-    """Return distinct Aloha locations that have sales data, including ownershipType."""
+    """Return distinct Aloha locations that have sales data, including
+    ownershipType and a comping flag. Closed stores (zClosed) are excluded."""
     if not aloha_sales_db.db_available():
         return []
     ownership = _load_store_ownership()
+    closed_ids = aloha_sales_db.get_closed_location_ids()
+    comping_ids = _contacts_comping_ids()
     conn = aloha_sales_db.get_connection()
     try:
         rows = conn.execute(
@@ -15616,8 +15693,16 @@ async def list_aloha_sales_locations():
         ).fetchall()
         result = []
         for r in rows:
+            loc_id = str(r[0]).strip()
+            if loc_id in closed_ids:
+                continue
             ot = ownership.get(r[0], {}).get("ownershipType", "Franchise")
-            result.append({"id": r[0], "name": r[1], "ownershipType": ot})
+            result.append({
+                "id": r[0],
+                "name": r[1],
+                "ownershipType": ot,
+                "comping": loc_id in comping_ids,
+            })
         return result
     finally:
         conn.close()
@@ -16498,10 +16583,11 @@ def _aggregate_flash_from_aloha(start_date: str, end_date: str, locations: Optio
     if df.empty:
         return {}
 
+    closed_ids = aloha_sales_db.get_closed_location_ids()
     result = {}
     for _, row in df.iterrows():
         loc_id = str(row["location"]).strip()
-        if not loc_id:
+        if not loc_id or loc_id in closed_ids:
             continue
         ch = {k: 0.0 for k in _FLASH_CHANNEL_KEYS}
         ch["POS2"] = 0.0
@@ -16617,6 +16703,16 @@ async def run_daily_flash_report(payload: dict = Body(...)):
 
     store_info = aloha_sales_db.get_store_info()
 
+    # Single source of truth for the comp set: overlay the master
+    # contacts.dbo.Store.StoreIsComping flag onto store_info so the report's
+    # "Total Comp Restaurants" subtotal matches the picker's "All Comping" group.
+    comping_ids = _contacts_comping_ids()
+    if comping_ids:
+        for loc_id, si in store_info.items():
+            si["comping"] = "Y" if str(loc_id).strip() in comping_ids else "N"
+
+    closed_ids = aloha_sales_db.get_closed_location_ids()
+
     # Collect all unique date ranges we need to query
     periods_config = {
         "Daily": (report_date, report_date, daily_ly[0], daily_ly[1]),
@@ -16643,7 +16739,7 @@ async def run_daily_flash_report(payload: dict = Body(...)):
     # Also include non-Toast stores from FBC mapping (e.g. Lubbock still on Aloha POS)
     fbc_mapping = _load_fbc_mapping()
     for loc_id in fbc_mapping.keys():
-        if loc_id in store_info and loc_id not in aloha_loc_ids:
+        if loc_id in store_info and loc_id not in aloha_loc_ids and str(loc_id).strip() not in closed_ids:
             aloha_loc_ids.append(loc_id)
             logger.info("Added non-Toast store %s to aloha_loc_ids for flash query", loc_id)
 

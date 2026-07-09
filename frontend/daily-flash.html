@@ -213,6 +213,8 @@
               style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Company</button>
             <button type="button" onclick="filterByOwnership('Franchise')" id="ownFilter_Franchise"
               style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">Franchise</button>
+            <button type="button" onclick="filterByOwnership('comping')" id="ownFilter_comping"
+              style="font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:4px;border:1px solid #6B7280;background:#fff;color:#374151;cursor:pointer;">All Comping</button>
           </div>
           <div class="loc-grid" id="locGrid">
             <span style="color:#6B7280; font-size:0.82rem;">Loading locations...</span>
@@ -279,7 +281,7 @@
           countEl.textContent = '0'; return;
         }
         grid.innerHTML = allLocations.map(loc =>
-          `<label class="loc-item"><input type="checkbox" class="loc-cb" value="${esc(loc.id)}" data-ownership="${esc(loc.ownershipType||'Franchise')}" checked /><span>${esc(loc.id)} – ${esc(loc.name)}</span></label>`
+          `<label class="loc-item"><input type="checkbox" class="loc-cb" value="${esc(loc.id)}" data-ownership="${esc(loc.ownershipType||'Franchise')}" data-comping="${loc.comping ? 'true' : 'false'}" checked /><span>${esc(loc.id)} – ${esc(loc.name)}</span></label>`
         ).join('');
         updateLocCount();
         document.getElementById('selectAllLocs').addEventListener('change', (e) => {
@@ -303,12 +305,14 @@
     }
     function filterByOwnership(type) {
       document.querySelectorAll('.loc-cb').forEach(cb => {
-        cb.checked = (type === 'all') || (cb.dataset.ownership === type);
+        if (type === 'all')          cb.checked = true;
+        else if (type === 'comping') cb.checked = (cb.dataset.comping === 'true');
+        else                         cb.checked = (cb.dataset.ownership === type);
       });
       document.getElementById('selectAllLocs').checked = (type === 'all');
       updateLocCount();
       // Update button styles
-      ['all', 'Company', 'Franchise'].forEach(t => {
+      ['all', 'Company', 'Franchise', 'comping'].forEach(t => {
         const btn = document.getElementById(`ownFilter_${t}`);
         if (!btn) return;
         const active = t === type;
