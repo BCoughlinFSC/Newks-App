@@ -393,6 +393,7 @@
 
     function renderContent() {
       if (activeChannel === 'Smmary') renderSummary();
+      else if (activeChannel === 'AdjAcctNet') renderBridge();
       else renderChannelContent(activeChannel);
     }
 
@@ -420,7 +421,8 @@
         const chLabel = labels[ch] || ch;
         const isCheck = ch === 'CheckCount' || ch === 'NonCateringChecks';
         const isAvg = ch === 'CheckAverage';
-        const fVal = isCheck ? fmtNum : (isAvg ? fmtAvg : fmtDollar);
+        const isBridgeNet = BRIDGE_NET_CHANNELS.includes(ch);
+        const fVal = isCheck ? fmtNum : (isAvg ? fmtAvg : (isBridgeNet ? fmtDollarBlank : fmtDollar));
         // Total Restaurants
         html += buildSummaryRow(chLabel, 'Total Restaurants', ch, 'allRestaurants', fVal);
         html += buildSummaryRow('', 'Total Comp Restaurants', ch, 'comping', fVal);
@@ -456,6 +458,110 @@
 
     function getLaborPct(pKey) { return ''; } // Placeholder — we don't have labor data yet
 
+    // ── Adjusted Accounting tab: the royalty-adjustment bridge ───────
+    let bridgeStorePeriod = 'Daily';
+    function setBridgePeriod(p) { bridgeStorePeriod = p; renderBridge(); }
+    function toggleBridgeStore(idx) {
+      const row = document.getElementById('bridgeDetail_' + idx);
+      if (row) row.style.display = (row.style.display === 'none' ? '' : 'none');
+    }
+
+    function renderBridge() {
+      const content = document.getElementById('reportContent');
+      if (!reportData) { content.innerHTML = '<div class="status-msg">No data.</div>'; return; }
+
+      // Union of itemized names across all periods for the chain rows.
+      const scNames = new Set(), defNames = new Set();
+      for (const p of PERIODS) {
+        const c = reportData.periods[p]?.bridge?.chain;
+        if (!c) continue;
+        Object.keys(c.scByName || {}).forEach(n => scNames.add(n));
+        Object.keys(c.deferredByName || {}).forEach(n => defNames.add(n));
+      }
+      const scList = [...scNames], defList = [...defNames];
+      const chainOf = p => reportData.periods[p]?.bridge?.chain || null;
+
+      const bRow = (label, valFn, cls, indent) => {
+        let h = `<tr class="${cls || ''}">`;
+        h += `<td class="left sticky sticky-0" style="min-width:260px;${indent ? 'padding-left:1.6rem;' : ''}${cls === 'total-row' ? 'font-weight:700;' : ''}">${esc(label)}</td>`;
+        for (const p of PERIODS) {
+          const v = valFn(p);
+          h += `<td class="period-sep">${(v == null) ? '' : fmtDollar(v)}</td>`;
+        }
+        h += '</tr>';
+        return h;
+      };
+
+      let html = '<div class="flash-table-wrap">';
+      html += '<p style="margin:0.4rem 0 0.9rem; font-size:0.85rem; color:#374151;">'
+            + '<b>Adjustment bridge.</b> Toast Net &minus; restaurant service charges = <b>R-Net</b>; '
+            + 'Toast Net &plus; allowlisted deferred add-back = <b>Adjusted Accounting Net</b>. '
+            + 'Only stores with captured Toast data are included.</p>';
+
+      // ── Chain bridge (line items × period columns) ──
+      html += '<table class="flash-table"><thead>';
+      html += '<tr class="period-header-row"><th class="fixed-col"></th>';
+      for (const p of PERIODS) html += `<th class="period-sep">${p}</th>`;
+      html += '</tr><tr class="date-row"><th class="fixed-col"></th>';
+      for (const p of PERIODS) {
+        const pd = reportData.periods[p];
+        html += `<th class="period-sep">${pd ? `${fmtDateShort(pd.currentRange.start)}–${fmtDateShort(pd.currentRange.end)}` : ''}</th>`;
+      }
+      html += '</tr><tr class="col-header-row"><th class="left sticky sticky-0">Chain bridge</th>';
+      for (const p of PERIODS) html += '<th class="period-sep">Amount</th>';
+      html += '</tr></thead><tbody>';
+
+      html += bRow('Toast - Net', p => chainOf(p)?.toastNet, 'total-row');
+      for (const nm of scList) html += bRow('− ' + nm, p => { const v = chainOf(p)?.scByName?.[nm]; return v ? -v : null; }, '', true);
+      html += bRow('= R-Net (royalty net)', p => chainOf(p)?.rNet, 'total-row');
+      for (const nm of defList) html += bRow('+ ' + nm, p => chainOf(p)?.deferredByName?.[nm] || null, '', true);
+      html += bRow('= Adjusted Accounting Net', p => chainOf(p)?.adjNet, 'total-row');
+      html += '</tbody></table>';
+
+      // ── Per-store drill (single period, selectable) ──
+      const byStore = reportData.periods[bridgeStorePeriod]?.bridge?.byStore || [];
+      html += '<div style="margin:1.2rem 0 0.5rem; display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">';
+      html += '<span style="font-weight:600;">Per-store detail:</span>';
+      for (const p of PERIODS) {
+        const active = p === bridgeStorePeriod;
+        html += `<button type="button" onclick="setBridgePeriod('${p}')" style="font-size:0.78rem;padding:0.25rem 0.7rem;border-radius:4px;border:1px solid ${active ? '#C41E3A' : '#6B7280'};background:${active ? '#C41E3A' : '#fff'};color:${active ? '#fff' : '#374151'};cursor:pointer;font-weight:${active ? 600 : 400};">${p}</button>`;
+      }
+      html += `<span style="color:#6B7280;font-size:0.82rem;">${byStore.length} store${byStore.length === 1 ? '' : 's'} with Toast data</span>`;
+      html += '</div>';
+
+      html += '<table class="flash-table"><thead><tr class="col-header-row">';
+      html += '<th class="left sticky sticky-0" style="min-width:220px;">Location</th>';
+      html += '<th>Toast - Net</th><th>Service Charges</th><th>R-Net</th><th>Deferred Add-back</th><th>Adjusted Accounting Net</th>';
+      html += '</tr></thead><tbody>';
+      if (!byStore.length) {
+        html += `<tr><td class="left sticky sticky-0">—</td><td colspan="5" style="color:#6B7280;">No Toast-sourced stores for ${esc(bridgeStorePeriod)}.</td></tr>`;
+      }
+      byStore.forEach((s, idx) => {
+        const scItems = Object.entries(s.scByName || {});
+        const defItems = Object.entries(s.deferredByName || {});
+        const hasDetail = scItems.length || defItems.length;
+        html += '<tr>';
+        html += `<td class="left sticky sticky-0">`
+              + (hasDetail ? `<span style="cursor:pointer;color:#C41E3A;font-weight:600;" onclick="toggleBridgeStore(${idx})">▸ </span>` : '')
+              + `${esc(s.restaurantName || s.location)}</td>`;
+        html += `<td>${fmtDollar(s.toastNet)}</td>`;
+        html += `<td class="negative">${s.scTotal ? fmtDollar(-s.scTotal) : fmtDollar(0)}</td>`;
+        html += `<td>${fmtDollar(s.rNet)}</td>`;
+        html += `<td class="positive">${s.deferredTotal ? fmtDollar(s.deferredTotal) : fmtDollar(0)}</td>`;
+        html += `<td style="font-weight:600;">${fmtDollar(s.adjNet)}</td>`;
+        html += '</tr>';
+        if (hasDetail) {
+          html += `<tr id="bridgeDetail_${idx}" style="display:none;background:#F9FAFB;"><td class="left sticky sticky-0"></td><td colspan="5" style="font-size:0.82rem;">`;
+          if (scItems.length) html += '<b>Service charges:</b> ' + scItems.map(([n, v]) => `${esc(n)} ${fmtDollar(v)}`).join(' · ');
+          if (scItems.length && defItems.length) html += '<br>';
+          if (defItems.length) html += '<b>Deferred add-back:</b> ' + defItems.map(([n, v]) => `${esc(n)} ${fmtDollar(v)}`).join(' · ');
+          html += '</td></tr>';
+        }
+      });
+      html += '</tbody></table></div>';
+      content.innerHTML = html;
+    }
+
     // ── Per-Channel Tab ──────────────────────────────
     function renderChannelContent(ch) {
       const content = document.getElementById('reportContent');
@@ -464,7 +570,8 @@
       const isCheck = ch === 'CheckCount' || ch === 'NonCateringChecks';
       const isAvg = ch === 'CheckAverage';
       const isPOS2 = ch === 'POS2';
-      const fVal = isCheck ? fmtNum : (isAvg ? fmtAvg : fmtDollar);
+      const isBridgeNet = BRIDGE_NET_CHANNELS.includes(ch);
+      const fVal = isCheck ? fmtNum : (isAvg ? fmtAvg : (isBridgeNet ? fmtDollarBlank : fmtDollar));
 
       // Get locations from first available period
       const firstPeriod = PERIODS.find(p => reportData.periods[p]?.channels[ch]?.locations?.length);
@@ -627,6 +734,14 @@
       const s = '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       return neg ? `(${s})` : s;
     }
+    // Toast-Net / Adjusted Accounting Net are Toast-only figures; a 0 means the
+    // value wasn't captured for that store/period (Aloha-sourced / pre-backfill),
+    // so render it blank rather than a misleading $0.00.
+    function fmtDollarBlank(v) {
+      if (v == null || isNaN(v) || v === 0) return '';
+      return fmtDollar(v);
+    }
+    const BRIDGE_NET_CHANNELS = ['ToastNet', 'AdjAcctNet'];
     function fmtNum(v) {
       if (v == null || isNaN(v)) return '-';
       return v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -749,6 +864,7 @@
 
       // ── Per-channel sheets ──
       for (const ch of order) {
+        if (ch === 'AdjAcctNet') continue; // rendered as the dedicated bridge sheet below
         const sheetName = (labels[ch] || ch).substring(0, 31);
         const rows = [];
         const merges = [];
@@ -877,6 +993,70 @@
         ws['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 4 }, { wch: 28 }];
         for (let i = 0; i < PERIODS.length * colsPerPeriod; i++) ws['!cols'].push({ wch: 14 });
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      }
+
+      // ── Adjusted Accounting bridge sheet ──
+      {
+        const rows = [];
+        const merges = [];
+        const chainOf = p => reportData.periods[p]?.bridge?.chain || null;
+        const scNames = new Set(), defNames = new Set();
+        for (const p of PERIODS) {
+          const c = chainOf(p);
+          if (!c) continue;
+          Object.keys(c.scByName || {}).forEach(n => scNames.add(n));
+          Object.keys(c.deferredByName || {}).forEach(n => defNames.add(n));
+        }
+        const ncols = 1 + PERIODS.length;
+
+        const titleRow = [{ v: 'Daily Sales Flash – Adjusted Accounting Bridge', s: S.titleFont }];
+        for (let i = 1; i < ncols; i++) titleRow.push({ v: '', s: S.titleFont });
+        rows.push(titleRow);
+        merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: ncols - 1 } });
+        rows.push([]);
+
+        const hdr = [{ v: 'Chain bridge', s: S.colHeaderLeft }];
+        for (const p of PERIODS) {
+          const pd = reportData.periods[p];
+          hdr.push({ v: pd ? `${p} (${fmtDateShort(pd.currentRange.start)}-${fmtDateShort(pd.currentRange.end)})` : p, s: S.colHeader });
+        }
+        rows.push(hdr);
+
+        const line = (label, valFn, isTotal) => {
+          const r = [{ v: label, s: isTotal ? S.totalLabel : S.locName }];
+          for (const p of PERIODS) {
+            const v = valFn(p);
+            r.push({ v: (v == null ? '' : v), t: (v == null ? 's' : 'n'), s: isTotal ? S.totalDollar : S.dollar });
+          }
+          return r;
+        };
+        rows.push(line('Toast - Net', p => chainOf(p)?.toastNet ?? null, true));
+        for (const nm of scNames) rows.push(line('   − ' + nm, p => { const v = chainOf(p)?.scByName?.[nm]; return v ? -v : null; }, false));
+        rows.push(line('= R-Net (royalty net)', p => chainOf(p)?.rNet ?? null, true));
+        for (const nm of defNames) rows.push(line('   + ' + nm, p => chainOf(p)?.deferredByName?.[nm] ?? null, false));
+        rows.push(line('= Adjusted Accounting Net', p => chainOf(p)?.adjNet ?? null, true));
+
+        // Per-store detail (YTD — most complete period).
+        rows.push([]);
+        const hdr2 = [{ v: 'Per-store (YTD)', s: S.colHeaderLeft }, { v: 'Toast - Net', s: S.colHeader }, { v: 'Service Charges', s: S.colHeader }, { v: 'R-Net', s: S.colHeader }, { v: 'Deferred Add-back', s: S.colHeader }, { v: 'Adjusted Accounting Net', s: S.colHeader }];
+        rows.push(hdr2);
+        const byStore = reportData.periods['YTD']?.bridge?.byStore || [];
+        for (const s of byStore) {
+          rows.push([
+            { v: s.restaurantName || s.location, s: S.locName },
+            { v: s.toastNet, t: 'n', s: S.dollar },
+            { v: s.scTotal ? -s.scTotal : 0, t: 'n', s: S.dollar },
+            { v: s.rNet, t: 'n', s: S.dollar },
+            { v: s.deferredTotal || 0, t: 'n', s: S.dollar },
+            { v: s.adjNet, t: 'n', s: S.dollar },
+          ]);
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!merges'] = merges;
+        ws['!cols'] = [{ wch: 30 }];
+        for (let i = 0; i < PERIODS.length; i++) ws['!cols'].push({ wch: 16 });
+        XLSX.utils.book_append_sheet(wb, ws, 'Adj Acct Bridge');
       }
 
       const filename = `Daily_Sales_Flash_${reportData.reportDate}.xlsx`;

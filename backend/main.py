@@ -6570,6 +6570,14 @@ async def nightly_flash_import_job():
                 cat_checks = data.pop("_catering_checks", 0)
                 data["checks_minus_catering"] = data["check_count"] - cat_checks
 
+                # Royalty bridge: Toast Net = ERA net BEFORE service-charge
+                # subtraction (net_sales below becomes Royalty Net once SC is
+                # removed). Defaults hold when a store has no orders/guid.
+                data["toast_net"] = data["net_sales"]
+                data["deferred_addback"] = 0.0
+                data["sc_by_name"] = ""
+                data["deferred_by_name"] = ""
+
                 if guid:
                     try:
                         sc_amount, gng_amount, sc_by_dopt, cat_leak_by_dopt, cat_leak_checks = await _compute_sc_and_gng(
@@ -6611,6 +6619,16 @@ async def nightly_flash_import_job():
                             data["checks_minus_catering"] = max(
                                 0, data["checks_minus_catering"] - cat_leak_checks
                             )
+                        # Royalty-bridge detail (deferred add-back + itemized SC /
+                        # deferred by name). Orders are already cached from the
+                        # _compute_sc_and_gng call above, so this adds no API load.
+                        try:
+                            detail = await _compute_netsales_detail_for_day(client, guid, yesterday_yyyymmdd)
+                            data["deferred_addback"] = detail.get("deferredTotal", 0.0)
+                            data["sc_by_name"] = json.dumps(detail.get("scByName", {}))
+                            data["deferred_by_name"] = json.dumps(detail.get("deferredByName", {}))
+                        except Exception as dexc:
+                            logger.warning("Flash import: bridge detail failed for %s: %s", loc_id, dexc)
                         await asyncio.sleep(0.3)  # Rate limit courtesy
                     except Exception as exc:
                         logger.warning("Flash import: SC/GNG fetch failed for %s: %s", loc_id, exc)
@@ -6648,6 +6666,10 @@ async def nightly_flash_import_job():
                     "OLOCallInNetSales": data["olo_callin_net_sales"],
                     "CheckCount": data["check_count"],
                     "ChecksMinusCatering": data["checks_minus_catering"],
+                    "ToastNet": data.get("toast_net", data["net_sales"]),
+                    "DeferredAddback": data.get("deferred_addback", 0.0),
+                    "ScByName": data.get("sc_by_name", ""),
+                    "DeferredByName": data.get("deferred_by_name", ""),
                 })
 
             if rows_for_df:
@@ -13313,6 +13335,12 @@ async def _compute_flash_loc_data(
         cat_checks = data.pop("_catering_checks", 0)
         data["checks_minus_catering"] = data["check_count"] - cat_checks
 
+        # Royalty bridge: Toast Net = ERA net BEFORE SC subtraction.
+        data["toast_net"] = data["net_sales"]
+        data["deferred_addback"] = 0.0
+        data["sc_by_name"] = ""
+        data["deferred_by_name"] = ""
+
         if guid:
             try:
                 sc_amount, gng_amount, sc_by_dopt, cat_leak_by_dopt, cat_leak_checks = await _compute_sc_and_gng(
@@ -13337,6 +13365,14 @@ async def _compute_flash_loc_data(
                     data["checks_minus_catering"] = max(
                         0, data["checks_minus_catering"] - cat_leak_checks
                     )
+                # Royalty-bridge detail — orders already cached above, no extra API load.
+                try:
+                    detail = await _compute_netsales_detail_for_day(client, guid, target_yyyymmdd)
+                    data["deferred_addback"] = detail.get("deferredTotal", 0.0)
+                    data["sc_by_name"] = json.dumps(detail.get("scByName", {}))
+                    data["deferred_by_name"] = json.dumps(detail.get("deferredByName", {}))
+                except Exception as dexc:
+                    logger.warning("Flash bridge detail for %s: %s", loc_id, dexc)
                 await asyncio.sleep(0.3)
             except Exception as exc:
                 logger.warning("Flash SC/GNG for %s: %s", loc_id, exc)
@@ -13386,6 +13422,10 @@ async def _run_flash_import_for_date(target_date: date):
                     "OLOCallInNetSales": data["olo_callin_net_sales"],
                     "CheckCount": data["check_count"],
                     "ChecksMinusCatering": data["checks_minus_catering"],
+                    "ToastNet": data.get("toast_net", data["net_sales"]),
+                    "DeferredAddback": data.get("deferred_addback", 0.0),
+                    "ScByName": data.get("sc_by_name", ""),
+                    "DeferredByName": data.get("deferred_by_name", ""),
                 })
 
             if rows_for_df:
@@ -15966,14 +16006,16 @@ _DINING_OPTION_TO_CHANNEL = {
     "X-Online Catering":    "Catering",
 }
 
-# Flash channels in display order
+# Flash channels in display order. ToastNet + AdjAcctNet sit right under R-Net
+# (Net) so the Summary reads R-Net → Toast-Net → Adjusted Accounting Net.
 _FLASH_CHANNEL_KEYS = [
-    "Net", "CallInNet", "ToGoNet", "GNG", "Catering", "OLO",
+    "Net", "ToastNet", "AdjAcctNet", "CallInNet", "ToGoNet", "GNG", "Catering", "OLO",
     "NonCatering", "NonCateringChecks", "CheckCount",
     "DineInNet", "DeliveryNet", "CurbSide",
 ]
 _FLASH_CHANNEL_LABELS = {
-    "Net": "R-Net", "CallInNet": "CallInNet", "ToGoNet": "ToGoNet",
+    "Net": "R-Net", "ToastNet": "Toast - Net", "AdjAcctNet": "Adjusted Accounting Net",
+    "CallInNet": "CallInNet", "ToGoNet": "ToGoNet",
     "GNG": "GNG", "Catering": "Catering (cat)", "OLO": "OLO",
     "NonCatering": "NonCatering", "NonCateringChecks": "NonCateringChecks",
     "CheckCount": "CheckCount", "DineInNet": "DineInNet",
@@ -16603,10 +16645,83 @@ def _aggregate_flash_from_aloha(start_date: str, end_date: str, locations: Optio
         ch["CheckCount"] = float(row.get("check_count", 0) or 0)
         ch["NonCateringChecks"] = float(row.get("checks_minus_catering", 0) or 0)
         ch["NonCatering"] = ch["Net"] - ch["Catering"]
+        # Royalty bridge channels. ch["Net"] is Royalty Net (Toast − SC).
+        #   Toast-Net       = raw Toast netSalesAmount (cached before SC subtraction)
+        #   Adjusted Acct.  = Toast Net + allowlisted deferred add-back
+        # toast_net == 0 means the figure wasn't captured for this store/day
+        # (pre-migration or Aloha-sourced); leave both at 0 so the frontend can
+        # render them blank rather than a misleading zero.
+        toast_net = float(row.get("toast_net", 0) or 0)
+        deferred = float(row.get("deferred_addback", 0) or 0)
+        ch["ToastNet"] = toast_net
+        ch["AdjAcctNet"] = (toast_net + deferred) if toast_net else 0.0
         ch["_orders"] = ch["CheckCount"]
         ch["_guests"] = 0.0
         result[loc_id] = ch
     return result
+
+
+def _build_flash_bridge(cy_agg: dict, bridge_detail: dict, store_info: dict, closed_ids: set) -> dict:
+    """
+    Build the royalty-adjustment bridge for one period from the cached CY aggregation:
+
+        Toast Net  − service charges (itemized by name)  = R-Net
+        Toast Net  + deferred add-back (itemized by name) = Adjusted Accounting Net
+
+    Only stores with a captured Toast Net (>0) participate; others lack the figure
+    (pre-migration or Aloha-sourced) and are excluded from the bridge.
+    Returns {"chain": {...}, "byStore": [...], "storeCount": n}.
+    """
+    chain_toast = chain_rnet = chain_deferred = 0.0
+    chain_sc_by: Dict[str, float] = {}
+    chain_def_by: Dict[str, float] = {}
+    by_store = []
+    for loc_id, ch in cy_agg.items():
+        if loc_id in closed_ids:
+            continue
+        toast_net = float(ch.get("ToastNet", 0) or 0)
+        if toast_net <= 0:
+            continue
+        rnet = float(ch.get("Net", 0) or 0)
+        adj = float(ch.get("AdjAcctNet", 0) or 0)
+        deferred_total = round(adj - toast_net, 2)
+        detail = bridge_detail.get(loc_id, {})
+        sc_by = detail.get("scByName", {}) or {}
+        def_by = detail.get("deferredByName", {}) or {}
+        si = store_info.get(loc_id, {})
+        by_store.append({
+            "location": loc_id,
+            "restaurantName": si.get("restaurant_name", "") or loc_id,
+            "toastNet": round(toast_net, 2),
+            "scTotal": round(toast_net - rnet, 2),
+            "rNet": round(rnet, 2),
+            "deferredTotal": deferred_total,
+            "adjNet": round(adj, 2),
+            "scByName": {k: round(v, 2) for k, v in sc_by.items()},
+            "deferredByName": {k: round(v, 2) for k, v in def_by.items()},
+        })
+        chain_toast += toast_net
+        chain_rnet += rnet
+        chain_deferred += deferred_total
+        for k, v in sc_by.items():
+            chain_sc_by[k] = round(chain_sc_by.get(k, 0.0) + v, 2)
+        for k, v in def_by.items():
+            chain_def_by[k] = round(chain_def_by.get(k, 0.0) + v, 2)
+
+    by_store.sort(key=lambda r: (int(r["location"]) if str(r["location"]).isdigit() else 0))
+    return {
+        "chain": {
+            "toastNet": round(chain_toast, 2),
+            "scTotal": round(chain_toast - chain_rnet, 2),
+            "rNet": round(chain_rnet, 2),
+            "deferredTotal": round(chain_deferred, 2),
+            "adjNet": round(chain_toast + chain_deferred, 2),
+            "scByName": dict(sorted(chain_sc_by.items(), key=lambda kv: -kv[1])),
+            "deferredByName": dict(sorted(chain_def_by.items(), key=lambda kv: -kv[1])),
+        },
+        "byStore": by_store,
+        "storeCount": len(by_store),
+    }
 
 
 @app.post("/api/daily-flash-report")
@@ -16775,6 +16890,18 @@ async def run_daily_flash_report(payload: dict = Body(...)):
             "cy": range_source.get((cs, ce), "toast_api"),
             "py": range_source.get((ps, pe), "toast_api"),
         }
+        # Royalty-adjustment bridge (Toast Net → −SC by name → R-Net → +deferred
+        # by name → Adjusted Accounting Net), CY range, chain + per-store.
+        try:
+            bridge_detail = aloha_sales_db.query_bridge_detail(
+                cs, ce, locations=aloha_loc_ids if aloha_loc_ids else None
+            )
+            periods[pname]["bridge"] = _build_flash_bridge(
+                unique_ranges[(cs, ce)], bridge_detail, store_info, closed_ids
+            )
+        except Exception as bexc:
+            logger.warning("Flash bridge build failed for %s: %s", pname, bexc)
+            periods[pname]["bridge"] = {"chain": {}, "byStore": [], "storeCount": 0}
 
     _flash_channel_order = _FLASH_CHANNEL_KEYS + ["CheckAverage", "POS2"]
 

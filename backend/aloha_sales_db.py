@@ -30,9 +30,10 @@ Usage
   from aloha_sales_db import initialize_db, upsert_date, query_date_range, get_stats
 """
 
+import json
 import os
 import sqlite3
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -46,7 +47,15 @@ _SALES_COLS = [
     "gng_net_sales", "togo_net_sales", "curbside_net_sales", "curbside_olo_net_sales",
     "dinein_net_sales", "callin_net_sales", "olo_callin_net_sales",
     "check_count", "checks_minus_catering",
+    # Royalty-bridge figures (summable): Toast's raw netSalesAmount and the
+    # allowlisted deferred add-back. net_sales itself is Royalty Net (Toast − SC),
+    # so restaurant SC total is derivable as (toast_net − net_sales).
+    "toast_net", "deferred_addback",
 ]
+
+# JSON detail columns — itemized {name: amount} for the adjustment bridge.
+# Not summable, so kept OUT of _SALES_COLS; merged per range by query_bridge_detail.
+_JSON_DETAIL_COLS = ["sc_by_name", "deferred_by_name"]
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS aloha_sales_data (
@@ -66,7 +75,11 @@ CREATE TABLE IF NOT EXISTS aloha_sales_data (
     callin_net_sales       REAL    NOT NULL DEFAULT 0,
     olo_callin_net_sales   REAL    NOT NULL DEFAULT 0,
     check_count            REAL    NOT NULL DEFAULT 0,
-    checks_minus_catering  REAL    NOT NULL DEFAULT 0
+    checks_minus_catering  REAL    NOT NULL DEFAULT 0,
+    toast_net              REAL    NOT NULL DEFAULT 0,
+    deferred_addback       REAL    NOT NULL DEFAULT 0,
+    sc_by_name             TEXT    NOT NULL DEFAULT '',
+    deferred_by_name       TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_aloha_sales_unique
@@ -120,6 +133,12 @@ _MIGRATION_COLS = [
     ("olo_callin_net_sales", "REAL NOT NULL DEFAULT 0"),
     ("check_count", "REAL NOT NULL DEFAULT 0"),
     ("checks_minus_catering", "REAL NOT NULL DEFAULT 0"),
+    # Royalty-bridge columns (added 2026-07). Existing rows default to 0/''
+    # until re-imported/backfilled.
+    ("toast_net", "REAL NOT NULL DEFAULT 0"),
+    ("deferred_addback", "REAL NOT NULL DEFAULT 0"),
+    ("sc_by_name", "TEXT NOT NULL DEFAULT ''"),
+    ("deferred_by_name", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 
@@ -191,6 +210,10 @@ def upsert_date(
             float(row.get("OLOCallInNetSales", 0) or 0),
             float(row.get("CheckCount", 0) or 0),
             float(row.get("ChecksMinusCatering", 0) or 0),
+            float(row.get("ToastNet", 0) or 0),
+            float(row.get("DeferredAddback", 0) or 0),
+            str(row.get("ScByName", "") or ""),
+            str(row.get("DeferredByName", "") or ""),
         ))
 
     with get_connection(db_path) as conn:
@@ -205,8 +228,9 @@ def upsert_date(
                 " net_sales, olo_net_sales, delivery_net_sales, catering_net_sales,"
                 " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
                 " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
-                " check_count, checks_minus_catering)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " check_count, checks_minus_catering,"
+                " toast_net, deferred_addback, sc_by_name, deferred_by_name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 records,
             )
     return len(records)
@@ -246,6 +270,10 @@ def upsert_rows(
             float(row.get("OLOCallInNetSales", 0) or 0),
             float(row.get("CheckCount", 0) or 0),
             float(row.get("ChecksMinusCatering", 0) or 0),
+            float(row.get("ToastNet", 0) or 0),
+            float(row.get("DeferredAddback", 0) or 0),
+            str(row.get("ScByName", "") or ""),
+            str(row.get("DeferredByName", "") or ""),
         ))
 
     with get_connection(db_path) as conn:
@@ -256,8 +284,9 @@ def upsert_rows(
                 " net_sales, olo_net_sales, delivery_net_sales, catering_net_sales,"
                 " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
                 " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
-                " check_count, checks_minus_catering)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " check_count, checks_minus_catering,"
+                " toast_net, deferred_addback, sc_by_name, deferred_by_name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 records,
             )
     return len(records)
@@ -347,6 +376,52 @@ def query_date_range(
             return pd.read_sql_query(sql, conn, params=params)
     except Exception as exc:
         raise RuntimeError(f"Aloha Sales DB query failed: {exc}") from exc
+
+
+def query_bridge_detail(
+    start_date: str,
+    end_date: str,
+    locations: Optional[List[str]] = None,
+    db_path: str = ALOHA_SALES_DB_PATH,
+) -> Dict[str, dict]:
+    """
+    Merge the itemized adjustment detail (sc_by_name / deferred_by_name JSON)
+    across a date range, per location.
+
+    Returns {loc_id: {"scByName": {name: amt}, "deferredByName": {name: amt}}}
+    with amounts summed across every day in the range.
+    """
+    if not db_available(db_path):
+        return {}
+
+    params: List = [start_date, end_date]
+    where_clauses = ["business_date BETWEEN ? AND ?"]
+    if locations:
+        ph = ",".join("?" * len(locations))
+        where_clauses.append(f"location IN ({ph})")
+        params.extend(locations)
+
+    sql = (
+        "SELECT location, sc_by_name, deferred_by_name FROM aloha_sales_data "
+        "WHERE " + " AND ".join(where_clauses)
+    )
+
+    out: Dict[str, dict] = {}
+    with get_connection(db_path) as conn:
+        for loc, sc_json, def_json in conn.execute(sql, params).fetchall():
+            loc_id = str(loc).strip()
+            entry = out.setdefault(loc_id, {"scByName": {}, "deferredByName": {}})
+            for blob, key in ((sc_json, "scByName"), (def_json, "deferredByName")):
+                if not blob:
+                    continue
+                try:
+                    parsed = json.loads(blob)
+                except Exception:
+                    continue
+                tgt = entry[key]
+                for nm, amt in (parsed or {}).items():
+                    tgt[nm] = round(tgt.get(nm, 0.0) + float(amt or 0), 2)
+    return out
 
 
 def query_date_range_daily(
