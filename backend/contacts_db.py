@@ -1607,6 +1607,7 @@ CONTACT_REPORT_COLUMNS = [
     ("billing_phone",         "Billing Phone"),
     ("sysco_market",          "Sysco Market"),
     ("dma",                   "DMA"),
+    ("firewall_provider",     "Firewall Provider"),
 ]
 
 
@@ -1646,6 +1647,44 @@ def _all_gms_by_store() -> Dict[int, List[Dict[str, Any]]]:
         if sid is None:
             continue
         out.setdefault(int(sid), []).append(d)
+    return out
+
+
+def _all_store_technical_by_id() -> Dict[int, Dict[str, Any]]:
+    """Return {StoreID: StoreTechnical row} for every store in one query.
+    The FK to Store is the lowercase `storeid` column (SQL Server schema)."""
+    out: Dict[int, Dict[str, Any]] = {}
+    with get_connection() as conn:
+        try:
+            rows = conn.execute("SELECT * FROM StoreTechnical").fetchall()
+        except sqlite3.OperationalError as exc:
+            logger.warning("report: StoreTechnical load failed: %s", exc)
+            return out
+    for r in rows:
+        d = _row_to_dict(r)
+        sid = d.get("storeid")
+        if sid is None:
+            continue
+        out[int(sid)] = d
+    return out
+
+
+def _all_store_physical_by_id() -> Dict[int, Dict[str, Any]]:
+    """Return {StoreID: StorePhysical row} for every store in one query.
+    StorePhysical is keyed directly on StoreID (its PK)."""
+    out: Dict[int, Dict[str, Any]] = {}
+    with get_connection() as conn:
+        try:
+            rows = conn.execute("SELECT * FROM StorePhysical").fetchall()
+        except sqlite3.OperationalError as exc:
+            logger.warning("report: StorePhysical load failed: %s", exc)
+            return out
+    for r in rows:
+        d = _row_to_dict(r)
+        sid = d.get("StoreID")
+        if sid is None:
+            continue
+        out[int(sid)] = d
     return out
 
 
@@ -1702,6 +1741,24 @@ def _pick(row: Optional[Dict[str, Any]], *keys: str) -> Optional[str]:
     return None
 
 
+def _report_date(v: Any) -> Optional[str]:
+    """Normalize a stored datetime/date string to YYYY-MM-DD for a report cell.
+    Treats 1900/9999 sentinel dates (Don's SQL Server placeholders) as blank."""
+    if v in (None, ""):
+        return None
+    s = str(v).strip()
+    if s.startswith("1900") or s.startswith("9999"):
+        return None
+    return s[:10]  # ISO 'YYYY-MM-DD...' -> date portion
+
+
+def _yes_no(v: Any) -> Optional[str]:
+    """Render a bit/flag column as Yes/No; blank when unset."""
+    if v in (None, ""):
+        return None
+    return "Yes" if v in (1, True, "1", "true", "True") else "No"
+
+
 def get_contact_information_report() -> Dict[str, Any]:
     """Build the full Restaurant Contact Information dataset.
 
@@ -1721,6 +1778,10 @@ def get_contact_information_report() -> Dict[str, Any]:
     gms_by      = _all_gms_by_store()
     olo_by      = get_olo_vendor_map()
     guid_by     = _toast_guid_map()
+    tech_by     = _all_store_technical_by_id()
+    # Firewall provider id -> name, resolved the same way the rest of the app
+    # does (via the 'firewall' lookup spec) so the label column stays central.
+    firewall_labels = {r["id"]: r["label"] for r in list_lookup("firewall")}
 
     def _addr(s: Dict[str, Any]) -> Optional[str]:
         parts = [s.get("StoreAdd1"), s.get("StoreAdd2"), s.get("StoreAdd3")]
@@ -1744,6 +1805,8 @@ def get_contact_information_report() -> Dict[str, Any]:
         dma     = dma_by.get(s.get("StoreDMAID"))
         gms     = gms_by.get(int(sid), []) if sid is not None else []
         gm      = gms[0] if gms else None
+        tech    = tech_by.get(int(sid)) if sid is not None else None
+        fw_id   = tech.get("FireWallProvider") if tech else None
 
         rows.append({
             "restaurant_id":         sid,
@@ -1772,6 +1835,7 @@ def get_contact_information_report() -> Dict[str, Any]:
             "billing_phone":         _pick(billing, "BillingPhone", "Phone"),
             "sysco_market":          _pick(sysco, "SyscoMarket"),
             "dma":                   _pick(dma, "DMAName"),
+            "firewall_provider":     firewall_labels.get(fw_id),
         })
 
     # Sort by numeric Restaurant ID where possible (falls back to string).
@@ -1785,6 +1849,106 @@ def get_contact_information_report() -> Dict[str, Any]:
 
     return {
         "columns": [{"key": k, "label": lbl} for k, lbl in CONTACT_REPORT_COLUMNS],
+        "rows":    rows,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Technical & Physical Info report
+#
+# Sister report to the Contact Information Sheet — the store's setup/build data
+# from the StoreTechnical + StorePhysical satellites (plus a few Store columns),
+# with FK columns (POS type, phone/camera vendor) resolved to names.
+# ──────────────────────────────────────────────────────────────────────────────
+
+TECH_PHYS_REPORT_COLUMNS = [
+    ("restaurant_id",     "Restaurant ID"),
+    ("restaurant_name",   "Restaurant Name"),
+    # StoreTechnical
+    ("pos_type",          "POS Type"),
+    ("toast_pos_version", "Toast POS Version"),
+    ("toast_pay_version", "Toast Pay Version"),
+    ("isp_name",          "ISP Name"),
+    ("bandwidth",         "Bandwidth"),
+    ("external_ip",       "External IP"),
+    ("phone_vendor",      "Phone Vendor"),
+    ("camera_vendor",     "Camera Vendor"),
+    # StorePhysical
+    ("square_feet",       "Square Feet"),
+    ("indoor_seats",      "Indoor Seats"),
+    ("exterior_seats",    "Exterior Seats"),
+    ("drive_thru",        "Drive-Thru"),
+    ("pos_terminals",     "POS Terminals"),
+    # Store
+    ("toast_go_live",     "Toast Go-Live"),
+    ("open_date",         "Open Date"),
+    ("sells_alcohol",     "Sells Alcohol"),
+    ("catering_email",    "Catering Email"),
+    ("catering_phone",    "Catering Phone"),
+    ("region_id",         "Region ID"),
+    ("district_id",       "District ID"),
+]
+
+
+def get_technical_physical_report() -> Dict[str, Any]:
+    """Build the Technical & Physical Info dataset (per store).
+
+    Returns {"columns": [{key,label}...], "rows": [...]}, sorted by Restaurant
+    ID. One pass over Store + bulk satellite/lookup loads (no N+1)."""
+    stores  = list_stores()
+    tech_by = _all_store_technical_by_id()
+    phys_by = _all_store_physical_by_id()
+
+    postype_labels = {r["id"]: r["label"] for r in list_lookup("postype")}
+    phone_labels   = {r["id"]: r["label"] for r in list_lookup("phonevendor")}
+    camera_labels  = {r["id"]: r["label"] for r in list_lookup("cameravendor")}
+
+    def _phone_vendor(t: Dict[str, Any]) -> Optional[str]:
+        # Named vendor via FK, else the free-text "other" field if present.
+        return phone_labels.get(t.get("PhoneVendorID")) or _pick(t, "OtherPhoneVendor")
+
+    rows: List[Dict[str, Any]] = []
+    for s in stores:
+        sid = s.get("StoreID")
+        t   = tech_by.get(int(sid)) if sid is not None else None
+        p   = phys_by.get(int(sid)) if sid is not None else None
+        t   = t or {}
+        p   = p or {}
+        rows.append({
+            "restaurant_id":     sid,
+            "restaurant_name":   s.get("StoreName"),
+            "pos_type":          postype_labels.get(t.get("fkPOSTypeID")),
+            "toast_pos_version": _pick(t, "ToastPOSVersion"),
+            "toast_pay_version": _pick(t, "ToastPayVersion"),
+            "isp_name":          _pick(t, "ISPName"),
+            "bandwidth":         _pick(t, "Bandwidth"),
+            "external_ip":       _pick(t, "ExternalIP"),
+            "phone_vendor":      _phone_vendor(t),
+            "camera_vendor":     camera_labels.get(t.get("CameraVendorID")),
+            "square_feet":       _pick(p, "SquareFeet"),
+            "indoor_seats":      _pick(p, "IndoorSeats"),
+            "exterior_seats":    _pick(p, "ExteriorSeats"),
+            "drive_thru":        _pick(p, "DriveThru"),
+            "pos_terminals":     _pick(p, "NumPOSTerms"),
+            "toast_go_live":     _report_date(s.get("ToastLive")),
+            "open_date":         _report_date(s.get("StoreOpenDate")),
+            "sells_alcohol":     _yes_no(s.get("StoreAlcFlag")),
+            "catering_email":    _pick(s, "StoreCateringEmail"),
+            "catering_phone":    _pick(s, "StoreCateringPhone"),
+            "region_id":         _pick(s, "StoreRegionID"),
+            "district_id":       _pick(s, "StoreDistrictID"),
+        })
+
+    def _sort_key(r):
+        v = r.get("restaurant_id")
+        try:
+            return (0, int(v))
+        except (ValueError, TypeError):
+            return (1, str(v))
+    rows.sort(key=_sort_key)
+
+    return {
+        "columns": [{"key": k, "label": lbl} for k, lbl in TECH_PHYS_REPORT_COLUMNS],
         "rows":    rows,
     }
 

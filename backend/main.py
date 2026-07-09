@@ -19792,11 +19792,31 @@ async def contacts_list_store_gms(
     return contacts_db.list_general_managers_by_store(store_id)
 
 
-# ─── Restaurant Contact Information report ────────────────────────────────────
-# Rebuild of the legacy SSRS "Restaurant Contact Information Sheet". Assembles
-# 26 columns per store from the app's contacts mirror + the app-owned
-# StoreOLOVendor table — no SQL Server dependency, which lets the SQL Server
-# OLO ETL (and its licensed ZappySys package) be retired.
+# ─── Contacts reports ─────────────────────────────────────────────────────────
+# In-app rebuilds of the legacy SSRS store reference sheets. Both assemble their
+# columns per store from the app's contacts mirror + app-owned tables — no SQL
+# Server dependency (which lets the SQL Server OLO ETL + ZappySys be retired).
+
+def _report_csv_response(report: Dict[str, Any], filename: str):
+    """Turn a {columns, rows} report into a downloadable CSV Response."""
+    import csv as _csv
+    import io as _io
+    from starlette.responses import Response as _Response
+
+    cols = report["columns"]
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow([c["label"] for c in cols])
+    for row in report["rows"]:
+        writer.writerow(["" if row.get(c["key"]) is None else row.get(c["key"]) for c in cols])
+    # Excel-friendly UTF-8 BOM so accented names render correctly on open.
+    data = "﻿" + buf.getvalue()
+    return _Response(
+        content=data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 
 @app.get("/api/contacts/report/contact-information-sheet")
 async def contacts_report_contact_information_sheet(
@@ -19816,25 +19836,30 @@ async def contacts_report_contact_information_sheet(
 
     if (format or "").lower() != "csv":
         return report
+    return _report_csv_response(report, "restaurant_contact_information_sheet.csv")
 
-    import csv as _csv
-    import io as _io
-    from starlette.responses import Response as _Response
 
-    cols = report["columns"]
-    buf = _io.StringIO()
-    writer = _csv.writer(buf)
-    writer.writerow([c["label"] for c in cols])
-    for row in report["rows"]:
-        writer.writerow(["" if row.get(c["key"]) is None else row.get(c["key"]) for c in cols])
-    # Excel-friendly UTF-8 BOM so accented names render correctly on open.
-    data = "﻿" + buf.getvalue()
-    return _Response(
-        content=data,
-        media_type="text/csv",
-        headers={"Content-Disposition":
-                 'attachment; filename="restaurant_contact_information_sheet.csv"'},
-    )
+@app.get("/api/contacts/report/technical-physical-sheet")
+async def contacts_report_technical_physical_sheet(
+    format: str = "json",
+    _user: User = Depends(get_current_user),
+):
+    """Technical & Physical Info sheet — StoreTechnical + StorePhysical build
+    data per store (POS/network/vendors, square footage/seats/drive-thru, plus
+    a few Store columns), FKs resolved to names.
+
+    ?format=json (default) → {columns, rows} for the on-screen table.
+    ?format=csv            → downloadable CSV.
+    """
+    try:
+        report = contacts_db.get_technical_physical_report()
+    except Exception as exc:
+        logger.error("contacts.technical_physical_report failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+    if (format or "").lower() != "csv":
+        return report
+    return _report_csv_response(report, "store_technical_physical_info.csv")
 
 
 # ─── Toast Device Details (live API call) ─────────────────────────────────────
