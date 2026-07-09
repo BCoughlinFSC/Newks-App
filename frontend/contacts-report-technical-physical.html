@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Store Technical &amp; Physical Info — Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /*
+     * Sister report to the Restaurant Contact Information Sheet — the store
+     * build/setup data from the StoreTechnical + StorePhysical satellites
+     * (plus a few Store columns), sourced entirely from the app's contacts DB.
+     *
+     * Data:   GET /api/contacts/report/technical-physical-sheet  (JSON)
+     * Export: same endpoint with ?format=csv
+     */
+    :root {
+      --newks-red:   #C41E3A;
+      --newks-red-d: #A01A2E;
+      --ink:         #1F2937;
+      --ink-muted:   #6B7280;
+      --line:        #E5E7EB;
+      --line-soft:   #F3F4F6;
+      --bg:          #F8FAFC;
+      --card:        #FFFFFF;
+      --navy:        #1E3A5F;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .header {
+      background: var(--newks-red);
+      padding: 1.25rem 2rem;
+      border-bottom: 3px solid var(--newks-red-d);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header-content {
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 1rem;
+    }
+    .header h1 { margin: 0; color: #fff; font-size: 1.55rem; font-weight: 700; }
+    .header p  { margin: 0.35rem 0 0; color: rgba(255,255,255,0.9); font-size: 0.88rem; }
+    .header-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .btn {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.35);
+      padding: 0.5rem 0.9rem;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .btn:hover { background: rgba(255,255,255,0.28); }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+
+    main { padding: 1.5rem 2rem; }
+
+    .toolbar {
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .toolbar input[type="search"], .toolbar select {
+      padding: 0.5rem 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 0.9rem;
+      color: var(--ink);
+      background: #fff;
+    }
+    .toolbar input[type="search"] { min-width: 240px; flex: 1 1 240px; }
+    .toolbar .count {
+      margin-left: auto;
+      color: var(--ink-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .toolbar .field-label {
+      font-size: 0.78rem; color: var(--ink-muted);
+      text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+    }
+
+    .table-wrap {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow-x: auto;
+    }
+    table.report {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+    table.report thead th {
+      position: sticky; top: 0;
+      background: var(--navy);
+      color: #fff;
+      text-align: left;
+      padding: 0.55rem 0.7rem;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      font-weight: 700;
+      z-index: 1;
+    }
+    table.report tbody td {
+      padding: 0.45rem 0.7rem;
+      border-bottom: 1px solid var(--line-soft);
+      vertical-align: top;
+    }
+    table.report tbody tr:nth-child(even) { background: #FBFCFE; }
+    table.report tbody tr:hover { background: #F1F6FC; }
+    td.mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.76rem; color: var(--ink-muted); }
+    td.empty { color: #C7CDD3; }
+    td.wrap { white-space: normal; min-width: 180px; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    a.email { color: var(--newks-red); text-decoration: none; }
+    a.email:hover { text-decoration: underline; }
+
+    .state {
+      max-width: 620px; margin: 3rem auto; text-align: center;
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 2rem;
+    }
+    .state.error { background: #FEF2F2; border-color: #FECACA; color: #991B1B; }
+
+    @media print {
+      .header-actions, .toolbar, .home-btn { display: none !important; }
+      .header { background: #fff !important; border-bottom: 2px solid #000; box-shadow: none; }
+      .header h1, .header p { color: #000 !important; }
+      main { padding: 0; }
+      .table-wrap { border: none; border-radius: 0; overflow: visible; }
+      table.report { font-size: 7pt; white-space: normal; }
+      table.report thead th { background: #ddd !important; color: #000 !important; }
+      @page { size: landscape; margin: 0.4in; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Store Technical &amp; Physical Info</h1>
+        <p>POS, network, vendors, square footage &amp; seats — from the in-app contacts database.</p>
+      </div>
+      <div class="header-actions">
+        <button id="csv-btn" class="btn" title="Download as CSV">⬇ CSV</button>
+        <button id="print-btn" class="btn" title="Print / Save as PDF">🖨 Print</button>
+        <a href="/contacts.html" class="btn home-btn">← Contacts</a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div class="toolbar" id="toolbar" style="display:none;">
+      <input type="search" id="search" placeholder="Search name, ISP, IP, vendor…" />
+      <span class="field-label">POS Type</span>
+      <select id="postype-filter"><option value="">All</option></select>
+      <span class="count" id="count"></span>
+    </div>
+
+    <div id="content">
+      <div class="state">Loading technical &amp; physical info…</div>
+    </div>
+  </main>
+
+  <script>
+    const authToken = localStorage.getItem('auth_token');
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+      return h;
+    }
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    const REPORT_URL = '/api/contacts/report/technical-physical-sheet';
+    const MONO_COLS  = new Set(['external_ip']);
+    const WRAP_COLS  = new Set(['restaurant_name']);
+    const NUM_COLS   = new Set(['square_feet','indoor_seats','exterior_seats','pos_terminals']);
+    const EMAIL_COLS = new Set(['catering_email']);
+
+    let COLUMNS = [];
+    let ROWS = [];
+
+    function renderTable() {
+      const q = (document.getElementById('search').value || '').trim().toLowerCase();
+      const posVal = document.getElementById('postype-filter').value;
+
+      const filtered = ROWS.filter(r => {
+        if (posVal && (r.pos_type || '') !== posVal) return false;
+        if (!q) return true;
+        return COLUMNS.some(c => String(r[c.key] ?? '').toLowerCase().includes(q));
+      });
+
+      document.getElementById('count').textContent =
+        `${filtered.length} of ${ROWS.length} restaurants`;
+
+      const thead = `<thead><tr>${COLUMNS.map(c =>
+        `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>`;
+
+      const tbody = `<tbody>${filtered.map(r => `<tr>${COLUMNS.map(c => {
+        const v = r[c.key];
+        const empty = v === null || v === undefined || v === '';
+        let cls = [];
+        if (MONO_COLS.has(c.key)) cls.push('mono');
+        if (WRAP_COLS.has(c.key)) cls.push('wrap');
+        if (NUM_COLS.has(c.key))  cls.push('num');
+        if (empty) cls.push('empty');
+        let inner;
+        if (empty) inner = '—';
+        else if (EMAIL_COLS.has(c.key))
+          inner = `<a class="email" href="mailto:${escapeHtml(v)}">${escapeHtml(v)}</a>`;
+        else inner = escapeHtml(v);
+        return `<td class="${cls.join(' ')}">${inner}</td>`;
+      }).join('')}</tr>`).join('')}</tbody>`;
+
+      document.getElementById('content').innerHTML =
+        `<div class="table-wrap"><table class="report">${thead}${tbody}</table></div>`;
+    }
+
+    function populateFilters() {
+      const posSel = document.getElementById('postype-filter');
+      [...new Set(ROWS.map(r => r.pos_type).filter(v => v))].sort().forEach(v => {
+        const o = document.createElement('option'); o.value = v; o.textContent = v; posSel.appendChild(o);
+      });
+    }
+
+    async function downloadCsv() {
+      const btn = document.getElementById('csv-btn');
+      btn.disabled = true;
+      try {
+        const r = await fetch(`${REPORT_URL}?format=csv`, { headers: authHeaders() });
+        if (!r.ok) throw new Error(await r.text());
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'store_technical_physical_info.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        alert('CSV download failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function boot() {
+      try {
+        const r = await fetch(REPORT_URL, { headers: authHeaders() });
+        if (r.status === 401) {
+          document.getElementById('content').innerHTML =
+            '<div class="state error">Sign in required. <a href="/">Sign in</a> to view the report.</div>';
+          return;
+        }
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        COLUMNS = data.columns || [];
+        ROWS = data.rows || [];
+        if (!ROWS.length) {
+          document.getElementById('content').innerHTML =
+            '<div class="state">No restaurants found in the contacts database yet.</div>';
+          return;
+        }
+        document.getElementById('toolbar').style.display = '';
+        populateFilters();
+        renderTable();
+        document.getElementById('search').addEventListener('input', renderTable);
+        document.getElementById('postype-filter').addEventListener('change', renderTable);
+      } catch (e) {
+        document.getElementById('content').innerHTML =
+          `<div class="state error">Couldn't load the report: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    document.getElementById('csv-btn').addEventListener('click', downloadCsv);
+    document.getElementById('print-btn').addEventListener('click', () => window.print());
+    boot();
+  </script>
+</body>
+</html>

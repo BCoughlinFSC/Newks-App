@@ -98,3 +98,8 @@ response.txt
 !backend/data/fbc_location_mapping.json
 !backend/data/fbc_store_mapping.json
 
+# Exception: OLO Vendor ID seed (StoreID -> OLO Vendor ID), loaded into the
+# app-local StoreOLOVendor table by backend/seed_olo_vendor_ids.py. Replaces
+# the retired SQL Server OLO.dbo.OLOVendors ETL as the source of this data.
+!backend/data/contacts/olo_vendor_seed.json
+
