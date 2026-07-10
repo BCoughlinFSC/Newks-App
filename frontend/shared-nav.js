@@ -95,6 +95,7 @@
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';
     if (path.endsWith('/admin.html'))                 return 'admin';
+    if (path.endsWith('/projects.html'))              return 'projects';
     return '';
   }
 
@@ -150,6 +151,14 @@
     const guideActive = activePage === 'guide' ? ' active' : '';
     const guideHtml = `<a href="/toast-reporting-guide.html" class="snav-link${guideActive}" data-key="guide">Toast Reporting Guide</a>`;
 
+    // Projects board — shared team ticket board. Visible to every logged-in
+    // user (not permission-gated), like the Guide link.
+    const projectsActive = activePage === 'projects' ? ' active' : '';
+    const projectsHtml = user
+      ? `<div class="snav-section-label" style="margin-top:0.5rem;">Team</div>
+         <a href="/projects.html" class="snav-link${projectsActive}" data-key="projects">Projects</a>`
+      : '';
+
     // Admin section
     let adminHtml = '';
     if (isAdmin) {
@@ -196,6 +205,7 @@
         <div style="margin-top:0.5rem;">
           ${guideHtml}
         </div>
+        ${projectsHtml}
         ${adminHtml}
       </div>
       ${userHtml}

@@ -49,6 +49,7 @@ import toast_config_builder
 import monkey_db
 import crunchtime_db
 import punchh_db
+import projects_db
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -6798,9 +6799,18 @@ async def nightly_flash_import_job():
         })
 
 
-# Schedule: run at 4:00 AM daily (after the 3 AM orders cache job finishes)
-_scheduler.add_job(nightly_flash_import_job, CronTrigger(hour=4, minute=0),
-                   id="nightly_flash_import", replace_existing=True)
+# Schedule: 6:00 AM CENTRAL daily. Must run AFTER the Central business day is
+# fully closed AND Toast ERA has settled — otherwise it imports an in-progress
+# day and the Flash reads low ("way off") until a manual backfill. The old
+# CronTrigger(hour=4) had no timezone, so on a UTC server it fired at 11 PM
+# Central the night before and pulled the still-open day.
+#   misfire_grace_time: if the app is down at 6 AM (e.g. a deploy), still run the
+#     import when it comes back within 6 h instead of skipping the day.
+#   coalesce: collapse multiple missed fires into one run.
+_scheduler.add_job(nightly_flash_import_job,
+                   CronTrigger(hour=6, minute=0, timezone="America/Chicago"),
+                   id="nightly_flash_import", replace_existing=True,
+                   misfire_grace_time=6 * 3600, coalesce=True)
 
 
 # ------------------
@@ -7006,6 +7016,11 @@ async def _on_startup():
         contacts_db.initialize_schema()
     except Exception as exc:
         logger.warning("contacts_db.initialize_schema failed (non-fatal): %s", exc)
+    # Projects dashboard (internal ticket board) — app-local SQLite.
+    try:
+        projects_db.initialize_schema()
+    except Exception as exc:
+        logger.warning("projects_db.initialize_schema failed (non-fatal): %s", exc)
     _scheduler.start()
     logger.info(
         "APScheduler started — nightly jobs scheduled "
@@ -20916,6 +20931,81 @@ async def admin_upload_sigma_excel(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         os.unlink(tmp.name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Projects dashboard — a tiny internal ticket board so the team can see what
+# everyone is working on. Every field is free-typed (assignee is plain text,
+# NOT tied to app user accounts). Any logged-in user can add/edit/delete;
+# writes are stamped with the current user's name for a light audit trail.
+# Backed by projects_db (app-local SQLite, no SQL Server sync).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ProjectIn(BaseModel):
+    """Input shape for creating/updating a project card. Only `name` is
+    really required; everything else is optional free text."""
+    name:     str
+    assignee: Optional[str] = None
+    status:   Optional[str] = None
+    priority: Optional[str] = None
+    due_date: Optional[str] = None
+    notes:    Optional[str] = None
+
+
+@app.get("/api/projects")
+async def projects_list(_user: User = Depends(get_current_user)):
+    """List every project card, newest activity first."""
+    try:
+        return projects_db.list_projects()
+    except Exception as exc:
+        logger.error("projects.list failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.post("/api/projects")
+async def projects_create(body: ProjectIn, current_user: User = Depends(get_current_user)):
+    """Create a new project card. Any logged-in user may create."""
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="Project name is required")
+    try:
+        new_id = projects_db.insert_project(body.dict(), created_by=current_user.name)
+        logger.info("Project created id=%s by %s", new_id, current_user.email)
+        return {"id": new_id, "success": True}
+    except Exception as exc:
+        logger.error("projects.create failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.put("/api/projects/{project_id}")
+async def projects_update(
+    project_id: int, body: ProjectIn, current_user: User = Depends(get_current_user)
+):
+    """Update an existing project card. Any logged-in user may edit."""
+    if not projects_db.get_project(project_id):
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="Project name is required")
+    try:
+        ok = projects_db.update_project(project_id, body.dict(), updated_by=current_user.name)
+        logger.info("Project updated id=%s by %s", project_id, current_user.email)
+        return {"id": project_id, "success": ok}
+    except Exception as exc:
+        logger.error("projects.update failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.delete("/api/projects/{project_id}")
+async def projects_delete(project_id: int, current_user: User = Depends(get_current_user)):
+    """Delete a project card. Any logged-in user may delete."""
+    if not projects_db.get_project(project_id):
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    try:
+        ok = projects_db.delete_project(project_id)
+        logger.info("Project deleted id=%s by %s", project_id, current_user.email)
+        return {"id": project_id, "success": ok}
+    except Exception as exc:
+        logger.error("projects.delete failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
 
 
 if os.path.isdir(kiosk_path):

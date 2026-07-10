@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Projects – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c; min-height: 100vh; }
+    .header { background: #C41E3A; padding: 1.5rem 2rem; border-bottom: 3px solid #A01A2E; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.5rem; font-weight: 700; }
+    .header p { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; text-decoration: none; }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+    .container { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; padding: 1.5rem 2rem; max-width: 1800px; margin: 0 auto; }
+    @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+    .card { background: #fff; border-radius: 12px; padding: 1.5rem; border: 1px solid #e8e0d5; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .card h2 { margin: 0 0 1.25rem 0; color: #C41E3A; font-size: 1.1rem; font-weight: 700; }
+    .controls-row { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; }
+    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .form-group input, .form-group select, .form-group textarea { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+    .form-group textarea { resize: vertical; min-height: 2.4rem; }
+    .btn-primary { background: #C41E3A; color: #fff; border: none; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: #374151; color: #fff; border: none; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+    .btn-secondary:hover:not(:disabled) { background: #1F2937; }
+    .btn-link { background: none; border: none; color: #C41E3A; cursor: pointer; font-size: 0.85rem; padding: 0.2rem 0.4rem; font-weight: 600; }
+    .btn-link.danger { color: #B91C1C; }
+    .btn-link:hover { text-decoration: underline; }
+    .status-msg { padding: 0.75rem 1rem; border-radius: 8px; margin-top: 1rem; font-size: 0.85rem; display: none; }
+    .status-msg.info { background: #F0F9FF; border: 1px solid #BAE6FD; color: #0369A1; display: block; }
+    .status-msg.error { background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; display: block; }
+    .report-table-wrap { overflow-x: auto; margin-top: 1rem; }
+    table.report { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    table.report th, table.report td { padding: 0.55rem 0.7rem; border-bottom: 1px solid #E5E7EB; text-align: left; vertical-align: top; }
+    table.report th { background: #F3F4F6; font-weight: 600; white-space: nowrap; }
+    table.report tr:hover td { background: #FAFAFA; }
+    .empty { padding: 2rem; text-align: center; color: #9CA3AF; }
+    .pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+    .st-Open { background: #E0F2FE; color: #0369A1; }
+    .st-InProgress { background: #FEF9C3; color: #854D0E; }
+    .st-Blocked { background: #FEE2E2; color: #B91C1C; }
+    .st-Done { background: #DCFCE7; color: #166534; }
+    .pr-High { color: #B91C1C; font-weight: 700; }
+    .pr-Medium { color: #854D0E; }
+    .pr-Low { color: #6B7280; }
+    .meta { font-size: 0.75rem; color: #9CA3AF; }
+    .filters { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 50; padding: 1rem; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #fff; border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 520px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    .modal h3 { margin: 0 0 1rem 0; color: #C41E3A; }
+    .modal .form-group { margin-bottom: 0.9rem; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Projects</h1>
+        <p>Shared team board — what everyone's working on. Add a project, assign it to someone, track its status.</p>
+      </div>
+      <a href="/" class="home-btn">Home</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div id="shared-sidebar"></div>
+
+    <div>
+      <div class="card">
+        <h2>New Project</h2>
+        <div class="controls-row">
+          <div class="form-group" style="flex:2;min-width:220px;">
+            <label for="newName">Project name</label>
+            <input type="text" id="newName" placeholder="e.g. Q3 Menu Refresh" />
+          </div>
+          <div class="form-group" style="flex:1;min-width:140px;">
+            <label for="newAssignee">Assigned to</label>
+            <input type="text" id="newAssignee" placeholder="e.g. Sarah" />
+          </div>
+          <div class="form-group">
+            <label for="newStatus">Status</label>
+            <select id="newStatus">
+              <option>Open</option><option>In Progress</option><option>Blocked</option><option>Done</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="newPriority">Priority</label>
+            <select id="newPriority">
+              <option>Low</option><option selected>Medium</option><option>High</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="newDue">Due date</label>
+            <input type="date" id="newDue" />
+          </div>
+          <button class="btn-primary" id="addBtn" onclick="addProject()">Add Project</button>
+        </div>
+        <div class="form-group" style="margin-top:0.9rem;">
+          <label for="newNotes">Notes (optional)</label>
+          <textarea id="newNotes" placeholder="Anything the team should know…"></textarea>
+        </div>
+        <div id="statusMsg" class="status-msg"></div>
+      </div>
+
+      <div class="card" style="margin-top:1rem;">
+        <h2>All Projects <span id="countMeta" style="font-weight:400;font-size:0.85rem;color:#6B7280;"></span></h2>
+        <div class="filters">
+          <div class="form-group">
+            <label for="filterStatus" style="font-size:0.78rem;">Filter by status</label>
+            <select id="filterStatus" onchange="render()">
+              <option value="">All</option>
+              <option>Open</option><option>In Progress</option><option>Blocked</option><option>Done</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="filterAssignee" style="font-size:0.78rem;">Filter by assignee</label>
+            <input type="text" id="filterAssignee" placeholder="type a name…" oninput="render()" />
+          </div>
+        </div>
+        <div id="resultsWrap" class="report-table-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit modal -->
+  <div class="modal-overlay" id="editModal">
+    <div class="modal">
+      <h3>Edit Project</h3>
+      <input type="hidden" id="editId" />
+      <div class="form-group">
+        <label for="editName">Project name</label>
+        <input type="text" id="editName" />
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="editAssignee">Assigned to</label>
+          <input type="text" id="editAssignee" />
+        </div>
+        <div class="form-group">
+          <label for="editDue">Due date</label>
+          <input type="date" id="editDue" />
+        </div>
+        <div class="form-group">
+          <label for="editStatus">Status</label>
+          <select id="editStatus">
+            <option>Open</option><option>In Progress</option><option>Blocked</option><option>Done</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="editPriority">Priority</label>
+          <select id="editPriority">
+            <option>Low</option><option>Medium</option><option>High</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:0.9rem;">
+        <label for="editNotes">Notes</label>
+        <textarea id="editNotes"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="closeEdit()">Cancel</button>
+        <button class="btn-primary" id="saveBtn" onclick="saveEdit()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="shared-nav.js"></script>
+  <script>
+    const API_BASE = '';
+    let allProjects = [];
+
+    function getAuthHeaders() {
+      const token = localStorage.getItem('auth_token');
+      return token ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+    }
+
+    function showStatus(msg, type) {
+      const el = document.getElementById('statusMsg');
+      el.className = 'status-msg ' + type;
+      el.textContent = msg;
+    }
+    function clearStatus() { document.getElementById('statusMsg').className = 'status-msg'; }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+    function statusClass(s) { return 'st-' + String(s || 'Open').replace(/\s+/g, ''); }
+    function priorityClass(p) { return 'pr-' + String(p || 'Medium').replace(/\s+/g, ''); }
+
+    function fmtDate(iso) {
+      if (!iso) return '';
+      // stored as 'YYYY-MM-DD' or datetime — show the date part
+      return String(iso).split('T')[0].split(' ')[0];
+    }
+
+    async function loadProjects() {
+      try {
+        const res = await fetch(API_BASE + '/api/projects', { headers: getAuthHeaders() });
+        if (res.status === 401) { window.location.href = '/index.html'; return; }
+        if (!res.ok) { showStatus('Could not load projects (' + res.status + ')', 'error'); return; }
+        allProjects = await res.json();
+        render();
+      } catch (e) {
+        showStatus('Network error loading projects: ' + e.message, 'error');
+      }
+    }
+
+    function render() {
+      const fStatus = document.getElementById('filterStatus').value;
+      const fAssignee = document.getElementById('filterAssignee').value.trim().toLowerCase();
+      let rows = allProjects.slice();
+      if (fStatus) rows = rows.filter(p => (p.status || 'Open') === fStatus);
+      if (fAssignee) rows = rows.filter(p => (p.assignee || '').toLowerCase().includes(fAssignee));
+
+      document.getElementById('countMeta').textContent =
+        rows.length + ' of ' + allProjects.length + ' shown';
+
+      const wrap = document.getElementById('resultsWrap');
+      if (!rows.length) {
+        wrap.innerHTML = '<div class="empty">No projects yet. Add one above to get started.</div>';
+        return;
+      }
+
+      const body = rows.map(p => `
+        <tr>
+          <td>
+            <div style="font-weight:600;">${esc(p.name)}</div>
+            ${p.notes ? `<div class="meta" style="white-space:pre-wrap;margin-top:0.2rem;">${esc(p.notes)}</div>` : ''}
+          </td>
+          <td>${esc(p.assignee) || '<span class="meta">—</span>'}</td>
+          <td><span class="pill ${statusClass(p.status)}">${esc(p.status || 'Open')}</span></td>
+          <td class="${priorityClass(p.priority)}">${esc(p.priority || 'Medium')}</td>
+          <td>${esc(fmtDate(p.due_date)) || '<span class="meta">—</span>'}</td>
+          <td class="meta">${esc(p.updated_by || p.created_by || '')}<br>${esc(fmtDate(p.updated_at))}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn-link" onclick='openEdit(${p.id})'>Edit</button>
+            <button class="btn-link danger" onclick='deleteProject(${p.id})'>Delete</button>
+          </td>
+        </tr>
+      `).join('');
+
+      wrap.innerHTML = `
+        <table class="report">
+          <thead>
+            <tr>
+              <th>Project</th><th>Assigned to</th><th>Status</th><th>Priority</th>
+              <th>Due</th><th>Last update</th><th></th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>`;
+    }
+
+    async function addProject() {
+      const name = document.getElementById('newName').value.trim();
+      if (!name) { showStatus('Project name is required.', 'error'); return; }
+      const btn = document.getElementById('addBtn');
+      btn.disabled = true;
+      const payload = {
+        name,
+        assignee: document.getElementById('newAssignee').value.trim(),
+        status:   document.getElementById('newStatus').value,
+        priority: document.getElementById('newPriority').value,
+        due_date: document.getElementById('newDue').value,
+        notes:    document.getElementById('newNotes').value.trim(),
+      };
+      try {
+        const res = await fetch(API_BASE + '/api/projects', {
+          method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          showStatus('Could not add project: ' + (err.detail || res.status), 'error');
+          return;
+        }
+        // reset form
+        ['newName','newAssignee','newDue','newNotes'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('newStatus').value = 'Open';
+        document.getElementById('newPriority').value = 'Medium';
+        showStatus('Project added.', 'info');
+        await loadProjects();
+      } catch (e) {
+        showStatus('Network error: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function openEdit(id) {
+      const p = allProjects.find(x => x.id === id);
+      if (!p) return;
+      document.getElementById('editId').value = p.id;
+      document.getElementById('editName').value = p.name || '';
+      document.getElementById('editAssignee').value = p.assignee || '';
+      document.getElementById('editStatus').value = p.status || 'Open';
+      document.getElementById('editPriority').value = p.priority || 'Medium';
+      document.getElementById('editDue').value = fmtDate(p.due_date) || '';
+      document.getElementById('editNotes').value = p.notes || '';
+      document.getElementById('editModal').classList.add('open');
+    }
+    function closeEdit() { document.getElementById('editModal').classList.remove('open'); }
+
+    async function saveEdit() {
+      const id = document.getElementById('editId').value;
+      const name = document.getElementById('editName').value.trim();
+      if (!name) { alert('Project name is required.'); return; }
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true;
+      const payload = {
+        name,
+        assignee: document.getElementById('editAssignee').value.trim(),
+        status:   document.getElementById('editStatus').value,
+        priority: document.getElementById('editPriority').value,
+        due_date: document.getElementById('editDue').value,
+        notes:    document.getElementById('editNotes').value.trim(),
+      };
+      try {
+        const res = await fetch(API_BASE + '/api/projects/' + id, {
+          method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert('Could not save: ' + (err.detail || res.status));
+          return;
+        }
+        closeEdit();
+        await loadProjects();
+      } catch (e) {
+        alert('Network error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function deleteProject(id) {
+      const p = allProjects.find(x => x.id === id);
+      if (!confirm('Delete project "' + (p ? p.name : id) + '"? This cannot be undone.')) return;
+      try {
+        const res = await fetch(API_BASE + '/api/projects/' + id, {
+          method: 'DELETE', headers: getAuthHeaders(),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          showStatus('Could not delete: ' + (err.detail || res.status), 'error');
+          return;
+        }
+        await loadProjects();
+      } catch (e) {
+        showStatus('Network error: ' + e.message, 'error');
+      }
+    }
+
+    // Enter key in the name field adds the project
+    document.getElementById('newName').addEventListener('keydown', e => {
+      if (e.key === 'Enter') addProject();
+    });
+
+    loadProjects();
+  </script>
+</body>
+</html>
