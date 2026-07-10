@@ -3662,7 +3662,15 @@
           if (allCats.length > 0 && currentReportConfig) {
             const haveTagsNorm = (currentReportConfig.itemTags || []).map(_normalizeTagForMatch);
             const allTagsNorm  = allCats.map(_normalizeTagForMatch);
-            const haveAll = allTagsNorm.every(t => haveTagsNorm.includes(t));
+            // A consolidated category counts as "covered" if it's already
+            // selected on screen OR it isn't present in the menu at all — you
+            // can't be expected to have ticked a tag that has no checkbox.
+            // Without this, a canonical category that no store actually carries
+            // would force a needless full re-fetch (and expose an ERA 429).
+            const menuTagsNorm = (allItemTags || []).map(_normalizeTagForMatch);
+            const haveAll = allTagsNorm.every(
+              t => haveTagsNorm.includes(t) || !menuTagsNorm.includes(t)
+            );
             if (!haveAll) {
               showStatus('info', 'Generating Excel — fetching all categories…');
               const signal = showLoadingOverlay();

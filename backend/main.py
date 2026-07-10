@@ -8947,23 +8947,38 @@ def _load_mapping_table_excel() -> Tuple[str, List[str], List[Dict]]:
 @app.get("/api/consolidated-categories")
 async def get_consolidated_categories():
     """
-    Return the canonical list of "* Consolidated …" tag names from
-    consolidated_category_ids. The Excel export uses this to fire a
-    re-fetch when the on-screen report was filtered to a subset, so the
-    download always covers every category instead of just what the user
-    was looking at.
+    Return the canonical list of "* Consolidated …" tag names for the Excel
+    "include all categories" export. The export uses this to fire a re-fetch
+    when the on-screen report was filtered to a subset, so the download always
+    covers every category instead of just what the user was looking at.
+
+    IMPORTANT: this is intersected with precompute_cache.CONSOLIDATED_TAGS_SUPERSET
+    so the export's "all categories" definition matches the cache/precompute
+    definition exactly. The consolidated_category_ids table carries two extra
+    tags — "* Consolidated Beer" and "* Consolidated Wine and Spirits" — that
+    Newk's menus don't actually contain (they exist only as item→category
+    mapping IDs). Returning them here forced two failures on every all-cats
+    export: (1) haveAll in the frontend could never be satisfied because those
+    tags aren't selectable checkboxes, so it always re-fetched; and (2) the
+    re-fetch's itemTags (17) never matched the cache superset (15), guaranteeing
+    a cache miss + full live Toast pull (which was tripping ERA 429s). If beer/
+    wine sales ever become real, add them to CONSOLIDATED_TAGS_SUPERSET too.
     """
+    superset = precompute_cache.CONSOLIDATED_TAGS_SUPERSET
     if not toast_config_db.db_available():
-        return {"categories": []}
+        return {"categories": sorted(superset)}
     try:
         with toast_config_db.get_connection() as conn:
             rows = conn.execute(
                 "SELECT tag_name FROM consolidated_category_ids ORDER BY tag_name"
             ).fetchall()
-        return {"categories": [r[0] for r in rows if r[0]]}
+        cats = [r[0] for r in rows if r[0] and r[0] in superset]
+        # Fall back to the superset if the table is empty/unseeded so the
+        # export still has a full list to work from.
+        return {"categories": cats or sorted(superset)}
     except Exception as exc:
         logger.warning(f"Failed to load consolidated categories: {exc}")
-        return {"categories": []}
+        return {"categories": sorted(superset)}
 
 
 @app.get("/api/mapping-table")
