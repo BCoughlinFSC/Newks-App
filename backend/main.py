@@ -1855,6 +1855,19 @@ async def get_all_active_locations(client: httpx.AsyncClient, include_test: bool
     _locations_cache[f"{cache_key}_expires_at"] = now + LOCATIONS_CACHE_TTL_SECONDS
     return active
 
+def _retry_after_seconds(resp: httpx.Response, default: float) -> float:
+    """Seconds to wait after a 429, from the Retry-After header if Toast sent
+    one (delta-seconds form), otherwise the caller's backoff default. Capped so
+    a bogus header can't stall an export."""
+    raw = resp.headers.get("Retry-After")
+    if raw:
+        try:
+            return min(max(float(raw), default), 30.0)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
 async def request_toast_report(
     client: httpx.AsyncClient,
     start: date,
@@ -1862,7 +1875,7 @@ async def request_toast_report(
     restaurant_ids: List[str],
     report_type: str,
     group_by: List[str],
-    max_attempts: int = 3,
+    max_attempts: int = 6,
     delay_seconds: float = 1.0,
 ) -> str:
     days_diff = (end - start).days + 1
@@ -1914,8 +1927,21 @@ async def request_toast_report(
                 continue
         
         if resp.status_code == 429:
+            # ERA rate limits are per short window. A full menu-performance
+            # export fires many report-creation POSTs back to back (MENU_ITEM
+            # batches, then MODIFIER chunks), so a single 429 mid-run must not
+            # kill the whole export — wait out the window and retry.
+            if attempt < max_attempts - 1:
+                wait = _retry_after_seconds(resp, default=delay_seconds)
+                logger.warning(
+                    f"Toast API 429 creating report (attempt {attempt + 1}/{max_attempts}); "
+                    f"backing off {wait:.1f}s"
+                )
+                await asyncio.sleep(wait)
+                delay_seconds = min(delay_seconds * 2, 16.0)
+                continue
             raise HTTPException(status_code=429, detail="Toast API rate limit exceeded. Please wait before trying again.")
-        
+
         if resp.status_code != 200:
             error_msg = resp.text
             try:
@@ -1976,8 +2002,17 @@ async def fetch_toast_report(
             continue
         
         if resp.status_code == 429:
+            if attempt < max_attempts - 1:
+                wait = _retry_after_seconds(resp, default=delay_seconds)
+                logger.warning(
+                    f"Toast API 429 retrieving report {report_guid} "
+                    f"(attempt {attempt + 1}/{max_attempts}); backing off {wait:.1f}s"
+                )
+                await asyncio.sleep(wait)
+                delay_seconds = min(delay_seconds * 1.5, 10.0)
+                continue
             raise HTTPException(status_code=429, detail="Toast API rate limit exceeded while retrieving report.")
-        
+
         error_msg = resp.text
         try:
             error_json = resp.json()
