@@ -197,6 +197,11 @@
           </div>
           <button class="btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
           <button class="btn-secondary" id="exportBtn" onclick="exportExcel()" disabled>Export Excel</button>
+          <label id="pyBasisWrap" title="Default (off): Prior-Year uses -364 days / same weekday (correct retail YoY). On: match SSRS — PTD/QTD/YTD Prior-Year use the same calendar dates a year prior. Daily & WTD are unchanged (both already match SSRS). Re-run to apply."
+                 style="display:flex; align-items:center; gap:0.4rem; font-size:0.82rem; color:#374151; cursor:pointer; margin-left:0.5rem;">
+            <input type="checkbox" id="pyBasisToggle" style="accent-color:#C41E3A;" onchange="if (reportData) runReport();" />
+            Match SSRS PY (calendar −365)
+          </label>
         </div>
         <div class="loc-picker">
           <div class="loc-picker-header">
@@ -345,7 +350,11 @@
         const resp = await fetch('/api/daily-flash-report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
-          body: JSON.stringify({ report_date: dateStr, locations: getSelectedLocations() })
+          body: JSON.stringify({
+            report_date: dateStr,
+            locations: getSelectedLocations(),
+            py_basis: document.getElementById('pyBasisToggle').checked ? 'calendar' : 'fiscal',
+          })
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));

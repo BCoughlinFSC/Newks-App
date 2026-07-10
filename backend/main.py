@@ -16803,6 +16803,22 @@ async def run_daily_flash_report(payload: dict = Body(...)):
     qtd_ly = _get_ly_range(qtd_start, report_date, fy - 1, q_start_period)
     ytd_ly = _get_ly_range(ytd_start, report_date, fy - 1, 1)
 
+    # PY-basis toggle. Default 'fiscal' = -364d / day-of-week aligned (the correct
+    # retail YoY, per handoff spec §4). 'calendar' reproduces SSRS's mixed
+    # convention so the app can be reconciled against the SSRS Flash: SSRS keeps
+    # Daily/WTD day-of-week aligned but maps PTD/QTD/YTD PY to the SAME CALENDAR
+    # DATE a year prior (7/1->7/1, 1/1->1/1). We only override P/Q/YTD here;
+    # Daily & WTD already match SSRS.
+    if payload.get("py_basis") == "calendar":
+        def _same_date_py(d: date) -> str:
+            try:
+                return d.replace(year=d.year - 1).isoformat()
+            except ValueError:      # Feb 29 -> Feb 28
+                return d.replace(year=d.year - 1, day=28).isoformat()
+        ptd_ly = (_same_date_py(ptd_start), _same_date_py(report_date))
+        qtd_ly = (_same_date_py(qtd_start), _same_date_py(report_date))
+        ytd_ly = (_same_date_py(ytd_start), _same_date_py(report_date))
+
     # Get all restaurant GUIDs and mappings
     async with httpx.AsyncClient(timeout=60.0) as client:
         all_locations = await get_all_active_locations(client)
