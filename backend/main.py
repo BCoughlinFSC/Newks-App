@@ -2032,7 +2032,7 @@ async def request_and_fetch_toast_report(
     restaurant_ids: List[str],
     report_type: str,
     group_by: List[str],
-    guid_retries: int = 5,
+    guid_retries: int = 3,
 ):
     """
     Create an ERA report request and fetch its result, regenerating the
@@ -2041,9 +2041,10 @@ async def request_and_fetch_toast_report(
     the same GUID can never be retrieved.  Only that specific 409 is retried; every
     other error propagates unchanged.
 
-    Backoff escalates (5s, 10s, 20s, 40s) between regenerations so Toast's report
-    engine has time to recover from the bad window rather than us hammering it with
-    fresh GUIDs that fail just as fast.
+    Backoff escalates (5s, 10s) between regenerations so Toast's report engine has
+    time to recover rather than us hammering it with fresh GUIDs.  Kept to a few
+    attempts (one request at a time) so a persistent failure doesn't pile onto
+    Toast's rate limit.
     """
     last_exc: Optional[HTTPException] = None
     backoff = 5.0
@@ -2079,51 +2080,6 @@ async def request_and_fetch_toast_report(
 # carry restaurantGuid + businessDate, so concatenating batches yields
 # exactly the same row set as a single all-stores request.
 MENU_REPORT_RESTAURANT_BATCH = 25
-
-# Restaurant-batch size for the flash metrics report. A single all-stores (~98)
-# metrics/day request started failing Toast's report engine with a 409 (the report
-# job dies and the GUID can never be fetched — observed 2026-07-14). Smaller
-# per-restaurant batches build reliably; ERA rows carry restaurantGuid +
-# businessDate, so concatenating batches yields the same row set.
-FLASH_REPORT_RESTAURANT_BATCH = 20
-
-
-async def fetch_flash_metrics_batched(
-    client: httpx.AsyncClient,
-    start: date,
-    end: date,
-    restaurant_ids: List[str],
-) -> list:
-    """
-    Fetch ERA metrics (groupBy=DINING_OPTION) for the flash import, batched by
-    restaurant so one oversized/failing all-stores report can't sink the run.
-    Each batch regenerates its reportRequestGuid on the transient stale-GUID 409.
-    A batch that still fails after retries raises with its store GUIDs logged, so
-    the culprit is visible rather than a blank all-stores 409.
-    """
-    out: list = []
-    batches = chunk_list(restaurant_ids, FLASH_REPORT_RESTAURANT_BATCH)
-    for i, batch in enumerate(batches):
-        try:
-            rows = await request_and_fetch_toast_report(
-                client, start, end, batch,
-                report_type="metrics", group_by=["DINING_OPTION"],
-            )
-        except HTTPException as exc:
-            logger.error(
-                "Flash ERA batch %d/%d FAILED (%d stores: %s): %s",
-                i + 1, len(batches), len(batch),
-                ", ".join(s[:8] for s in batch), exc.detail,
-            )
-            raise
-        if isinstance(rows, list):
-            out.extend(rows)
-        logger.info("Flash ERA batch %d/%d ok (%d stores, %d rows so far)",
-                    i + 1, len(batches), len(batch), len(out))
-        if i < len(batches) - 1:
-            await asyncio.sleep(0.3)
-    return out
-
 
 async def fetch_menu_rows_batched(
     client: httpx.AsyncClient,
@@ -2462,6 +2418,11 @@ def _is_grat_fee_addback(name: str) -> bool:
 
 # {restaurant_guid: {salesCategory_guid: name}} — resolved once per restaurant.
 _salescat_config_cache: Dict[str, Dict[str, str]] = {}
+# Newk's runs a chain-wide shared menu, so salesCategory GUIDs → names are identical
+# across every store.  We resolve the map ONCE and reuse it for all restaurants — a
+# per-store config fetch was a ~98-call burst that tripped Toast's rate limit and
+# broke the flash import (2026-07-14).
+_salescat_shared_map: Optional[Dict[str, str]] = None
 
 
 async def _fetch_sales_category_configs(
@@ -2469,16 +2430,20 @@ async def _fetch_sales_category_configs(
     restaurant_guid: str,
 ) -> Dict[str, str]:
     """
-    Fetch and cache {salesCategory_guid: name} for one restaurant from the Toast
-    Config API.  The Orders API only carries the salesCategory GUID (no name), so
-    this map is what lets us match fee categories by the names accounting uses.
+    Return {salesCategory_guid: name}.  The Orders API only carries the salesCategory
+    GUID (no name), so this map is what lets us match fee categories by the names
+    accounting uses.
 
-    Cached indefinitely per restaurant_guid (categories rarely change).  Returns {}
-    on any error so callers degrade to "no fees identified" rather than crashing.
+    Categories are chain-wide, so the first successful fetch is reused for every
+    store (one Config-API call per process, not one per restaurant).  Returns {} on
+    error so callers degrade to the name-based fee fallback rather than crashing.
     """
-    global _salescat_config_cache
+    global _salescat_config_cache, _salescat_shared_map
     if restaurant_guid in _salescat_config_cache:
         return _salescat_config_cache[restaurant_guid]
+    if _salescat_shared_map is not None:
+        _salescat_config_cache[restaurant_guid] = _salescat_shared_map
+        return _salescat_shared_map
 
     standard_headers = await get_standard_api_auth_headers()
     headers = {
@@ -2490,7 +2455,7 @@ async def _fetch_sales_category_configs(
         resp = await client.get(url, headers=headers, timeout=30.0)
         if resp.status_code != 200:
             logger.warning(
-                "Sales-category config fetch failed for %s: HTTP %s — fees will be 0",
+                "Sales-category config fetch failed for %s: HTTP %s — fees fall back to name match",
                 restaurant_guid[:8] + "...", resp.status_code,
             )
             _salescat_config_cache[restaurant_guid] = {}
@@ -2503,9 +2468,11 @@ async def _fetch_sales_category_configs(
                 if guid:
                     configs[guid] = cat.get("name", "") or ""
         _salescat_config_cache[restaurant_guid] = configs
+        if configs:
+            _salescat_shared_map = configs   # reuse for all other stores
         logger.info(
-            "Sales-category configs cached for %s: %d categories",
-            restaurant_guid[:8] + "...", len(configs),
+            "Sales-category configs cached (shared across stores): %d categories",
+            len(configs),
         )
         return configs
     except Exception as exc:
@@ -6837,7 +6804,10 @@ async def nightly_flash_import_job():
             guid_to_loc = _get_flash_loc_mapping()
 
             # 3. Fetch ERA metrics with DINING_OPTION groupBy for yesterday
-            era_rows = await fetch_flash_metrics_batched(client, yesterday, yesterday, restaurant_ids)
+            era_rows = await request_and_fetch_toast_report(
+                client, yesterday, yesterday, restaurant_ids,
+                report_type="metrics", group_by=["DINING_OPTION"],
+            )
             if not isinstance(era_rows, list):
                 era_rows = []
 
@@ -13634,7 +13604,10 @@ async def _compute_flash_loc_data(
     restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
     guid_to_loc = _get_flash_loc_mapping()
 
-    era_rows = await fetch_flash_metrics_batched(client, target_date, target_date, restaurant_ids)
+    era_rows = await request_and_fetch_toast_report(
+        client, target_date, target_date, restaurant_ids,
+        report_type="metrics", group_by=["DINING_OPTION"],
+    )
     if not isinstance(era_rows, list):
         era_rows = []
 
@@ -16386,7 +16359,10 @@ async def _fetch_flash_era_data(
     Returns list of rows: {restaurantGuid, restaurantName, diningOption, netSalesAmount, guestCount, ordersCount, ...}
     """
     async with httpx.AsyncClient(timeout=120.0) as client:
-        data = await fetch_flash_metrics_batched(client, start_date, end_date, restaurant_ids)
+        data = await request_and_fetch_toast_report(
+            client, start_date, end_date, restaurant_ids,
+            report_type="metrics", group_by=["DINING_OPTION"],
+        )
     return data if isinstance(data, list) else []
 
 
