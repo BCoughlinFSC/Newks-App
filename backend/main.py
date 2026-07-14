@@ -2025,6 +2025,46 @@ async def fetch_toast_report(
     raise HTTPException(status_code=504, detail=f"Timed out waiting for report {report_guid}. Try narrowing the date range.")
 
 
+async def request_and_fetch_toast_report(
+    client: httpx.AsyncClient,
+    start: date,
+    end: date,
+    restaurant_ids: List[str],
+    report_type: str,
+    group_by: List[str],
+    guid_retries: int = 3,
+):
+    """
+    Create an ERA report request and fetch its result, regenerating the
+    reportRequestGuid on Toast's 409 "please generate a new reportRequestGuid and
+    try again" — a transient server-side failure where the queued request dies and
+    the same GUID can never be retrieved.  Only that specific 409 is retried; every
+    other error propagates unchanged.
+    """
+    last_exc: Optional[HTTPException] = None
+    for attempt in range(guid_retries):
+        report_guid = await request_toast_report(
+            client, start, end, restaurant_ids, report_type=report_type, group_by=group_by,
+        )
+        try:
+            return await fetch_toast_report(client, report_guid, report_type=report_type)
+        except HTTPException as exc:
+            detail = str(exc.detail or "")
+            is_stale_guid = exc.status_code == 409 and "reportRequestGuid" in detail
+            if is_stale_guid and attempt < guid_retries - 1:
+                last_exc = exc
+                logger.warning(
+                    "ERA report %s failed with stale-GUID 409 (attempt %d/%d); "
+                    "regenerating reportRequestGuid",
+                    report_guid, attempt + 1, guid_retries,
+                )
+                await asyncio.sleep(2.0)
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+
+
 # Restaurant-batch size for ERA menu analytics requests. One all-stores
 # payload (~98 restaurants × a week of MENU_ITEM/MODIFIER rows) is large
 # enough that the resp.json() parse spike alone can blow Cloudways' memory
@@ -6747,11 +6787,10 @@ async def nightly_flash_import_job():
             guid_to_loc = _get_flash_loc_mapping()
 
             # 3. Fetch ERA metrics with DINING_OPTION groupBy for yesterday
-            report_guid = await request_toast_report(
+            era_rows = await request_and_fetch_toast_report(
                 client, yesterday, yesterday, restaurant_ids,
                 report_type="metrics", group_by=["DINING_OPTION"],
             )
-            era_rows = await fetch_toast_report(client, report_guid, report_type="metrics")
             if not isinstance(era_rows, list):
                 era_rows = []
 
@@ -13548,11 +13587,10 @@ async def _compute_flash_loc_data(
     restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
     guid_to_loc = _get_flash_loc_mapping()
 
-    report_guid = await request_toast_report(
+    era_rows = await request_and_fetch_toast_report(
         client, target_date, target_date, restaurant_ids,
         report_type="metrics", group_by=["DINING_OPTION"],
     )
-    era_rows = await fetch_toast_report(client, report_guid, report_type="metrics")
     if not isinstance(era_rows, list):
         era_rows = []
 
