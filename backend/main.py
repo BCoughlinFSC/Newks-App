@@ -2415,20 +2415,37 @@ def _norm_cat_name(name: str) -> str:
 
 def _collect_fee_selections(selections, cat_configs: Dict[str, str], out: list) -> None:
     """
-    Recurse selections + modifiers; collect (category_name, price) for any selection
-    whose salesCategory resolves to a royalty-excluded fee category.  Tips/gratuity
-    lines are skipped (they are not sales), mirroring the deferred-item handling.
+    Recurse selections + modifiers; collect (label, price) for NON-DEFERRED fee items
+    — the ones that ARE inside Toast net and must come OUT of Royalty Net.
+
+    These fee items toggle on Toast's `deferred` flag (accounting controls it):
+      • deferred      → NOT in Toast net → added back for the Accounting figure
+                        (handled by the deferred add-back, NOT here);
+      • not deferred  → IN Toast net     → removed from Royalty Net (collected here).
+
+    A selection is a fee item when its salesCategory resolves to a royalty-excluded
+    fee category (Newks Fees / Third Party Fees / OLO Service Fee (D)) OR its name is
+    in the fee-item allowlist (_DEFERRED_ADDBACK_ITEMS — the SAME items, just their
+    non-deferred instances).  The name test is a fallback so a store whose Config-API
+    category name doesn't resolve still has its Tech/Service/Delivery fees removed.
+    Tips/gratuity lines are skipped (they are not sales).
     """
     for sel in (selections or []):
         if not isinstance(sel, dict) or sel.get("voided"):
             continue
-        cat_name = cat_configs.get((sel.get("salesCategory") or {}).get("guid", ""), "")
-        if cat_name and _norm_cat_name(cat_name) in _ROYALTY_EXCLUDE_FEE_CATEGORIES:
-            nm_low = (sel.get("displayName") or "").lower()
-            if "tip" not in nm_low and "gratuit" not in nm_low:
-                price = float(sel.get("price") or 0)
-                if price:
-                    out.append((cat_name, price))
+        # Deferred fee items are excluded from Toast net already — leave them for the
+        # accounting add-back; only non-deferred ones inflate Royalty Net.
+        if not sel.get("deferred"):
+            name = sel.get("displayName") or ""
+            nm_low = name.strip().lower()
+            if nm_low and "tip" not in nm_low and "gratuit" not in nm_low:
+                cat_name = cat_configs.get((sel.get("salesCategory") or {}).get("guid", ""), "")
+                cat_hit = bool(cat_name) and _norm_cat_name(cat_name) in _ROYALTY_EXCLUDE_FEE_CATEGORIES
+                name_hit = nm_low in _DEFERRED_ADDBACK_ITEMS
+                if cat_hit or name_hit:
+                    price = float(sel.get("price") or 0)
+                    if price:
+                        out.append((cat_name if cat_hit else name, price))
         _collect_fee_selections(sel.get("modifiers"), cat_configs, out)
 
 
@@ -3961,14 +3978,15 @@ def pivot_metrics_by_location_and_date(
 
     location_data = {}  # location -> date -> toast_net_sales
     location_sc_addon = {}  # location -> date -> restaurant_sc amount subtracted from Newk's
+    location_fee_addon = {} # location -> date -> un-deferred fee amount subtracted from Royalty Net
     all_dates = set()
     date_totals = {}       # date -> total Toast net sales
-    date_totals_newks = {} # date -> total Newk's net sales
+    date_totals_newks = {} # date -> total Newk's net sales (Royalty Net: −SC −fees)
     date_totals_sc = {}    # date -> total SC add-on (for display)
 
     # Royalty Net transparency + deferred add-back, aggregated per location over the range.
     have_details = bool(details)
-    loc_detail: Dict[str, dict] = {}  # location -> {toast, scTotal, scByName, deferredTotal, deferredByName}
+    loc_detail: Dict[str, dict] = {}  # location -> {toast, scTotal, scByName, deferredTotal, deferredByName, feesTotal, feesByName}
 
     for row in raw_rows:
         restaurant_name = row.get("restaurantName", "Unknown")
@@ -3979,14 +3997,19 @@ def pivot_metrics_by_location_and_date(
         # Restaurant-destination SCs fetched via Orders API; subtracted to get Newk's true net
         sc_key = f"{restaurant_guid}|{business_date}"
         sc_addon = (service_charges or {}).get(sc_key, 0.0)
-        newks_net_sales = toast_net_sales - sc_addon
+        # Un-deferred fee-category sales (also in Toast net) — removed from Royalty Net.
+        det_row = (details or {}).get(sc_key) or {}
+        fee_addon = det_row.get("feesTotal", 0.0)
+        newks_net_sales = toast_net_sales - sc_addon - fee_addon
 
         if restaurant_name not in location_data:
             location_data[restaurant_name] = {}
             location_sc_addon[restaurant_name] = {}
+            location_fee_addon[restaurant_name] = {}
 
         location_data[restaurant_name][business_date] = toast_net_sales
         location_sc_addon[restaurant_name][business_date] = sc_addon
+        location_fee_addon[restaurant_name][business_date] = fee_addon
         all_dates.add(business_date)
 
         if business_date not in date_totals:
@@ -4018,15 +4041,17 @@ def pivot_metrics_by_location_and_date(
     sorted_dates = sorted(list(all_dates))
     sorted_locations = sorted(location_data.keys())
 
-    # Build pivot rows: each date column has Toast value; date_newks has Newk's (Toast - SC addon)
+    # Build pivot rows: each date column has Toast value; date_newks has Royalty Net
+    # (Toast − restaurant SC − un-deferred fees).
     pivot_rows = []
     for location in sorted_locations:
         row_data = {"restaurantName": location}
         for d in sorted_dates:
             toast_val = location_data[location].get(d, 0)
             sc = location_sc_addon[location].get(d, 0)
+            fee = location_fee_addon[location].get(d, 0)
             row_data[d] = toast_val
-            row_data[f"{d}_newks"] = toast_val - sc
+            row_data[f"{d}_newks"] = toast_val - sc - fee
         pivot_rows.append(row_data)
 
     totals_rows = [
