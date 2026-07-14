@@ -2080,6 +2080,50 @@ async def request_and_fetch_toast_report(
 # exactly the same row set as a single all-stores request.
 MENU_REPORT_RESTAURANT_BATCH = 25
 
+# Restaurant-batch size for the flash metrics report. A single all-stores (~98)
+# metrics/day request started failing Toast's report engine with a 409 (the report
+# job dies and the GUID can never be fetched — observed 2026-07-14). Smaller
+# per-restaurant batches build reliably; ERA rows carry restaurantGuid +
+# businessDate, so concatenating batches yields the same row set.
+FLASH_REPORT_RESTAURANT_BATCH = 20
+
+
+async def fetch_flash_metrics_batched(
+    client: httpx.AsyncClient,
+    start: date,
+    end: date,
+    restaurant_ids: List[str],
+) -> list:
+    """
+    Fetch ERA metrics (groupBy=DINING_OPTION) for the flash import, batched by
+    restaurant so one oversized/failing all-stores report can't sink the run.
+    Each batch regenerates its reportRequestGuid on the transient stale-GUID 409.
+    A batch that still fails after retries raises with its store GUIDs logged, so
+    the culprit is visible rather than a blank all-stores 409.
+    """
+    out: list = []
+    batches = chunk_list(restaurant_ids, FLASH_REPORT_RESTAURANT_BATCH)
+    for i, batch in enumerate(batches):
+        try:
+            rows = await request_and_fetch_toast_report(
+                client, start, end, batch,
+                report_type="metrics", group_by=["DINING_OPTION"],
+            )
+        except HTTPException as exc:
+            logger.error(
+                "Flash ERA batch %d/%d FAILED (%d stores: %s): %s",
+                i + 1, len(batches), len(batch),
+                ", ".join(s[:8] for s in batch), exc.detail,
+            )
+            raise
+        if isinstance(rows, list):
+            out.extend(rows)
+        logger.info("Flash ERA batch %d/%d ok (%d stores, %d rows so far)",
+                    i + 1, len(batches), len(batch), len(out))
+        if i < len(batches) - 1:
+            await asyncio.sleep(0.3)
+    return out
+
 
 async def fetch_menu_rows_batched(
     client: httpx.AsyncClient,
@@ -6793,10 +6837,7 @@ async def nightly_flash_import_job():
             guid_to_loc = _get_flash_loc_mapping()
 
             # 3. Fetch ERA metrics with DINING_OPTION groupBy for yesterday
-            era_rows = await request_and_fetch_toast_report(
-                client, yesterday, yesterday, restaurant_ids,
-                report_type="metrics", group_by=["DINING_OPTION"],
-            )
+            era_rows = await fetch_flash_metrics_batched(client, yesterday, yesterday, restaurant_ids)
             if not isinstance(era_rows, list):
                 era_rows = []
 
@@ -13593,10 +13634,7 @@ async def _compute_flash_loc_data(
     restaurant_ids = _ensure_all_mapped_guids(restaurant_ids)
     guid_to_loc = _get_flash_loc_mapping()
 
-    era_rows = await request_and_fetch_toast_report(
-        client, target_date, target_date, restaurant_ids,
-        report_type="metrics", group_by=["DINING_OPTION"],
-    )
+    era_rows = await fetch_flash_metrics_batched(client, target_date, target_date, restaurant_ids)
     if not isinstance(era_rows, list):
         era_rows = []
 
@@ -16348,12 +16386,7 @@ async def _fetch_flash_era_data(
     Returns list of rows: {restaurantGuid, restaurantName, diningOption, netSalesAmount, guestCount, ordersCount, ...}
     """
     async with httpx.AsyncClient(timeout=120.0) as client:
-        report_guid = await request_toast_report(
-            client, start_date, end_date, restaurant_ids,
-            report_type="metrics",
-            group_by=["DINING_OPTION"],
-        )
-        data = await fetch_toast_report(client, report_guid, report_type="metrics")
+        data = await fetch_flash_metrics_batched(client, start_date, end_date, restaurant_ids)
     return data if isinstance(data, list) else []
 
 
