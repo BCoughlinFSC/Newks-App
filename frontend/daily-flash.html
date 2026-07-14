@@ -480,15 +480,16 @@
       if (!reportData) { content.innerHTML = '<div class="status-msg">No data.</div>'; return; }
 
       // Union of itemized names across all periods for the chain rows.
-      const scNames = new Set(), feeNames = new Set(), defNames = new Set();
+      const scNames = new Set(), feeNames = new Set(), defNames = new Set(), gratNames = new Set();
       for (const p of PERIODS) {
         const c = reportData.periods[p]?.bridge?.chain;
         if (!c) continue;
         Object.keys(c.scByName || {}).forEach(n => scNames.add(n));
         Object.keys(c.feesByName || {}).forEach(n => feeNames.add(n));
         Object.keys(c.deferredByName || {}).forEach(n => defNames.add(n));
+        Object.keys(c.gratFeeByName || {}).forEach(n => gratNames.add(n));
       }
-      const scList = [...scNames], feeList = [...feeNames], defList = [...defNames];
+      const scList = [...scNames], feeList = [...feeNames], defList = [...defNames], gratList = [...gratNames];
       const chainOf = p => reportData.periods[p]?.bridge?.chain || null;
 
       const bRow = (label, valFn, cls, indent) => {
@@ -505,7 +506,7 @@
       let html = '<div class="flash-table-wrap">';
       html += '<p style="margin:0.4rem 0 0.9rem; font-size:0.85rem; color:#374151;">'
             + '<b>Adjustment bridge.</b> Toast Net &minus; restaurant service charges &minus; un-deferred fees = <b>R-Net</b>; '
-            + 'Toast Net &plus; allowlisted deferred add-back = <b>Adjusted Accounting Net</b>. '
+            + 'Toast Net &plus; deferred add-back &plus; gratuity-flagged fees = <b>Adjusted Accounting Net</b>. '
             + 'Only stores with captured Toast data are included.</p>';
 
       // ── Chain bridge (line items × period columns) ──
@@ -525,7 +526,8 @@
       for (const nm of scList) html += bRow('− ' + nm, p => { const v = chainOf(p)?.scByName?.[nm]; return v ? -v : null; }, '', true);
       for (const nm of feeList) html += bRow('− ' + nm + ' (fee)', p => { const v = chainOf(p)?.feesByName?.[nm]; return v ? -v : null; }, '', true);
       html += bRow('= R-Net (royalty net)', p => chainOf(p)?.rNet, 'total-row');
-      for (const nm of defList) html += bRow('+ ' + nm, p => chainOf(p)?.deferredByName?.[nm] || null, '', true);
+      for (const nm of defList) html += bRow('+ ' + nm + ' (deferred)', p => chainOf(p)?.deferredByName?.[nm] || null, '', true);
+      for (const nm of gratList) html += bRow('+ ' + nm + ' (gratuity fee)', p => chainOf(p)?.gratFeeByName?.[nm] || null, '', true);
       html += bRow('= Adjusted Accounting Net', p => chainOf(p)?.adjNet, 'total-row');
       html += '</tbody></table>';
 
@@ -551,7 +553,8 @@
         const scItems = Object.entries(s.scByName || {});
         const feeItems = Object.entries(s.feesByName || {});
         const defItems = Object.entries(s.deferredByName || {});
-        const hasDetail = scItems.length || feeItems.length || defItems.length;
+        const gratItems = Object.entries(s.gratFeeByName || {});
+        const hasDetail = scItems.length || feeItems.length || defItems.length || gratItems.length;
         html += '<tr>';
         html += `<td class="left sticky sticky-0">`
               + (hasDetail ? `<span style="cursor:pointer;color:#C41E3A;font-weight:600;" onclick="toggleBridgeStore(${idx})">▸ </span>` : '')
@@ -568,7 +571,8 @@
           const parts = [];
           if (scItems.length) parts.push('<b>Service charges:</b> ' + scItems.map(([n, v]) => `${esc(n)} ${fmtDollar(v)}`).join(' · '));
           if (feeItems.length) parts.push('<b>Fees (removed from royalty):</b> ' + feeItems.map(([n, v]) => `${esc(n)} ${fmtDollar(v)}`).join(' · '));
-          if (defItems.length) parts.push('<b>Deferred add-back:</b> ' + defItems.map(([n, v]) => `${esc(n)} ${fmtDollar(v)}`).join(' · '));
+          if (defItems.length) parts.push('<b>Deferred add-back (accounting):</b> ' + defItems.map(([n, v]) => `${esc(n)} ${fmtDollar(v)}`).join(' · '));
+          if (gratItems.length) parts.push('<b>Gratuity-flagged fees (accounting add-back):</b> ' + gratItems.map(([n, v]) => `${esc(n)} ${fmtDollar(v)}`).join(' · '));
           html += parts.join('<br>');
           html += '</td></tr>';
         }
@@ -1015,13 +1019,14 @@
         const rows = [];
         const merges = [];
         const chainOf = p => reportData.periods[p]?.bridge?.chain || null;
-        const scNames = new Set(), feeNames = new Set(), defNames = new Set();
+        const scNames = new Set(), feeNames = new Set(), defNames = new Set(), gratNames = new Set();
         for (const p of PERIODS) {
           const c = chainOf(p);
           if (!c) continue;
           Object.keys(c.scByName || {}).forEach(n => scNames.add(n));
           Object.keys(c.feesByName || {}).forEach(n => feeNames.add(n));
           Object.keys(c.deferredByName || {}).forEach(n => defNames.add(n));
+          Object.keys(c.gratFeeByName || {}).forEach(n => gratNames.add(n));
         }
         const ncols = 1 + PERIODS.length;
 
@@ -1050,12 +1055,13 @@
         for (const nm of scNames) rows.push(line('   − ' + nm, p => { const v = chainOf(p)?.scByName?.[nm]; return v ? -v : null; }, false));
         for (const nm of feeNames) rows.push(line('   − ' + nm + ' (fee)', p => { const v = chainOf(p)?.feesByName?.[nm]; return v ? -v : null; }, false));
         rows.push(line('= R-Net (royalty net)', p => chainOf(p)?.rNet ?? null, true));
-        for (const nm of defNames) rows.push(line('   + ' + nm, p => chainOf(p)?.deferredByName?.[nm] ?? null, false));
+        for (const nm of defNames) rows.push(line('   + ' + nm + ' (deferred)', p => chainOf(p)?.deferredByName?.[nm] ?? null, false));
+        for (const nm of gratNames) rows.push(line('   + ' + nm + ' (gratuity fee)', p => chainOf(p)?.gratFeeByName?.[nm] ?? null, false));
         rows.push(line('= Adjusted Accounting Net', p => chainOf(p)?.adjNet ?? null, true));
 
         // Per-store detail (YTD — most complete period).
         rows.push([]);
-        const hdr2 = [{ v: 'Per-store (YTD)', s: S.colHeaderLeft }, { v: 'Toast - Net', s: S.colHeader }, { v: 'Service Charges', s: S.colHeader }, { v: 'Fees', s: S.colHeader }, { v: 'R-Net', s: S.colHeader }, { v: 'Deferred Add-back', s: S.colHeader }, { v: 'Adjusted Accounting Net', s: S.colHeader }];
+        const hdr2 = [{ v: 'Per-store (YTD)', s: S.colHeaderLeft }, { v: 'Toast - Net', s: S.colHeader }, { v: 'Service Charges', s: S.colHeader }, { v: 'Fees', s: S.colHeader }, { v: 'R-Net', s: S.colHeader }, { v: 'Deferred Add-back', s: S.colHeader }, { v: 'Gratuity Fees (acct)', s: S.colHeader }, { v: 'Adjusted Accounting Net', s: S.colHeader }];
         rows.push(hdr2);
         const byStore = reportData.periods['YTD']?.bridge?.byStore || [];
         for (const s of byStore) {
@@ -1066,6 +1072,7 @@
             { v: s.feesTotal ? -s.feesTotal : 0, t: 'n', s: S.dollar },
             { v: s.rNet, t: 'n', s: S.dollar },
             { v: s.deferredTotal || 0, t: 'n', s: S.dollar },
+            { v: s.gratFeeTotal || 0, t: 'n', s: S.dollar },
             { v: s.adjNet, t: 'n', s: S.dollar },
           ]);
         }

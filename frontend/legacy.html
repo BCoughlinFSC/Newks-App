@@ -3405,8 +3405,8 @@
             const rangeLabel = (s,e) => !s ? '' : (s===e ? fmtD(s) : `${fmtD(s)}–${fmtD(e)}`);
             const cyRange = rangeLabel(meta.cyStart, meta.cyEnd);
             const pyRange = rangeLabel(meta.pyStart, meta.pyEnd);
-            const cyNorm = d => ({toast:d.toastNetSales, scTotal:d.serviceChargeTotal, scByName:d.scByName||{}, feesTotal:d.feesTotal, feesByName:d.feesByName||{}, royalty:d.royaltyNet, defTotal:d.deferredTotal, defByName:d.deferredByName||{}, accurate:d.accurateNetSales});
-            const pyNorm = d => ({toast:d.pyToastNetSales, scTotal:d.pyServiceChargeTotal, scByName:d.pyScByName||{}, feesTotal:d.pyFeesTotal, feesByName:d.pyFeesByName||{}, royalty:d.pyRoyaltyNet, defTotal:d.pyDeferredTotal, defByName:d.pyDeferredByName||{}, accurate:d.pyAccurateNetSales});
+            const cyNorm = d => ({toast:d.toastNetSales, scTotal:d.serviceChargeTotal, scByName:d.scByName||{}, feesTotal:d.feesTotal, feesByName:d.feesByName||{}, royalty:d.royaltyNet, defTotal:d.deferredTotal, defByName:d.deferredByName||{}, gratTotal:d.gratFeeTotal, gratByName:d.gratFeeByName||{}, accurate:d.accurateNetSales});
+            const pyNorm = d => ({toast:d.pyToastNetSales, scTotal:d.pyServiceChargeTotal, scByName:d.pyScByName||{}, feesTotal:d.pyFeesTotal, feesByName:d.pyFeesByName||{}, royalty:d.pyRoyaltyNet, defTotal:d.pyDeferredTotal, defByName:d.pyDeferredByName||{}, gratTotal:d.pyGratFeeTotal, gratByName:d.pyGratFeeByName||{}, accurate:d.pyAccurateNetSales});
             const pyToastAvail = d => d.pySource === 'toast' && d.pyToastNetSales != null;
             const pyAlohaAvail = d => d.pySource === 'aloha' && d.pyAlohaNetSales != null;
             const buildWaterfall = (n, title, accent) => {
@@ -3422,10 +3422,13 @@
               }
               w += `<tr style="background:#ECFDF5;border-top:2px solid #065F46;"><td style="padding:0.35rem 0.6rem;font-weight:700;color:#065F46;">= Royalty Net</td><td style="padding:0.35rem 0.6rem;text-align:right;font-weight:700;color:#065F46;">${money(n.royalty)}</td></tr>`;
               const defNames = Object.keys(n.defByName||{});
-              if ((n.defTotal||0) > 0 || defNames.length) {
-                defNames.forEach(nm => { w += `<tr><td style="padding:0.12rem 0.6rem 0.12rem 1.4rem;color:#6B7280;">+ ${nm}</td><td style="padding:0.12rem 0.6rem;text-align:right;color:#1D4ED8;">+${money(n.defByName[nm])}</td></tr>`; });
-                w += `<tr><td style="padding:0.25rem 0.6rem;font-weight:600;">Total Deferred Add-back</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;color:#1D4ED8;">+${money(n.defTotal)}</td></tr>`;
-                w += `<tr style="background:#EFF6FF;border-top:2px solid #1D4ED8;"><td style="padding:0.35rem 0.6rem;font-weight:700;color:#1E3A8A;">= Accurate Net Sales</td><td style="padding:0.35rem 0.6rem;text-align:right;font-weight:700;color:#1E3A8A;">${money(n.accurate)}</td></tr>`;
+              const gratNames = Object.keys(n.gratByName||{});
+              const addbackTotal = (n.defTotal||0) + (n.gratTotal||0);
+              if (addbackTotal > 0 || defNames.length || gratNames.length) {
+                defNames.forEach(nm => { w += `<tr><td style="padding:0.12rem 0.6rem 0.12rem 1.4rem;color:#6B7280;">+ ${nm} <span style="color:#9CA3AF;">(deferred)</span></td><td style="padding:0.12rem 0.6rem;text-align:right;color:#1D4ED8;">+${money(n.defByName[nm])}</td></tr>`; });
+                gratNames.forEach(nm => { w += `<tr><td style="padding:0.12rem 0.6rem 0.12rem 1.4rem;color:#6B7280;">+ ${nm} <span style="color:#9CA3AF;">(gratuity-flagged fee)</span></td><td style="padding:0.12rem 0.6rem;text-align:right;color:#1D4ED8;">+${money(n.gratByName[nm])}</td></tr>`; });
+                w += `<tr><td style="padding:0.25rem 0.6rem;font-weight:600;">Total Accounting Add-back</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;color:#1D4ED8;">+${money(addbackTotal)}</td></tr>`;
+                w += `<tr style="background:#EFF6FF;border-top:2px solid #1D4ED8;"><td style="padding:0.35rem 0.6rem;font-weight:700;color:#1E3A8A;">= Accounting Net Sales</td><td style="padding:0.35rem 0.6rem;text-align:right;font-weight:700;color:#1E3A8A;">${money(n.accurate)}</td></tr>`;
               }
               w += '</table></div>';
               return w;
@@ -3442,7 +3445,8 @@
               if (pyToastAvail(d)) s += ` &nbsp;vs&nbsp; PY (Toast) Royalty Net <span style="color:#1E3A8A;font-weight:700;">${money(d.pyRoyaltyNet)}</span>`;
               else if (pyAlohaAvail(d)) s += ` &nbsp;vs&nbsp; <span style="color:#92400E;">PY (Aloha) Net ${money(d.pyAlohaNetSales)} · royalty pending</span>`;
               else s += ` &nbsp;vs&nbsp; <span style="color:#6B7280;">PY: no data</span>`;
-              if ((d.deferredTotal||0) > 0) s += ` &nbsp;&middot;&nbsp; CY +Deferred ${money(d.deferredTotal)} = Accurate <span style="color:#1E3A8A;">${money(d.accurateNetSales)}</span>`;
+              const cyAddback = (d.deferredTotal||0) + (d.gratFeeTotal||0);
+              if (cyAddback > 0) s += ` &nbsp;&middot;&nbsp; CY +Add-back ${money(cyAddback)} = Accounting <span style="color:#1E3A8A;">${money(d.accurateNetSales)}</span>`;
               return s;
             };
             html += '<tr><td colspan="100" style="height:18px;border:none;"></td></tr>';
@@ -5210,8 +5214,8 @@
             // Currency number format — red parentheses for negatives, mirroring the screen.
             const CUR = '$#,##0.00;[Red]($#,##0.00)';
             const money = st => ({ ...st, numFmt: CUR });
-            const cyNorm = d => ({toast:d.toastNetSales, scByName:d.scByName||{}, scTotal:d.serviceChargeTotal, feesByName:d.feesByName||{}, feesTotal:d.feesTotal, royalty:d.royaltyNet, defByName:d.deferredByName||{}, defTotal:d.deferredTotal, accurate:d.accurateNetSales});
-            const pyNorm = d => ({toast:d.pyToastNetSales, scByName:d.pyScByName||{}, scTotal:d.pyServiceChargeTotal, feesByName:d.pyFeesByName||{}, feesTotal:d.pyFeesTotal, royalty:d.pyRoyaltyNet, defByName:d.pyDeferredByName||{}, defTotal:d.pyDeferredTotal, accurate:d.pyAccurateNetSales});
+            const cyNorm = d => ({toast:d.toastNetSales, scByName:d.scByName||{}, scTotal:d.serviceChargeTotal, feesByName:d.feesByName||{}, feesTotal:d.feesTotal, royalty:d.royaltyNet, defByName:d.deferredByName||{}, defTotal:d.deferredTotal, gratByName:d.gratFeeByName||{}, gratTotal:d.gratFeeTotal, accurate:d.accurateNetSales});
+            const pyNorm = d => ({toast:d.pyToastNetSales, scByName:d.pyScByName||{}, scTotal:d.pyServiceChargeTotal, feesByName:d.pyFeesByName||{}, feesTotal:d.pyFeesTotal, royalty:d.pyRoyaltyNet, defByName:d.pyDeferredByName||{}, defTotal:d.pyDeferredTotal, gratByName:d.pyGratFeeByName||{}, gratTotal:d.pyGratFeeTotal, accurate:d.pyAccurateNetSales});
             // Build the vertical waterfall rows ([labelCell, valueCell]) for a Toast node.
             const toastPanel = nm => {
               const out = [];
@@ -5225,10 +5229,13 @@
               }
               out.push([c('= Royalty Net', S.lGreenL), n(nm.royalty || 0, money(S.lGreenR))]);
               const defNames = Object.keys(nm.defByName || {});
-              if ((nm.defTotal || 0) > 0 || defNames.length) {
-                defNames.forEach(name => out.push([c('     + ' + name, S.dL), n(nm.defByName[name] || 0, money(S.dR))]));
-                out.push([c('Total Deferred Add-back', S.dLbld), n(nm.defTotal || 0, money(S.dRbld))]);
-                out.push([c('= Accurate Net Sales', S.lBlueL), n(nm.accurate || 0, money(S.lBlueR))]);
+              const gratNames = Object.keys(nm.gratByName || {});
+              const addback = (nm.defTotal || 0) + (nm.gratTotal || 0);
+              if (addback > 0 || defNames.length || gratNames.length) {
+                defNames.forEach(name => out.push([c('     + ' + name + ' (deferred)', S.dL), n(nm.defByName[name] || 0, money(S.dR))]));
+                gratNames.forEach(name => out.push([c('     + ' + name + ' (gratuity-flagged fee)', S.dL), n(nm.gratByName[name] || 0, money(S.dR))]));
+                out.push([c('Total Accounting Add-back', S.dLbld), n(addback, money(S.dRbld))]);
+                out.push([c('= Accounting Net Sales', S.lBlueL), n(nm.accurate || 0, money(S.lBlueR))]);
               }
               return out;
             };
@@ -5245,7 +5252,8 @@
               if (pyOn(d)) summary += `  vs  PY Royalty Net ${(d.pyRoyaltyNet||0).toFixed(2)}`;
               else if (pyAloha(d)) summary += `  vs  PY (Aloha) Net ${(d.pyAlohaNetSales||0).toFixed(2)}`;
               else summary += '  vs  PY: no data';
-              if ((d.deferredTotal||0) > 0) summary += `  ·  +Deferred ${(d.deferredTotal||0).toFixed(2)} = Accurate ${(d.accurateNetSales||0).toFixed(2)}`;
+              const cyAddback = (d.deferredTotal||0) + (d.gratFeeTotal||0);
+              if (cyAddback > 0) summary += `  ·  +Add-back ${cyAddback.toFixed(2)} = Accounting ${(d.accurateNetSales||0).toFixed(2)}`;
               rRows.push([c(label, S.greenL), c('', S.greenR), blank(), c(summary, S.greenL), c('', S.greenR)]);
               // Panel titles
               const cyTitle = 'Current Year (Toast)' + (cyt ? ' · ' + cyt : '');

@@ -2353,6 +2353,23 @@ _ROYALTY_EXCLUDE_FEE_CATEGORIES = {
     "olo service fee (d)",
 }
 
+
+def _is_grat_fee_addback(name: str) -> bool:
+    """
+    True for a GRATUITY-flagged service charge that is really a FEE (e.g.
+    "Catering - Delivery Fee"), not a genuine tip.  Toast excludes gratuity service
+    charges from net sales, so these fees drop out of Toast net; accounting still
+    recognizes them, so they are added back for the Accounting figure.
+
+    Name-based rule (accounting's choice): the charge is a fee when its name contains
+    "fee" and does NOT read as a tip/gratuity — so "… Delivery Fee(s)" / "Service Fee"
+    add back, while "… Tips" / "… Delivery Tip" / "Gratuity" stay out.
+    """
+    nm = (name or "").strip().lower()
+    if not nm or "tip" in nm or "gratuit" in nm:
+        return False
+    return "fee" in nm
+
 # {restaurant_guid: {salesCategory_guid: name}} — resolved once per restaurant.
 _salescat_config_cache: Dict[str, Dict[str, str]] = {}
 
@@ -2481,9 +2498,11 @@ async def _compute_netsales_detail_for_day(
     sc_by: Dict[str, float] = {}
     deferred_by: Dict[str, float] = {}
     fees_by: Dict[str, float] = {}
+    grat_fee_by: Dict[str, float] = {}
     sc_total = 0.0
     deferred_total = 0.0
     fees_total = 0.0
+    grat_fee_total = 0.0
 
     for order in orders:
         if order.get("voided"):
@@ -2491,19 +2510,26 @@ async def _compute_netsales_detail_for_day(
         for check in order.get("checks", []):
             if check.get("voided") or check.get("deleted"):
                 continue
-            # Restaurant-destination service charges (subtracted for Royalty Net)
             for applied_sc in check.get("appliedServiceCharges", []):
                 amt = float(applied_sc.get("chargeAmount") or 0)
                 if amt <= 0:
                     continue
-                if (applied_sc.get("destination") or "RESTAURANT") != "RESTAURANT":
-                    continue
+                dest = applied_sc.get("destination") or "RESTAURANT"
+                is_grat = bool(applied_sc.get("gratuity"))
                 sc_guid = (applied_sc.get("serviceCharge") or {}).get("guid", "")
                 nm = (applied_sc.get("name")
                       or (configs.get(sc_guid) or {}).get("name")
                       or "Service Charge")
-                sc_by[nm] = sc_by.get(nm, 0.0) + amt
-                sc_total += amt
+                if dest == "RESTAURANT" and not is_grat:
+                    # Non-gratuity restaurant SC — INCLUDED in Toast net; subtract for Royalty Net.
+                    sc_by[nm] = sc_by.get(nm, 0.0) + amt
+                    sc_total += amt
+                elif is_grat and _is_grat_fee_addback(nm):
+                    # Gratuity-flagged FEE (e.g. Catering - Delivery Fee) — Toast excludes gratuity
+                    # SCs from net, so accounting adds it back for the Accounting figure.
+                    grat_fee_by[nm] = grat_fee_by.get(nm, 0.0) + amt
+                    grat_fee_total += amt
+                # else: genuine tip / non-restaurant non-fee → not Newk's net revenue, ignored.
             # Deferred line-item sales (added back for historical parity, tips excluded)
             deferred_sels: list = []
             _collect_deferred_selections(check.get("selections"), deferred_sels)
@@ -2532,6 +2558,10 @@ async def _compute_netsales_detail_for_day(
         "deferredByName": {k: round(v, 2) for k, v in deferred_by.items()},
         "feesTotal": round(fees_total, 2),
         "feesByName": {k: round(v, 2) for k, v in fees_by.items()},
+        # Gratuity-flagged fee service charges (excluded from Toast net) — added back
+        # for the Accounting figure alongside deferred items.
+        "gratFeeTotal": round(grat_fee_total, 2),
+        "gratFeeByName": {k: round(v, 2) for k, v in grat_fee_by.items()},
     }
     _netsales_detail_cache[key] = result
     return result
@@ -4025,7 +4055,8 @@ def pivot_metrics_by_location_and_date(
             ld = loc_detail.setdefault(
                 restaurant_name,
                 {"toast": 0.0, "scTotal": 0.0, "scByName": {}, "deferredTotal": 0.0,
-                 "deferredByName": {}, "feesTotal": 0.0, "feesByName": {}},
+                 "deferredByName": {}, "feesTotal": 0.0, "feesByName": {},
+                 "gratFeeTotal": 0.0, "gratFeeByName": {}},
             )
             ld["toast"] += toast_net_sales
             ld["scTotal"] += det.get("scTotal", 0.0)
@@ -4037,6 +4068,9 @@ def pivot_metrics_by_location_and_date(
             ld["feesTotal"] += det.get("feesTotal", 0.0)
             for nm, amt in (det.get("feesByName") or {}).items():
                 ld["feesByName"][nm] = ld["feesByName"].get(nm, 0.0) + amt
+            ld["gratFeeTotal"] += det.get("gratFeeTotal", 0.0)
+            for nm, amt in (det.get("gratFeeByName") or {}).items():
+                ld["gratFeeByName"][nm] = ld["gratFeeByName"].get(nm, 0.0) + amt
 
     sorted_dates = sorted(list(all_dates))
     sorted_locations = sorted(location_data.keys())
@@ -4078,7 +4112,8 @@ def pivot_metrics_by_location_and_date(
         chain_sc: Dict[str, float] = {}
         chain_def: Dict[str, float] = {}
         chain_fees: Dict[str, float] = {}
-        chain_toast = chain_sc_total = chain_def_total = chain_fees_total = 0.0
+        chain_gratfee: Dict[str, float] = {}
+        chain_toast = chain_sc_total = chain_def_total = chain_fees_total = chain_gratfee_total = 0.0
         for loc, ld in loc_detail.items():
             by_location[loc] = {
                 "toastNetSales":      round(ld["toast"], 2),
@@ -4090,18 +4125,24 @@ def pivot_metrics_by_location_and_date(
                 "royaltyNet":         round(ld["toast"] - ld["scTotal"] - ld["feesTotal"], 2),
                 "deferredTotal":      round(ld["deferredTotal"], 2),
                 "deferredByName":     _sorted_round(ld["deferredByName"]),
-                "accurateNetSales":   round(ld["toast"] + ld["deferredTotal"], 2),
+                "gratFeeTotal":       round(ld["gratFeeTotal"], 2),
+                "gratFeeByName":      _sorted_round(ld["gratFeeByName"]),
+                # Accounting Net = Toast net + deferred add-back + gratuity-flagged fees
+                "accurateNetSales":   round(ld["toast"] + ld["deferredTotal"] + ld["gratFeeTotal"], 2),
             }
             chain_toast += ld["toast"]
             chain_sc_total += ld["scTotal"]
             chain_def_total += ld["deferredTotal"]
             chain_fees_total += ld["feesTotal"]
+            chain_gratfee_total += ld["gratFeeTotal"]
             for k, v in ld["scByName"].items():
                 chain_sc[k] = chain_sc.get(k, 0.0) + v
             for k, v in ld["deferredByName"].items():
                 chain_def[k] = chain_def.get(k, 0.0) + v
             for k, v in ld["feesByName"].items():
                 chain_fees[k] = chain_fees.get(k, 0.0) + v
+            for k, v in ld["gratFeeByName"].items():
+                chain_gratfee[k] = chain_gratfee.get(k, 0.0) + v
         result["royaltyDetail"] = {
             "byLocation": by_location,
             "chain": {
@@ -4113,7 +4154,9 @@ def pivot_metrics_by_location_and_date(
                 "royaltyNet":         round(chain_toast - chain_sc_total - chain_fees_total, 2),
                 "deferredTotal":      round(chain_def_total, 2),
                 "deferredByName":     _sorted_round(chain_def),
-                "accurateNetSales":   round(chain_toast + chain_def_total, 2),
+                "gratFeeTotal":       round(chain_gratfee_total, 2),
+                "gratFeeByName":      _sorted_round(chain_gratfee),
+                "accurateNetSales":   round(chain_toast + chain_def_total + chain_gratfee_total, 2),
             },
         }
 
@@ -4178,6 +4221,8 @@ def _merge_py_royalty_detail(cy_rd: dict, py_rd: Optional[dict], py_start: date,
             "pyRoyaltyNet":         d.get("royaltyNet"),
             "pyDeferredTotal":      d.get("deferredTotal"),
             "pyDeferredByName":     d.get("deferredByName", {}),
+            "pyGratFeeTotal":       d.get("gratFeeTotal"),
+            "pyGratFeeByName":      d.get("gratFeeByName", {}),
             "pyAccurateNetSales":   d.get("accurateNetSales"),
             "pySource":             "toast",
         }
@@ -6763,6 +6808,7 @@ async def nightly_flash_import_job():
                 data["sc_by_name"] = ""
                 data["deferred_by_name"] = ""
                 data["fees_by_name"] = ""
+                data["grat_fee_by_name"] = ""
 
                 if guid:
                     try:
@@ -6814,6 +6860,7 @@ async def nightly_flash_import_job():
                             data["sc_by_name"] = json.dumps(detail.get("scByName", {}))
                             data["deferred_by_name"] = json.dumps(detail.get("deferredByName", {}))
                             data["fees_by_name"] = json.dumps(detail.get("feesByName", {}))
+                            data["grat_fee_by_name"] = json.dumps(detail.get("gratFeeByName", {}))
                         except Exception as dexc:
                             logger.warning("Flash import: bridge detail failed for %s: %s", loc_id, dexc)
                         await asyncio.sleep(0.3)  # Rate limit courtesy
@@ -6858,6 +6905,7 @@ async def nightly_flash_import_job():
                     "ScByName": data.get("sc_by_name", ""),
                     "DeferredByName": data.get("deferred_by_name", ""),
                     "FeesByName": data.get("fees_by_name", ""),
+                    "GratFeeByName": data.get("grat_fee_by_name", ""),
                 })
 
             if rows_for_df:
@@ -13558,6 +13606,7 @@ async def _compute_flash_loc_data(
         data["sc_by_name"] = ""
         data["deferred_by_name"] = ""
         data["fees_by_name"] = ""
+        data["grat_fee_by_name"] = ""
 
         if guid:
             try:
@@ -13590,6 +13639,7 @@ async def _compute_flash_loc_data(
                     data["sc_by_name"] = json.dumps(detail.get("scByName", {}))
                     data["deferred_by_name"] = json.dumps(detail.get("deferredByName", {}))
                     data["fees_by_name"] = json.dumps(detail.get("feesByName", {}))
+                    data["grat_fee_by_name"] = json.dumps(detail.get("gratFeeByName", {}))
                 except Exception as dexc:
                     logger.warning("Flash bridge detail for %s: %s", loc_id, dexc)
                 await asyncio.sleep(0.3)
@@ -13646,6 +13696,7 @@ async def _run_flash_import_for_date(target_date: date):
                     "ScByName": data.get("sc_by_name", ""),
                     "DeferredByName": data.get("deferred_by_name", ""),
                     "FeesByName": data.get("fees_by_name", ""),
+                    "GratFeeByName": data.get("grat_fee_by_name", ""),
                 })
 
             if rows_for_df:
@@ -16906,10 +16957,11 @@ def _build_flash_bridge(cy_agg: dict, bridge_detail: dict, store_info: dict, clo
     rest are pre-migration / Aloha-sourced.
     Returns {"chain": {...}, "byStore": [...], "storeCount": n}.
     """
-    chain_toast = chain_rnet = chain_deferred = chain_sc_total = chain_fees_total = 0.0
+    chain_toast = chain_rnet = chain_deferred = chain_sc_total = chain_fees_total = chain_gratfee_total = 0.0
     chain_sc_by: Dict[str, float] = {}
     chain_fees_by: Dict[str, float] = {}
     chain_def_by: Dict[str, float] = {}
+    chain_gratfee_by: Dict[str, float] = {}
     by_store = []
     for loc_id, ch in cy_agg.items():
         if loc_id in closed_ids:
@@ -16921,12 +16973,14 @@ def _build_flash_bridge(cy_agg: dict, bridge_detail: dict, store_info: dict, clo
         sc_by = detail.get("scByName", {}) or {}
         fees_by = detail.get("feesByName", {}) or {}
         def_by = detail.get("deferredByName", {}) or {}
+        gratfee_by = detail.get("gratFeeByName", {}) or {}
         sc_total = round(sum(float(v or 0) for v in sc_by.values()), 2)
         fees_total = round(sum(float(v or 0) for v in fees_by.values()), 2)
         deferred_total = round(sum(float(v or 0) for v in def_by.values()), 2)
+        gratfee_total = round(sum(float(v or 0) for v in gratfee_by.values()), 2)
         toast_net = round(net + sc_total, 2)         # derive Toast Net upward
         rnet = round(net - fees_total, 2)            # Royalty Net = net − un-deferred fees
-        adj = round(toast_net + deferred_total, 2)
+        adj = round(toast_net + deferred_total + gratfee_total, 2)  # + gratuity-flagged fees
         si = store_info.get(loc_id, {})
         by_store.append({
             "location": loc_id,
@@ -16936,22 +16990,27 @@ def _build_flash_bridge(cy_agg: dict, bridge_detail: dict, store_info: dict, clo
             "feesTotal": fees_total,
             "rNet": rnet,
             "deferredTotal": deferred_total,
+            "gratFeeTotal": gratfee_total,
             "adjNet": adj,
             "scByName": {k: round(v, 2) for k, v in sc_by.items()},
             "feesByName": {k: round(v, 2) for k, v in fees_by.items()},
             "deferredByName": {k: round(v, 2) for k, v in def_by.items()},
+            "gratFeeByName": {k: round(v, 2) for k, v in gratfee_by.items()},
         })
         chain_toast += toast_net
         chain_rnet += rnet
         chain_deferred += deferred_total
         chain_sc_total += sc_total
         chain_fees_total += fees_total
+        chain_gratfee_total += gratfee_total
         for k, v in sc_by.items():
             chain_sc_by[k] = round(chain_sc_by.get(k, 0.0) + v, 2)
         for k, v in fees_by.items():
             chain_fees_by[k] = round(chain_fees_by.get(k, 0.0) + v, 2)
         for k, v in def_by.items():
             chain_def_by[k] = round(chain_def_by.get(k, 0.0) + v, 2)
+        for k, v in gratfee_by.items():
+            chain_gratfee_by[k] = round(chain_gratfee_by.get(k, 0.0) + v, 2)
 
     by_store.sort(key=lambda r: (int(r["location"]) if str(r["location"]).isdigit() else 0))
     return {
@@ -16961,10 +17020,12 @@ def _build_flash_bridge(cy_agg: dict, bridge_detail: dict, store_info: dict, clo
             "feesTotal": round(chain_fees_total, 2),
             "rNet": round(chain_rnet, 2),
             "deferredTotal": round(chain_deferred, 2),
-            "adjNet": round(chain_toast + chain_deferred, 2),
+            "gratFeeTotal": round(chain_gratfee_total, 2),
+            "adjNet": round(chain_toast + chain_deferred + chain_gratfee_total, 2),
             "scByName": dict(sorted(chain_sc_by.items(), key=lambda kv: -kv[1])),
             "feesByName": dict(sorted(chain_fees_by.items(), key=lambda kv: -kv[1])),
             "deferredByName": dict(sorted(chain_def_by.items(), key=lambda kv: -kv[1])),
+            "gratFeeByName": dict(sorted(chain_gratfee_by.items(), key=lambda kv: -kv[1])),
         },
         "byStore": by_store,
         "storeCount": len(by_store),

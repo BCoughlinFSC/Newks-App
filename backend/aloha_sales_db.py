@@ -55,7 +55,7 @@ _SALES_COLS = [
 
 # JSON detail columns — itemized {name: amount} for the adjustment bridge.
 # Not summable, so kept OUT of _SALES_COLS; merged per range by query_bridge_detail.
-_JSON_DETAIL_COLS = ["sc_by_name", "deferred_by_name", "fees_by_name"]
+_JSON_DETAIL_COLS = ["sc_by_name", "deferred_by_name", "fees_by_name", "grat_fee_by_name"]
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS aloha_sales_data (
@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS aloha_sales_data (
     deferred_addback       REAL    NOT NULL DEFAULT 0,
     sc_by_name             TEXT    NOT NULL DEFAULT '',
     deferred_by_name       TEXT    NOT NULL DEFAULT '',
-    fees_by_name           TEXT    NOT NULL DEFAULT ''
+    fees_by_name           TEXT    NOT NULL DEFAULT '',
+    grat_fee_by_name       TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_aloha_sales_unique
@@ -142,6 +143,8 @@ _MIGRATION_COLS = [
     ("deferred_by_name", "TEXT NOT NULL DEFAULT ''"),
     # Fee-category sales excluded from Royalty Net (un-deferred ~2026-07-06).
     ("fees_by_name", "TEXT NOT NULL DEFAULT ''"),
+    # Gratuity-flagged fee service charges added back for the Accounting figure.
+    ("grat_fee_by_name", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 
@@ -218,6 +221,7 @@ def upsert_date(
             str(row.get("ScByName", "") or ""),
             str(row.get("DeferredByName", "") or ""),
             str(row.get("FeesByName", "") or ""),
+            str(row.get("GratFeeByName", "") or ""),
         ))
 
     with get_connection(db_path) as conn:
@@ -233,8 +237,8 @@ def upsert_date(
                 " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
                 " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
                 " check_count, checks_minus_catering,"
-                " toast_net, deferred_addback, sc_by_name, deferred_by_name, fees_by_name)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " toast_net, deferred_addback, sc_by_name, deferred_by_name, fees_by_name, grat_fee_by_name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 records,
             )
     return len(records)
@@ -279,6 +283,7 @@ def upsert_rows(
             str(row.get("ScByName", "") or ""),
             str(row.get("DeferredByName", "") or ""),
             str(row.get("FeesByName", "") or ""),
+            str(row.get("GratFeeByName", "") or ""),
         ))
 
     with get_connection(db_path) as conn:
@@ -290,8 +295,8 @@ def upsert_rows(
                 " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
                 " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
                 " check_count, checks_minus_catering,"
-                " toast_net, deferred_addback, sc_by_name, deferred_by_name, fees_by_name)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " toast_net, deferred_addback, sc_by_name, deferred_by_name, fees_by_name, grat_fee_by_name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 records,
             )
     return len(records)
@@ -407,21 +412,22 @@ def query_bridge_detail(
         params.extend(locations)
 
     sql = (
-        "SELECT location, sc_by_name, deferred_by_name, fees_by_name FROM aloha_sales_data "
-        "WHERE " + " AND ".join(where_clauses)
+        "SELECT location, sc_by_name, deferred_by_name, fees_by_name, grat_fee_by_name "
+        "FROM aloha_sales_data WHERE " + " AND ".join(where_clauses)
     )
 
     out: Dict[str, dict] = {}
     with get_connection(db_path) as conn:
-        for loc, sc_json, def_json, fees_json in conn.execute(sql, params).fetchall():
+        for loc, sc_json, def_json, fees_json, gratfee_json in conn.execute(sql, params).fetchall():
             loc_id = str(loc).strip()
             entry = out.setdefault(
-                loc_id, {"scByName": {}, "deferredByName": {}, "feesByName": {}}
+                loc_id, {"scByName": {}, "deferredByName": {}, "feesByName": {}, "gratFeeByName": {}}
             )
             for blob, key in (
                 (sc_json, "scByName"),
                 (def_json, "deferredByName"),
                 (fees_json, "feesByName"),
+                (gratfee_json, "gratFeeByName"),
             ):
                 if not blob:
                     continue
