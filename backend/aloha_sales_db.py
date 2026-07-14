@@ -55,7 +55,7 @@ _SALES_COLS = [
 
 # JSON detail columns — itemized {name: amount} for the adjustment bridge.
 # Not summable, so kept OUT of _SALES_COLS; merged per range by query_bridge_detail.
-_JSON_DETAIL_COLS = ["sc_by_name", "deferred_by_name"]
+_JSON_DETAIL_COLS = ["sc_by_name", "deferred_by_name", "fees_by_name"]
 
 _CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS aloha_sales_data (
@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS aloha_sales_data (
     toast_net              REAL    NOT NULL DEFAULT 0,
     deferred_addback       REAL    NOT NULL DEFAULT 0,
     sc_by_name             TEXT    NOT NULL DEFAULT '',
-    deferred_by_name       TEXT    NOT NULL DEFAULT ''
+    deferred_by_name       TEXT    NOT NULL DEFAULT '',
+    fees_by_name           TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_aloha_sales_unique
@@ -139,6 +140,8 @@ _MIGRATION_COLS = [
     ("deferred_addback", "REAL NOT NULL DEFAULT 0"),
     ("sc_by_name", "TEXT NOT NULL DEFAULT ''"),
     ("deferred_by_name", "TEXT NOT NULL DEFAULT ''"),
+    # Fee-category sales excluded from Royalty Net (un-deferred ~2026-07-06).
+    ("fees_by_name", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 
@@ -214,6 +217,7 @@ def upsert_date(
             float(row.get("DeferredAddback", 0) or 0),
             str(row.get("ScByName", "") or ""),
             str(row.get("DeferredByName", "") or ""),
+            str(row.get("FeesByName", "") or ""),
         ))
 
     with get_connection(db_path) as conn:
@@ -229,8 +233,8 @@ def upsert_date(
                 " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
                 " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
                 " check_count, checks_minus_catering,"
-                " toast_net, deferred_addback, sc_by_name, deferred_by_name)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " toast_net, deferred_addback, sc_by_name, deferred_by_name, fees_by_name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 records,
             )
     return len(records)
@@ -274,6 +278,7 @@ def upsert_rows(
             float(row.get("DeferredAddback", 0) or 0),
             str(row.get("ScByName", "") or ""),
             str(row.get("DeferredByName", "") or ""),
+            str(row.get("FeesByName", "") or ""),
         ))
 
     with get_connection(db_path) as conn:
@@ -285,8 +290,8 @@ def upsert_rows(
                 " gng_net_sales, togo_net_sales, curbside_net_sales, curbside_olo_net_sales,"
                 " dinein_net_sales, callin_net_sales, olo_callin_net_sales,"
                 " check_count, checks_minus_catering,"
-                " toast_net, deferred_addback, sc_by_name, deferred_by_name)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " toast_net, deferred_addback, sc_by_name, deferred_by_name, fees_by_name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 records,
             )
     return len(records)
@@ -385,10 +390,10 @@ def query_bridge_detail(
     db_path: str = ALOHA_SALES_DB_PATH,
 ) -> Dict[str, dict]:
     """
-    Merge the itemized adjustment detail (sc_by_name / deferred_by_name JSON)
-    across a date range, per location.
+    Merge the itemized adjustment detail (sc_by_name / deferred_by_name /
+    fees_by_name JSON) across a date range, per location.
 
-    Returns {loc_id: {"scByName": {name: amt}, "deferredByName": {name: amt}}}
+    Returns {loc_id: {"scByName": {..}, "deferredByName": {..}, "feesByName": {..}}}
     with amounts summed across every day in the range.
     """
     if not db_available(db_path):
@@ -402,16 +407,22 @@ def query_bridge_detail(
         params.extend(locations)
 
     sql = (
-        "SELECT location, sc_by_name, deferred_by_name FROM aloha_sales_data "
+        "SELECT location, sc_by_name, deferred_by_name, fees_by_name FROM aloha_sales_data "
         "WHERE " + " AND ".join(where_clauses)
     )
 
     out: Dict[str, dict] = {}
     with get_connection(db_path) as conn:
-        for loc, sc_json, def_json in conn.execute(sql, params).fetchall():
+        for loc, sc_json, def_json, fees_json in conn.execute(sql, params).fetchall():
             loc_id = str(loc).strip()
-            entry = out.setdefault(loc_id, {"scByName": {}, "deferredByName": {}})
-            for blob, key in ((sc_json, "scByName"), (def_json, "deferredByName")):
+            entry = out.setdefault(
+                loc_id, {"scByName": {}, "deferredByName": {}, "feesByName": {}}
+            )
+            for blob, key in (
+                (sc_json, "scByName"),
+                (def_json, "deferredByName"),
+                (fees_json, "feesByName"),
+            ):
                 if not blob:
                     continue
                 try:

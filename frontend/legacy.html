@@ -3405,8 +3405,8 @@
             const rangeLabel = (s,e) => !s ? '' : (s===e ? fmtD(s) : `${fmtD(s)}–${fmtD(e)}`);
             const cyRange = rangeLabel(meta.cyStart, meta.cyEnd);
             const pyRange = rangeLabel(meta.pyStart, meta.pyEnd);
-            const cyNorm = d => ({toast:d.toastNetSales, scTotal:d.serviceChargeTotal, scByName:d.scByName||{}, royalty:d.royaltyNet, defTotal:d.deferredTotal, defByName:d.deferredByName||{}, accurate:d.accurateNetSales});
-            const pyNorm = d => ({toast:d.pyToastNetSales, scTotal:d.pyServiceChargeTotal, scByName:d.pyScByName||{}, royalty:d.pyRoyaltyNet, defTotal:d.pyDeferredTotal, defByName:d.pyDeferredByName||{}, accurate:d.pyAccurateNetSales});
+            const cyNorm = d => ({toast:d.toastNetSales, scTotal:d.serviceChargeTotal, scByName:d.scByName||{}, feesTotal:d.feesTotal, feesByName:d.feesByName||{}, royalty:d.royaltyNet, defTotal:d.deferredTotal, defByName:d.deferredByName||{}, accurate:d.accurateNetSales});
+            const pyNorm = d => ({toast:d.pyToastNetSales, scTotal:d.pyServiceChargeTotal, scByName:d.pyScByName||{}, feesTotal:d.pyFeesTotal, feesByName:d.pyFeesByName||{}, royalty:d.pyRoyaltyNet, defTotal:d.pyDeferredTotal, defByName:d.pyDeferredByName||{}, accurate:d.pyAccurateNetSales});
             const pyToastAvail = d => d.pySource === 'toast' && d.pyToastNetSales != null;
             const pyAlohaAvail = d => d.pySource === 'aloha' && d.pyAlohaNetSales != null;
             const buildWaterfall = (n, title, accent) => {
@@ -3415,6 +3415,11 @@
               w += `<tr><td style="padding:0.25rem 0.6rem;">Net Sales (Toast)</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;">${money(n.toast)}</td></tr>`;
               Object.keys(n.scByName||{}).forEach(nm => { w += `<tr><td style="padding:0.12rem 0.6rem 0.12rem 1.4rem;color:#6B7280;">${nm}</td><td style="padding:0.12rem 0.6rem;text-align:right;color:#B91C1C;">(${money(n.scByName[nm])})</td></tr>`; });
               w += `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:0.25rem 0.6rem;font-weight:600;">Total Service Charges</td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;color:#B91C1C;">(${money(n.scTotal)})</td></tr>`;
+              const feeNames = Object.keys(n.feesByName||{});
+              if ((n.feesTotal||0) > 0 || feeNames.length) {
+                feeNames.forEach(nm => { w += `<tr><td style="padding:0.12rem 0.6rem 0.12rem 1.4rem;color:#6B7280;">${nm} <span style="color:#9CA3AF;">(fee)</span></td><td style="padding:0.12rem 0.6rem;text-align:right;color:#B91C1C;">(${money(n.feesByName[nm])})</td></tr>`; });
+                w += `<tr style="border-top:1px solid #E5E7EB;"><td style="padding:0.25rem 0.6rem;font-weight:600;">Total Fees <span style="font-weight:400;color:#6B7280;">(removed from royalty)</span></td><td style="padding:0.25rem 0.6rem;text-align:right;font-weight:600;color:#B91C1C;">(${money(n.feesTotal)})</td></tr>`;
+              }
               w += `<tr style="background:#ECFDF5;border-top:2px solid #065F46;"><td style="padding:0.35rem 0.6rem;font-weight:700;color:#065F46;">= Royalty Net</td><td style="padding:0.35rem 0.6rem;text-align:right;font-weight:700;color:#065F46;">${money(n.royalty)}</td></tr>`;
               const defNames = Object.keys(n.defByName||{});
               if ((n.defTotal||0) > 0 || defNames.length) {
@@ -5191,37 +5196,78 @@
           }
           addWS(WB, rows, isMetrics ? 'Sales' : 'Summary');
 
-          // ── Royalty Net Detail sheet — CY vs PY (Toast → service charges → Royalty Net → deferred) ──
+          // ── Royalty Net sheet — mirrors the on-screen transparency waterfall ──
+          // Per location: Net Sales (Toast) − service charges (by name) = Royalty Net,
+          // then + deferred (by name) = Accurate Net Sales. CY panel left, PY panel right.
           if (isMetrics && currentResults.royaltyDetail) {
             const rd = currentResults.royaltyDetail;
             const meta = rd.meta || {};
             const fmtD = iso => { if(!iso) return ''; const p=String(iso).split('-'); return p.length===3?`${+p[1]}/${+p[2]}/${p[0].slice(2)}`:iso; };
             const rangeLabel = (s,e)=> !s?'':(s===e?fmtD(s):`${fmtD(s)}–${fmtD(e)}`);
             const cyt = rangeLabel(meta.cyStart, meta.cyEnd); const pyt = rangeLabel(meta.pyStart, meta.pyEnd);
-            const cyL = cyt ? ` (${cyt})` : ''; const pyL = pyt ? ` (${pyt})` : '';
-            const detailStr = obj => Object.keys(obj || {}).map(k => `${k}: ${(obj[k] || 0).toFixed(2)}`).join('; ');
             const pyOn = d => d.pySource === 'toast' && d.pyToastNetSales != null;
             const pyAloha = d => d.pySource === 'aloha' && d.pyAlohaNetSales != null;
-            const rHdr = [c('Location', S.navyL),
-                          c('CY Net Sales (Toast)'+cyL, S.navyR), c('CY Royalty Net', S.navyR),
-                          c('PY Source', S.navyL), c('PY Net Sales'+pyL, S.navyR), c('PY Royalty Net', S.navyR),
-                          c('CY Service Charges (detail)', S.navyL), c('PY Service Charges (detail)', S.navyL),
-                          c('CY Deferred Add-back', S.navyR), c('CY Deferred (detail)', S.navyL),
-                          c('PY Deferred Add-back', S.navyR), c('PY Deferred (detail)', S.navyL)];
-            const rRows = [rHdr];
-            const mkRow = (label, d, style) => {
-              const py = pyOn(d), pa = pyAloha(d);
-              const pySrc = py ? 'Toast' : (pa ? 'Aloha' : '—');
-              const pyNet = py ? n(d.pyToastNetSales || 0, S.dR) : (pa ? n(d.pyAlohaNetSales || 0, S.dR) : c('—', S.dR));
-              return [c(label, style || S.dL),
-                      n(d.toastNetSales || 0, S.dR), n(d.royaltyNet || 0, S.dR),
-                      c(pySrc, style || S.dL), pyNet, py ? n(d.pyRoyaltyNet || 0, S.dR) : c('—', S.dR),
-                      c(detailStr(d.scByName), S.dL), py ? c(detailStr(d.pyScByName), S.dL) : c('—', S.dL),
-                      n(d.deferredTotal || 0, S.dR), c(detailStr(d.deferredByName), S.dL),
-                      py ? n(d.pyDeferredTotal || 0, S.dR) : c('—', S.dR), py ? c(detailStr(d.pyDeferredByName), S.dL) : c('—', S.dL)];
+            // Currency number format — red parentheses for negatives, mirroring the screen.
+            const CUR = '$#,##0.00;[Red]($#,##0.00)';
+            const money = st => ({ ...st, numFmt: CUR });
+            const cyNorm = d => ({toast:d.toastNetSales, scByName:d.scByName||{}, scTotal:d.serviceChargeTotal, feesByName:d.feesByName||{}, feesTotal:d.feesTotal, royalty:d.royaltyNet, defByName:d.deferredByName||{}, defTotal:d.deferredTotal, accurate:d.accurateNetSales});
+            const pyNorm = d => ({toast:d.pyToastNetSales, scByName:d.pyScByName||{}, scTotal:d.pyServiceChargeTotal, feesByName:d.pyFeesByName||{}, feesTotal:d.pyFeesTotal, royalty:d.pyRoyaltyNet, defByName:d.pyDeferredByName||{}, defTotal:d.pyDeferredTotal, accurate:d.pyAccurateNetSales});
+            // Build the vertical waterfall rows ([labelCell, valueCell]) for a Toast node.
+            const toastPanel = nm => {
+              const out = [];
+              out.push([c('Net Sales (Toast)', S.dL), n(nm.toast || 0, money(S.dR))]);
+              Object.keys(nm.scByName || {}).forEach(name => out.push([c('     ' + name, S.dL), n(-(nm.scByName[name] || 0), money(S.dR))]));
+              out.push([c('Total Service Charges', S.dLbld), n(-(nm.scTotal || 0), money(S.dRbld))]);
+              const feeNames = Object.keys(nm.feesByName || {});
+              if ((nm.feesTotal || 0) > 0 || feeNames.length) {
+                feeNames.forEach(name => out.push([c('     ' + name + ' (fee)', S.dL), n(-(nm.feesByName[name] || 0), money(S.dR))]));
+                out.push([c('Total Fees (removed from royalty)', S.dLbld), n(-(nm.feesTotal || 0), money(S.dRbld))]);
+              }
+              out.push([c('= Royalty Net', S.lGreenL), n(nm.royalty || 0, money(S.lGreenR))]);
+              const defNames = Object.keys(nm.defByName || {});
+              if ((nm.defTotal || 0) > 0 || defNames.length) {
+                defNames.forEach(name => out.push([c('     + ' + name, S.dL), n(nm.defByName[name] || 0, money(S.dR))]));
+                out.push([c('Total Deferred Add-back', S.dLbld), n(nm.defTotal || 0, money(S.dRbld))]);
+                out.push([c('= Accurate Net Sales', S.lBlueL), n(nm.accurate || 0, money(S.lBlueR))]);
+              }
+              return out;
             };
-            Object.keys(rd.byLocation || {}).sort().forEach((loc, i) => rRows.push(mkRow(loc, rd.byLocation[loc], i % 2 ? S.dLalt : S.dL)));
-            addWS(WB, rRows, 'Royalty Net Detail');
+            const pyPanelRows = d => {
+              if (pyOn(d)) return toastPanel(pyNorm(d));
+              if (pyAloha(d)) return [[c('Net Sales (Aloha)', S.dL), n(d.pyAlohaNetSales || 0, money(S.dR))],
+                                      [c('Source: Aloha — Toast royalty detail pending', S.dL), c('', S.dR)]];
+              return [[c('No prior-year data for this location.', S.dL), c('', S.dR)]];
+            };
+            const rRows = [];
+            const buildSection = (label, d) => {
+              // Green banner + summary line (CY vs PY royalty net, deferred add-back)
+              let summary = `CY Royalty Net ${(d.royaltyNet||0).toFixed(2)}`;
+              if (pyOn(d)) summary += `  vs  PY Royalty Net ${(d.pyRoyaltyNet||0).toFixed(2)}`;
+              else if (pyAloha(d)) summary += `  vs  PY (Aloha) Net ${(d.pyAlohaNetSales||0).toFixed(2)}`;
+              else summary += '  vs  PY: no data';
+              if ((d.deferredTotal||0) > 0) summary += `  ·  +Deferred ${(d.deferredTotal||0).toFixed(2)} = Accurate ${(d.accurateNetSales||0).toFixed(2)}`;
+              rRows.push([c(label, S.greenL), c('', S.greenR), blank(), c(summary, S.greenL), c('', S.greenR)]);
+              // Panel titles
+              const cyTitle = 'Current Year (Toast)' + (cyt ? ' · ' + cyt : '');
+              let pyT;
+              if (pyOn(d))        pyT = [c('Prior Year (Toast)' + (pyt ? ' · ' + pyt : ''), S.lBlueL),  c('', S.lBlueR)];
+              else if (pyAloha(d)) pyT = [c('Prior Year (Aloha)' + (pyt ? ' · ' + pyt : ''), S.lAmberL), c('', S.lAmberR)];
+              else                 pyT = [c('Prior Year',                                    S.dLbld),   c('', S.dRbld)];
+              rRows.push([c(cyTitle, S.lGreenL), c('', S.lGreenR), blank(), pyT[0], pyT[1]]);
+              // Zip the two panels side by side (spacer column between)
+              const cyRows = toastPanel(cyNorm(d));
+              const pyRows = pyPanelRows(d);
+              const rowCount = Math.max(cyRows.length, pyRows.length);
+              for (let i = 0; i < rowCount; i++) {
+                const L = cyRows[i] || [blank(), blank()];
+                const R = pyRows[i] || [c('', S.dL), c('', S.dR)];
+                rRows.push([L[0], L[1], blank(), R[0], R[1]]);
+              }
+              rRows.push([blank(), blank(), blank(), blank(), blank()]);
+            };
+            buildSection('All Locations', rd.chain);
+            Object.keys(rd.byLocation || {}).sort().forEach(loc => buildSection(loc, rd.byLocation[loc]));
+            addWS(WB, rRows, 'Royalty Net');
           }
 
           // ── Performance Summary sheet (metrics reports only) ──────────────

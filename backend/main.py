@@ -2339,6 +2339,99 @@ def _is_addback_deferred_item(name: str) -> bool:
     return (name or "").strip().lower() in _DEFERRED_ADDBACK_ITEMS
 
 
+# Toast SALES CATEGORIES that are fees, NOT royalty-bearing sales.  Toast stopped
+# flagging these items "deferred" ~2026-07-06, so they now post inside Toast net
+# sales and inflate Royalty Net.  Newk's excludes them from Royalty Net (matched
+# case-insensitively against the salesCategory NAME resolved from the Config API).
+# NOTE: "Non-Grat Svc Charges" is deliberately NOT here — those are restaurant
+# service charges already removed via appliedServiceCharges, so listing the
+# category too would double-count.  "Menu Mark Up" is also excluded from this set
+# (it stays IN Royalty Net as sales, matching the Aloha treatment).
+_ROYALTY_EXCLUDE_FEE_CATEGORIES = {
+    "newks fees",
+    "third party fees",
+    "olo service fee (d)",
+}
+
+# {restaurant_guid: {salesCategory_guid: name}} — resolved once per restaurant.
+_salescat_config_cache: Dict[str, Dict[str, str]] = {}
+
+
+async def _fetch_sales_category_configs(
+    client: httpx.AsyncClient,
+    restaurant_guid: str,
+) -> Dict[str, str]:
+    """
+    Fetch and cache {salesCategory_guid: name} for one restaurant from the Toast
+    Config API.  The Orders API only carries the salesCategory GUID (no name), so
+    this map is what lets us match fee categories by the names accounting uses.
+
+    Cached indefinitely per restaurant_guid (categories rarely change).  Returns {}
+    on any error so callers degrade to "no fees identified" rather than crashing.
+    """
+    global _salescat_config_cache
+    if restaurant_guid in _salescat_config_cache:
+        return _salescat_config_cache[restaurant_guid]
+
+    standard_headers = await get_standard_api_auth_headers()
+    headers = {
+        **standard_headers,
+        "Toast-Restaurant-External-ID": restaurant_guid,
+    }
+    url = f"{TOAST_STANDARD_API_BASE_URL}/config/v2/salesCategories"
+    try:
+        resp = await client.get(url, headers=headers, timeout=30.0)
+        if resp.status_code != 200:
+            logger.warning(
+                "Sales-category config fetch failed for %s: HTTP %s — fees will be 0",
+                restaurant_guid[:8] + "...", resp.status_code,
+            )
+            _salescat_config_cache[restaurant_guid] = {}
+            return {}
+        cat_list = resp.json()
+        configs: Dict[str, str] = {}
+        if isinstance(cat_list, list):
+            for cat in cat_list:
+                guid = cat.get("guid", "")
+                if guid:
+                    configs[guid] = cat.get("name", "") or ""
+        _salescat_config_cache[restaurant_guid] = configs
+        logger.info(
+            "Sales-category configs cached for %s: %d categories",
+            restaurant_guid[:8] + "...", len(configs),
+        )
+        return configs
+    except Exception as exc:
+        logger.warning("Sales-category config fetch error for %s: %s", restaurant_guid[:8] + "...", exc)
+        _salescat_config_cache[restaurant_guid] = {}
+        return {}
+
+
+def _norm_cat_name(name: str) -> str:
+    """Normalize a sales-category name for matching: drop apostrophes, collapse
+    whitespace, lowercase — so "Newk's  Fees" and "Newks Fees" compare equal."""
+    return " ".join((name or "").replace("’", "").replace("'", "").split()).lower()
+
+
+def _collect_fee_selections(selections, cat_configs: Dict[str, str], out: list) -> None:
+    """
+    Recurse selections + modifiers; collect (category_name, price) for any selection
+    whose salesCategory resolves to a royalty-excluded fee category.  Tips/gratuity
+    lines are skipped (they are not sales), mirroring the deferred-item handling.
+    """
+    for sel in (selections or []):
+        if not isinstance(sel, dict) or sel.get("voided"):
+            continue
+        cat_name = cat_configs.get((sel.get("salesCategory") or {}).get("guid", ""), "")
+        if cat_name and _norm_cat_name(cat_name) in _ROYALTY_EXCLUDE_FEE_CATEGORIES:
+            nm_low = (sel.get("displayName") or "").lower()
+            if "tip" not in nm_low and "gratuit" not in nm_low:
+                price = float(sel.get("price") or 0)
+                if price:
+                    out.append((cat_name, price))
+        _collect_fee_selections(sel.get("modifiers"), cat_configs, out)
+
+
 async def _compute_netsales_detail_for_day(
     client: httpx.AsyncClient,
     restaurant_guid: str,
@@ -2354,18 +2447,26 @@ async def _compute_netsales_detail_for_day(
                                   These do NOT post to ToastWeb sales today; once accounting
                                   stops deferring them (2026-07-06) Toast net will jump, so for
                                   pre-cutover history we add them back to keep comparisons valid.
+      feesByName / feesTotal    – fee-category SALES (Newks Fees, Third Party Fees, OLO Service
+                                  Fee (D)) that Toast un-deferred ~2026-07-06.  They now post as
+                                  net sales but are NOT royalty-bearing, so they are subtracted
+                                  from Royalty Net (Non-Grat Svc Charges is excluded here — it is
+                                  already removed as a restaurant service charge).
     """
     key = f"{restaurant_guid}|{business_date_yyyymmdd}"
     if key in _netsales_detail_cache:
         return _netsales_detail_cache[key]
 
     configs = await _fetch_service_charge_configs(client, restaurant_guid)
+    cat_configs = await _fetch_sales_category_configs(client, restaurant_guid)
     orders = await _fetch_orders_for_restaurant_day(client, restaurant_guid, business_date_yyyymmdd)
 
     sc_by: Dict[str, float] = {}
     deferred_by: Dict[str, float] = {}
+    fees_by: Dict[str, float] = {}
     sc_total = 0.0
     deferred_total = 0.0
+    fees_total = 0.0
 
     for order in orders:
         if order.get("voided"):
@@ -2400,12 +2501,20 @@ async def _compute_netsales_detail_for_day(
                     continue
                 deferred_by[nm] = deferred_by.get(nm, 0.0) + sales
                 deferred_total += sales
+            # Fee-category line items (un-deferred ~2026-07-06) — subtracted from Royalty Net.
+            fee_sels: list = []
+            _collect_fee_selections(check.get("selections"), cat_configs, fee_sels)
+            for cat_name, price in fee_sels:
+                fees_by[cat_name] = fees_by.get(cat_name, 0.0) + price
+                fees_total += price
 
     result = {
         "scTotal": round(sc_total, 2),
         "scByName": {k: round(v, 2) for k, v in sc_by.items()},
         "deferredTotal": round(deferred_total, 2),
         "deferredByName": {k: round(v, 2) for k, v in deferred_by.items()},
+        "feesTotal": round(fees_total, 2),
+        "feesByName": {k: round(v, 2) for k, v in fees_by.items()},
     }
     _netsales_detail_cache[key] = result
     return result
@@ -3892,7 +4001,8 @@ def pivot_metrics_by_location_and_date(
             det = details.get(sc_key) or {}
             ld = loc_detail.setdefault(
                 restaurant_name,
-                {"toast": 0.0, "scTotal": 0.0, "scByName": {}, "deferredTotal": 0.0, "deferredByName": {}},
+                {"toast": 0.0, "scTotal": 0.0, "scByName": {}, "deferredTotal": 0.0,
+                 "deferredByName": {}, "feesTotal": 0.0, "feesByName": {}},
             )
             ld["toast"] += toast_net_sales
             ld["scTotal"] += det.get("scTotal", 0.0)
@@ -3901,6 +4011,9 @@ def pivot_metrics_by_location_and_date(
             ld["deferredTotal"] += det.get("deferredTotal", 0.0)
             for nm, amt in (det.get("deferredByName") or {}).items():
                 ld["deferredByName"][nm] = ld["deferredByName"].get(nm, 0.0) + amt
+            ld["feesTotal"] += det.get("feesTotal", 0.0)
+            for nm, amt in (det.get("feesByName") or {}).items():
+                ld["feesByName"][nm] = ld["feesByName"].get(nm, 0.0) + amt
 
     sorted_dates = sorted(list(all_dates))
     sorted_locations = sorted(location_data.keys())
@@ -3939,13 +4052,17 @@ def pivot_metrics_by_location_and_date(
         by_location: Dict[str, dict] = {}
         chain_sc: Dict[str, float] = {}
         chain_def: Dict[str, float] = {}
-        chain_toast = chain_sc_total = chain_def_total = 0.0
+        chain_fees: Dict[str, float] = {}
+        chain_toast = chain_sc_total = chain_def_total = chain_fees_total = 0.0
         for loc, ld in loc_detail.items():
             by_location[loc] = {
                 "toastNetSales":      round(ld["toast"], 2),
                 "serviceChargeTotal": round(ld["scTotal"], 2),
                 "scByName":           _sorted_round(ld["scByName"]),
-                "royaltyNet":         round(ld["toast"] - ld["scTotal"], 2),
+                "feesTotal":          round(ld["feesTotal"], 2),
+                "feesByName":         _sorted_round(ld["feesByName"]),
+                # Royalty Net = Toast net − restaurant service charges − un-deferred fees
+                "royaltyNet":         round(ld["toast"] - ld["scTotal"] - ld["feesTotal"], 2),
                 "deferredTotal":      round(ld["deferredTotal"], 2),
                 "deferredByName":     _sorted_round(ld["deferredByName"]),
                 "accurateNetSales":   round(ld["toast"] + ld["deferredTotal"], 2),
@@ -3953,17 +4070,22 @@ def pivot_metrics_by_location_and_date(
             chain_toast += ld["toast"]
             chain_sc_total += ld["scTotal"]
             chain_def_total += ld["deferredTotal"]
+            chain_fees_total += ld["feesTotal"]
             for k, v in ld["scByName"].items():
                 chain_sc[k] = chain_sc.get(k, 0.0) + v
             for k, v in ld["deferredByName"].items():
                 chain_def[k] = chain_def.get(k, 0.0) + v
+            for k, v in ld["feesByName"].items():
+                chain_fees[k] = chain_fees.get(k, 0.0) + v
         result["royaltyDetail"] = {
             "byLocation": by_location,
             "chain": {
                 "toastNetSales":      round(chain_toast, 2),
                 "serviceChargeTotal": round(chain_sc_total, 2),
                 "scByName":           _sorted_round(chain_sc),
-                "royaltyNet":         round(chain_toast - chain_sc_total, 2),
+                "feesTotal":          round(chain_fees_total, 2),
+                "feesByName":         _sorted_round(chain_fees),
+                "royaltyNet":         round(chain_toast - chain_sc_total - chain_fees_total, 2),
                 "deferredTotal":      round(chain_def_total, 2),
                 "deferredByName":     _sorted_round(chain_def),
                 "accurateNetSales":   round(chain_toast + chain_def_total, 2),
@@ -4026,6 +4148,8 @@ def _merge_py_royalty_detail(cy_rd: dict, py_rd: Optional[dict], py_start: date,
             "pyToastNetSales":      d.get("toastNetSales"),
             "pyServiceChargeTotal": d.get("serviceChargeTotal"),
             "pyScByName":           d.get("scByName", {}),
+            "pyFeesTotal":          d.get("feesTotal"),
+            "pyFeesByName":         d.get("feesByName", {}),
             "pyRoyaltyNet":         d.get("royaltyNet"),
             "pyDeferredTotal":      d.get("deferredTotal"),
             "pyDeferredByName":     d.get("deferredByName", {}),
@@ -6613,6 +6737,7 @@ async def nightly_flash_import_job():
                 data["deferred_addback"] = 0.0
                 data["sc_by_name"] = ""
                 data["deferred_by_name"] = ""
+                data["fees_by_name"] = ""
 
                 if guid:
                     try:
@@ -6663,6 +6788,7 @@ async def nightly_flash_import_job():
                             data["deferred_addback"] = detail.get("deferredTotal", 0.0)
                             data["sc_by_name"] = json.dumps(detail.get("scByName", {}))
                             data["deferred_by_name"] = json.dumps(detail.get("deferredByName", {}))
+                            data["fees_by_name"] = json.dumps(detail.get("feesByName", {}))
                         except Exception as dexc:
                             logger.warning("Flash import: bridge detail failed for %s: %s", loc_id, dexc)
                         await asyncio.sleep(0.3)  # Rate limit courtesy
@@ -6706,6 +6832,7 @@ async def nightly_flash_import_job():
                     "DeferredAddback": data.get("deferred_addback", 0.0),
                     "ScByName": data.get("sc_by_name", ""),
                     "DeferredByName": data.get("deferred_by_name", ""),
+                    "FeesByName": data.get("fees_by_name", ""),
                 })
 
             if rows_for_df:
@@ -13405,6 +13532,7 @@ async def _compute_flash_loc_data(
         data["deferred_addback"] = 0.0
         data["sc_by_name"] = ""
         data["deferred_by_name"] = ""
+        data["fees_by_name"] = ""
 
         if guid:
             try:
@@ -13436,6 +13564,7 @@ async def _compute_flash_loc_data(
                     data["deferred_addback"] = detail.get("deferredTotal", 0.0)
                     data["sc_by_name"] = json.dumps(detail.get("scByName", {}))
                     data["deferred_by_name"] = json.dumps(detail.get("deferredByName", {}))
+                    data["fees_by_name"] = json.dumps(detail.get("feesByName", {}))
                 except Exception as dexc:
                     logger.warning("Flash bridge detail for %s: %s", loc_id, dexc)
                 await asyncio.sleep(0.3)
@@ -13491,6 +13620,7 @@ async def _run_flash_import_for_date(target_date: date):
                     "DeferredAddback": data.get("deferred_addback", 0.0),
                     "ScByName": data.get("sc_by_name", ""),
                     "DeferredByName": data.get("deferred_by_name", ""),
+                    "FeesByName": data.get("fees_by_name", ""),
                 })
 
             if rows_for_df:
@@ -16728,48 +16858,73 @@ def _aggregate_flash_from_aloha(start_date: str, end_date: str, locations: Optio
 
 def _build_flash_bridge(cy_agg: dict, bridge_detail: dict, store_info: dict, closed_ids: set) -> dict:
     """
-    Build the royalty-adjustment bridge for one period from the cached CY aggregation:
+    Build the royalty-adjustment bridge for one period, ANCHORED on Newk's net
+    (ch["Net"] = Toast net − restaurant service charges), which has full-period
+    coverage:
 
-        Toast Net  − service charges (itemized by name)  = R-Net
-        Toast Net  + deferred add-back (itemized by name) = Adjusted Accounting Net
+        Toast Net              = Newk's net + restaurant service charges
+          − service charges (itemized by name)
+          − fees (itemized by name)   ← categories un-deferred ~2026-07-06
+        = R-Net (royalty net)  = Newk's net − fees
+          + deferred add-back (itemized by name)
+        = Adjusted Accounting Net = Toast Net + deferred
 
-    Only stores with a captured Toast Net (>0) participate; others lack the figure
-    (pre-migration or Aloha-sourced) and are excluded from the bridge.
+    Why anchor on ch["Net"] instead of the stored toast_net column: toast_net is
+    only captured from ~late June, while ch["Net"] carries full history.  Mixing the
+    two made long periods (YTD) explode — R-Net (full history) dwarfed Toast Net
+    (partial), producing an impossible $100M+ R-Net and negative per-store service
+    charges.  Deriving Toast Net upward from ch["Net"] + itemized SC keeps every
+    arrow internally consistent.  Where a period predates the itemized capture the
+    SC/fees/deferred detail is partial (bounded, never wrong-sign).
+
+    Only stores with a captured Toast Net (stored toast_net > 0) participate; the
+    rest are pre-migration / Aloha-sourced.
     Returns {"chain": {...}, "byStore": [...], "storeCount": n}.
     """
-    chain_toast = chain_rnet = chain_deferred = 0.0
+    chain_toast = chain_rnet = chain_deferred = chain_sc_total = chain_fees_total = 0.0
     chain_sc_by: Dict[str, float] = {}
+    chain_fees_by: Dict[str, float] = {}
     chain_def_by: Dict[str, float] = {}
     by_store = []
     for loc_id, ch in cy_agg.items():
         if loc_id in closed_ids:
             continue
-        toast_net = float(ch.get("ToastNet", 0) or 0)
-        if toast_net <= 0:
-            continue
-        rnet = float(ch.get("Net", 0) or 0)
-        adj = float(ch.get("AdjAcctNet", 0) or 0)
-        deferred_total = round(adj - toast_net, 2)
+        if float(ch.get("ToastNet", 0) or 0) <= 0:
+            continue  # only stores with captured Toast data participate
+        net = float(ch.get("Net", 0) or 0)          # Newk's net = Toast − SC (fees still in)
         detail = bridge_detail.get(loc_id, {})
         sc_by = detail.get("scByName", {}) or {}
+        fees_by = detail.get("feesByName", {}) or {}
         def_by = detail.get("deferredByName", {}) or {}
+        sc_total = round(sum(float(v or 0) for v in sc_by.values()), 2)
+        fees_total = round(sum(float(v or 0) for v in fees_by.values()), 2)
+        deferred_total = round(sum(float(v or 0) for v in def_by.values()), 2)
+        toast_net = round(net + sc_total, 2)         # derive Toast Net upward
+        rnet = round(net - fees_total, 2)            # Royalty Net = net − un-deferred fees
+        adj = round(toast_net + deferred_total, 2)
         si = store_info.get(loc_id, {})
         by_store.append({
             "location": loc_id,
             "restaurantName": si.get("restaurant_name", "") or loc_id,
-            "toastNet": round(toast_net, 2),
-            "scTotal": round(toast_net - rnet, 2),
-            "rNet": round(rnet, 2),
+            "toastNet": toast_net,
+            "scTotal": sc_total,
+            "feesTotal": fees_total,
+            "rNet": rnet,
             "deferredTotal": deferred_total,
-            "adjNet": round(adj, 2),
+            "adjNet": adj,
             "scByName": {k: round(v, 2) for k, v in sc_by.items()},
+            "feesByName": {k: round(v, 2) for k, v in fees_by.items()},
             "deferredByName": {k: round(v, 2) for k, v in def_by.items()},
         })
         chain_toast += toast_net
         chain_rnet += rnet
         chain_deferred += deferred_total
+        chain_sc_total += sc_total
+        chain_fees_total += fees_total
         for k, v in sc_by.items():
             chain_sc_by[k] = round(chain_sc_by.get(k, 0.0) + v, 2)
+        for k, v in fees_by.items():
+            chain_fees_by[k] = round(chain_fees_by.get(k, 0.0) + v, 2)
         for k, v in def_by.items():
             chain_def_by[k] = round(chain_def_by.get(k, 0.0) + v, 2)
 
@@ -16777,11 +16932,13 @@ def _build_flash_bridge(cy_agg: dict, bridge_detail: dict, store_info: dict, clo
     return {
         "chain": {
             "toastNet": round(chain_toast, 2),
-            "scTotal": round(chain_toast - chain_rnet, 2),
+            "scTotal": round(chain_sc_total, 2),
+            "feesTotal": round(chain_fees_total, 2),
             "rNet": round(chain_rnet, 2),
             "deferredTotal": round(chain_deferred, 2),
             "adjNet": round(chain_toast + chain_deferred, 2),
             "scByName": dict(sorted(chain_sc_by.items(), key=lambda kv: -kv[1])),
+            "feesByName": dict(sorted(chain_fees_by.items(), key=lambda kv: -kv[1])),
             "deferredByName": dict(sorted(chain_def_by.items(), key=lambda kv: -kv[1])),
         },
         "byStore": by_store,
