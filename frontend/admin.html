@@ -360,6 +360,7 @@
     <button class="admin-tab" data-tab="validation">Validation</button>
     <button class="admin-tab" data-tab="repoll" id="repollTab">&#x21BB; Repoll</button>
     <button class="admin-tab" data-tab="ipa">IPA Export</button>
+    <button class="admin-tab" data-tab="royaltyrecon">🥗 Royalty Recon</button>
   </nav>
 
   <!-- ─── Status toast ─────────────────────────────────── -->
@@ -922,6 +923,36 @@ ORDER BY DateOfBusiness</pre>
       </div>
     </div><!-- /tab-ipa -->
 
+    <div class="tab-panel" id="tab-royaltyrecon">
+      <div class="section-header">
+        <div>
+          <h2>🥗 Royalty &amp; Accounting Net (ERA-independent)</h2>
+          <div class="user-count">Toast Net comes from a pasted Toast Web "Sales by location" export (exact); the service-charge / fee / deferred / gratuity adjustments are computed live from the Orders API. Produces the Toast Net → Royalty Net → Accounting Net Excel per store + chain. Does NOT use the ERA report.</div>
+        </div>
+      </div>
+      <div style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:1.25rem;">
+        <div style="display:flex;gap:0.75rem;align-items:end;flex-wrap:wrap;margin-bottom:1rem;">
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Start Date</label>
+            <input type="date" id="rrStart" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <div>
+            <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">End Date</label>
+            <input type="date" id="rrEnd" style="padding:0.45rem 0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.85rem;" />
+          </div>
+          <div style="margin-left:auto;">
+            <button class="btn-primary" id="rrRunBtn" style="background:#065F46;">Generate Excel</button>
+          </div>
+        </div>
+        <label style="font-size:0.8rem;font-weight:600;color:#374151;display:block;margin-bottom:0.25rem;">Toast Web "Sales by location" export — paste the whole CSV (including header row)</label>
+        <textarea id="rrCsv" rows="10" placeholder="Restaurant,Location,Net Sales,Gross Sales,..."
+          style="width:100%;padding:0.6rem;border:1px solid #D1D5DB;border-radius:6px;font-size:0.78rem;font-family:monospace;"></textarea>
+        <div style="margin-top:0.75rem;display:flex;align-items:center;gap:1rem;">
+          <div id="rrMsg" style="font-size:0.85rem;color:#6B7280;"></div>
+        </div>
+      </div>
+    </div><!-- /tab-royaltyrecon -->
+
   </main>
 
   <!-- ─── Auth Modal ───────────────────────────────────── -->
@@ -1108,6 +1139,42 @@ ORDER BY DateOfBusiness</pre>
       if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
       return headers;
     }
+
+    // ── Royalty & Accounting reconcile (Orders-API adjustments + pasted Toast net) ──
+    (function wireRoyaltyRecon() {
+      const btn = document.getElementById('rrRunBtn');
+      if (!btn) return;
+      btn.addEventListener('click', async () => {
+        const start = document.getElementById('rrStart').value;
+        const end = document.getElementById('rrEnd').value;
+        const csv = document.getElementById('rrCsv').value;
+        const msg = document.getElementById('rrMsg');
+        if (!start || !end || !csv.trim()) { msg.style.color = '#991B1B'; msg.textContent = 'Enter start date, end date, and paste the Toast net CSV.'; return; }
+        btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Working… (pulling Orders API)';
+        msg.style.color = '#6B7280'; msg.textContent = 'Computing per-store adjustments from the Orders API — this can take a couple of minutes for a full week.';
+        try {
+          const resp = await fetch('/api/admin/royalty-reconcile', {
+            method: 'POST', headers: getAuthHeaders(),
+            body: JSON.stringify({ start_date: start, end_date: end, net_csv: csv }),
+          });
+          if (!resp.ok) {
+            let detail = 'HTTP ' + resp.status;
+            try { const j = await resp.json(); detail = j.detail || detail; } catch (e) {}
+            throw new Error(detail);
+          }
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `Royalty_Accounting_Net_${start}_${end}.xlsx`;
+          document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+          msg.style.color = '#065F46'; msg.textContent = 'Done — Excel downloaded.';
+        } catch (e) {
+          msg.style.color = '#991B1B'; msg.textContent = 'Failed: ' + e.message;
+        } finally {
+          btn.disabled = false; btn.textContent = orig;
+        }
+      });
+    })();
 
     function showStatus(type, message) {
       const el = document.getElementById('adminStatus');

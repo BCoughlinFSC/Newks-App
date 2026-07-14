@@ -12136,6 +12136,214 @@ async def clear_sc_cache():
     return {"cleared": True, "entries_removed": count}
 
 
+def _parse_toast_net_csv(text: str) -> Dict[str, float]:
+    """
+    Parse a Toast Web 'Sales by location' CSV export → {store_id: net_sales}.
+    The export's Location column ('1040 - Newk's …, ST') is unquoted and contains a
+    comma, which shifts columns, so we locate the 'ID - Name' field by regex and take
+    the first numeric field after it as Net Sales.  Rows sharing a store id are summed
+    (Toast lists a few stores twice; summing matches Toast's own chain total).
+    """
+    import csv as _csv, io as _io, re as _re
+    out: Dict[str, float] = {}
+    reader = _csv.reader(_io.StringIO(text))
+    for line in reader:
+        if not line or not any(x.strip() for x in line):
+            continue
+        idpos = next((i for i, fld in enumerate(line) if _re.match(r"\s*\d+\s*-\s*\S", fld)), None)
+        if idpos is None:
+            continue
+        m = _re.match(r"\s*(\d+)\s*-", line[idpos])
+        if not m:
+            continue
+        sid = m.group(1)
+        net = None
+        for fld in line[idpos + 1:]:
+            s = (fld or "").strip().replace(",", "")
+            if _re.fullmatch(r"-?\d+(\.\d+)?", s):
+                net = float(s)
+                break
+        if net is not None:
+            out[sid] = round(out.get(sid, 0.0) + net, 2)
+    return out
+
+
+@app.post("/api/admin/royalty-reconcile")
+async def admin_royalty_reconcile(
+    payload: dict = Body(...),
+    admin_user: User = Depends(get_current_admin_user),
+):
+    """
+    Build the Toast Net → Royalty Net → Accounting Net breakdown per store + chain,
+    WITHOUT the ERA report:
+      • Toast Net comes from a pasted Toast Web 'Sales by location' CSV (exact).
+      • Adjustments (service charges, un-deferred fees, deferred + gratuity-flagged
+        fee add-backs) come from the ORDERS API only (_compute_netsales_detail_for_day).
+
+        Royalty Net    = Toast Net − restaurant service charges − un-deferred fees
+        Accounting Net = Toast Net + deferred add-back + gratuity-flagged fees
+
+    Body: {"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","net_csv":"<pasted csv>"}
+    Returns a formatted .xlsx.
+    """
+    import io as _io
+    from datetime import date as _date, timedelta as _timedelta
+    from fastapi.responses import StreamingResponse
+    import openpyxl as _oxl
+    from openpyxl.styles import Font as _Font, PatternFill as _Fill, Alignment as _Align, Border as _Bd, Side as _Side
+
+    start_s = (payload or {}).get("start_date")
+    end_s = (payload or {}).get("end_date")
+    net_csv = (payload or {}).get("net_csv") or ""
+    if not start_s or not end_s or not net_csv.strip():
+        raise HTTPException(status_code=400, detail="start_date, end_date and net_csv are required")
+    try:
+        start_d = _date.fromisoformat(start_s)
+        end_d = _date.fromisoformat(end_s)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="dates must be YYYY-MM-DD")
+    if end_d < start_d:
+        raise HTTPException(status_code=400, detail="end_date must be on/after start_date")
+
+    net_by_store = _parse_toast_net_csv(net_csv)
+    if not net_by_store:
+        raise HTTPException(status_code=400, detail="No store rows parsed from net_csv")
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        locations = await get_all_active_locations(client)
+        guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
+        guid_to_loc = _get_flash_loc_mapping()
+        loc_to_guid = {str(v).strip(): k for k, v in guid_to_loc.items()}
+        store_info = aloha_sales_db.get_store_info()
+
+        days = []
+        d = start_d
+        while d <= end_d:
+            days.append(d.strftime("%Y%m%d"))
+            d += _timedelta(days=1)
+
+        sem = asyncio.Semaphore(6)
+
+        async def _store_adj(sid: str):
+            guid = loc_to_guid.get(sid)
+            if not guid:
+                return sid, None
+            agg = {"sc": 0.0, "fees": 0.0, "deferred": 0.0, "gratfee": 0.0,
+                   "scByName": {}, "feesByName": {}, "deferredByName": {}, "gratFeeByName": {}}
+            async with sem:
+                for bd in days:
+                    try:
+                        det = await _compute_netsales_detail_for_day(client, guid, bd)
+                    except Exception as exc:
+                        logger.warning("royalty-reconcile: detail failed %s|%s: %s", sid, bd, exc)
+                        continue
+                    agg["sc"] += det.get("scTotal", 0.0)
+                    agg["fees"] += det.get("feesTotal", 0.0)
+                    agg["deferred"] += det.get("deferredTotal", 0.0)
+                    agg["gratfee"] += det.get("gratFeeTotal", 0.0)
+                    for key, src in (("scByName", "scByName"), ("feesByName", "feesByName"),
+                                     ("deferredByName", "deferredByName"), ("gratFeeByName", "gratFeeByName")):
+                        for nm, amt in (det.get(src) or {}).items():
+                            agg[key][nm] = round(agg[key].get(nm, 0.0) + amt, 2)
+            return sid, agg
+
+        results = dict(await asyncio.gather(*[_store_adj(sid) for sid in net_by_store]))
+
+    # Assemble per-store rows
+    rows = []
+    unmapped = []
+    ch = {"toast": 0.0, "sc": 0.0, "fees": 0.0, "deferred": 0.0, "gratfee": 0.0}
+    for sid, toast_net in net_by_store.items():
+        adj = results.get(sid)
+        if adj is None:
+            unmapped.append(sid)
+            adj = {"sc": 0.0, "fees": 0.0, "deferred": 0.0, "gratfee": 0.0,
+                   "scByName": {}, "feesByName": {}, "deferredByName": {}, "gratFeeByName": {}}
+        name = (store_info.get(sid, {}).get("restaurant_name")
+                or guid_to_name.get(loc_to_guid.get(sid, ""), "") or sid)
+        royalty = round(toast_net - adj["sc"] - adj["fees"], 2)
+        accounting = round(toast_net + adj["deferred"] + adj["gratfee"], 2)
+        rows.append({"sid": sid, "name": name, "toast": round(toast_net, 2),
+                     "sc": round(adj["sc"], 2), "fees": round(adj["fees"], 2),
+                     "royalty": royalty, "deferred": round(adj["deferred"], 2),
+                     "gratfee": round(adj["gratfee"], 2), "accounting": accounting,
+                     "detail": adj})
+        ch["toast"] += toast_net; ch["sc"] += adj["sc"]; ch["fees"] += adj["fees"]
+        ch["deferred"] += adj["deferred"]; ch["gratfee"] += adj["gratfee"]
+    rows.sort(key=lambda r: -r["toast"])
+    ch_royalty = round(ch["toast"] - ch["sc"] - ch["fees"], 2)
+    ch_accounting = round(ch["toast"] + ch["deferred"] + ch["gratfee"], 2)
+
+    # ── Build the workbook ──
+    wb = _oxl.Workbook()
+    ws = wb.active
+    ws.title = "Royalty & Accounting Net"
+    green = "065F46"; navy = "1E3A5F"; alt = "F3F4F6"
+    thin = _Side(style="thin", color="D1D5DB"); bd_all = _Bd(thin, thin, thin, thin)
+    money = '#,##0.00'
+    def _hdr(cells):
+        for c in cells:
+            c.font = _Font(bold=True, color="FFFFFF", size=10); c.fill = _Fill("solid", fgColor=navy)
+            c.alignment = _Align(horizontal="center", vertical="center", wrap_text=True); c.border = bd_all
+
+    ws.append([f"Toast Net → Royalty Net → Accounting Net   ·   {start_s} to {end_s}"])
+    ws["A1"].font = _Font(bold=True, size=13, color=green); ws.merge_cells("A1:I1")
+    ws.append([])
+    header = ["Store", "Location", "Toast Net", "− Service Charges", "− Fees",
+              "= Royalty Net", "+ Deferred", "+ Gratuity Fees", "= Accounting Net"]
+    ws.append(header); _hdr(ws[3])
+    r0 = 4
+    for i, r in enumerate(rows):
+        ws.append([r["sid"], r["name"], r["toast"], -r["sc"], -r["fees"],
+                   r["royalty"], r["deferred"], r["gratfee"], r["accounting"]])
+        rr = r0 + i
+        for cidx in range(3, 10):
+            cell = ws.cell(rr, cidx); cell.number_format = money
+        if i % 2:
+            for cidx in range(1, 10):
+                ws.cell(rr, cidx).fill = _Fill("solid", fgColor=alt)
+        for cidx in range(1, 10):
+            ws.cell(rr, cidx).border = bd_all
+    tr = r0 + len(rows)
+    ws.append(["", "CHAIN TOTAL", round(ch["toast"], 2), -round(ch["sc"], 2), -round(ch["fees"], 2),
+               ch_royalty, round(ch["deferred"], 2), round(ch["gratfee"], 2), ch_accounting])
+    for cidx in range(1, 10):
+        c = ws.cell(tr, cidx); c.font = _Font(bold=True, color="FFFFFF", size=11)
+        c.fill = _Fill("solid", fgColor=green); c.border = bd_all
+        if cidx >= 3: c.number_format = money
+    widths = [8, 42, 13, 15, 12, 14, 12, 14, 15]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[_oxl.utils.get_column_letter(i)].width = w
+    ws.freeze_panes = "A4"
+
+    # Detail sheet — itemized adjustments per store (transparency)
+    ws2 = wb.create_sheet("Adjustment Detail")
+    ws2.append(["Store", "Location", "Service charges (itemized)", "Fees removed (itemized)",
+                "Deferred add-back (itemized)", "Gratuity fees (itemized)"])
+    _hdr(ws2[1])
+    def _fmt(d): return "; ".join(f"{k}: {v:,.2f}" for k, v in sorted((d or {}).items(), key=lambda kv: -kv[1]))
+    for r in rows:
+        det = r["detail"]
+        ws2.append([r["sid"], r["name"], _fmt(det["scByName"]), _fmt(det["feesByName"]),
+                    _fmt(det["deferredByName"]), _fmt(det["gratFeeByName"])])
+    for i, w in enumerate([8, 40, 40, 40, 40, 40], start=1):
+        ws2.column_dimensions[_oxl.utils.get_column_letter(i)].width = w
+
+    if unmapped:
+        ws.append([]); ws.append([f"NOTE: {len(unmapped)} store(s) in the CSV had no Toast GUID mapping "
+                                  f"(adjustments shown as 0): {', '.join(unmapped)}"])
+
+    buf = _io.BytesIO(); wb.save(buf); buf.seek(0)
+    logger.info("royalty-reconcile: %d stores, chain Toast=%.2f Royalty=%.2f Accounting=%.2f, unmapped=%d",
+                len(rows), ch["toast"], ch_royalty, ch_accounting, len(unmapped))
+    fname = f"Royalty_Accounting_Net_{start_s}_{end_s}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 # ------------------
 # Orders Cache Admin Endpoints
 # ------------------
