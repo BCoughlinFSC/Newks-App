@@ -2032,16 +2032,21 @@ async def request_and_fetch_toast_report(
     restaurant_ids: List[str],
     report_type: str,
     group_by: List[str],
-    guid_retries: int = 3,
+    guid_retries: int = 5,
 ):
     """
     Create an ERA report request and fetch its result, regenerating the
     reportRequestGuid on Toast's 409 "please generate a new reportRequestGuid and
-    try again" — a transient server-side failure where the queued request dies and
+    try again" — a transient server-side failure where the queued report dies and
     the same GUID can never be retrieved.  Only that specific 409 is retried; every
     other error propagates unchanged.
+
+    Backoff escalates (5s, 10s, 20s, 40s) between regenerations so Toast's report
+    engine has time to recover from the bad window rather than us hammering it with
+    fresh GUIDs that fail just as fast.
     """
     last_exc: Optional[HTTPException] = None
+    backoff = 5.0
     for attempt in range(guid_retries):
         report_guid = await request_toast_report(
             client, start, end, restaurant_ids, report_type=report_type, group_by=group_by,
@@ -2054,11 +2059,12 @@ async def request_and_fetch_toast_report(
             if is_stale_guid and attempt < guid_retries - 1:
                 last_exc = exc
                 logger.warning(
-                    "ERA report %s failed with stale-GUID 409 (attempt %d/%d); "
-                    "regenerating reportRequestGuid",
-                    report_guid, attempt + 1, guid_retries,
+                    "ERA STALE-GUID 409 RETRY: report %s failed (attempt %d/%d); "
+                    "waiting %.0fs then regenerating reportRequestGuid",
+                    report_guid, attempt + 1, guid_retries, backoff,
                 )
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 40.0)
                 continue
             raise
     if last_exc:
