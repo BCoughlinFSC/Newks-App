@@ -2072,60 +2072,6 @@ async def request_and_fetch_toast_report(
         raise last_exc
 
 
-async def _fetch_flash_metrics_isolating(
-    client: httpx.AsyncClient,
-    start: date,
-    end: date,
-    restaurant_ids: List[str],
-    failed: List[str],
-) -> list:
-    """
-    Fetch ERA metrics (groupBy=DINING_OPTION) for a set of restaurants, isolating any
-    store whose data makes Toast's report engine fail to BUILD the report (a 409
-    "generate a new reportRequestGuid" that persists across fresh GUIDs — i.e. not a
-    transient hiccup and not rate limiting).
-
-    On such a build failure we binary-split the store list and recurse, so one bad
-    store can't sink the whole chain: the split narrows down to the offending
-    store(s), which are appended to `failed` and skipped.  Every other store's rows
-    come back normally.  Non-build errors (rate limit, auth, timeout) propagate.
-    """
-    n = len(restaurant_ids)
-    if n == 0:
-        return []
-    # Single attempt for multi-store nodes (splitting is the recovery); a couple of
-    # retries only at the leaf, to tell a transient blip apart from a real bad store.
-    try:
-        rows = await request_and_fetch_toast_report(
-            client, start, end, restaurant_ids,
-            report_type="metrics", group_by=["DINING_OPTION"],
-            guid_retries=(3 if n == 1 else 1),
-        )
-        return rows if isinstance(rows, list) else []
-    except HTTPException as exc:
-        detail = str(exc.detail or "")
-        build_failure = exc.status_code == 409 and "reportRequestGuid" in detail
-        if not build_failure:
-            raise  # rate limit / auth / etc. — do NOT split (would worsen it)
-        if n == 1:
-            failed.append(restaurant_ids[0])
-            logger.error(
-                "Flash ERA: store %s cannot build its report for %s..%s — SKIPPED. %s",
-                restaurant_ids[0][:8], start.isoformat(), end.isoformat(), detail,
-            )
-            return []
-        mid = n // 2
-        logger.warning(
-            "Flash ERA: build failed for a %d-store batch (%s..%s); splitting to isolate the bad store",
-            n, start.isoformat(), end.isoformat(),
-        )
-        await asyncio.sleep(0.5)
-        left = await _fetch_flash_metrics_isolating(client, start, end, restaurant_ids[:mid], failed)
-        await asyncio.sleep(0.5)
-        right = await _fetch_flash_metrics_isolating(client, start, end, restaurant_ids[mid:], failed)
-        return left + right
-
-
 async def fetch_flash_metrics(
     client: httpx.AsyncClient,
     start: date,
@@ -2133,26 +2079,36 @@ async def fetch_flash_metrics(
     restaurant_ids: List[str],
 ) -> list:
     """
-    Flash ERA metrics fetch with per-store fault isolation.  Requests in chunks of
-    25 (paced) so a normal run is a handful of requests; a chunk that hits a
-    persistent build-failure 409 is binary-split to skip only the offending store.
-    Stores that can't build are logged and omitted (their prior rollup row is left
-    untouched by the upsert), rather than failing the entire import.
+    Flash ERA metrics fetch — ONE all-stores report request (the approach that
+    worked for months), with the light stale-GUID retry.
+
+    Deliberately does NOT batch or per-store isolate: when Toast's report engine is
+    failing (a 409 "generate a new reportRequestGuid" that persists across fresh
+    GUIDs), the failure is on Toast's side and affects EVERY report — splitting into
+    per-store requests just fires hundreds of doomed requests and keeps the account's
+    report generation throttled.  So we make one clean attempt and fail fast with a
+    clear message telling the operator to wait and retry.
     """
-    failed: List[str] = []
-    rows: list = []
-    chunks = chunk_list(restaurant_ids, 25)
-    for i, chunk in enumerate(chunks):
-        rows.extend(await _fetch_flash_metrics_isolating(client, start, end, chunk, failed))
-        if i < len(chunks) - 1:
-            await asyncio.sleep(0.5)
-    if failed:
-        logger.error(
-            "Flash ERA: %d/%d store(s) SKIPPED for %s..%s (report build failed): %s",
-            len(failed), len(restaurant_ids), start.isoformat(), end.isoformat(),
-            ", ".join(g[:8] for g in failed),
+    try:
+        rows = await request_and_fetch_toast_report(
+            client, start, end, restaurant_ids,
+            report_type="metrics", group_by=["DINING_OPTION"],
         )
-    return rows
+        return rows if isinstance(rows, list) else []
+    except HTTPException as exc:
+        detail = str(exc.detail or "")
+        if exc.status_code == 409 and "reportRequestGuid" in detail:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Toast's report engine could not build the metrics report for "
+                    f"{start.isoformat()} (repeated 409 across fresh report IDs). This is a "
+                    "Toast-side failure, not a data problem — it affects every store. Stop "
+                    "running imports for ~30-60 minutes (each attempt keeps Toast's report "
+                    "generation throttled), then retry once."
+                ),
+            ) from exc
+        raise
 
 
 # Restaurant-batch size for ERA menu analytics requests. One all-stores
@@ -13833,11 +13789,7 @@ async def _run_flash_import_for_date(target_date: date):
 
             if rows_for_df:
                 df = pd.DataFrame(rows_for_df)
-                # upsert_rows (per-store INSERT OR REPLACE), NOT upsert_date
-                # (delete-all-then-insert): if a store was skipped by the ERA
-                # fault-isolation, we must leave its existing row intact rather than
-                # wipe it. For a full run this is equivalent (every store replaced).
-                inserted = aloha_sales_db.upsert_rows(df, target_str)
+                inserted = aloha_sales_db.upsert_date(df, target_str)
                 logger.info("Flash import: %d rows for %s", inserted, target_str)
 
                 _nightly_flash_last_result.update({
