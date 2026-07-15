@@ -441,6 +441,71 @@ def upsert_item_tags(
     return len(rows)
 
 
+def replace_item_tags_for_items(
+    mappings: List[dict],
+    seen_item_guids: List[str],
+    store_guid: str,
+    db_path: str = TOAST_CONFIG_DB_PATH,
+) -> int:
+    """
+    Authoritatively replace the tag assignments for a store, but ONLY for the
+    items we actually received fresh data about in this sync (``seen_item_guids``).
+
+    This fixes the "removed tag never disappears" bug: ``upsert_item_tags`` only
+    ever inserts/updates, so a tag removed in Toastweb left an orphan row in
+    cfg_map_item_tags forever — and get_live_item_tag_attrs() (tier-2 fallback in
+    the menu performance report) would keep resurrecting it (e.g. a half-pizza
+    still showing a "TurkeyBreast" recipe after the recipe tag was cleared).
+
+    Safety: we delete tag rows only for item_guids present in *this* payload, so
+    a partial/incomplete Toast menu response can never wipe good data for items
+    it happened to omit. Items with zero tags after removal are included in
+    ``seen_item_guids`` (so their orphaned rows are cleared) even though they
+    contribute no rows to ``mappings``. All in one transaction.
+
+    Returns the number of mapping rows inserted.
+    """
+    initialize_db(db_path)
+
+    # Deduplicate + drop empties; nothing to scope the delete to → no-op.
+    guids = sorted({g for g in (seen_item_guids or []) if g})
+    if not guids:
+        return upsert_item_tags(mappings, store_guid, db_path)
+
+    insert_rows = [
+        (
+            store_guid,
+            m.get("item_guid", ""),
+            m.get("tag_guid", ""),
+            m.get("item_plu", 0),
+            m.get("multi_location_id", ""),
+        )
+        for m in (mappings or [])
+    ]
+
+    with get_connection(db_path) as conn:
+        # Purge existing assignments for exactly the items in this payload.
+        # Chunk the IN-list to stay under SQLite's variable limit.
+        for i in range(0, len(guids), 500):
+            chunk = guids[i:i + 500]
+            ph = ",".join("?" * len(chunk))
+            conn.execute(
+                f"DELETE FROM cfg_map_item_tags "
+                f"WHERE store_guid = ? AND item_guid IN ({ph})",
+                [store_guid, *chunk],
+            )
+        # Re-insert the current set. INSERT OR REPLACE guards against any
+        # duplicate (mli, tag_guid) within the same payload.
+        if insert_rows:
+            conn.executemany(
+                """INSERT OR REPLACE INTO cfg_map_item_tags (
+                    store_guid, item_guid, tag_guid, item_plu, multi_location_id
+                ) VALUES (?,?,?,?,?)""",
+                insert_rows,
+            )
+    return len(insert_rows)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Writes — cfg_sales_cats
 # ──────────────────────────────────────────────────────────────────────────────

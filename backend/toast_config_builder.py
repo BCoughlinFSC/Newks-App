@@ -87,7 +87,14 @@ def merge_menu_config_from_api(
     # ── Upsert everything ──
     n_items = toast_config_db.upsert_menu_items(menu_items, store_guid, db_path)
     n_tags = toast_config_db.upsert_tags(list(tags_seen.values()), store_guid, db_path)
-    n_item_tags = toast_config_db.upsert_item_tags(item_tags, store_guid, db_path)
+    # Every item/modifier guid we saw in this payload — the authoritative scope
+    # for pruning stale tag rows. Using this (rather than only the guids that
+    # still have tags) ensures an item stripped of ALL tags in Toastweb also
+    # gets its orphaned cfg_map_item_tags rows cleared.
+    seen_item_guids = [mi["item_guid"] for mi in menu_items if mi.get("item_guid")]
+    n_item_tags = toast_config_db.replace_item_tags_for_items(
+        item_tags, seen_item_guids, store_guid, db_path
+    )
     n_cats = toast_config_db.upsert_sales_cats(list(sales_cats_seen.values()), store_guid, db_path)
 
     result = {
