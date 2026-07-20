@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Newk's Onboarding Journey</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --maroon:#9E1B32; --maroon-deep:#7E1428; --gold:#C9A24B; --gold-soft:#E6D9BF;
+    --ground:#F4EFE6; --panel:#FFFFFF; --panel-2:#FBF7EF; --line:#E7DECF;
+    --ink:#2A2320; --ink-2:#5C534B; --ink-3:#8A8178;
+    --good:#3F7A52; --good-bg:#E7F0E8; --warn:#B07D1E; --warn-bg:#F7EED8;
+    --cond:#2F6F7E; --cond-bg:#E1EEF1; --idle:#9C948A; --idle-bg:#EFEAE1;
+    --shadow:0 1px 2px rgba(42,35,32,.06), 0 8px 24px rgba(42,35,32,.06);
+    --serif:Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,Helvetica,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  h1,h2,h3{font-family:var(--serif);font-weight:normal;margin:0;text-wrap:balance;}
+  a{color:var(--maroon);}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 72px;}
+  .topbar{background:var(--maroon);color:#fff;}
+  .topbar-inner{max-width:1000px;margin:0 auto;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+  .brand .eyebrow{font-family:var(--serif);font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;color:#F3C9CF;display:block;}
+  .brand .name{font-family:var(--serif);font-size:19px;color:#fff;line-height:1.1;}
+  .ticket{font-size:12.5px;color:#F6D9DD;text-decoration:none;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:7px 13px;}
+  .ticket:hover{background:rgba(255,255,255,.12);color:#fff;}
+  .goldrule{height:3px;background:var(--gold);}
+
+  .pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;line-height:1.5;white-space:nowrap;}
+  .pill.req{color:var(--maroon);background:color-mix(in srgb,var(--maroon) 12%,transparent);}
+  .pill.rec{color:var(--warn);background:var(--warn-bg);}
+  .pill.opt{color:var(--ink-2);background:var(--idle-bg);}
+  .pill.cond{color:var(--cond);background:var(--cond-bg);}
+  .chip{display:inline-flex;align-items:center;font-size:11px;font-weight:600;color:var(--ink-3);background:var(--panel-2);border:1px solid var(--line);padding:2px 9px;border-radius:999px;white-space:nowrap;}
+  .owner{display:inline-flex;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap;}
+  .owner.franchisee{color:var(--maroon);background:color-mix(in srgb,var(--maroon) 10%,transparent);}
+  .owner.newks{color:var(--cond);background:var(--cond-bg);}
+
+  .hero{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);margin-top:24px;overflow:hidden;}
+  .hero-top{padding:24px 28px;display:flex;gap:26px;align-items:center;flex-wrap:wrap;}
+  .hero-copy{flex:1 1 300px;min-width:0;}
+  .hero-copy .kicker{font-family:var(--serif);font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);}
+  .hero-copy h1{font-size:26px;margin:5px 0 4px;color:var(--ink);}
+  .hero-copy .sub{color:var(--ink-2);font-size:14px;}
+  .hero-copy .meta{display:flex;gap:18px;margin-top:14px;flex-wrap:wrap;}
+  .hero-copy .meta .m{display:flex;flex-direction:column;}
+  .hero-copy .meta .m .k{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--ink-3);}
+  .hero-copy .meta .m .v{font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;}
+  .hero-copy .meta .m .v.alert{color:var(--maroon);}
+  .ring{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .ring .dial{width:116px;height:116px;border-radius:50%;display:grid;place-items:center;position:relative;background:conic-gradient(var(--gold) calc(var(--pct)*1%), var(--line) 0);}
+  .ring .dial::before{content:"";position:absolute;width:88px;height:88px;border-radius:50%;background:var(--panel);}
+  .ring .dial b{position:relative;font-family:var(--serif);font-size:29px;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1;}
+  .ring .dial b span{font-size:14px;color:var(--ink-3);}
+  .ring .cap{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--ink-3);}
+  .phasebar{display:flex;border-top:1px solid var(--line);background:var(--panel-2);}
+  .phasebar .ph{flex:1;padding:13px 16px;border-right:1px solid var(--line);}
+  .phasebar .ph:last-child{border-right:0;}
+  .phasebar .ph .lab{font-size:11px;font-weight:700;color:var(--ink-2);display:flex;justify-content:space-between;gap:8px;}
+  .phasebar .ph .lab em{font-style:normal;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+  .phasebar .ph .track{height:5px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden;}
+  .phasebar .ph .track i{display:block;height:100%;background:var(--gold);border-radius:3px;transition:width .35s ease;}
+
+  .callout{margin-top:20px;background:var(--panel-2);border:1px solid var(--gold-soft);border-left:4px solid var(--gold);border-radius:8px;padding:14px 18px;font-size:13.5px;color:var(--ink-2);}
+  .callout b{color:var(--maroon);}
+
+  .section{margin-top:30px;}
+  .section-head{display:flex;align-items:baseline;gap:12px;margin-bottom:4px;}
+  .section-head .step{font-family:var(--serif);font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);}
+  .section-head h2{font-size:20px;color:var(--ink);}
+  .section-head .count{margin-left:auto;font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+  .rule{height:2px;background:var(--line);margin:10px 0 4px;}
+
+  .tasks{display:flex;flex-direction:column;gap:10px;margin-top:12px;}
+  .task{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);display:flex;gap:14px;padding:15px 17px;}
+  .task.done{background:color-mix(in srgb,var(--good-bg) 55%,var(--panel));border-color:color-mix(in srgb,var(--good) 30%,var(--line));}
+  .cbx{appearance:none;width:24px;height:24px;border:2px solid var(--idle);border-radius:7px;cursor:pointer;display:grid;place-items:center;background:var(--panel);transition:.15s;margin-top:1px;}
+  .cbx:hover{border-color:var(--maroon);}
+  .cbx:checked{background:var(--good);border-color:var(--good);}
+  .cbx:checked::after{content:"";width:6px;height:11px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(43deg) translateY(-1px);}
+  .cbx:disabled{cursor:not-allowed;opacity:.5;}
+  .cbx:focus-visible{outline:2px solid var(--maroon);outline-offset:2px;}
+  .task .body{flex:1;min-width:0;}
+  .task .title{font-size:15px;font-weight:700;color:var(--ink);text-decoration:none;}
+  a.title:hover{text-decoration:underline;text-decoration-color:var(--gold);}
+  .task.done .title{color:var(--ink-2);}
+  .task .tags{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0;align-items:center;}
+  .task .desc{font-size:13px;color:var(--ink-2);}
+  .task .foot{margin-top:9px;font-size:12px;color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+  .task .foot .ok{color:var(--good);font-weight:600;}
+  .task .foot a{font-weight:600;text-decoration:none;}
+  .task .foot a:hover{text-decoration:underline;}
+  .task .foot .notebtn{background:none;border:0;color:var(--maroon);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;padding:0;}
+  .task .foot .notebtn:hover{text-decoration:underline;}
+  .locknote{font-style:italic;}
+  .notebox{margin-top:9px;display:none;}
+  .notebox.open{display:block;}
+  .notebox textarea{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-family:inherit;font-size:13px;resize:vertical;min-height:2.4rem;color:var(--ink);background:var(--panel);}
+  .notebox .na{display:flex;gap:8px;justify-content:flex-end;margin-top:6px;}
+  .btn{border:0;border-radius:7px;padding:6px 14px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;}
+  .btn.primary{background:var(--maroon);color:#fff;} .btn.primary:hover{background:var(--maroon-deep);}
+  .btn.ghost{background:var(--panel-2);color:var(--ink-2);border:1px solid var(--line);}
+  .savednote{margin-top:8px;font-size:12.5px;color:var(--ink-2);background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;white-space:pre-wrap;}
+  .savednote .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--ink-3);display:block;margin-bottom:2px;}
+
+  .legend{margin-top:30px;background:var(--panel-2);border:1px solid var(--gold-soft);border-radius:8px;padding:14px 18px;font-size:12.5px;color:var(--ink-2);line-height:1.9;}
+  .legend b{color:var(--ink);}
+  .foothint{margin-top:26px;text-align:center;font-size:12px;color:var(--ink-3);}
+
+  .state{max-width:520px;margin:70px auto;text-align:center;padding:0 20px;}
+  .state h2{font-size:22px;color:var(--ink);margin-bottom:8px;}
+  .state p{color:var(--ink-2);}
+  .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--maroon);border-radius:50%;margin:0 auto 16px;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:10px 18px;border-radius:8px;font-size:13.5px;box-shadow:0 8px 30px rgba(0,0,0,.25);opacity:0;transition:.25s;pointer-events:none;z-index:50;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .toast.err{background:#8a1f1f;}
+  @media (max-width:720px){
+    .hero-top{flex-direction:column-reverse;align-items:flex-start;}
+    .phasebar{flex-wrap:wrap;} .phasebar .ph{flex:1 1 50%;}
+  }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <div class="brand">
+    <span class="eyebrow">Newk's Eatery &middot; New Restaurant Opening</span>
+    <span class="name">IT Onboarding Journey</span>
+  </div>
+  <a class="ticket" href="https://fscticket.freshdesk.com/support/tickets/new" target="_blank" rel="noopener">Need help? Submit a ticket</a>
+</div></div>
+<div class="goldrule"></div>
+
+<div id="app">
+  <div class="state"><div class="spinner"></div><p>Loading your onboarding journey…</p></div>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+const PRIO = {req:['★ Required','req'], rec:['◆ Recommended','rec'], opt:['○ Optional','opt'], cond:['⚠ Conditional','cond']};
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+let DATA = null;
+
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function fmt(iso){ if(!iso) return '—'; const p=String(iso).split('T')[0].split('-'); if(p.length<3) return iso;
+  const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]; return `${mo} ${+p[2]}, ${p[0]}`; }
+function daysUntil(iso){ if(!iso) return null; const t=new Date(iso+'T00:00:00'); const now=new Date(); now.setHours(0,0,0,0);
+  return Math.round((t-now)/86400000); }
+function toast(msg, isErr){ const el=document.getElementById('toast'); el.textContent=msg; el.className='toast show'+(isErr?' err':'');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.className='toast'+(isErr?' err':''),2200); }
+
+async function load(){
+  if(!TOKEN){ return renderError("This onboarding link is missing its access code. Please use the link from your invitation email."); }
+  try{
+    const res = await fetch('/api/onboarding/journey/'+encodeURIComponent(TOKEN));
+    if(res.status===404){ return renderError("This onboarding link is invalid or has expired. Please contact the FSC Help Desk for a fresh link."); }
+    if(!res.ok){ return renderError("We couldn't load your journey right now (error "+res.status+"). Please try again shortly."); }
+    DATA = await res.json();
+    render();
+  }catch(e){ renderError("Network error loading your journey: "+e.message); }
+}
+
+function renderError(msg){
+  document.getElementById('app').innerHTML =
+    `<div class="state"><h2>We hit a snag</h2><p>${esc(msg)}</p>
+     <p style="margin-top:16px;"><a href="https://fscticket.freshdesk.com/support/tickets/new">Submit an FSC Help Desk ticket →</a></p></div>`;
+}
+
+function stepStats(step){
+  const req = DATA.tasks.filter(t=>t.step===step && t.prio==='req');
+  const done = req.filter(t=>t.done).length;
+  return {done, n:req.length, pct: req.length?Math.round(done/req.length*100):0};
+}
+
+function render(){
+  const op = DATA, p = op.progress, label = [op.city, op.state].filter(Boolean).join(', ');
+  const dleft = daysUntil(op.target_open);
+  const countdown = dleft===null ? '—' : (dleft<0 ? 'Open' : dleft+' days');
+  const steps = op.steps || {};
+  let h = `
+   <div class="wrap">
+   <div class="hero">
+     <div class="hero-top">
+       <div class="hero-copy">
+         <div class="kicker">Your Onboarding Journey</div>
+         <h1>${esc(op.store_name||"Newk's Eatery")}${label?' — '+esc(label):''}</h1>
+         <div class="sub">Welcome aboard. Here's everything IT needs for opening day, in the order we recommend tackling it.</div>
+         <div class="meta">
+           <div class="m"><span class="k">Target open</span><span class="v">${esc(fmt(op.target_open))}</span></div>
+           <div class="m"><span class="k">Countdown</span><span class="v ${dleft!==null&&dleft>=0&&dleft<45?'alert':''}">${countdown}</span></div>
+           <div class="m"><span class="k">Required left</span><span class="v ${p.required_open>6?'alert':''}">${p.required_open} tasks</span></div>
+         </div>
+       </div>
+       <div class="ring"><div class="dial" style="--pct:${p.pct}"><b>${p.pct}<span>%</span></b></div><div class="cap">Required complete</div></div>
+     </div>
+     <div class="phasebar">${[1,2,3,4].map(s=>{const st=stepStats(s);
+       return `<div class="ph"><div class="lab">Step ${s} <em>${st.done}/${st.n}</em></div><div class="track"><i style="width:${st.pct}%"></i></div></div>`;}).join('')}</div>
+   </div>
+   <div class="callout"><b>How this works —</b> Check off each task as you finish it and your progress saves automatically. Tasks marked <span class="owner newks">Newk's team</span> are handled internally — you'll see them completed here as we finish. Bring your progress to the 90 / 60 / 30-day status calls. Stuck? <a href="https://fscticket.freshdesk.com/support/tickets/new" target="_blank" rel="noopener">Submit an FSC Help Desk ticket</a>.</div>
+  `;
+  [1,2,3,4].forEach(step=>{
+    const items = op.tasks.filter(t=>t.step===step);
+    const done = items.filter(t=>t.done).length;
+    h += `<div class="section"><div class="section-head"><div><div class="step">Step ${step}</div><h2>${esc(steps[step]||'')}</h2></div>
+      <div class="count">${done}/${items.length} complete</div></div><div class="rule"></div><div class="tasks">`;
+    items.forEach(t=>{
+      const mine = t.owner==='franchisee';
+      h += taskCard(t, mine, true);
+    });
+    h += `</div></div>`;
+  });
+  h += `<div class="legend"><b>KEY</b> &nbsp; <span class="pill req">★ Required</span> must complete &nbsp;·&nbsp; <span class="pill rec">◆ Recommended</span> strongly advised &nbsp;·&nbsp; <span class="pill opt">○ Optional</span> at your discretion &nbsp;·&nbsp; <span class="pill cond">⚠ Conditional</span> only if not using ISS for network</div>
+    <div class="foothint">Your progress is saved automatically and shared with the FSC IT team.</div></div>`;
+  document.getElementById('app').innerHTML = h;
+}
+
+function taskCard(t, canCheck, franchiseeView){
+  const doneStamp = t.done_at ? ' · '+fmt(t.done_at) : '';
+  const titleHtml = t.kb ? `<a class="title" href="${esc(t.kb)}" target="_blank" rel="noopener">${esc(t.title)}</a>`
+                         : `<span class="title">${esc(t.title)}</span>`;
+  return `<div class="task ${t.done?'done':''}" data-key="${esc(t.key)}">
+     <input class="cbx" type="checkbox" ${t.done?'checked':''} ${canCheck?'':'disabled'}
+       onchange="toggle('${esc(t.key)}',this)" aria-label="Mark ${esc(t.title)} complete">
+     <div class="body">
+       ${titleHtml}
+       <div class="tags">
+         <span class="pill ${PRIO[t.prio][1]}">${PRIO[t.prio][0]}</span>
+         ${t.lead?`<span class="chip">${esc(t.lead)}</span>`:''}
+         ${t.dept?`<span class="chip">${esc(t.dept)}</span>`:''}
+         <span class="owner ${canCheck?'franchisee':'newks'}">${canCheck?(franchiseeView?'You':'Franchisee'):"Newk's team"}</span>
+       </div>
+       <div class="desc">${esc(t.desc)}</div>
+       <div class="foot">
+         ${t.done?`<span class="ok">✓ Completed${esc(doneStamp)}</span>`
+                 :(canCheck?'<span>Not started</span>':'<span class="locknote">Newk\'s handles this — no action needed from you</span>')}
+         ${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">Knowledge Base article →</a>`:''}
+         ${canCheck?`<button class="notebtn" onclick="toggleNote('${esc(t.key)}')">${t.note?'Edit note':'Add a note'}</button>`:''}
+       </div>
+       ${t.note?`<div class="savednote" id="sn-${esc(t.key)}"><span class="lbl">Your note</span>${esc(t.note)}</div>`:''}
+       ${canCheck?`<div class="notebox" id="nb-${esc(t.key)}">
+          <textarea placeholder="Add account details, questions, or anything to share with the Newk's team…">${esc(t.note||'')}</textarea>
+          <div class="na"><button class="btn ghost" onclick="toggleNote('${esc(t.key)}')">Cancel</button>
+          <button class="btn primary" onclick="saveNote('${esc(t.key)}')">Save note</button></div></div>`:''}
+     </div></div>`;
+}
+
+function findTask(key){ return DATA.tasks.find(t=>t.key===key); }
+
+async function toggle(key, el){
+  const done = el.checked;
+  el.disabled = true;
+  try{
+    const res = await fetch(`/api/onboarding/journey/${encodeURIComponent(TOKEN)}/tasks/${encodeURIComponent(key)}`,
+      {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({done})});
+    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.detail||res.status); }
+    const t = findTask(key); t.done = done; t.done_at = done ? new Date().toISOString() : null;
+    render();
+    toast(done?'Nice — marked complete ✓':'Marked not started');
+  }catch(e){ el.checked=!done; el.disabled=false; toast('Could not save: '+e.message, true); }
+}
+
+function toggleNote(key){
+  const nb = document.getElementById('nb-'+cssId(key)); if(!nb) return;
+  nb.classList.toggle('open');
+  if(nb.classList.contains('open')) nb.querySelector('textarea').focus();
+}
+// keys are simple slugs (a-z0-9_) so they're valid as-is for getElementById
+function cssId(key){ return key; }
+
+async function saveNote(key){
+  const nb = document.getElementById('nb-'+key); const val = nb.querySelector('textarea').value;
+  try{
+    const res = await fetch(`/api/onboarding/journey/${encodeURIComponent(TOKEN)}/tasks/${encodeURIComponent(key)}`,
+      {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note:val})});
+    if(!res.ok){ const e=await res.json().catch(()=>({})); throw new Error(e.detail||res.status); }
+    findTask(key).note = val.trim() || null;
+    render(); toast('Note saved');
+  }catch(e){ toast('Could not save note: '+e.message, true); }
+}
+
+load();
+</script>
+</body>
+</html>

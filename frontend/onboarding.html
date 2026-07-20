@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>NRO Onboarding – Newk's Reporting Platform</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#F8FAFC;color:#2c2c2c;min-height:100vh;}
+  .header{background:#C41E3A;padding:1.5rem 2rem;border-bottom:3px solid #A01A2E;box-shadow:0 2px 8px rgba(0,0,0,.1);}
+  .header-content{display:flex;justify-content:space-between;align-items:center;}
+  .header h1{margin:0;color:#fff;font-size:1.5rem;font-weight:700;}
+  .header p{margin:.25rem 0 0;color:rgba(255,255,255,.85);font-size:.85rem;}
+  .home-btn{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);padding:.4rem .8rem;border-radius:6px;font-size:.85rem;text-decoration:none;}
+  .home-btn:hover{background:rgba(255,255,255,.25);}
+  .container{display:grid;grid-template-columns:280px 1fr;gap:1.5rem;padding:1.5rem 2rem;max-width:1500px;margin:0 auto;}
+  @media (max-width:900px){.container{grid-template-columns:1fr;}}
+  .card{background:#fff;border-radius:12px;padding:1.5rem;border:1px solid #e8e0d5;box-shadow:0 2px 8px rgba(0,0,0,.08);}
+  .card h2{margin:0 0 1rem;color:#C41E3A;font-size:1.1rem;font-weight:700;}
+  .btn-primary{background:#C41E3A;color:#fff;border:none;padding:.55rem 1.25rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.9rem;}
+  .btn-primary:hover:not(:disabled){background:#A01A2E;}
+  .btn-primary:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-secondary{background:#374151;color:#fff;border:none;padding:.55rem 1.25rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.9rem;}
+  .btn-secondary:hover:not(:disabled){background:#1F2937;}
+  .btn-ghost{background:#fff;border:1px solid #D1D5DB;color:#374151;padding:.5rem 1rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.85rem;}
+  .btn-ghost:hover{background:#F3F4F6;}
+  .btn-link{background:none;border:none;color:#C41E3A;cursor:pointer;font-size:.85rem;font-weight:600;padding:.2rem .4rem;}
+  .btn-link.danger{color:#B91C1C;} .btn-link:hover{text-decoration:underline;}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.25rem;}
+  @media (max-width:700px){.stats{grid-template-columns:repeat(2,1fr);}}
+  .stat{background:#fff;border:1px solid #e8e0d5;border-radius:12px;padding:1rem 1.15rem;box-shadow:0 2px 8px rgba(0,0,0,.06);}
+  .stat .n{font-size:1.9rem;font-weight:800;color:#1F2937;line-height:1;font-variant-numeric:tabular-nums;}
+  .stat .n.warn{color:#B07D1E;} .stat .n.alert{color:#C41E3A;}
+  .stat .l{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:#6B7280;margin-top:.5rem;}
+
+  /* portfolio */
+  .p-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;gap:1rem;flex-wrap:wrap;}
+  .p-toolbar h2{margin:0;color:#C41E3A;font-size:1.15rem;}
+  .plist{background:#fff;border:1px solid #e8e0d5;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;}
+  .p-row{display:grid;grid-template-columns:1.7fr .9fr 1.5fr .8fr 30px;gap:1rem;align-items:center;padding:.95rem 1.25rem;border-top:1px solid #EEF2F7;cursor:pointer;transition:.12s;}
+  .p-row:first-child{border-top:none;}
+  .p-row:hover{background:#FAFAF8;}
+  .p-row.head{cursor:default;background:#F8F5F0;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;color:#8A8178;font-weight:700;}
+  .p-row.head:hover{background:#F8F5F0;}
+  .p-store{font-weight:700;color:#1F2937;} .p-store .loc{font-weight:400;color:#9CA3AF;font-size:.82rem;}
+  .p-open b{display:block;font-size:.85rem;color:#374151;font-variant-numeric:tabular-nums;} .p-open span{font-size:.75rem;color:#9CA3AF;}
+  .pbar-wrap{display:flex;align-items:center;gap:.65rem;}
+  .pbar{flex:1;height:8px;background:#EAE3D8;border-radius:5px;overflow:hidden;}
+  .pbar i{display:block;height:100%;border-radius:5px;transition:width .35s;}
+  .pbar-wrap b{font-size:.8rem;font-variant-numeric:tabular-nums;min-width:34px;color:#4B5563;}
+  .p-block{font-size:.8rem;font-weight:700;} .p-block.zero{color:#3F7A52;} .p-block.some{color:#B07D1E;} .p-block.many{color:#C41E3A;}
+  .p-arrow{color:#C0B6A8;text-align:right;font-size:1.1rem;}
+  .empty{padding:2.5rem;text-align:center;color:#9CA3AF;}
+
+  /* modal */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:60;padding:1rem;}
+  .modal-overlay.open{display:flex;}
+  .modal{background:#fff;border-radius:12px;padding:1.6rem;width:100%;max-width:540px;box-shadow:0 12px 44px rgba(0,0,0,.28);max-height:90vh;overflow:auto;}
+  .modal h3{margin:0 0 1rem;color:#C41E3A;}
+  .form-group{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.9rem;}
+  .form-group label{font-weight:600;font-size:.83rem;color:#374151;}
+  .form-group input{padding:.55rem .75rem;border:1px solid #D1D5DB;border-radius:6px;font-size:.9rem;font-family:inherit;}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;}
+  .grid-2b{display:grid;grid-template-columns:2fr 1fr;gap:.9rem;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:.6rem;margin-top:1rem;}
+  .check-row{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:#374151;margin-bottom:.5rem;}
+  .hint{font-size:.78rem;color:#9CA3AF;margin:.2rem 0 0;}
+
+  /* detail */
+  .backlink{background:none;border:0;color:#C41E3A;font-weight:600;font-size:.9rem;cursor:pointer;padding:0;margin-bottom:1rem;}
+  .backlink:hover{text-decoration:underline;}
+  .detail-hero{display:flex;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;}
+  .detail-hero .dh-meta{display:flex;gap:1.5rem;margin-top:.6rem;flex-wrap:wrap;}
+  .detail-hero .dh-meta .m .k{font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;color:#9CA3AF;}
+  .detail-hero .dh-meta .m .v{font-weight:700;font-size:.95rem;color:#1F2937;}
+  .ringd{width:88px;height:88px;border-radius:50%;display:grid;place-items:center;position:relative;flex:0 0 auto;background:conic-gradient(#C9A24B calc(var(--pct)*1%),#EAE3D8 0);}
+  .ringd::before{content:"";position:absolute;width:66px;height:66px;border-radius:50%;background:#fff;}
+  .ringd b{position:relative;font-size:1.35rem;font-weight:800;color:#1F2937;font-variant-numeric:tabular-nums;}
+
+  .invite-box{background:#FBF7EF;border:1px solid #E6D9BF;border-radius:10px;padding:1rem 1.15rem;margin:1.15rem 0;}
+  .invite-box .il{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:#8A8178;font-weight:700;margin-bottom:.4rem;}
+  .invite-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;}
+  .invite-row input{flex:1;min-width:220px;padding:.5rem .7rem;border:1px solid #D9CEBB;border-radius:6px;font-size:.82rem;background:#fff;color:#4B5563;font-family:ui-monospace,Menlo,monospace;}
+  .invite-actions{display:flex;gap:.5rem;margin-top:.7rem;flex-wrap:wrap;}
+
+  .task{display:flex;gap:.85rem;padding:.85rem 1rem;border:1px solid #EAE3D8;border-radius:10px;margin-bottom:.55rem;background:#fff;}
+  .task.done{background:#F1F7F2;border-color:#CBE3D0;}
+  .cbx{appearance:none;width:22px;height:22px;border:2px solid #B9AF9F;border-radius:6px;cursor:pointer;display:grid;place-items:center;background:#fff;margin-top:1px;flex:0 0 auto;}
+  .cbx:hover{border-color:#C41E3A;} .cbx:checked{background:#3F7A52;border-color:#3F7A52;}
+  .cbx:checked::after{content:"";width:6px;height:10px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(43deg) translateY(-1px);}
+  .task .tt{font-weight:700;color:#1F2937;font-size:.92rem;}
+  .task .tg{display:flex;gap:.4rem;flex-wrap:wrap;margin:.35rem 0;align-items:center;}
+  .task .td{font-size:.82rem;color:#5C534B;}
+  .task .tf{margin-top:.45rem;font-size:.76rem;color:#9CA3AF;display:flex;gap:.9rem;flex-wrap:wrap;align-items:center;}
+  .task .tf .ok{color:#3F7A52;font-weight:600;}
+  .task .savednote{margin-top:.5rem;font-size:.8rem;background:#F8F5F0;border:1px solid #EAE3D8;border-radius:6px;padding:.5rem .65rem;white-space:pre-wrap;color:#4B5563;}
+  .task .savednote .lbl{display:block;font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#9CA3AF;margin-bottom:.15rem;}
+  .pill{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.68rem;font-weight:700;white-space:nowrap;}
+  .pill.req{color:#C41E3A;background:#F7E4E7;} .pill.rec{color:#B07D1E;background:#F7EED8;}
+  .pill.opt{color:#5C534B;background:#EFEAE1;} .pill.cond{color:#2F6F7E;background:#E1EEF1;}
+  .chip{display:inline-block;font-size:.68rem;font-weight:600;color:#8A8178;background:#F3EFE7;border:1px solid #EAE3D8;padding:.1rem .55rem;border-radius:999px;}
+  .own{display:inline-block;font-size:.68rem;font-weight:700;padding:.1rem .55rem;border-radius:999px;}
+  .own.fr{color:#C41E3A;background:#F7E4E7;} .own.nk{color:#2F6F7E;background:#E1EEF1;}
+  .step-h{margin:1.4rem 0 .5rem;display:flex;align-items:baseline;gap:.6rem;}
+  .step-h .s{font-size:.68rem;letter-spacing:1.5px;text-transform:uppercase;color:#C9A24B;font-weight:700;}
+  .step-h h3{margin:0;font-size:1.02rem;color:#1F2937;}
+  .step-h .c{margin-left:auto;font-size:.76rem;color:#9CA3AF;}
+
+  .status-msg{padding:.7rem 1rem;border-radius:8px;margin-top:1rem;font-size:.85rem;display:none;}
+  .status-msg.info{background:#F0F9FF;border:1px solid #BAE6FD;color:#0369A1;display:block;}
+  .status-msg.error{background:#FEF2F2;border:1px solid #FCA5A5;color:#B91C1C;display:block;}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#1F2937;color:#fff;padding:.6rem 1.1rem;border-radius:8px;font-size:.85rem;box-shadow:0 8px 30px rgba(0,0,0,.25);opacity:0;transition:.25s;pointer-events:none;z-index:80;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .toast.err{background:#8a1f1f;}
+</style>
+</head>
+<body>
+  <div class="header"><div class="header-content">
+    <div><h1>NRO Onboarding</h1><p>Track every New Restaurant Opening — invite franchisees, monitor progress, tick off IT tasks.</p></div>
+    <a href="/" class="home-btn">Home</a>
+  </div></div>
+
+  <div class="container">
+    <div id="shared-sidebar"></div>
+    <div>
+      <!-- PORTFOLIO -->
+      <div id="portfolioView">
+        <div class="stats" id="stats"></div>
+        <div class="p-toolbar">
+          <h2>Active Openings</h2>
+          <button class="btn-primary" onclick="openCreate()">+ New Opening / Invite</button>
+        </div>
+        <div class="plist" id="plist"><div class="empty">Loading…</div></div>
+      </div>
+
+      <!-- DETAIL -->
+      <div id="detailView" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Create modal -->
+  <div class="modal-overlay" id="createModal">
+    <div class="modal">
+      <h3>New Opening &amp; Franchisee Invite</h3>
+      <div class="grid-2b">
+        <div class="form-group"><label for="cStore">Restaurant name</label><input id="cStore" value="Newk's Eatery" /></div>
+        <div class="form-group"><label for="cOpen">Target open date</label><input id="cOpen" type="date" /></div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group"><label for="cCity">City</label><input id="cCity" placeholder="e.g. Franklin" /></div>
+        <div class="form-group"><label for="cState">State</label><input id="cState" placeholder="e.g. TN" maxlength="2" /></div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group"><label for="cFName">Franchisee / owner name</label><input id="cFName" placeholder="e.g. Jamie Rivera" /></div>
+        <div class="form-group"><label for="cFEmail">Franchisee email</label><input id="cFEmail" type="email" placeholder="owner@example.com" /></div>
+      </div>
+      <div class="check-row"><input type="checkbox" id="cSendInvite" checked /><label for="cSendInvite" style="font-weight:400;">Email the franchisee their invite link now</label></div>
+      <p class="hint">The magic link is created either way — if email isn't set up yet, you can copy the link on the next screen and send it yourself.</p>
+      <div id="createMsg" class="status-msg"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost" onclick="closeCreate()">Cancel</button>
+        <button class="btn-primary" id="createBtn" onclick="createOpening()">Create &amp; Invite</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="shared-nav.js"></script>
+  <script>
+    const PRIO={req:['★ Required','req'],rec:['◆ Recommended','rec'],opt:['○ Optional','opt'],cond:['⚠ Conditional','cond']};
+    let OPENINGS=[], CURRENT=null;
+
+    function authHeaders(){ const t=localStorage.getItem('auth_token');
+      return t?{'Authorization':'Bearer '+t,'Content-Type':'application/json'}:{'Content-Type':'application/json'}; }
+    function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+    function toast(m,e){const el=document.getElementById('toast');el.textContent=m;el.className='toast show'+(e?' err':'');
+      clearTimeout(el._t);el._t=setTimeout(()=>el.className='toast'+(e?' err':''),2200);}
+    function fmt(iso){if(!iso)return '—';const p=String(iso).split('T')[0].split('-');if(p.length<3)return iso;
+      return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]+' '+(+p[2])+', '+p[0];}
+    function daysUntil(iso){if(!iso)return null;const t=new Date(iso+'T00:00:00');const n=new Date();n.setHours(0,0,0,0);return Math.round((t-n)/864e5);}
+    function barColor(p){return p>=80?'#3F7A52':p>=45?'#B07D1E':'#C41E3A';}
+
+    async function api(path,opts){
+      const res=await fetch(path,{headers:authHeaders(),...opts});
+      if(res.status===401){location.href='/index.html';throw new Error('unauthorized');}
+      if(res.status===403){document.getElementById('plist').innerHTML='<div class="empty">This page is for Newk\'s admin staff. Ask an administrator for access.</div>';throw new Error('forbidden');}
+      return res;
+    }
+
+    async function loadPortfolio(){
+      try{
+        const res=await api('/api/onboarding/openings');
+        if(!res.ok){document.getElementById('plist').innerHTML='<div class="empty">Could not load openings ('+res.status+').</div>';return;}
+        OPENINGS=await res.json();
+        renderPortfolio();
+      }catch(e){ if(e.message!=='forbidden'&&e.message!=='unauthorized') toast('Load error: '+e.message,true); }
+    }
+
+    function renderPortfolio(){
+      const n=OPENINGS.length;
+      const avg=n?Math.round(OPENINGS.reduce((a,o)=>a+o.progress.pct,0)/n):0;
+      const atRisk=OPENINGS.filter(o=>{const d=daysUntil(o.target_open);return d!==null&&d>=0&&d<60&&o.progress.pct<70;}).length;
+      const totalOpen=OPENINGS.reduce((a,o)=>a+o.progress.required_open,0);
+      document.getElementById('stats').innerHTML=`
+        <div class="stat"><div class="n">${n}</div><div class="l">Active openings</div></div>
+        <div class="stat"><div class="n">${avg}%</div><div class="l">Avg required complete</div></div>
+        <div class="stat"><div class="n ${atRisk?'alert':''}">${atRisk}</div><div class="l">At risk (&lt;60d, &lt;70%)</div></div>
+        <div class="stat"><div class="n ${totalOpen>25?'warn':''}">${totalOpen}</div><div class="l">Open required tasks</div></div>`;
+
+      const list=document.getElementById('plist');
+      if(!n){list.innerHTML='<div class="empty">No openings yet. Click <strong>+ New Opening / Invite</strong> to add your first one.</div>';return;}
+      const rows=OPENINGS.map(o=>{
+        const p=o.progress.pct, d=daysUntil(o.target_open), b=o.progress.required_open;
+        const bc=b===0?'zero':b<=6?'some':'many';
+        const loc=[o.city,o.state].filter(Boolean).join(', ');
+        const cd=d===null?'—':(d<0?'Open':d+' days');
+        return `<div class="p-row" onclick="openDetail(${o.id})">
+          <div class="p-store">${esc(o.store_name)} <span class="loc">${esc(loc)}</span></div>
+          <div class="p-open"><b>${esc(fmt(o.target_open))}</b><span>${cd}${d>=0?' to open':''}</span></div>
+          <div class="pbar-wrap"><div class="pbar"><i style="width:${p}%;background:${barColor(p)}"></i></div><b>${p}%</b></div>
+          <div class="p-block ${bc}">${b===0?'✓ Clear':b+' open'}</div>
+          <div class="p-arrow">›</div></div>`;
+      }).join('');
+      list.innerHTML=`<div class="p-row head"><div>Restaurant</div><div>Opening</div><div>Required progress</div><div>Open</div><div></div></div>${rows}`;
+    }
+
+    // ---- create ----
+    function openCreate(){document.getElementById('createModal').classList.add('open');}
+    function closeCreate(){document.getElementById('createModal').classList.remove('open');document.getElementById('createMsg').className='status-msg';}
+    async function createOpening(){
+      const body={
+        store_name:document.getElementById('cStore').value.trim()||"Newk's Eatery",
+        city:document.getElementById('cCity').value.trim(),
+        state:document.getElementById('cState').value.trim(),
+        target_open:document.getElementById('cOpen').value,
+        franchisee_name:document.getElementById('cFName').value.trim(),
+        franchisee_email:document.getElementById('cFEmail').value.trim(),
+      };
+      const send=document.getElementById('cSendInvite').checked;
+      const btn=document.getElementById('createBtn');btn.disabled=true;
+      try{
+        const res=await api('/api/onboarding/openings?send_invite='+send,{method:'POST',body:JSON.stringify(body)});
+        const data=await res.json();
+        if(!res.ok){document.getElementById('createMsg').className='status-msg error';document.getElementById('createMsg').textContent='Could not create: '+(data.detail||res.status);return;}
+        closeCreate();
+        ['cCity','cState','cOpen','cFName','cFEmail'].forEach(id=>document.getElementById(id).value='');
+        document.getElementById('cStore').value="Newk's Eatery";
+        await loadPortfolio();
+        toast(data.email_sent?'Opening created — invite emailed ✓':'Opening created — copy the link to send');
+        openDetail(data.id);
+      }catch(e){ if(e.message!=='forbidden') { document.getElementById('createMsg').className='status-msg error'; document.getElementById('createMsg').textContent='Error: '+e.message; } }
+      finally{btn.disabled=false;}
+    }
+
+    // ---- detail ----
+    async function openDetail(id){
+      try{
+        const res=await api('/api/onboarding/openings/'+id);
+        if(!res.ok){toast('Could not load opening ('+res.status+')',true);return;}
+        CURRENT=await res.json();
+        renderDetail();
+        window.scrollTo({top:0,behavior:'smooth'});
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+    function backToList(){document.getElementById('detailView').style.display='none';document.getElementById('portfolioView').style.display='';CURRENT=null;loadPortfolio();}
+
+    function stepStats(step){const r=CURRENT.tasks.filter(t=>t.step===step&&t.prio==='req');const d=r.filter(t=>t.done).length;return {d,n:r.length};}
+
+    function renderDetail(){
+      const o=CURRENT,p=o.progress,loc=[o.city,o.state].filter(Boolean).join(', ');
+      const d=daysUntil(o.target_open),cd=d===null?'—':(d<0?'Open':d+' days');
+      let h=`<button class="backlink" onclick="backToList()">‹ Back to portfolio</button>
+        <div class="card">
+          <div class="detail-hero">
+            <div>
+              <h2 style="margin:0;color:#1F2937;font-size:1.3rem;">${esc(o.store_name)}${loc?' — '+esc(loc):''}</h2>
+              <div class="dh-meta">
+                <div class="m"><div class="k">Target open</div><div class="v">${esc(fmt(o.target_open))}</div></div>
+                <div class="m"><div class="k">Countdown</div><div class="v">${cd}</div></div>
+                <div class="m"><div class="k">Franchisee</div><div class="v">${esc(o.franchisee_name||'—')}</div></div>
+                <div class="m"><div class="k">Required left</div><div class="v">${p.required_open}</div></div>
+              </div>
+            </div>
+            <div class="ringd" style="--pct:${p.pct}"><b>${p.pct}%</b></div>
+          </div>
+
+          <div class="invite-box">
+            <div class="il">Franchisee magic link</div>
+            <div class="invite-row">
+              <input id="linkField" readonly value="${esc(o.journey_url)}" onclick="this.select()" />
+              <button class="btn-ghost" onclick="copyLink()">Copy</button>
+            </div>
+            <div class="invite-actions">
+              <button class="btn-ghost" onclick="resendInvite()">✉ ${o.franchisee_email?'Resend invite email':'Email (no address on file)'}</button>
+              <button class="btn-ghost" onclick="rotateToken()">↻ New link</button>
+              <button class="btn-link danger" style="margin-left:auto;" onclick="archiveOpening()">Archive opening</button>
+            </div>
+            ${o.invited_at?`<p class="hint">Last invite sent ${esc(fmt(o.invited_at))}.</p>`:'<p class="hint">No invite sent yet.</p>'}
+          </div>
+        </div>`;
+
+      [1,2,3,4].forEach(step=>{
+        const items=o.tasks.filter(t=>t.step===step);const done=items.filter(t=>t.done).length;
+        h+=`<div class="step-h"><div class="s">Step ${step}</div><h3>${esc(o.steps[step]||'')}</h3><div class="c">${done}/${items.length} complete</div></div>`;
+        items.forEach(t=>{
+          const fr=t.owner==='franchisee';
+          h+=`<div class="task ${t.done?'done':''}">
+            <input class="cbx" type="checkbox" ${t.done?'checked':''} onchange="setTask('${esc(t.key)}',this)" aria-label="Toggle ${esc(t.title)}">
+            <div style="flex:1;min-width:0;">
+              <div class="tt">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;">${esc(t.title)}</a>`:esc(t.title)}</div>
+              <div class="tg">
+                <span class="pill ${PRIO[t.prio][1]}">${PRIO[t.prio][0]}</span>
+                ${t.lead?`<span class="chip">${esc(t.lead)}</span>`:''}
+                ${t.dept?`<span class="chip">${esc(t.dept)}</span>`:''}
+                <span class="own ${fr?'fr':'nk'}">${fr?'Franchisee':"Newk's team"}</span>
+              </div>
+              <div class="td">${esc(t.desc)}</div>
+              <div class="tf">${t.done?`<span class="ok">✓ Completed${t.done_by?' by '+esc(t.done_by):''}${t.done_at?' · '+esc(fmt(t.done_at)):''}</span>`:'<span>Open</span>'}</div>
+              ${t.note?`<div class="savednote"><span class="lbl">Note${fr?' from franchisee':''}</span>${esc(t.note)}</div>`:''}
+            </div></div>`;
+        });
+      });
+      document.getElementById('detailView').innerHTML=h;
+      document.getElementById('portfolioView').style.display='none';
+      document.getElementById('detailView').style.display='';
+    }
+
+    async function setTask(key,el){
+      const done=el.checked;el.disabled=true;
+      try{
+        const res=await api(`/api/onboarding/openings/${CURRENT.id}/tasks/${encodeURIComponent(key)}`,
+          {method:'POST',body:JSON.stringify({done})});
+        if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.detail||res.status);}
+        const t=CURRENT.tasks.find(x=>x.key===key);t.done=done;t.done_at=done?new Date().toISOString():null;
+        // recompute progress locally
+        const rd=CURRENT.tasks.filter(x=>x.prio==='req'&&x.done).length;
+        CURRENT.progress.required_done=rd;CURRENT.progress.required_open=CURRENT.progress.required_total-rd;
+        CURRENT.progress.pct=Math.round(rd/CURRENT.progress.required_total*100);
+        renderDetail();toast(done?'Marked complete ✓':'Marked open');
+      }catch(e){el.checked=!done;el.disabled=false;toast('Could not save: '+e.message,true);}
+    }
+
+    function copyLink(){const f=document.getElementById('linkField');f.select();
+      navigator.clipboard?.writeText(f.value).then(()=>toast('Link copied'),()=>{document.execCommand('copy');toast('Link copied');});}
+
+    async function resendInvite(){
+      if(!CURRENT.franchisee_email){toast('No franchisee email on file — add one via edit, or copy the link.',true);return;}
+      try{const res=await api(`/api/onboarding/openings/${CURRENT.id}/resend-invite`,{method:'POST'});
+        const d=await res.json();
+        if(res.ok&&d.email_sent){toast('Invite email sent ✓');CURRENT.invited_at=new Date().toISOString();renderDetail();}
+        else toast('Email not sent (SMTP may not be configured). Copy the link instead.',true);
+      }catch(e){toast('Error: '+e.message,true);}
+    }
+    async function rotateToken(){
+      if(!confirm('Issue a new link? The current link will stop working.'))return;
+      try{const res=await api(`/api/onboarding/openings/${CURRENT.id}/rotate-token`,{method:'POST'});
+        const d=await res.json();
+        if(res.ok&&d.journey_url){CURRENT.journey_url=d.journey_url;renderDetail();toast('New link issued');}
+        else toast('Could not issue link',true);
+      }catch(e){toast('Error: '+e.message,true);}
+    }
+    async function archiveOpening(){
+      if(!confirm('Archive "'+CURRENT.store_name+(CURRENT.city?' — '+CURRENT.city:'')+'"? It will drop off the active portfolio.'))return;
+      try{const res=await api('/api/onboarding/openings/'+CURRENT.id,{method:'DELETE'});
+        if(res.ok){toast('Opening archived');backToList();}else toast('Could not archive',true);
+      }catch(e){toast('Error: '+e.message,true);}
+    }
+
+    loadPortfolio();
+  </script>
+</body>
+</html>

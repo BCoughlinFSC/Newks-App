@@ -144,6 +144,87 @@ def send_invite_email(to_email: str, user_name: str, invite_url: str) -> bool:
     return False
 
 
+def send_onboarding_invite_email(to_email: str, franchisee_name: str,
+                                 store_label: str, journey_url: str) -> bool:
+    """Invite a franchisee to their NRO IT Onboarding Journey.
+
+    `store_label` is the location line (e.g. "Newk's Eatery — Franklin, TN").
+    `journey_url` is the magic-link URL (carries the per-opening token; no
+    password needed). Returns True on success, False on failure (logged).
+    """
+    if not SMTP_HOST:
+        logger.error("SMTP not configured — cannot send onboarding invite")
+        return False
+
+    name = franchisee_name or "there"
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"Your Newk's Onboarding Journey — {store_label}"
+    msg["From"] = FROM_HEADER
+    msg["To"] = to_email
+
+    plain = (
+        f"Hi {name},\n\n"
+        f"Welcome to the Newk's family! Your IT onboarding journey for "
+        f"{store_label} is ready.\n\n"
+        f"Open your personal checklist here (no password needed):\n{journey_url}\n\n"
+        f"You'll see every setup task in the order we recommend tackling it, with "
+        f"links to step-by-step Knowledge Base articles. Check items off as you go "
+        f"and your progress saves automatically — and the FSC IT team sees it too, "
+        f"so we can review together on your 90/60/30-day status calls.\n\n"
+        f"Keep this email — the link is your way back in any time.\n\n"
+        f"— FSC Shared Services IT Team"
+    )
+
+    html = f"""\
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;background:#F1ECE4;">
+  <div style="max-width:560px;margin:2rem auto;background:#ffffff;border-radius:12px;border:1px solid #E4DBCD;overflow:hidden;">
+    <div style="background:#9E1B32;padding:1.75rem 2rem;">
+      <div style="font-family:Georgia,serif;font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:#F3C9CF;">Newk's Eatery &middot; IT Onboarding</div>
+      <h1 style="margin:0.4rem 0 0;color:#ffffff;font-size:1.5rem;font-weight:normal;font-family:Georgia,serif;">Welcome to the Newk's Family</h1>
+    </div>
+    <div style="height:4px;background:#C9A24B;"></div>
+    <div style="padding:2rem;">
+      <h2 style="margin:0 0 0.5rem;color:#2A2320;font-size:1.1rem;">Hi {name},</h2>
+      <p style="color:#3A322D;font-size:0.95rem;line-height:1.6;">
+        Your IT onboarding journey for <strong>{store_label}</strong> is ready. It's your
+        complete setup checklist — in the order we recommend tackling it, with links to a
+        step-by-step article for every task.
+      </p>
+      <div style="text-align:center;margin:1.75rem 0;">
+        <a href="{journey_url}"
+           style="display:inline-block;background:#9E1B32;color:#ffffff;text-decoration:none;
+                  padding:0.8rem 2rem;border-radius:8px;font-weight:700;font-size:1rem;">
+          Open Your Onboarding Journey
+        </a>
+      </div>
+      <p style="color:#5C534B;font-size:0.9rem;line-height:1.6;">
+        No password needed — this link is your way in. Check items off as you go; your
+        progress saves automatically and the FSC IT team can see it too, so we can review
+        together on your 90 / 60 / 30-day status calls.
+      </p>
+      <p style="color:#9CA3AF;font-size:0.8rem;margin-top:1.5rem;border-top:1px solid #EDE4D5;padding-top:1rem;">
+        Keep this email — the link brings you back any time. If the button doesn't work,
+        copy and paste this URL:<br>
+        <a href="{journey_url}" style="color:#9E1B32;word-break:break-all;">{journey_url}</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>"""
+
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    if _send(msg, to_email):
+        logger.info(f"Onboarding invite sent to {to_email} for {store_label}")
+        return True
+    logger.error(f"Failed to send onboarding invite to {to_email}")
+    return False
+
+
 def send_password_reset_email(to_email: str, user_name: str, reset_url: str) -> bool:
     """Send a password reset email.
 

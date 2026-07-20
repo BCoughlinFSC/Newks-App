@@ -50,6 +50,7 @@ import monkey_db
 import crunchtime_db
 import punchh_db
 import projects_db
+import onboarding_db
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -59,7 +60,11 @@ from olo_client import (
     aggregate_orders_placed_ahead,
     filter_batches_by_date_range,
 )
-from email_service import send_invite_email, send_password_reset_email
+from email_service import (
+    send_invite_email,
+    send_password_reset_email,
+    send_onboarding_invite_email,
+)
 import toast_puller_db as repoll_db
 import precompute_cache
 import toast_menu_raw_db
@@ -7348,6 +7353,11 @@ async def _on_startup():
         projects_db.initialize_schema()
     except Exception as exc:
         logger.warning("projects_db.initialize_schema failed (non-fatal): %s", exc)
+    # NRO IT Onboarding Journey — app-local SQLite.
+    try:
+        onboarding_db.initialize_schema()
+    except Exception as exc:
+        logger.warning("onboarding_db.initialize_schema failed (non-fatal): %s", exc)
     _scheduler.start()
     logger.info(
         "APScheduler started — nightly jobs scheduled "
@@ -21590,6 +21600,214 @@ async def projects_delete(project_id: int, current_user: User = Depends(get_curr
     except Exception as exc:
         logger.error("projects.delete failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NRO IT Onboarding Journey
+#
+# Turns the static onboarding email into a tracked, interactive journey.
+# Two audiences, two auth models:
+#   • Internal staff (IT/FSC/Marketing/Ops) — admin JWT. Create openings, send
+#     invites, view the portfolio dashboard, and tick ANY task.
+#   • Franchisees (external) — NO app account. Each opening has an unguessable
+#     magic-link token; the /journey/{token} endpoints authenticate on that
+#     token alone and only allow franchisee-owned tasks to be ticked.
+# Backed by onboarding_db (app-local SQLite, no SQL Server sync).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class OpeningIn(BaseModel):
+    """Create/update an opening. Only store_name is really required."""
+    store_name:       Optional[str] = "Newk's Eatery"
+    city:             Optional[str] = None
+    state:            Optional[str] = None
+    target_open:      Optional[str] = None   # 'YYYY-MM-DD'
+    franchisee_name:  Optional[str] = None
+    franchisee_email: Optional[str] = None
+
+
+class TaskUpdateIn(BaseModel):
+    """Toggle a task and/or set its note. Each field applied only when present."""
+    done: Optional[bool] = None
+    note: Optional[str] = None
+
+
+def _store_label(op: Dict[str, Any]) -> str:
+    """Human location line, e.g. 'Newk's Eatery — Franklin, TN'."""
+    place = ", ".join([p for p in [op.get("city"), op.get("state")] if p])
+    base = op.get("store_name") or "Newk's Eatery"
+    return f"{base} — {place}" if place else base
+
+
+def _journey_url(token: str) -> str:
+    return f"{APP_BASE_URL}/onboarding-journey.html?t={token}"
+
+
+# ---- Internal (admin-authenticated) endpoints -------------------------------
+
+@app.get("/api/onboarding/catalog")
+async def onboarding_catalog(_user: User = Depends(get_current_user)):
+    """The static task template + step titles (for rendering labels)."""
+    return onboarding_db.catalog()
+
+
+@app.get("/api/onboarding/openings")
+async def onboarding_list(
+    include_archived: bool = False, _user: User = Depends(get_current_admin_user)
+):
+    """Portfolio dashboard — all openings with computed progress."""
+    try:
+        return onboarding_db.list_openings(include_archived=include_archived)
+    except Exception as exc:
+        logger.error("onboarding.list failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.post("/api/onboarding/openings")
+async def onboarding_create(
+    body: OpeningIn, send_invite: bool = True,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Create an opening (+ magic-link token) and, by default, email the
+    franchisee their invite. Always returns the journey_url so staff can copy
+    it manually — the flow never depends on email being configured/working."""
+    try:
+        op = onboarding_db.create_opening(body.dict(), created_by=current_user.name)
+        token = onboarding_db.get_token(op["id"])
+        journey_url = _journey_url(token)
+        email_sent = False
+        email = (body.franchisee_email or "").strip()
+        if send_invite and email:
+            try:
+                email_sent = send_onboarding_invite_email(
+                    email, body.franchisee_name or "", _store_label(op), journey_url
+                )
+                if email_sent:
+                    onboarding_db.mark_invited(op["id"])
+            except Exception as exc:  # never fail the create over email
+                logger.warning("onboarding invite email failed: %s", exc)
+        logger.info("Opening created id=%s by %s (invite sent=%s)",
+                    op["id"], current_user.email, email_sent)
+        return {"id": op["id"], "journey_url": journey_url,
+                "email_sent": email_sent, "success": True}
+    except Exception as exc:
+        logger.error("onboarding.create failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.get("/api/onboarding/openings/{opening_id}")
+async def onboarding_detail(
+    opening_id: int, _user: User = Depends(get_current_admin_user)
+):
+    """Full opening incl. tasks + the magic-link URL (internal drill-in)."""
+    op = onboarding_db.get_opening_by_id(opening_id)
+    if not op:
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    op["journey_url"] = _journey_url(op.pop("token"))
+    return op
+
+
+@app.put("/api/onboarding/openings/{opening_id}")
+async def onboarding_update(
+    opening_id: int, body: OpeningIn, _user: User = Depends(get_current_admin_user)
+):
+    if not onboarding_db.get_opening_by_id(opening_id):
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    try:
+        ok = onboarding_db.update_opening(opening_id, body.dict())
+        return {"id": opening_id, "success": ok}
+    except Exception as exc:
+        logger.error("onboarding.update failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.post("/api/onboarding/openings/{opening_id}/tasks/{task_key}")
+async def onboarding_set_task(
+    opening_id: int, task_key: str, body: TaskUpdateIn,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Internal task toggle/note — staff may set ANY task."""
+    if not onboarding_db.get_opening_by_id(opening_id):
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    ok = onboarding_db.set_task(
+        opening_id, task_key, done=body.done, note=body.note, actor=current_user.name
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Unknown task '{task_key}'")
+    return {"success": True}
+
+
+@app.post("/api/onboarding/openings/{opening_id}/resend-invite")
+async def onboarding_resend_invite(
+    opening_id: int, current_user: User = Depends(get_current_admin_user)
+):
+    """Re-send the franchisee invite email (same link)."""
+    op = onboarding_db.get_opening_by_id(opening_id)
+    if not op:
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    email = (op.get("franchisee_email") or "").strip()
+    journey_url = _journey_url(op["token"])
+    if not email:
+        raise HTTPException(status_code=400, detail="No franchisee email on file")
+    sent = send_onboarding_invite_email(
+        email, op.get("franchisee_name") or "", _store_label(op), journey_url
+    )
+    if sent:
+        onboarding_db.mark_invited(opening_id)
+    return {"success": sent, "email_sent": sent, "journey_url": journey_url}
+
+
+@app.post("/api/onboarding/openings/{opening_id}/rotate-token")
+async def onboarding_rotate_token(
+    opening_id: int, current_user: User = Depends(get_current_admin_user)
+):
+    """Issue a fresh magic link (invalidates the old one)."""
+    if not onboarding_db.get_opening_by_id(opening_id):
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    token = onboarding_db.rotate_token(opening_id)
+    return {"success": bool(token), "journey_url": _journey_url(token) if token else None}
+
+
+@app.delete("/api/onboarding/openings/{opening_id}")
+async def onboarding_archive(
+    opening_id: int, current_user: User = Depends(get_current_admin_user)
+):
+    """Archive (soft-delete) an opening — drops it from the active portfolio."""
+    if not onboarding_db.get_opening_by_id(opening_id):
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    ok = onboarding_db.archive_opening(opening_id)
+    logger.info("Opening archived id=%s by %s", opening_id, current_user.email)
+    return {"id": opening_id, "success": ok}
+
+
+# ---- Franchisee (magic-link token) endpoints — NO login ---------------------
+
+@app.get("/api/onboarding/journey/{token}")
+async def onboarding_journey(token: str):
+    """The franchisee's own journey, resolved by magic-link token. No auth
+    beyond possession of the unguessable token; the token is not echoed back."""
+    op = onboarding_db.get_opening_by_token(token)
+    if not op:
+        raise HTTPException(status_code=404, detail="This onboarding link is invalid or has expired.")
+    return op
+
+
+@app.post("/api/onboarding/journey/{token}/tasks/{task_key}")
+async def onboarding_journey_set_task(token: str, task_key: str, body: TaskUpdateIn):
+    """Franchisee task toggle/note — restricted to franchisee-owned tasks."""
+    op = onboarding_db.get_opening_by_token(token)
+    if not op:
+        raise HTTPException(status_code=404, detail="This onboarding link is invalid or has expired.")
+    actor = op.get("franchisee_name") or "Franchisee"
+    ok = onboarding_db.set_task(
+        op["id"], task_key, done=body.done, note=body.note, actor=actor,
+        restrict_owner=onboarding_db.OWNER_FRANCHISEE,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=403,
+            detail="That task is handled by the Newk's team and can't be changed here.",
+        )
+    return {"success": True}
 
 
 if os.path.isdir(kiosk_path):

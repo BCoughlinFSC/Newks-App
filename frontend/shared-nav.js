@@ -64,6 +64,7 @@
     { key: 'olo',              label: 'Digital Orders by Platform',   href: '/olo.html' },
     { key: 'contacts',         label: 'Contacts (forms.nfc.local)',   href: '/contacts.html' },
     { key: 'integrations',     label: 'Integrations / Re-run',        href: '/integrations.html' },
+    { key: 'onboarding',       label: 'NRO Onboarding',               href: '/onboarding.html' },
   ];
 
   // ─── Detect active page ─────────────────────────
@@ -96,6 +97,7 @@
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';
     if (path.endsWith('/admin.html'))                 return 'admin';
     if (path.endsWith('/projects.html'))              return 'projects';
+    if (path.endsWith('/onboarding.html'))            return 'onboarding';
     return '';
   }
 
