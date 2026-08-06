@@ -45,6 +45,8 @@ JOBS = {
     "plateiq":               {"cmd": ["python3", "vendor_ftp.py", "plateiq"],               "cwd": "/opt/sysco"},
     "nproduce_dryrun":       {"cmd": ["python3", "vendor_ftp.py", "nproduce", "--dry-run"], "cwd": "/opt/sysco"},
     "nproduce":              {"cmd": ["python3", "vendor_ftp.py", "nproduce"],              "cwd": "/opt/sysco"},
+    "freshconcepts_dryrun":  {"cmd": ["python3", "vendor_ftp.py", "freshconcepts", "--dry-run"], "cwd": "/opt/sysco"},
+    "freshconcepts":         {"cmd": ["python3", "vendor_ftp.py", "freshconcepts"],              "cwd": "/opt/sysco"},
     "punchh_dryrun":         {"cmd": ["python3", "vendor_ftp.py", "punchh",   "--dry-run"], "cwd": "/opt/sysco"},
     "punchh":                {"cmd": ["python3", "vendor_ftp.py", "punchh"],                "cwd": "/opt/sysco"},
 }

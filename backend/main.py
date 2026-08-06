@@ -19284,6 +19284,8 @@ INTEGRATION_JOBS = {
     "plateiq":               {"label": "PlateIQ — Invoices (pull)",     "description": "Pull + archive PlateIQ invoice files.",                          "needs_date": False, "outbound": False},
     "nproduce_dryrun":       {"label": "nProduce — Bid Files (dry run)","description": "Preview nProduce bid files waiting on the FTP — no download.",   "needs_date": False, "outbound": False},
     "nproduce":              {"label": "nProduce — Bid Files (pull)",   "description": "Pull + archive nProduce bid files (txt/xls/xlsx).",              "needs_date": False, "outbound": False},
+    "freshconcepts_dryrun":  {"label": "Fresh Concepts — Order Guides (dry run)", "description": "Preview Fresh Concepts order guides waiting on the FTP — no download.", "needs_date": False, "outbound": False},
+    "freshconcepts":         {"label": "Fresh Concepts — Order Guides (pull)",    "description": "Pull + archive Fresh Concepts order guides (txt/xls/xlsx) → SQL-PROD CDP → CrunchTime.", "needs_date": False, "outbound": False},
     "punchh_dryrun":         {"label": "Punchh — Files (dry run)",      "description": "Preview Punchh CSV files waiting on the FTP — no download.",      "needs_date": False, "outbound": False},
     "punchh":                {"label": "Punchh — Files (pull)",         "description": "Pull + archive Punchh CSV files.",                               "needs_date": False, "outbound": False},
 }
