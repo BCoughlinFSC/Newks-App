@@ -17,7 +17,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     job_key      TEXT    NOT NULL,
-    status       TEXT    NOT NULL DEFAULT 'queued',   -- queued | running | success | failed
+    status       TEXT    NOT NULL DEFAULT 'queued',   -- queued | running | success | partial | failed
     requested_by TEXT,
     args         TEXT,
     created_at   TEXT    NOT NULL,
@@ -82,7 +82,7 @@ def claim_next(db_path: str = JOBS_DB_PATH) -> Optional[Dict]:
 
 def post_result(job_id: int, status: str, exit_code: Optional[int], log: str,
                 db_path: str = JOBS_DB_PATH) -> None:
-    status = status if status in ("success", "failed") else "failed"
+    status = status if status in ("success", "partial", "failed") else "failed"
     with get_connection(db_path) as conn:
         conn.execute(
             "UPDATE jobs SET status=?, exit_code=?, log=?, finished_at=? WHERE id=?",
@@ -96,7 +96,7 @@ def record_run(job_key: str, requested_by: str, status: str, exit_code: Optional
     """Insert an ALREADY-FINISHED run (e.g. a cron job reporting in via the wrapper)
     so it shows in Recent Runs and updates the last-run badge."""
     initialize_db(db_path)
-    status = status if status in ("success", "failed") else "failed"
+    status = status if status in ("success", "partial", "failed") else "failed"
     now = _now()
     with get_connection(db_path) as conn:
         cur = conn.execute(

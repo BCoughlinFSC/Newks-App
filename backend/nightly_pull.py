@@ -601,7 +601,32 @@ async def main():
         log.warning("FAILED STORES (%d):", len(failures))
         for r in failures:
             log.warning("  Store %s — %s", r["store_num"], r["error"])
+
+    # ── Exit status ───────────────────────────────────────────────────────
+    # Three outcomes, so the Integrations dashboard stops crying wolf when a
+    # couple of flaky/closed stores miss but the reporting data is fine:
+    #   0 SUCCESS — every store-day landed, rollup + royalty OK
+    #   2 PARTIAL — rollup + royalty OK (or skipped) but some store-days missed;
+    #               data is still usable for reporting (misses listed above)
+    #   1 FAILED  — rollup or royalty FAILED, or a systemic share of stores
+    #               failed (>25%) — something actually needs attention.
+    # run_and_record.py + integrations_agent.py map exit 2 -> the amber
+    # "partial" badge. NOTE: rollup/royalty failure is now RED even with zero
+    # store misses (it previously exited 0 — a real false-green).
+    attempts = len(stores) * len(target_dates)
+    systemic = bool(attempts) and (len(failures) / attempts) > 0.25
+    if rollup_ok is False or royalty_ok is False or systemic:
+        why = []
+        if rollup_ok is False:  why.append("rollup FAILED")
+        if royalty_ok is False: why.append("royalty FAILED")
+        if systemic:            why.append(f"{len(failures)}/{attempts} store-days failed (>25%)")
+        log.error("RESULT: FAILED — %s.", "; ".join(why))
         sys.exit(1)
+    if failures:
+        log.warning("RESULT: PARTIAL — %d of %d store-days missed; rollup/royalty OK, "
+                    "data usable for reporting.", len(failures), attempts)
+        sys.exit(2)
+    log.info("RESULT: SUCCESS — all %d store-days landed; rollup/royalty OK.", attempts)
 
 
 if __name__ == "__main__":

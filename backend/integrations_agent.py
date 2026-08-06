@@ -86,7 +86,9 @@ def run_job(job_key: str, args: str):
         log = header + (proc.stdout or "")
         if proc.stderr:
             log += "\n--- STDERR ---\n" + proc.stderr
-        return ("success" if proc.returncode == 0 else "failed"), proc.returncode, log
+        # exit 2 = "partial" (rollup OK but some store-days missed) -> amber badge.
+        status = {0: "success", 2: "partial"}.get(proc.returncode, "failed")
+        return status, proc.returncode, log
     except subprocess.TimeoutExpired:
         return "failed", None, header + f"Timed out after {JOB_TIMEOUT}s."
     except Exception as exc:  # noqa: BLE001

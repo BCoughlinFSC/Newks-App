@@ -813,8 +813,24 @@ async def main():
         for r in emp_failures:
             log.warning("  Store %s — %s", r["store_num"], r.get("error"))
 
-    if failures or emp_failures:
+    # ── Exit status (tri-state; see nightly_pull.py for the rationale) ────────
+    #   0 SUCCESS — no misses, rollup OK
+    #   2 PARTIAL — rollup OK (or skipped) but some labor/employee stores missed
+    #   1 FAILED  — rollup FAILED, or a systemic share (>25%) of stores missed
+    attempts = max(1, len(stores))
+    systemic = ((len(failures) / attempts) > 0.25) or ((len(emp_failures) / attempts) > 0.25)
+    if rollup_ok is False or systemic:
+        why = []
+        if rollup_ok is False: why.append("rollup FAILED")
+        if systemic:           why.append(f"{len(failures)} labor / {len(emp_failures)} employee "
+                                          f"store failures of {attempts} (>25%)")
+        log.error("RESULT: FAILED — %s.", "; ".join(why))
         sys.exit(1)
+    if failures or emp_failures:
+        log.warning("RESULT: PARTIAL — %d labor + %d employee-sync store miss(es) of %d; "
+                    "rollup OK, data usable.", len(failures), len(emp_failures), attempts)
+        sys.exit(2)
+    log.info("RESULT: SUCCESS — all %d stores OK; rollup OK.", attempts)
 
 
 if __name__ == "__main__":

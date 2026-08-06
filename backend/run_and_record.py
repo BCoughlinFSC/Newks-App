@@ -50,7 +50,9 @@ def main():
     except Exception as exc:  # noqa: BLE001
         out, code = f"wrapper exception: {exc}", 1
 
-    status = "success" if code == 0 else "failed"
+    # exit 2 = "partial" (e.g. nightly_pull: rollup OK but a few store-days
+    # missed) -> amber badge on the dashboard, not a red "failed".
+    status = {0: "success", 2: "partial"}.get(code, "failed")
     log = f"$ {' '.join(cmd)}   (scheduled, {time.time() - t0:.0f}s)\n\n" + out
 
     # Mirror the command's output to cron's own log, unchanged.
