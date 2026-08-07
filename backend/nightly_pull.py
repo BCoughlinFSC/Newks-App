@@ -109,6 +109,18 @@ STORE_GROUP    = 243
 # --concurrency or the TOAST_PULL_CONCURRENCY env var.
 DEFAULT_CONCURRENCY = int(os.getenv("TOAST_PULL_CONCURRENCY", "5"))
 
+# Hard wall-clock ceiling for ONE store's entire fetch (all pages, all retries).
+# The per-request httpx timeout (60s) and MAX_RETRIES bound a single call, but
+# NOT the store's paginating while-loop as a whole — so one store that keeps
+# stalling across pages could run indefinitely and, because Phase 1 uses
+# asyncio.gather (waits for ALL stores), freeze the entire nightly run with no
+# recovery. This deadline guarantees the gather always completes: a store that
+# exceeds it raises TimeoutError, which return_exceptions=True records as that
+# store's failure while every other store proceeds. (2026-07-31: an overnight
+# run hung 8+ hrs on a stalled Toast connection, leaving 7/30 Flash at $0.)
+# 600s is generous for the busiest store; override with TOAST_STORE_DEADLINE.
+STORE_FETCH_DEADLINE = float(os.getenv("TOAST_STORE_DEADLINE", "600"))
+
 
 # ─── Phase 1: parallel API fetch (no DB writes) ───────────────────────────────
 #
@@ -448,13 +460,27 @@ async def main():
 
     async def fetch_with_sem(s, date_sql):
         async with sem:
-            return await fetch_store_data(
-                client,
-                store_guid=str(s["guid"]),
-                store_num=int(s["store_num"]),
-                store_name=s.get("name", f"Store {s['store_num']}"),
-                date_sql=date_sql,
-            )
+            # Hard per-store deadline: a stalled store can no longer hang the
+            # whole gather(). On timeout, raise so gather (return_exceptions=True)
+            # records it as this store's failure and every other store proceeds.
+            try:
+                return await asyncio.wait_for(
+                    fetch_store_data(
+                        client,
+                        store_guid=str(s["guid"]),
+                        store_num=int(s["store_num"]),
+                        store_name=s.get("name", f"Store {s['store_num']}"),
+                        date_sql=date_sql,
+                    ),
+                    timeout=STORE_FETCH_DEADLINE,
+                )
+            except asyncio.TimeoutError:
+                log.error(
+                    "[%s] Fetch exceeded %.0fs deadline — skipping this store for "
+                    "%s (its data will be missing until re-polled).",
+                    s.get("store_num"), STORE_FETCH_DEADLINE, date_sql,
+                )
+                raise
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         for d in target_dates:
@@ -493,6 +519,26 @@ async def main():
             log.info("  Write phase done in %.1fs (%d failures).",
                      write_dur, date_failures)
             per_date_summary.append((d, date_failures))
+
+            # Fix DayPartIDs for THIS date immediately, right after its writes.
+            # The write phase re-INSERTs hstItem rows with DayPartID = NULL; the
+            # GUID→int resolution is done here. Running it PER DATE (not just once
+            # at the end) means an interrupted/killed run can never leave an
+            # already-written date with NULL DayPartID — which is exactly how the
+            # 2026-08-03 hung repoll silently blanked the mode/check breakdown for
+            # 7/27-7/31 (totals stayed right, every order-mode line went dark).
+            # Idempotent (WHERE DayPartID IS NULL), so the end-of-run range fix
+            # below is a harmless belt-and-suspenders.
+            try:
+                dp_conn = db.get_toast_connection()
+                try:
+                    dp_fixed = db.fix_daypart_ids(dp_conn, d, d)
+                    log.info("  [%s] DayPartID fix: %d rows updated.", d, dp_fixed)
+                finally:
+                    dp_conn.close()
+            except Exception as e:
+                log.error("  [%s] DayPartID fix FAILED: %s — this date's mode/"
+                          "check breakdown will be dark until re-fixed.", d, e)
 
     # ── Rollup + royalty: ONE call covering the full range ───────────────
     # The existing procs already accept start/end date parameters, so a single
