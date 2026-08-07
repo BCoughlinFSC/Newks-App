@@ -81,10 +81,23 @@
         const res = await fetch(API_BASE+'/locations', { headers: getAuthHeaders() });
         if(!res.ok) return;
         const locs = await res.json();
-        locs.sort((a,b)=>String(a.externalId||'').localeCompare(String(b.externalId||''),undefined,{numeric:true}));
+        // Toast returns externalId=null for these locations, so the old code
+        // dropped every option (filter(o=>o.id)) and the picker showed only
+        // "All stores". The store number lives inside restaurantName
+        // ("City, ST - 1154 - Newk's …") — fall back to parsing it so a
+        // single-store repoll is selectable again.
         STORE_OPTS = locs
-          .map(l => ({ id:String(l.externalId||''), label:(l.externalId?l.externalId+' – ':'')+(l.restaurantName||l.externalId||'') }))
-          .filter(o => o.id);
+          .map(l => {
+            const name = String(l.restaurantName || '');
+            let id = String(l.externalId || '').trim();
+            if (!id) {
+              const m = name.match(/ - (\d{3,5}) - /) || name.match(/\b(\d{3,5})\b/);
+              id = m ? m[1] : '';
+            }
+            return { id, label: l.externalId ? (id + ' – ' + name) : name };
+          })
+          .filter(o => o.id)
+          .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       }catch(e){ /* picker optional — "All stores" still works */ }
     }
 
