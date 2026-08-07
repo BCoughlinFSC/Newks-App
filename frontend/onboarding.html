@@ -4,10 +4,14 @@
 <meta charset="UTF-8" />
 <title>NRO Onboarding – Newk's Reporting Platform</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="onboarding-theme.css">
 <style>
   *{box-sizing:border-box;}
-  body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#F8FAFC;color:#2c2c2c;min-height:100vh;}
-  .header{background:#C41E3A;padding:1.5rem 2rem;border-bottom:3px solid #A01A2E;box-shadow:0 2px 8px rgba(0,0,0,.1);}
+  body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0;background:#F8FAFC;color:#2c2c2c;min-height:100vh;}
+  .header{background:#D9272C;padding:1.5rem 2rem;border-bottom:3px solid #B01F23;box-shadow:0 2px 8px rgba(0,0,0,.1);}
   .header-content{display:flex;justify-content:space-between;align-items:center;}
   .header h1{margin:0;color:#fff;font-size:1.5rem;font-weight:700;}
   .header p{margin:.25rem 0 0;color:rgba(255,255,255,.85);font-size:.85rem;}
@@ -16,15 +20,15 @@
   .container{display:grid;grid-template-columns:280px 1fr;gap:1.5rem;padding:1.5rem 2rem;max-width:1500px;margin:0 auto;}
   @media (max-width:900px){.container{grid-template-columns:1fr;}}
   .card{background:#fff;border-radius:12px;padding:1.5rem;border:1px solid #e8e0d5;box-shadow:0 2px 8px rgba(0,0,0,.08);}
-  .card h2{margin:0 0 1rem;color:#C41E3A;font-size:1.1rem;font-weight:700;}
-  .btn-primary{background:#C41E3A;color:#fff;border:none;padding:.55rem 1.25rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.9rem;}
-  .btn-primary:hover:not(:disabled){background:#A01A2E;}
+  .card h2{margin:0 0 1rem;color:#D9272C;font-size:1.1rem;font-weight:700;}
+  .btn-primary{background:#D9272C;color:#fff;border:none;padding:.55rem 1.25rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.9rem;}
+  .btn-primary:hover:not(:disabled){background:#B01F23;}
   .btn-primary:disabled{opacity:.5;cursor:not-allowed;}
   .btn-secondary{background:#374151;color:#fff;border:none;padding:.55rem 1.25rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.9rem;}
   .btn-secondary:hover:not(:disabled){background:#1F2937;}
   .btn-ghost{background:#fff;border:1px solid #D1D5DB;color:#374151;padding:.5rem 1rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.85rem;}
   .btn-ghost:hover{background:#F3F4F6;}
-  .btn-link{background:none;border:none;color:#C41E3A;cursor:pointer;font-size:.85rem;font-weight:600;padding:.2rem .4rem;}
+  .btn-link{background:none;border:none;color:#D9272C;cursor:pointer;font-size:.85rem;font-weight:600;padding:.2rem .4rem;}
   .btn-link.danger{color:#B91C1C;} .btn-link:hover{text-decoration:underline;}
 
   /* stats */
@@ -32,12 +36,12 @@
   @media (max-width:700px){.stats{grid-template-columns:repeat(2,1fr);}}
   .stat{background:#fff;border:1px solid #e8e0d5;border-radius:12px;padding:1rem 1.15rem;box-shadow:0 2px 8px rgba(0,0,0,.06);}
   .stat .n{font-size:1.9rem;font-weight:800;color:#1F2937;line-height:1;font-variant-numeric:tabular-nums;}
-  .stat .n.warn{color:#B07D1E;} .stat .n.alert{color:#C41E3A;}
+  .stat .n.warn{color:#B07D1E;} .stat .n.alert{color:#D9272C;}
   .stat .l{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:#6B7280;margin-top:.5rem;}
 
   /* portfolio */
   .p-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;gap:1rem;flex-wrap:wrap;}
-  .p-toolbar h2{margin:0;color:#C41E3A;font-size:1.15rem;}
+  .p-toolbar h2{margin:0;color:#D9272C;font-size:1.15rem;}
   .plist{background:#fff;border:1px solid #e8e0d5;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden;}
   .p-row{display:grid;grid-template-columns:1.7fr .9fr 1.5fr .8fr 30px;gap:1rem;align-items:center;padding:.95rem 1.25rem;border-top:1px solid #EEF2F7;cursor:pointer;transition:.12s;}
   .p-row:first-child{border-top:none;}
@@ -50,7 +54,7 @@
   .pbar{flex:1;height:8px;background:#EAE3D8;border-radius:5px;overflow:hidden;}
   .pbar i{display:block;height:100%;border-radius:5px;transition:width .35s;}
   .pbar-wrap b{font-size:.8rem;font-variant-numeric:tabular-nums;min-width:34px;color:#4B5563;}
-  .p-block{font-size:.8rem;font-weight:700;} .p-block.zero{color:#3F7A52;} .p-block.some{color:#B07D1E;} .p-block.many{color:#C41E3A;}
+  .p-block{font-size:.8rem;font-weight:700;} .p-block.zero{color:#3F7A52;} .p-block.some{color:#B07D1E;} .p-block.many{color:#D9272C;}
   .p-arrow{color:#C0B6A8;text-align:right;font-size:1.1rem;}
   .empty{padding:2.5rem;text-align:center;color:#9CA3AF;}
 
@@ -58,7 +62,7 @@
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:60;padding:1rem;}
   .modal-overlay.open{display:flex;}
   .modal{background:#fff;border-radius:12px;padding:1.6rem;width:100%;max-width:540px;box-shadow:0 12px 44px rgba(0,0,0,.28);max-height:90vh;overflow:auto;}
-  .modal h3{margin:0 0 1rem;color:#C41E3A;}
+  .modal h3{margin:0 0 1rem;color:#D9272C;}
   .form-group{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.9rem;}
   .form-group label{font-weight:600;font-size:.83rem;color:#374151;}
   .form-group input{padding:.55rem .75rem;border:1px solid #D1D5DB;border-radius:6px;font-size:.9rem;font-family:inherit;}
@@ -69,7 +73,7 @@
   .hint{font-size:.78rem;color:#9CA3AF;margin:.2rem 0 0;}
 
   /* detail */
-  .backlink{background:none;border:0;color:#C41E3A;font-weight:600;font-size:.9rem;cursor:pointer;padding:0;margin-bottom:1rem;}
+  .backlink{background:none;border:0;color:#D9272C;font-weight:600;font-size:.9rem;cursor:pointer;padding:0;margin-bottom:1rem;}
   .backlink:hover{text-decoration:underline;}
   .detail-hero{display:flex;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;}
   .detail-hero .dh-meta{display:flex;gap:1.5rem;margin-top:.6rem;flex-wrap:wrap;}
@@ -88,7 +92,7 @@
   .task{display:flex;gap:.85rem;padding:.85rem 1rem;border:1px solid #EAE3D8;border-radius:10px;margin-bottom:.55rem;background:#fff;}
   .task.done{background:#F1F7F2;border-color:#CBE3D0;}
   .cbx{appearance:none;width:22px;height:22px;border:2px solid #B9AF9F;border-radius:6px;cursor:pointer;display:grid;place-items:center;background:#fff;margin-top:1px;flex:0 0 auto;}
-  .cbx:hover{border-color:#C41E3A;} .cbx:checked{background:#3F7A52;border-color:#3F7A52;}
+  .cbx:hover{border-color:#D9272C;} .cbx:checked{background:#3F7A52;border-color:#3F7A52;}
   .cbx:checked::after{content:"";width:6px;height:10px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(43deg) translateY(-1px);}
   .task .tt{font-weight:700;color:#1F2937;font-size:.92rem;}
   .task .tg{display:flex;gap:.4rem;flex-wrap:wrap;margin:.35rem 0;align-items:center;}
@@ -98,11 +102,11 @@
   .task .savednote{margin-top:.5rem;font-size:.8rem;background:#F8F5F0;border:1px solid #EAE3D8;border-radius:6px;padding:.5rem .65rem;white-space:pre-wrap;color:#4B5563;}
   .task .savednote .lbl{display:block;font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#9CA3AF;margin-bottom:.15rem;}
   .pill{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.68rem;font-weight:700;white-space:nowrap;}
-  .pill.req{color:#C41E3A;background:#F7E4E7;} .pill.rec{color:#B07D1E;background:#F7EED8;}
+  .pill.req{color:#D9272C;background:#F7E4E7;} .pill.rec{color:#B07D1E;background:#F7EED8;}
   .pill.opt{color:#5C534B;background:#EFEAE1;} .pill.cond{color:#2F6F7E;background:#E1EEF1;}
   .chip{display:inline-block;font-size:.68rem;font-weight:600;color:#8A8178;background:#F3EFE7;border:1px solid #EAE3D8;padding:.1rem .55rem;border-radius:999px;}
   .own{display:inline-block;font-size:.68rem;font-weight:700;padding:.1rem .55rem;border-radius:999px;}
-  .own.fr{color:#C41E3A;background:#F7E4E7;} .own.nk{color:#2F6F7E;background:#E1EEF1;}
+  .own.fr{color:#D9272C;background:#F7E4E7;} .own.nk{color:#2F6F7E;background:#E1EEF1;}
   .step-h{margin:1.4rem 0 .5rem;display:flex;align-items:baseline;gap:.6rem;}
   .step-h .s{font-size:.68rem;letter-spacing:1.5px;text-transform:uppercase;color:#C9A24B;font-weight:700;}
   .step-h h3{margin:0;font-size:1.02rem;color:#1F2937;}
@@ -170,18 +174,19 @@
 
   <script src="shared-nav.js"></script>
   <script>
-    const PRIO={req:['★ Required','req'],rec:['◆ Recommended','rec'],opt:['○ Optional','opt'],cond:['⚠ Conditional','cond']};
-    let OPENINGS=[], CURRENT=null;
+    const PRIO={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
+    let OPENINGS=[], CURRENT=null, detailTab=null;
+    const linkifyEmail=t=>esc(t).replace(/([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/g,'<a href="mailto:$1">$1</a>');
 
     function authHeaders(){ const t=localStorage.getItem('auth_token');
       return t?{'Authorization':'Bearer '+t,'Content-Type':'application/json'}:{'Content-Type':'application/json'}; }
     function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
     function toast(m,e){const el=document.getElementById('toast');el.textContent=m;el.className='toast show'+(e?' err':'');
       clearTimeout(el._t);el._t=setTimeout(()=>el.className='toast'+(e?' err':''),2200);}
-    function fmt(iso){if(!iso)return '—';const p=String(iso).split('T')[0].split('-');if(p.length<3)return iso;
+    function fmt(iso){if(!iso)return '—';const p=String(iso).split(/[T ]/)[0].split('-');if(p.length<3)return iso;
       return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]+' '+(+p[2])+', '+p[0];}
     function daysUntil(iso){if(!iso)return null;const t=new Date(iso+'T00:00:00');const n=new Date();n.setHours(0,0,0,0);return Math.round((t-n)/864e5);}
-    function barColor(p){return p>=80?'#3F7A52':p>=45?'#B07D1E':'#C41E3A';}
+    function barColor(p){return p>=80?'#3F7A52':p>=45?'#B07D1E':'#D9272C';}
 
     async function api(path,opts){
       const res=await fetch(path,{headers:authHeaders(),...opts});
@@ -260,18 +265,32 @@
       try{
         const res=await api('/api/onboarding/openings/'+id);
         if(!res.ok){toast('Could not load opening ('+res.status+')',true);return;}
-        CURRENT=await res.json();
+        CURRENT=await res.json();detailTab=null;
         renderDetail();
         window.scrollTo({top:0,behavior:'smooth'});
       }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
     }
     function backToList(){document.getElementById('detailView').style.display='none';document.getElementById('portfolioView').style.display='';CURRENT=null;loadPortfolio();}
 
-    function stepStats(step){const r=CURRENT.tasks.filter(t=>t.step===step&&t.prio==='req');const d=r.filter(t=>t.done).length;return {d,n:r.length};}
+    function detailTabDefs(){
+      const tabs=[];
+      (CURRENT.track_views||[]).forEach(tv=>tabs.push({id:tv.track,label:tv.label,count:tv.total}));
+      const ref=CURRENT.reference||{};
+      if((ref.systems||[]).length) tabs.push({id:'systems',label:'Systems'});
+      if(ref.contacts&&Object.keys(ref.contacts).length) tabs.push({id:'contacts',label:'Contacts'});
+      if((ref.forms||[]).length) tabs.push({id:'forms',label:'Forms'});
+      if(ref.call45&&(ref.call45.sections||[]).length) tabs.push({id:'call45',label:'45-Day Call'});
+      if((ref.itquick||[]).length) tabs.push({id:'itquick',label:'IT Quick-Start'});
+      return tabs;
+    }
 
     function renderDetail(){
       const o=CURRENT,p=o.progress,loc=[o.city,o.state].filter(Boolean).join(', ');
       const d=daysUntil(o.target_open),cd=d===null?'—':(d<0?'Open':d+' days');
+      const openTasks=(p.total||0)-(p.done||0);
+      const tabs=detailTabDefs();
+      if(!detailTab||!tabs.find(t=>t.id===detailTab)) detailTab=tabs[0]?.id;
+
       let h=`<button class="backlink" onclick="backToList()">‹ Back to portfolio</button>
         <div class="card">
           <div class="detail-hero">
@@ -281,7 +300,7 @@
                 <div class="m"><div class="k">Target open</div><div class="v">${esc(fmt(o.target_open))}</div></div>
                 <div class="m"><div class="k">Countdown</div><div class="v">${cd}</div></div>
                 <div class="m"><div class="k">Franchisee</div><div class="v">${esc(o.franchisee_name||'—')}</div></div>
-                <div class="m"><div class="k">Required left</div><div class="v">${p.required_open}</div></div>
+                <div class="m"><div class="k">Open tasks</div><div class="v">${openTasks}</div></div>
               </div>
             </div>
             <div class="ringd" style="--pct:${p.pct}"><b>${p.pct}%</b></div>
@@ -300,32 +319,142 @@
             </div>
             ${o.invited_at?`<p class="hint">Last invite sent ${esc(fmt(o.invited_at))}.</p>`:'<p class="hint">No invite sent yet.</p>'}
           </div>
+        </div>
+
+        <div class="nro">
+          <nav class="tabnav"><div class="tabnav-inner" id="d-tabnav">${tabs.map(t=>
+            `<button class="tabbtn${t.id===detailTab?' active':''}" data-tab="${t.id}">${esc(t.label)}${t.count!=null?` <span class="n">${t.count}</span>`:''}</button>`).join('')}</div></nav>
+          <div id="d-tabbody"></div>
         </div>`;
 
-      [1,2,3,4].forEach(step=>{
-        const items=o.tasks.filter(t=>t.step===step);const done=items.filter(t=>t.done).length;
-        h+=`<div class="step-h"><div class="s">Step ${step}</div><h3>${esc(o.steps[step]||'')}</h3><div class="c">${done}/${items.length} complete</div></div>`;
-        items.forEach(t=>{
-          const fr=t.owner==='franchisee';
-          h+=`<div class="task ${t.done?'done':''}">
-            <input class="cbx" type="checkbox" ${t.done?'checked':''} onchange="setTask('${esc(t.key)}',this)" aria-label="Toggle ${esc(t.title)}">
-            <div style="flex:1;min-width:0;">
-              <div class="tt">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;">${esc(t.title)}</a>`:esc(t.title)}</div>
-              <div class="tg">
-                <span class="pill ${PRIO[t.prio][1]}">${PRIO[t.prio][0]}</span>
-                ${t.lead?`<span class="chip">${esc(t.lead)}</span>`:''}
-                ${t.dept?`<span class="chip">${esc(t.dept)}</span>`:''}
-                <span class="own ${fr?'fr':'nk'}">${fr?'Franchisee':"Newk's team"}</span>
-              </div>
-              <div class="td">${esc(t.desc)}</div>
-              <div class="tf">${t.done?`<span class="ok">✓ Completed${t.done_by?' by '+esc(t.done_by):''}${t.done_at?' · '+esc(fmt(t.done_at)):''}</span>`:'<span>Open</span>'}</div>
-              ${t.note?`<div class="savednote"><span class="lbl">Note${fr?' from franchisee':''}</span>${esc(t.note)}</div>`:''}
-            </div></div>`;
-        });
-      });
       document.getElementById('detailView').innerHTML=h;
       document.getElementById('portfolioView').style.display='none';
       document.getElementById('detailView').style.display='';
+      document.querySelectorAll('#d-tabnav .tabbtn').forEach(b=>b.onclick=()=>{detailTab=b.dataset.tab;renderDetailTab();});
+      renderDetailTab();
+    }
+
+    function renderDetailTab(){
+      const ref=CURRENT.reference||{};
+      const tv=(CURRENT.track_views||[]).find(x=>x.track===detailTab);
+      let h='';
+      if(tv) h=renderTrack(tv);
+      else if(detailTab==='systems') h=renderSystems(ref.systems||[]);
+      else if(detailTab==='contacts') h=renderContacts(ref.contacts||{});
+      else if(detailTab==='forms') h=renderForms(ref.forms||[]);
+      else if(detailTab==='call45') h=renderCall45(ref.call45||{sections:[]});
+      else if(detailTab==='itquick') h=renderItQuick(ref.itquick||[]);
+      document.getElementById('d-tabbody').innerHTML=h;
+      // reflect active tab in the nav (in case re-rendered)
+      document.querySelectorAll('#d-tabnav .tabbtn').forEach(b=>b.classList.toggle('active',b.dataset.tab===detailTab));
+      document.querySelectorAll('#d-tabbody .cbx input').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
+      document.querySelectorAll('#d-tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
+    }
+
+    function renderTrack(tv){
+      let h='';
+      if(tv.blurb) h+=`<p style="color:#4A4F57;margin:0 0 14px;">${esc(tv.blurb)}</p>`;
+      tv.groups.forEach(g=>{
+        const done=g.tasks.filter(t=>t.done).length,total=g.tasks.length,pct=total?Math.round(done/total*100):0;
+        const allDone=total>0&&done===total;
+        h+=`<section class="phase${allDone?' done':''}">
+          <div class="phase-h">
+            <div class="phase-num">${esc(String(g.order||g.id))}</div>
+            <div class="phase-meta">${g.range?`<div class="r">${esc(g.range)}</div>`:''}<h3>${esc(g.label)}</h3>${g.blurb?`<div class="blurb">${esc(g.blurb)}</div>`:''}</div>
+            <div class="phase-prog"><div class="txt">${done}/${total} done</div><div class="bar"><i style="width:${pct}%"></i></div></div>
+            <div class="chev2">&#9660;</div>
+          </div>
+          <ul class="tasklist">${g.tasks.map(taskRow).join('')}</ul>
+        </section>`;
+      });
+      return h||'<div class="empty">No tasks in this section.</div>';
+    }
+
+    function taskRow(t){
+      const fr=t.owner==='franchisee';
+      const meta=[];
+      if(t.prio&&PRIO[t.prio]) meta.push(`<span class="req ${t.prio}">${PRIO[t.prio]}</span>`);
+      if(t.lead) meta.push(`<span class="lead">${esc(t.lead)}</span>`);
+      if(t.dept) meta.push(`<span class="dtag ${esc((t.dept||'').split(/[\/ ]/)[0])}">${esc(t.dept)}</span>`);
+      meta.push(`<span class="own ${fr?'franchisee':'newks'}">${fr?'Franchisee':"Newk's team"}</span>`);
+      if(t.is_call) meta.push('<span class="callflag">Milestone Call</span>');
+      const links=[];
+      if(t.kb) links.push(`<span class="m">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></span>`);
+      if(t.form_url) links.push(`<span class="m">📝 <a href="${esc(t.form_url)}" target="_blank" rel="noopener">Form</a></span>`);
+      if(t.contact_info) links.push(`<span class="m">✉ ${linkifyEmail(t.contact_info)}</span>`);
+      return `<li class="task${t.done?' checked':''}">
+        <label class="cbx"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} aria-label="Toggle ${esc(t.title)}"></label>
+        <div class="t-body">
+          <div class="t-top">${meta.join('')}</div>
+          <div class="t-act">${esc(t.title)}</div>
+          ${t.desc?`<div class="t-desc">${esc(t.desc)}</div>`:''}
+          ${links.length?`<div class="t-meta">${links.join('')}</div>`:''}
+          ${t.note?`<div class="t-note"><span class="lbl">Note${fr?' from franchisee':''}</span>${esc(t.note)}</div>`:''}
+          ${t.done?`<div class="t-foot"><span class="ok">✓ Completed${t.done_by?' by '+esc(t.done_by):''}${t.done_at?' · '+esc(fmt(t.done_at)):''}</span></div>`:''}
+        </div></li>`;
+    }
+
+    function renderSystems(systems){
+      let h='<p style="color:#4A4F57;margin:0 0 14px;">Reference — systems used by the restaurant and who manages them.</p>';
+      const bySec={};systems.forEach(s=>{(bySec[s.section||'']=bySec[s.section||'']||[]).push(s);});
+      Object.keys(bySec).forEach(sec=>{
+        h+=`<div class="sysgroup">${esc(sec)}</div><div class="sysgrid">`;
+        h+=bySec[sec].map(s=>`<div class="syscard">
+          <div class="sn">${s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)} &#8599;</a>`:esc(s.name)}</div>
+          ${s.desc?`<div class="sd">${esc(s.desc)}</div>`:''}
+          <div class="srow">${s.managed?`<span>Managed: ${esc(s.managed)}</span>`:''}${s.rest_acct?`<span>Restaurant: ${esc(s.rest_acct)}</span>`:''}${s.fran_acct?`<span>Franchisee: ${esc(s.fran_acct)}</span>`:''}</div>
+        </div>`).join('');
+        h+=`</div>`;
+      });
+      return h;
+    }
+
+    function renderContacts(contacts){
+      let h='<p style="color:#4A4F57;margin:0 0 14px;">Vendor &amp; support directory.</p>';
+      Object.keys(contacts).forEach(gk=>{
+        const rows=contacts[gk].rows||[];
+        h+=`<div class="cgroup"><div class="gh">${esc(gk)} <span class="cnt">${rows.length}</span></div><div class="ccards">`;
+        h+=rows.map(r=>{
+          const req=(r['Required vs Optional']||'');
+          return `<div class="ccard">
+            <div class="cn">${esc(r.Vendor||r['Contact Name']||'—')}${req?`<span class="cbadge ${/required/i.test(req)?'req':''}">${esc(req)}</span>`:''}</div>
+            ${r['Contact Name']&&r.Vendor?`<div class="cr">${esc(r['Contact Name'])}${r.Role?' · '+esc(r.Role):''}</div>`:(r.Role?`<div class="cr">${esc(r.Role)}</div>`:'')}
+            ${r.Email?`<div class="ce">${linkifyEmail(r.Email)}</div>`:''}
+            ${r.Phone?`<div class="cp">${esc(r.Phone)}</div>`:''}
+          </div>`;
+        }).join('');
+        h+=`</div></div>`;
+      });
+      return h;
+    }
+
+    function renderForms(forms){
+      return `<p style="color:#4A4F57;margin:0 0 14px;">Key forms &amp; sign-ups.</p><div class="dir-grid">`+
+        forms.map(f=>`<div class="dir-item"><div class="r"><a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name)} &#8599;</a></div></div>`).join('')+`</div>`;
+    }
+
+    function renderCall45(call45){
+      let h='<p style="color:#4A4F57;margin:0 0 14px;">Status checklist reviewed on the 45-Day call.</p>';
+      (call45.sections||[]).forEach(s=>{
+        h+=`<div class="card"><div class="card-b"><div class="qsection"><div class="qh">${esc(s.title)}</div>`;
+        h+=s.items.map(i=>`<div class="qitem"><div class="qt">${esc(i.text)}</div>${i.yn?'<span class="qyn">Y / N</span>':''}</div>`).join('');
+        h+=`</div></div></div>`;
+      });
+      return h;
+    }
+
+    function renderItQuick(groups){
+      let h='<p style="color:#4A4F57;margin:0 0 14px;">The franchisee\'s quick-start reference (shown on their Hub).</p>';
+      groups.forEach(g=>{
+        h+=`<section class="card"><div class="card-h"><span class="ico">&#9776;</span><h2>${esc(g.title)}</h2></div><div class="card-b"><div class="dir-grid">`;
+        h+=g.items.map(i=>`<div class="dir-item">
+          <div class="r">${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.name)} &#8599;</a>`:esc(i.name)}</div>
+          <div class="sd">${esc(i.desc||'')}</div>
+          <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;">${i.req?`<span class="req ${i.req.toLowerCase().startsWith('req')?'req':'opt'}">${esc(i.req)}</span>`:''}${i.timing?`<span class="lead">${esc(i.timing)}</span>`:''}${i.dept?`<span class="chip">${esc(i.dept)}</span>`:''}</div>
+        </div>`).join('');
+        h+=`</div></div></section>`;
+      });
+      return h;
     }
 
     async function setTask(key,el){
@@ -334,13 +463,24 @@
         const res=await api(`/api/onboarding/openings/${CURRENT.id}/tasks/${encodeURIComponent(key)}`,
           {method:'POST',body:JSON.stringify({done})});
         if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.detail||res.status);}
-        const t=CURRENT.tasks.find(x=>x.key===key);t.done=done;t.done_at=done?new Date().toISOString():null;
-        // recompute progress locally
-        const rd=CURRENT.tasks.filter(x=>x.prio==='req'&&x.done).length;
-        CURRENT.progress.required_done=rd;CURRENT.progress.required_open=CURRENT.progress.required_total-rd;
-        CURRENT.progress.pct=Math.round(rd/CURRENT.progress.required_total*100);
-        renderDetail();toast(done?'Marked complete ✓':'Marked open');
+        // update local model (flat + track_views) then recompute + re-render current tab
+        let task=null;
+        (CURRENT.track_views||[]).forEach(tv=>tv.groups.forEach(g=>g.tasks.forEach(t=>{if(t.key===key)task=t;})));
+        if(task){task.done=done;task.done_at=done?new Date().toISOString():null;task.done_by=done?'You':null;}
+        recomputeProgress();
+        renderDetail();
+        toast(done?'Marked complete ✓':'Marked open');
       }catch(e){el.checked=!done;el.disabled=false;toast('Could not save: '+e.message,true);}
+    }
+
+    function recomputeProgress(){
+      let done=0,total=0;
+      (CURRENT.track_views||[]).forEach(tv=>{
+        let td=0,tt=0;tv.groups.forEach(g=>g.tasks.forEach(t=>{tt++;if(t.done)td++;}));
+        tv.done=td;tv.total=tt;tv.pct=tt?Math.round(td/tt*100):0;done+=td;total+=tt;
+      });
+      CURRENT.progress.done=done;CURRENT.progress.total=total;
+      CURRENT.progress.pct=total?Math.round(done/total*100):0;
     }
 
     function copyLink(){const f=document.getElementById('linkField');f.select();

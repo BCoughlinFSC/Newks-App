@@ -21,6 +21,7 @@ SQLite mirrors). App-owned — no SQL Server / outbox sync.
 
 import logging
 import os
+import re
 import secrets
 import sqlite3
 from contextlib import contextmanager
@@ -75,10 +76,13 @@ ONBOARDING_TASKS: List[Dict[str, Any]] = [
          prio="req", lead="Min. 8 weeks prior", owner=OWNER_NEWKS, dept="IT / FSC",
          desc="Site is provisioned in the Newk's Toast instance. IT completes the back-end setup.",
          kb=TICKET),
-    dict(key="managed_network", step=2, title="Managed Network, Phones, Internet & PCI",
-         prio="req", lead="Contact early", owner=OWNER_FRANCHISEE, dept="",
-         desc="Choose ISS (2025 preferred) or MD Tech — one package can cover network, phones, internet.",
-         kb=f"{KB}/en/support/solutions/articles/5000880616-choose-a-managed-network-security-provider-for-new-restaurant-openin"),
+    dict(key="managed_network", step=2, title="FSC Managed Network",
+         prio="req", lead="Contact early", owner=OWNER_NEWKS, dept="IT / FSC",
+         desc="FSC IT provides and manages the restaurant's network equipment, wireless "
+              "networks, and cellular backup connectivity for Toast services. Included in "
+              "the franchise agreement — contact FSC IT early so equipment placement, "
+              "installation requirements, and low-voltage cabling can be coordinated.",
+         kb=TICKET),
     dict(key="olo_olopay", step=2, title="OLO & OLO Pay",
          prio="req", lead="50 days prior", owner=OWNER_FRANCHISEE, dept="",
          desc="Digital ordering + OLO Pay card-present. Complete both the onboarding and OLO Pay forms.",
@@ -107,10 +111,7 @@ ONBOARDING_TASKS: List[Dict[str, Any]] = [
          prio="rec", lead="", owner=OWNER_FRANCHISEE, dept="",
          desc="Approved CCTV partners for loss prevention and security cameras.",
          kb=f"{KB}/en/support/solutions/articles/5000880749-dtiq-or-envysion-cctv-cameras-for-new-restaurant-openings-nro-"),
-    dict(key="grubbrr_kiosks", step=2, title="Grubbrr Kiosks",
-         prio="opt", lead="8 weeks lead time", owner=OWNER_FRANCHISEE, dept="",
-         desc="Order self-order kiosks and submit the OLO Pay payment form.",
-         kb=f"{KB}/support/solutions/articles/5000892744-nro-checklist-grubbrr-kiosk-purchase"),
+    # (Grubbrr Kiosks task retired 2026-08 — removed per FSC direction.)
 
     # ---- Step 3 · Local Agreements & Vendors ----
     dict(key="alarm", step=3, title="Burglar & Fire Alarm Services",
@@ -118,12 +119,17 @@ ONBOARDING_TASKS: List[Dict[str, Any]] = [
          desc="ADT is the national partner; local sourcing allowed. Must include a cellular unit.",
          kb=f"{KB}/en/support/solutions/articles/5000881313-nro-burglar-and-fire-alarm-sourcing"),
     dict(key="internet_local", step=3, title="High-Speed Internet Provider (Local)",
-         prio="cond", lead="Contact ISS first", owner=OWNER_FRANCHISEE, dept="",
-         desc="Coax/fiber, 5 static IPs (~$99–140/mo). Not needed if using ISS network package.",
+         prio="req", lead="", owner=OWNER_FRANCHISEE, dept="",
+         desc="The franchisee is responsible for selecting and contracting with a local "
+              "high-speed internet provider. FSC IT is available to review available "
+              "provider options and service speeds with the franchisee.",
          kb=f"{KB}/en/support/solutions/articles/5000881312-nro-high-speed-internet-provider"),
-    dict(key="voip_local", step=3, title="Voice / VOIP Telephone Provider (Local)",
-         prio="cond", lead="Contact ISS first", owner=OWNER_FRANCHISEE, dept="",
-         desc="UCaaS/VOIP platform. Not needed if using ISS network package.",
+    dict(key="voip_local", step=3, title="Voice / Telephone Provider (Local)",
+         prio="req", lead="", owner=OWNER_FRANCHISEE, dept="",
+         desc="The franchisee is responsible for selecting and contracting with a telephone "
+              "or VOIP provider. Telephone service may be purchased through the internet "
+              "provider or another local vendor. Any required cabling should be coordinated "
+              "with the low-voltage installer.",
          kb=f"{KB}/en/support/solutions/articles/5000880748-nro-checklist-choose-a-voice-telephone-provider-nro-"),
 
     # ---- Step 4 · Managed by Other Departments ----
@@ -176,9 +182,82 @@ STEP_TITLES = {
     4: "Managed by Other Departments",
 }
 
-# Fast lookup: key -> template dict
-_TASK_BY_KEY = {t["key"]: t for t in ONBOARDING_TASKS}
-_REQUIRED_KEYS = {t["key"] for t in ONBOARDING_TASKS if t["prio"] == "req"}
+# ─────────────────────────────────────────────────────────────────────────────
+# MULTI-TRACK CATALOG
+#
+# The curated IT list above is the "it" track (audience: internal). Three more
+# tracks — the full week-by-week IT kit, the cross-functional Master checklist,
+# and the Marketing toolkit — plus read-only reference (vendor contacts, systems
+# grid, forms, the 45-day call, the IT quick-start) are generated from Kim's
+# prototype HTML by build_onboarding_catalog.py and loaded from JSON here.
+#
+# task_status keys per task, so adding tracks needs no schema change as long as
+# keys stay globally unique (curated keys are bare; imported keys are prefixed
+# itf_/mstr_/mkt_).
+# ─────────────────────────────────────────────────────────────────────────────
+
+import json as _json  # noqa: E402
+
+_CATALOG_JSON_PATH = os.path.join(os.path.dirname(__file__), "data", "onboarding", "catalog_data.json")
+
+# Which tracks a franchisee (magic-link) may see, and in what order. The curated
+# "it" track and the full "it_full" kit are internal-only.
+FRANCHISEE_TRACKS = ["master", "marketing"]
+INTERNAL_TRACK_ORDER = ["it", "it_full", "master", "marketing"]
+
+# Reference-block audience: these keys are hidden from franchisees entirely.
+_INTERNAL_REFERENCE = {"systems"}
+# Contact groups hidden from franchisees (matched case-insensitively on label).
+_INTERNAL_CONTACT_GROUPS = re.compile(r"escalation|billing", re.I)
+
+
+def _normalize_curated() -> None:
+    """Give the curated IT tasks the same track/group shape as imported tasks."""
+    for t in ONBOARDING_TASKS:
+        t.setdefault("track", "it")
+        t["group"] = str(t["step"])
+        t["group_label"] = STEP_TITLES.get(t["step"], "")
+
+
+_normalize_curated()
+
+# Public metadata for the curated IT track (mirrors the imported tracks' meta).
+_IT_TRACK_META = {
+    "label": "IT Vendor Checklist (Curated)",
+    "audience": "internal",
+    "blurb": "The tightened IT/vendor agreement checklist (original app list).",
+    "groups": [{"id": str(s), "label": STEP_TITLES[s], "order": s} for s in sorted(STEP_TITLES)],
+}
+
+
+def _load_catalog() -> Dict[str, Any]:
+    try:
+        with open(_CATALOG_JSON_PATH, encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception as exc:  # pragma: no cover - non-fatal
+        logger.warning("onboarding catalog_data.json not loaded: %s", exc)
+        return {"tracks": {}, "reference": {}}
+
+
+_CATALOG = _load_catalog()
+_IMPORTED_TRACKS = _CATALOG.get("tracks", {})
+REFERENCE: Dict[str, Any] = _CATALOG.get("reference", {})
+
+# Combined public track metadata (meta only — no task rows).
+TRACK_META: Dict[str, Dict[str, Any]] = {"it": _IT_TRACK_META}
+for _tr, _data in _IMPORTED_TRACKS.items():
+    TRACK_META[_tr] = {k: v for k, v in _data.items() if k != "tasks"}
+
+# Flat template of every task across every track.
+ONBOARDING_TASKS_ALL: List[Dict[str, Any]] = list(ONBOARDING_TASKS)
+for _tr, _data in _IMPORTED_TRACKS.items():
+    ONBOARDING_TASKS_ALL.extend(_data.get("tasks", []))
+
+# Fast lookup: key -> template dict (spans all tracks).
+_TASK_BY_KEY = {t["key"]: t for t in ONBOARDING_TASKS_ALL}
+# "Required" progress stays scoped to the curated IT track (imported tracks have
+# no req/rec priority — they're tracked by done/total instead).
+_REQUIRED_KEYS = {t["key"] for t in ONBOARDING_TASKS if t.get("prio") == "req"}
 
 
 @contextmanager
@@ -249,15 +328,20 @@ def initialize_schema() -> None:
 # ─── template helpers ────────────────────────────────────────────────────────
 
 def catalog() -> Dict[str, Any]:
-    """The static task template + step titles (for the UI to render labels)."""
-    return {"tasks": ONBOARDING_TASKS, "steps": STEP_TITLES}
+    """The static task template + track metadata + reference (labels for the UI)."""
+    return {
+        "tasks": ONBOARDING_TASKS,      # curated IT (back-compat)
+        "steps": STEP_TITLES,           # curated IT groups (back-compat)
+        "tracks": TRACK_META,
+        "reference": REFERENCE,
+    }
 
 
 def _assemble_tasks(status_rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
-    """Merge the code template with an opening's stored status rows."""
+    """Merge the code+JSON template with an opening's stored status rows."""
     by_key = {r["task_key"]: r for r in status_rows}
     out = []
-    for t in ONBOARDING_TASKS:
+    for t in ONBOARDING_TASKS_ALL:
         s = by_key.get(t["key"])
         out.append({
             **t,
@@ -269,17 +353,80 @@ def _assemble_tasks(status_rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
     return out
 
 
-def _progress(tasks: List[Dict[str, Any]]) -> Dict[str, int]:
-    """Required-task completion for an opening."""
-    req_done = sum(1 for t in tasks if t["prio"] == "req" and t["done"])
+def _progress(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Overall + per-track done/total, plus the legacy required-task counters
+    (still scoped to the curated IT track)."""
+    by_track: Dict[str, Dict[str, int]] = {}
+    for t in tasks:
+        b = by_track.setdefault(t["track"], {"done": 0, "total": 0})
+        b["total"] += 1
+        if t["done"]:
+            b["done"] += 1
+    done = sum(b["done"] for b in by_track.values())
+    total = sum(b["total"] for b in by_track.values())
+    req_done = sum(1 for t in tasks if t.get("track") == "it" and t.get("prio") == "req" and t["done"])
     req_total = len(_REQUIRED_KEYS)
-    open_req = req_total - req_done
     return {
+        "done": done,
+        "total": total,
+        "pct": round(done / total * 100) if total else 0,
+        "by_track": {
+            tr: {**b, "pct": round(b["done"] / b["total"] * 100) if b["total"] else 0}
+            for tr, b in by_track.items()
+        },
         "required_done": req_done,
         "required_total": req_total,
-        "required_open": open_req,
-        "pct": round(req_done / req_total * 100) if req_total else 0,
+        "required_open": req_total - req_done,
     }
+
+
+def _build_track_views(tasks: List[Dict[str, Any]], for_franchisee: bool) -> List[Dict[str, Any]]:
+    """Group an opening's (already status-merged) tasks into track → group → task
+    structures the UI renders directly. Franchisees see only their tracks, and
+    tasks they don't own are flagged read-only (`locked`)."""
+    order = FRANCHISEE_TRACKS if for_franchisee else INTERNAL_TRACK_ORDER
+    views = []
+    for tr in order:
+        meta = TRACK_META.get(tr)
+        if not meta:
+            continue
+        tks = [t for t in tasks if t.get("track") == tr]
+        if not tks:
+            continue
+        if for_franchisee:
+            for t in tks:
+                t["locked"] = t.get("owner") != OWNER_FRANCHISEE
+        groups = []
+        for g in meta.get("groups", []):
+            gitems = [t for t in tks if str(t.get("group")) == str(g["id"])]
+            if gitems:
+                groups.append({**g, "tasks": gitems})
+        done = sum(1 for t in tks if t["done"])
+        total = len(tks)
+        views.append({
+            "track": tr,
+            "label": meta.get("label", tr),
+            "blurb": meta.get("blurb", ""),
+            "audience": meta.get("audience", "internal"),
+            "accounts": meta.get("accounts", []),
+            "done": done,
+            "total": total,
+            "pct": round(done / total * 100) if total else 0,
+            "groups": groups,
+        })
+    return views
+
+
+def _reference_view(for_franchisee: bool) -> Dict[str, Any]:
+    """Reference blocks for the payload, filtered for the franchisee audience."""
+    if not for_franchisee:
+        return REFERENCE
+    ref = {k: v for k, v in REFERENCE.items() if k not in _INTERNAL_REFERENCE}
+    contacts = ref.get("contacts", {})
+    ref["contacts"] = {
+        k: v for k, v in contacts.items() if not _INTERNAL_CONTACT_GROUPS.search(k)
+    }
+    return ref
 
 
 # ─── openings CRUD ───────────────────────────────────────────────────────────
@@ -333,14 +480,20 @@ def list_openings(include_archived: bool = False) -> List[Dict[str, Any]]:
     return out
 
 
-def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection) -> Dict[str, Any]:
+def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection,
+             for_franchisee: bool = False) -> Dict[str, Any]:
     status = conn.execute(
         "SELECT * FROM task_status WHERE opening_id = ?", (o["id"],)
     ).fetchall()
     tasks = _assemble_tasks(status)
+    track_views = _build_track_views(tasks, for_franchisee)
+    # Progress is computed over exactly what this audience can see.
+    visible = [t for grp in track_views for g in grp["groups"] for t in g["tasks"]]
     d = dict(o)
-    d["tasks"] = tasks
-    d["progress"] = _progress(tasks)
+    d["tasks"] = tasks                       # flat list (back-compat / internal)
+    d["track_views"] = track_views           # grouped, render-ready
+    d["reference"] = _reference_view(for_franchisee)
+    d["progress"] = _progress(visible if for_franchisee else tasks)
     d["steps"] = STEP_TITLES
     return d
 
@@ -361,7 +514,7 @@ def get_opening_by_token(token: str) -> Optional[Dict[str, Any]]:
         o = conn.execute("SELECT * FROM openings WHERE token = ?", (token,)).fetchone()
         if not o:
             return None
-        d = _hydrate(o, conn)
+        d = _hydrate(o, conn, for_franchisee=True)
         d.pop("token", None)
         return d
 

@@ -1,0 +1,6404 @@
+{
+ "_generated_by": "build_onboarding_catalog.py",
+ "tracks": {
+  "master": {
+   "label": "Master Opening Checklist",
+   "audience": "franchisee",
+   "blurb": "The full cross-functional 22-week opening plan.",
+   "infoFields": [
+    "Restaurant #, Name & Address",
+    "Ground Breaking",
+    "Build Time",
+    "Turn Over",
+    "Projected Open Date",
+    "Hiring Date",
+    "Training Week"
+   ],
+   "groups": [
+    {
+     "id": "1",
+     "label": "Contracts, Permits & Major Orders",
+     "range": "~22 Weeks Out",
+     "blurb": "Lock in POS, kiosks, key permits and the big equipment/signage purchase orders.",
+     "order": 1
+    },
+    {
+     "id": "2",
+     "label": "Planning, Insurance, Equipment & Décor",
+     "range": "21–15 Weeks Out",
+     "blurb": "Marketing planning, insurance, utility applications, and ordering equipment, smallwares & décor.",
+     "order": 2
+    },
+    {
+     "id": "3",
+     "label": "Systems, Training Start & Installations",
+     "range": "14–10 Weeks Out",
+     "blurb": "Labor & inventory systems, gift cards, first managers begin training, install coordination.",
+     "order": 3
+    },
+    {
+     "id": "4",
+     "label": "Payments, Installs & Hiring Prep",
+     "range": "9–6 Weeks Out",
+     "blurb": "Payment acceptance, equipment installs, remaining managers training, hiring materials.",
+     "order": 4
+    },
+    {
+     "id": "5",
+     "label": "Vendor Setup, Payroll & Compliance",
+     "range": "5–4 Weeks Out",
+     "blurb": "Final vendor accounts, payroll, food orders, POS install, 30-day call and compliance items.",
+     "order": 5
+    },
+    {
+     "id": "6",
+     "label": "Hiring & Pre-Opening Prep",
+     "range": "3–2 Weeks Out",
+     "blurb": "Interviews & orientation, service contracts, GO kit, 15-day call, staffing confirmation.",
+     "order": 6
+    },
+    {
+     "id": "7",
+     "label": "Turnover, Final Checks & Launch",
+     "range": "Final 2 Weeks → Opening",
+     "blurb": "Certificate of occupancy, turnover to operations, equipment checks, training week and opening-day cash.",
+     "order": 7
+    }
+   ],
+   "tasks": [
+    {
+     "key": "mstr_001",
+     "track": "master",
+     "group": "1",
+     "order": 1,
+     "title": "Contact Toast  to Complete Contract for POS + Credit Card",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "Timothy Carlo",
+     "contact_info": "timothy.carlo@toasttab.com",
+     "company": "Toast",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_003",
+     "track": "master",
+     "group": "1",
+     "order": 3,
+     "title": "Submit Request to the Marketing team for any unique Coming Soon visual noise (banners, window clings, fence wraps, post sign)",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_004",
+     "track": "master",
+     "group": "1",
+     "order": 4,
+     "title": "Contact Director of Training, discuss opening and training procedures",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "Jessica Drahem",
+     "contact_info": "jdrahem@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_005",
+     "track": "master",
+     "group": "1",
+     "order": 5,
+     "title": "Join the Chamber of Commerce",
+     "owner": "franchisee",
+     "dept": "Franchisee/Marketing",
+     "tags": [
+      "Franchisee",
+      "Marketing"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "Local Chamber",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_006",
+     "track": "master",
+     "group": "1",
+     "order": 6,
+     "title": "Discuss highway logo DOT boards with Field Marketing team to determine availability and cost",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_007",
+     "track": "master",
+     "group": "1",
+     "order": 7,
+     "title": "Set up po for Signage & Awning Package",
+     "owner": "newks",
+     "dept": "Development",
+     "tags": [
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_008",
+     "track": "master",
+     "group": "1",
+     "order": 8,
+     "title": "Submit Application - Alcohol/Beer Permit",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_009",
+     "track": "master",
+     "group": "1",
+     "order": 9,
+     "title": "Set up PO for Kitchen Equipment & seating package",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "Tracy Cooksey, CFSP",
+     "contact_info": "601-482-7127",
+     "company": "H&R Supply",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_010",
+     "track": "master",
+     "group": "1",
+     "order": 10,
+     "title": "Follow the OLO Onboarding on my.olo.com dashboard - Franchisee Onboarding in Dashboard. Be sure to sign up for both OLO and OLO Pay services.",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "Olo",
+     "contact_info": "help@olo.com",
+     "company": "Olo",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_011",
+     "track": "master",
+     "group": "1",
+     "order": 11,
+     "title": "Complete OloPay Kiosk Paperwork by following the link https://olo-signup.formstack.com/forms/olopaycardpresent [Use Password OloPay]",
+     "owner": "newks",
+     "dept": "IT Departmnet",
+     "tags": [
+      "IT"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "Olo",
+     "contact_info": "help@olo.com",
+     "company": "Olo",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_012",
+     "track": "master",
+     "group": "1",
+     "order": 12,
+     "title": "Submit Application - Spec Tax Reg",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_013",
+     "track": "master",
+     "group": "1",
+     "order": 13,
+     "title": "Submit Application - Sales/Use Tax",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_014",
+     "track": "master",
+     "group": "1",
+     "order": 14,
+     "title": "Submit Application - Use Tax",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_015",
+     "track": "master",
+     "group": "1",
+     "order": 15,
+     "title": "Submit Application - Tax Number",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_016",
+     "track": "master",
+     "group": "1",
+     "order": 16,
+     "title": "Submit Application - Occupational Tax",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "22 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_017",
+     "track": "master",
+     "group": "2",
+     "order": 17,
+     "title": "Identify a Marketing/Catering manager",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "21 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_018",
+     "track": "master",
+     "group": "2",
+     "order": 18,
+     "title": "Begin new store opening marketing planning with Marketing, discuss pre-opening training events",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "21 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_019",
+     "track": "master",
+     "group": "2",
+     "order": 19,
+     "title": "Order dine in paper menus, catering menus, and pens for trade area canvassing",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "21 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_020",
+     "track": "master",
+     "group": "2",
+     "order": 20,
+     "title": "Contact FSC IT to arrange the FSC Managed Network. FSC IT provides and manages the network equipment, wireless networks, and cellular backup connectivity for Toast (included in the franchise agreement). Contact FSC IT early to coordinate equipment placement, installation, and low-voltage cabling.",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "20 wks out",
+     "desc": "",
+     "contact": "FSC IT",
+     "contact_info": "itdepartment@newks.com",
+     "company": "FSC IT",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_021",
+     "track": "master",
+     "group": "2",
+     "order": 21,
+     "title": "Set up all required insurances (per Franchise Agreement)",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "20 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_022",
+     "track": "master",
+     "group": "2",
+     "order": 22,
+     "title": "Fax copy of proof of insurance to Newk's Eatery @601-982-1161",
+     "owner": "newks",
+     "dept": "Klara Smith",
+     "tags": [
+      "Other"
+     ],
+     "lead": "20 wks out",
+     "desc": "",
+     "contact": "ksmith@newks.com",
+     "contact_info": "Legal",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_023",
+     "track": "master",
+     "group": "2",
+     "order": 23,
+     "title": "Apply for liquor license if required",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "20 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_024",
+     "track": "master",
+     "group": "2",
+     "order": 24,
+     "title": "Begin local trade area canvassing and enter contacts on tracking spreadsheet - this is for eClub and VIP party invites.  Also potential catering clients",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "18 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_025",
+     "track": "master",
+     "group": "2",
+     "order": 25,
+     "title": "Set up Credit Account with Sysco",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "18 wks out",
+     "desc": "",
+     "contact": "Representative",
+     "contact_info": "Please contact purchasing@newks.com for the representative for your distribution center",
+     "company": "SYSCO",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_026",
+     "track": "master",
+     "group": "2",
+     "order": 26,
+     "title": "Set Up PO for Interior Décor",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "18 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_027",
+     "track": "master",
+     "group": "2",
+     "order": 27,
+     "title": "Set up PO for Small wares package",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "18 wks out",
+     "desc": "",
+     "contact": "Tracy Cooksey, CFSP",
+     "contact_info": "601-482-7127",
+     "company": "H&R Supply",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_028",
+     "track": "master",
+     "group": "2",
+     "order": 28,
+     "title": "Order Seating Equipment",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "18 wks out",
+     "desc": "",
+     "contact": "Tracy Cooksey, CFSP",
+     "contact_info": "601-482-7127",
+     "company": "H&R Supply",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_029",
+     "track": "master",
+     "group": "2",
+     "order": 29,
+     "title": "Order Smallwares Equipment",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "18 wks out",
+     "desc": "",
+     "contact": "Tracy Cooksey, CFSP",
+     "contact_info": "601-482-7127",
+     "company": "H&R Supply",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_030",
+     "track": "master",
+     "group": "2",
+     "order": 30,
+     "title": "Order Kitchen equipment",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "18 wks out",
+     "desc": "",
+     "contact": "Tracy Cooksey, CFSP",
+     "contact_info": "601-482-7127",
+     "company": "H&R Supply",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_031",
+     "track": "master",
+     "group": "2",
+     "order": 31,
+     "title": "Order Signs",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "17 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_032",
+     "track": "master",
+     "group": "2",
+     "order": 32,
+     "title": "Post the property for Beer/Wine Permits if required",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "17 wks out",
+     "desc": "",
+     "contact": "development@newks.com",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_033",
+     "track": "master",
+     "group": "2",
+     "order": 33,
+     "title": "Submit request to Field Marketing team for catering van artwork wrap",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "16 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_034",
+     "track": "master",
+     "group": "2",
+     "order": 34,
+     "title": "Management candidate planning call",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "16 wks out",
+     "desc": "",
+     "contact": "Training (PD&C)",
+     "contact_info": "pdc@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_035",
+     "track": "master",
+     "group": "2",
+     "order": 35,
+     "title": "Submit Application - Electricity",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "15 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_036",
+     "track": "master",
+     "group": "2",
+     "order": 36,
+     "title": "Submit Application - Gas",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "15 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_037",
+     "track": "master",
+     "group": "2",
+     "order": 37,
+     "title": "Submit Application - Water/Sewer",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "15 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_038",
+     "track": "master",
+     "group": "2",
+     "order": 38,
+     "title": "Order Décor",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "15 wks out",
+     "desc": "",
+     "contact": "Josh Wolfe",
+     "contact_info": "731-925-4448",
+     "company": "Design Team",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_039",
+     "track": "master",
+     "group": "2",
+     "order": 39,
+     "title": "Set-up State Tax ID #'s",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "15 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_040",
+     "track": "master",
+     "group": "3",
+     "order": 40,
+     "title": "Contact 7-Shifts to Setup your new Restaurant in their Labor Management/Scheduling Platform",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "14 wks out",
+     "desc": "",
+     "contact": "Kyle Chatterly / Alisha Angl",
+     "contact_info": "kyle.chatterley@7shifts.com / alisha.angl@7shifts.com",
+     "company": "7-Shifts",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_041",
+     "track": "master",
+     "group": "3",
+     "order": 41,
+     "title": "Complete CrunchTime BOH Solution Forms (Inventory/COGS) return to CrunchTime",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "14 wks out",
+     "desc": "",
+     "contact": "Crunchtime Accounting / Jeff Keelin",
+     "contact_info": "billing@crunchtime.com, jkeelin@crunchtime.com",
+     "company": "CrunchTime",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_042",
+     "track": "master",
+     "group": "3",
+     "order": 42,
+     "title": "Post all coming soon visual noise assets",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "13 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_043",
+     "track": "master",
+     "group": "3",
+     "order": 43,
+     "title": "Prepare employee handbook for your company",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "13 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_044",
+     "track": "master",
+     "group": "3",
+     "order": 44,
+     "title": "Set up Threds Acct. & order MIT training shirts on-line",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "13 wks out",
+     "desc": "",
+     "contact": "marketing@newks.com",
+     "contact_info": "marketing@newks.com",
+     "company": "Threds",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_045",
+     "track": "master",
+     "group": "3",
+     "order": 45,
+     "title": "Complete Newk's Gift Card ACH Program information via Paytronix",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "12 wks out",
+     "desc": "",
+     "contact": "Newk's IT",
+     "contact_info": "itdepartment@newks.com",
+     "company": "Paytronix",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_046",
+     "track": "master",
+     "group": "3",
+     "order": 46,
+     "title": "Access Toolkit to obtain Grand Opening Kit",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "12 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's ToolKit",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_047",
+     "track": "master",
+     "group": "3",
+     "order": 47,
+     "title": "Marketing adds location to Yext Platform/Website as a coming soon location",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "12 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_048",
+     "track": "master",
+     "group": "3",
+     "order": 48,
+     "title": "Set-up Chart of Accounts through accounting firm",
+     "owner": "newks",
+     "dept": "Accounting",
+     "tags": [
+      "Accounting"
+     ],
+     "lead": "12 wks out",
+     "desc": "",
+     "contact": "Accounting Department",
+     "contact_info": "accounting@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_049",
+     "track": "master",
+     "group": "3",
+     "order": 49,
+     "title": "GM & #2 Mgr must start training",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "11 wks out",
+     "desc": "",
+     "contact": "Jessica Drahem",
+     "contact_info": "pdc@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_050",
+     "track": "master",
+     "group": "3",
+     "order": 50,
+     "title": "Coordintate POS Installation",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "10 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "ashley.reeves@theabsolutepos.com",
+     "company": "Absolute POS",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_051",
+     "track": "master",
+     "group": "3",
+     "order": 51,
+     "title": "Schedule all low voltage pre-wire(POS, security, phones) Coord w/ GC",
+     "owner": "franchisee",
+     "dept": "Franchise/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "10 wks out",
+     "desc": "",
+     "contact": "Local Contractor",
+     "contact_info": "",
+     "company": "Local Contractor",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_052",
+     "track": "master",
+     "group": "3",
+     "order": 52,
+     "title": "Confirm the FSC Managed Network install date, and confirm install dates with your local high-speed internet and voice/telephone providers.",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "10 wks out",
+     "desc": "",
+     "contact": "FSC IT",
+     "contact_info": "itdepartment@newks.com",
+     "company": "FSC IT",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_053",
+     "track": "master",
+     "group": "3",
+     "order": 53,
+     "title": "Send an email with Restaurant phone and fax numbers to your FBC & the Support Center",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "10 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_054",
+     "track": "master",
+     "group": "4",
+     "order": 54,
+     "title": "#3 & #4 Mgrs must start training",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "9 wks out",
+     "desc": "",
+     "contact": "Jessica Drahem",
+     "contact_info": "pdc@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_055",
+     "track": "master",
+     "group": "4",
+     "order": 55,
+     "title": "Get copies of ServSafe certificates from managers",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "9 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_056",
+     "track": "master",
+     "group": "4",
+     "order": 56,
+     "title": "Confirm Install Date For Kitchen Equipment and Smallwares",
+     "owner": "newks",
+     "dept": "Development",
+     "tags": [
+      "Development"
+     ],
+     "lead": "9 wks out",
+     "desc": "",
+     "contact": "Tracy Cooksey, CFSP",
+     "contact_info": "601-482-7127",
+     "company": "H&R Supply",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_057",
+     "track": "master",
+     "group": "4",
+     "order": 57,
+     "title": "AMEX Card Acceptance: To set up new location please call American Express at 1-800-528-5200",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "New Merchant Setup Team",
+     "contact_info": "1-800-528-5200",
+     "company": "AMEX",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_058",
+     "track": "master",
+     "group": "4",
+     "order": 58,
+     "title": "Set-up music system (DirecTV - Music Chooice) Installation (Coord with Architect for speaker locations) / Digital Media Players (If Applicable)",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "Jacob Cordova",
+     "contact_info": "jacob.cordova@mydirectv.com",
+     "company": "DirecTV Music Choice",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_059",
+     "track": "master",
+     "group": "4",
+     "order": 59,
+     "title": "Email signed Franchise Royalty pre-arranged Payments form to NE",
+     "owner": "newks",
+     "dept": "Accounting",
+     "tags": [
+      "Accounting"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "Accounting Department",
+     "contact_info": "accounting@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_060",
+     "track": "master",
+     "group": "4",
+     "order": 60,
+     "title": "Provide franchisees accounting contact information to Newk's Accounting Dept.",
+     "owner": "newks",
+     "dept": "Accounting",
+     "tags": [
+      "Accounting"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "Accounting Department",
+     "contact_info": "accounting@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_061",
+     "track": "master",
+     "group": "4",
+     "order": 61,
+     "title": "Order Dine In and GNG menu board panels",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_062",
+     "track": "master",
+     "group": "4",
+     "order": 62,
+     "title": "Order business essentials-business cards,pens,letterhead,etc.",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_063",
+     "track": "master",
+     "group": "4",
+     "order": 63,
+     "title": "Arrange for Purchase and Install of 6-Head Soft Drink Dispensing Machines",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "Alyssa Ownby",
+     "contact_info": "aownby@coca-cola.com",
+     "company": "Coca-Cola",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_064",
+     "track": "master",
+     "group": "4",
+     "order": 64,
+     "title": "Order gift cards",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "User Card Foundry Website",
+     "contact_info": "Login is provided during initial meeting with Field Marketing",
+     "company": "Gift Card Foundry",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_065",
+     "track": "master",
+     "group": "4",
+     "order": 65,
+     "title": "Purchase Office Workstation Computer so your managers can work in email, excel and back office tools.",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "Your Choice",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_066",
+     "track": "master",
+     "group": "4",
+     "order": 66,
+     "title": "Set-up Training and Implementation of 7Shifts Scheduling System - use the below form: https://forms.gle/qPMh5kYBjdaiXH376",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "8 wks out",
+     "desc": "",
+     "contact": "Kyle Chatterly/ Alisha Angl",
+     "contact_info": "kyle.chatterley@7shifts.com / alisha.angl@7shifts.com",
+     "company": "7Shifts",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_067",
+     "track": "master",
+     "group": "4",
+     "order": 67,
+     "title": "Newk's Eatery - Franchise Restaurant Information Form - Google Forms",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_068",
+     "track": "master",
+     "group": "4",
+     "order": 68,
+     "title": "Newk's Eatery - Restaurant Systems Questionnaire",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_069",
+     "track": "master",
+     "group": "4",
+     "order": 69,
+     "title": "Set up Restaurant365 (R365) — accounting / inventory platform  [recently added]",
+     "owner": "newks",
+     "dept": "Accounting / IT",
+     "tags": [
+      "Accounting",
+      "IT"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_069",
+     "track": "master",
+     "group": "4",
+     "order": 69,
+     "title": "Coordinate all hiring materials (ie: applications, pens, job purveyors, etc.)",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_070",
+     "track": "master",
+     "group": "4",
+     "order": 70,
+     "title": "Plan for new hire paperwork/orientation meetings. Determine schedule",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_071",
+     "track": "master",
+     "group": "4",
+     "order": 71,
+     "title": "Beer Vendors - contact",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_072",
+     "track": "master",
+     "group": "4",
+     "order": 72,
+     "title": "Wine Distributors - contact",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_073",
+     "track": "master",
+     "group": "4",
+     "order": 73,
+     "title": "Provide Sales Team trade area canvassing contact list - this is for invite list for practice parties",
+     "owner": "newks",
+     "dept": "",
+     "tags": [
+      "Other"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_074",
+     "track": "master",
+     "group": "4",
+     "order": 74,
+     "title": "Set-up Bank Accounts with local bank (Get bank bags/night deposit info)",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_075",
+     "track": "master",
+     "group": "4",
+     "order": 75,
+     "title": "Application - Business License/Store License",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_076",
+     "track": "master",
+     "group": "4",
+     "order": 76,
+     "title": "Application - Health Permit",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_077",
+     "track": "master",
+     "group": "4",
+     "order": 77,
+     "title": "Georgia Pacific:  Paper Towel Dispensers: 8\" Recessed Stainless Steel Towel Dispsenser 59466A",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "7 wks out",
+     "desc": "",
+     "contact": "Ellis Bridgers",
+     "contact_info": "Ellis.Bridgers@GAPAC.com",
+     "company": "GA Pacific",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_078",
+     "track": "master",
+     "group": "4",
+     "order": 78,
+     "title": "Ecolab -  Soap Dispensers Order Sysco NEXA Antibacterial Soap #4294874",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "Jim Nutoff",
+     "contact_info": "jim.nutof@ecolab.com",
+     "company": "Eco Lab",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_079",
+     "track": "master",
+     "group": "4",
+     "order": 79,
+     "title": "45 Day Call",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "PDC@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_080",
+     "track": "master",
+     "group": "4",
+     "order": 80,
+     "title": "Order Now Open visual noise",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "Carmen Wilson",
+     "contact_info": "carmen.wilson@airadpromotions.com",
+     "company": "Air Ad Promotions",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_081",
+     "track": "master",
+     "group": "4",
+     "order": 81,
+     "title": "Marketing team creates all online listing accounts (Google Business, Imaps, etc) & Facebook page, Facebook pre-opening campaign begins",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_082",
+     "track": "master",
+     "group": "4",
+     "order": 82,
+     "title": "Frachisee orders new store opening POP via ToolKit",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's ToolKit",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_083",
+     "track": "master",
+     "group": "4",
+     "order": 83,
+     "title": "Schedule Installation of Dishwasher, Handsoap dispensers, Other Chemical Dispensing Equip.",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "Michael Lease  Michcael.Lease@ecolab.com",
+     "contact_info": "T",
+     "company": "Eco Lab",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_084",
+     "track": "master",
+     "group": "4",
+     "order": 84,
+     "title": "Coordinate Installation of CO2 Tank",
+     "owner": "newks",
+     "dept": "Purchasing@newks.com",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "Javi Estamponi",
+     "contact_info": "800-772-8144 CO2CustomerCare@airgas.com or javi.estamponi@airgas.com",
+     "company": "Air Gas",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_085",
+     "track": "master",
+     "group": "4",
+     "order": 85,
+     "title": "Black Mesh Blinds ordered if needed",
+     "owner": "newks",
+     "dept": "Development",
+     "tags": [
+      "Development"
+     ],
+     "lead": "6 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_086",
+     "track": "master",
+     "group": "5",
+     "order": 86,
+     "title": "Confirm Install Date For Coca Cola Dispensing Equipment",
+     "owner": "newks",
+     "dept": "Purchasing@newks.com",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Alyssa Ownby",
+     "contact_info": "aownby@coca-cola.com",
+     "company": "Coca Cola",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_087",
+     "track": "master",
+     "group": "5",
+     "order": 87,
+     "title": "Confirm permanent land line phone is correct(Website,RTC,Google,etc.)",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Field Marketing",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_088",
+     "track": "master",
+     "group": "5",
+     "order": 88,
+     "title": "Order Culture Cards for partner orientation",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "ColorMark",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Toolkit",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_089",
+     "track": "master",
+     "group": "5",
+     "order": 89,
+     "title": "Order Employee T-Shirts, Hats, Manager Apparel, Aprons.",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "Order with Threds login provided during initial meeting with Field Marketing",
+     "company": "Threds",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_090",
+     "track": "master",
+     "group": "5",
+     "order": 90,
+     "title": "Contact Service Providers for Window Cleaning and HVAC Filter Replacement",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_091",
+     "track": "master",
+     "group": "5",
+     "order": 91,
+     "title": "Contract with linen service for weekly cleaning/delivery svc.of towels,floor mats, mop heads, etc..",
+     "owner": "newks",
+     "dept": "Purchasing@newks.com",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Brent Weyant",
+     "contact_info": "WeyantB@cintas.com",
+     "company": "Cintas",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_092",
+     "track": "master",
+     "group": "5",
+     "order": 92,
+     "title": "Assemble New Employee Packets (ie. W2's, state income tax forms, I-9's, Employee handbooks)",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_093",
+     "track": "master",
+     "group": "5",
+     "order": 93,
+     "title": "Verify Food Vendor and Produce Account are Set-up",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "purchasing@newks.com",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_094",
+     "track": "master",
+     "group": "5",
+     "order": 94,
+     "title": "Coordinate the Ordering Process with the Food Vendors",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "purchasing@newks.com",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_095",
+     "track": "master",
+     "group": "5",
+     "order": 95,
+     "title": "Provide Sysco the Sales Tax Number for the Restaurant",
+     "owner": "newks",
+     "dept": "Purchasing@newks.com",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Corresponding Rep",
+     "contact_info": "Purchasing",
+     "company": "Sysco",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_096",
+     "track": "master",
+     "group": "5",
+     "order": 96,
+     "title": "Set-up Payroll system/purveyor",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_097",
+     "track": "master",
+     "group": "5",
+     "order": 97,
+     "title": "Order 2 Prep and Print Machines",
+     "owner": "newks",
+     "dept": "PD & C",
+     "tags": [
+      "Training"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Victor Aaron",
+     "contact_info": "Aaron.Victor@ecolab.com 860-508-5534",
+     "company": "Ecolab",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_098",
+     "track": "master",
+     "group": "5",
+     "order": 98,
+     "title": "Contact Dr. Pepper for Line Adapter and logo stickers",
+     "owner": "newks",
+     "dept": "Purchasing@newks.com",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Purchasing@newks.com",
+     "contact_info": "Purchasing",
+     "company": "Dr.Pepper",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_099",
+     "track": "master",
+     "group": "5",
+     "order": 99,
+     "title": "Register Your Company's Email Domain Name through provider of your choosing(cannot use Newks in domain name)",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "5 wks out",
+     "desc": "",
+     "contact": "Recommend Office 365 Hosted Mail or Google GSuite Business Accounts",
+     "contact_info": "",
+     "company": "Your companies email provider",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_100",
+     "track": "master",
+     "group": "5",
+     "order": 100,
+     "title": "Set-up Installation of POS system, verify prices and taxes",
+     "owner": "newks",
+     "dept": "IT Department",
+     "tags": [
+      "IT"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "Ashley Reeves",
+     "contact_info": "ashley.reeves@theabsolutepos.com",
+     "company": "Absolute POS",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_101",
+     "track": "master",
+     "group": "5",
+     "order": 101,
+     "title": "30 Day Call",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "All Departments",
+     "contact_info": "",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_102",
+     "track": "master",
+     "group": "5",
+     "order": 102,
+     "title": "At least one manager is Serve-safe certified (certificate provided to PD&C)",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "jdrahem@newks.com",
+     "contact_info": "pdc&newks.com",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_103",
+     "track": "master",
+     "group": "5",
+     "order": 103,
+     "title": "Provide Recruitment POP: Websites, Window Clings, Digital Signs, Banners.",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's ToolKit",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_104",
+     "track": "master",
+     "group": "5",
+     "order": 104,
+     "title": "Finalize and Submit Install Sysco Order for Pre-Opening Training.",
+     "owner": "newks",
+     "dept": "Purchasing/Training",
+     "tags": [
+      "Purchasing",
+      "Training"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "purchasing@newks.com",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_105",
+     "track": "master",
+     "group": "5",
+     "order": 105,
+     "title": "Set-up Garbage Collection Service",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_106",
+     "track": "master",
+     "group": "5",
+     "order": 106,
+     "title": "Coordinate Purchase of  Tea Brewing Equipment (order unwrapped urns and specify steeping funnels for iced tea)",
+     "owner": "newks",
+     "dept": "Purchasing",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "Lipton Customer Service 800-737-5064",
+     "contact_info": "purchasing@newks.com",
+     "company": "Lipton",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_107",
+     "track": "master",
+     "group": "5",
+     "order": 107,
+     "title": "Order Labor Law Posters-state specific,\"Easy-Post Complete Compliance Kit",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_108",
+     "track": "master",
+     "group": "5",
+     "order": 108,
+     "title": "Start developing list for training invitations",
+     "owner": "newks",
+     "dept": "Sales Team",
+     "tags": [
+      "Sales"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "salesteam@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_109",
+     "track": "master",
+     "group": "5",
+     "order": 109,
+     "title": "Workers Comp Insurance",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "4 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_110",
+     "track": "master",
+     "group": "6",
+     "order": 110,
+     "title": "Start Hiring Process By Scheduling Interviews For Hourly Partners. Restaurants Orientation Should Be Set Before Training Week.",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_111",
+     "track": "master",
+     "group": "6",
+     "order": 111,
+     "title": "Discuss Opening Week's Hourly/Mgt Schedules, Especially the \"shifts to Fill\" and \"placement guidelines\"  Following Guidelines Provided By NE",
+     "owner": "newks",
+     "dept": "",
+     "tags": [
+      "Other"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "PD&C",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_112",
+     "track": "master",
+     "group": "6",
+     "order": 112,
+     "title": "Set-up Hood Cleaning Contract",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_113",
+     "track": "master",
+     "group": "6",
+     "order": 113,
+     "title": "Grease Guard  Install - if necessary  David  @  972-468-8429",
+     "owner": "newks",
+     "dept": "",
+     "tags": [
+      "Other"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_114",
+     "track": "master",
+     "group": "6",
+     "order": 114,
+     "title": "Set-up Monthly Pest Control",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "Kyle Sloan",
+     "contact_info": "T 972-232-8662  M 615 403 8962  E kyle.sloan@ecolab.com",
+     "company": "Eco Lab",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_115",
+     "track": "master",
+     "group": "6",
+     "order": 115,
+     "title": "Set-up Landscape Contract",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_116",
+     "track": "master",
+     "group": "6",
+     "order": 116,
+     "title": "Puchase office supplies including office printer and fax machine (if applicable)",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_117",
+     "track": "master",
+     "group": "6",
+     "order": 117,
+     "title": "Order Grand Opening Kit",
+     "owner": "newks",
+     "dept": "Marketing",
+     "tags": [
+      "Marketing"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "Matilyn Skinner",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's ToolKit",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_118",
+     "track": "master",
+     "group": "6",
+     "order": 118,
+     "title": "Follow-up on Beer & Wine Permit if not received",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "3 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_119",
+     "track": "master",
+     "group": "6",
+     "order": 119,
+     "title": "Minimum of 4 Managers Certified",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "Jessica Drahem",
+     "contact_info": "pdc@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_120",
+     "track": "master",
+     "group": "6",
+     "order": 120,
+     "title": "Security System Install",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_121",
+     "track": "master",
+     "group": "6",
+     "order": 121,
+     "title": "Finalize and Submit 14 day Food order for Pre-Opening Training",
+     "owner": "newks",
+     "dept": "Purchasing/Training",
+     "tags": [
+      "Purchasing",
+      "Training"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "Jessica Drahem",
+     "contact_info": "pdc@newks.com",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_122",
+     "track": "master",
+     "group": "6",
+     "order": 122,
+     "title": "Receive, clean and organize all Smallwares",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_123",
+     "track": "master",
+     "group": "6",
+     "order": 123,
+     "title": "Service Techs (vendor support) on site  Fire up Equipment",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_124",
+     "track": "master",
+     "group": "6",
+     "order": 124,
+     "title": "Post Training Week Schedule, Distribute Uniforms to Staff prior to Training Start",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_125",
+     "track": "master",
+     "group": "6",
+     "order": 125,
+     "title": "15 Day Out Call - Marketing Update",
+     "owner": "newks",
+     "dept": "Marketing /Sales",
+     "tags": [
+      "Marketing",
+      "Sales"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "Marketing Department /",
+     "contact_info": "marketing@newks.com",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_126",
+     "track": "master",
+     "group": "6",
+     "order": 126,
+     "title": "EZ Cater - Add a new location",
+     "owner": "franchisee",
+     "dept": "Franchisee/Opening Ownership Group",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "EZcater",
+     "contact_info": "pdc@newks.com",
+     "company": "https://ezmanage.ezcater.com",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_127",
+     "track": "master",
+     "group": "6",
+     "order": 127,
+     "title": "Confirm Cintas mats",
+     "owner": "newks",
+     "dept": "Purchasing@newks.com",
+     "tags": [
+      "Purchasing"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "purchasing@newks.com",
+     "contact_info": "Purchasing",
+     "company": "Cintas",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_128",
+     "track": "master",
+     "group": "6",
+     "order": 128,
+     "title": "Confirm staffing levels match hiring par list",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "pdc@newks.com",
+     "contact_info": "Training",
+     "company": "Newk's Support Center",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_129",
+     "track": "master",
+     "group": "6",
+     "order": 129,
+     "title": "Obtain From GC the Following:Sub list with Phone Numbers, All Equipment Manuals and Warranty Cards, GC Must Present NFC with a Complete O&M Manual, A thorough walk-thru for Restaurant Personel can understand the mechanical, electrical and Plumbing Systems and Controls, GC Business Card with Phone Number posted in Office in Plain View",
+     "owner": "franchisee",
+     "dept": "Franchisee/Development",
+     "tags": [
+      "Franchisee",
+      "Development"
+     ],
+     "lead": "2 wks out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_130",
+     "track": "master",
+     "group": "7",
+     "order": 130,
+     "title": "Forward Copy of CO to NFC,  Must be received by 5pm Tuesday Prior to Start of Training",
+     "owner": "newks",
+     "dept": "Development",
+     "tags": [
+      "Development"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_131",
+     "track": "master",
+     "group": "7",
+     "order": 131,
+     "title": "Turn Over To Operations",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_132",
+     "track": "master",
+     "group": "7",
+     "order": 132,
+     "title": "Equipment check: All Equipment Checked While Vendor/Supplier Was Present. Thoroughly Run to Insure Quality. Double Check and Confirm All Settings",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_133",
+     "track": "master",
+     "group": "7",
+     "order": 133,
+     "title": "All Refrigeration at Acceptable Levels.  Use Hanging Thermometers in the Walk-ins and Reach-ins",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_134",
+     "track": "master",
+     "group": "7",
+     "order": 134,
+     "title": "New Hire Orientation",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_135",
+     "track": "master",
+     "group": "7",
+     "order": 135,
+     "title": "Verify That All Prices on the Menu Boards, Printed Menus,Catering Menus and POS as well as the Tax Rates are Accurate and consistant",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_136",
+     "track": "master",
+     "group": "7",
+     "order": 136,
+     "title": "All Shelving Properly Labeled",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_137",
+     "track": "master",
+     "group": "7",
+     "order": 137,
+     "title": "Training week food order placed (Final order)",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_138",
+     "track": "master",
+     "group": "7",
+     "order": 138,
+     "title": "Confirm  All Insurance Start up  (1 week out of Open)",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_139",
+     "track": "master",
+     "group": "7",
+     "order": 139,
+     "title": "Confirm all POP received and placed prior to training",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_140",
+     "track": "master",
+     "group": "7",
+     "order": 140,
+     "title": "All Training Aids Posted",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_141",
+     "track": "master",
+     "group": "7",
+     "order": 141,
+     "title": "Training Begins",
+     "owner": "newks",
+     "dept": "Training (PD&C)",
+     "tags": [
+      "Training"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_142",
+     "track": "master",
+     "group": "7",
+     "order": 142,
+     "title": "Post All State and Local Tax Numbers and Certificates, Business Permits etc.. As Required by Authorities . Frames to be Black and Chrome Only!",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "1 wk out",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_143",
+     "track": "master",
+     "group": "7",
+     "order": 143,
+     "title": "Post Opening Weeks Hourly and Mgt Schedule a minimum of 4 days prior to Opening Day",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "Opening",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mstr_144",
+     "track": "master",
+     "group": "7",
+     "order": 144,
+     "title": "Obtain Opening Day Cash and Change Order for the Registers and Safe,  $200 per Cash Drawer and $800 for the Safe are recommended.  Must Be on Hand the Prior Business Day.",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "tags": [
+      "Franchisee"
+     ],
+     "lead": "Opening",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "company": "",
+     "kb": "",
+     "form_url": ""
+    }
+   ]
+  },
+  "it_full": {
+   "label": "IT NRO Kit (Full)",
+   "audience": "internal",
+   "blurb": "The complete week-by-week IT onboarding checklist.",
+   "groups": [
+    {
+     "id": "22 WEEKS PRIOR TO OPENING",
+     "label": "22 Weeks Prior To Opening",
+     "order": 0
+    },
+    {
+     "id": "14 WEEKS PRIOR TO OPENING",
+     "label": "14 Weeks Prior To Opening",
+     "order": 1
+    },
+    {
+     "id": "13 WEEKS PRIOR TO OPENING",
+     "label": "13 Weeks Prior To Opening",
+     "order": 2
+    },
+    {
+     "id": "12 WEEKS PRIOR TO OPENING",
+     "label": "12 Weeks Prior To Opening",
+     "order": 3
+    },
+    {
+     "id": "9 WEEKS PRIOR TO OPENING",
+     "label": "9 Weeks Prior To Opening",
+     "order": 4
+    },
+    {
+     "id": "5 WEEKS PRIOR TO OPENING",
+     "label": "5 Weeks Prior To Opening",
+     "order": 5
+    },
+    {
+     "id": "4 WEEKS PRIOR TO OPENING",
+     "label": "4 Weeks Prior To Opening",
+     "order": 6
+    },
+    {
+     "id": "3 WEEKS PRIOR TO OPENING",
+     "label": "3 Weeks Prior To Opening",
+     "order": 7
+    },
+    {
+     "id": "2 WEEKS PRIOR TO OPENING",
+     "label": "2 Weeks Prior To Opening",
+     "order": 8
+    },
+    {
+     "id": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "label": "1 Week Prior To Opening – Pre-Training",
+     "order": 9
+    },
+    {
+     "id": "TRAINING WEEK TASKS",
+     "label": "Training Week Tasks",
+     "order": 10
+    },
+    {
+     "id": "OPENING WEEK",
+     "label": "Opening Week",
+     "order": 11
+    },
+    {
+     "id": "3 WEEKS AFTER OPENING",
+     "label": "3 Weeks After Opening",
+     "order": 12
+    }
+   ],
+   "tasks": [
+    {
+     "key": "itf_000",
+     "track": "it_full",
+     "group": "22 WEEKS PRIOR TO OPENING",
+     "order": 0,
+     "title": "Contact Toast POS Provider at minimum 90 days prior to open to. Equipment/Installer availability.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "22 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/support/solutions/articles/5000892720-nro-checklist-toast-point-of-sale-and-credit-card-processing",
+     "form_url": ""
+    },
+    {
+     "key": "itf_002",
+     "track": "it_full",
+     "group": "22 WEEKS PRIOR TO OPENING",
+     "order": 2,
+     "title": "Contact FSC IT — the FSC Managed Network provides and manages the network hardware for POS (included in the franchise agreement).",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "22 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/support/solutions/articles/5000892671-nro-checklist-network-provider-interface-security-systems",
+     "form_url": ""
+    },
+    {
+     "key": "itf_003",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 3,
+     "title": "Canned Email for Email Account Creation - Send to New Franchise Groups Only",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "Franchise",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000877023",
+     "form_url": "https://docs.google.com/document/d/1zTrVVQTdJ_qV4uakSNDQZqXS1IyakM2CNfU8YdnFcBQ/edit?usp=sharing"
+    },
+    {
+     "key": "itf_004",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 4,
+     "title": "Send out - Restaurant Systems Questionnaire",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://forms.gle/pkoiyTWCPd6xP39w6",
+     "kb": "https://newksit.freshdesk.com/support/solutions/articles/5000880525-nro-checklist-newk-s-website-information-form-for-new-restaurant-openings-nro-",
+     "form_url": ""
+    },
+    {
+     "key": "itf_005",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 5,
+     "title": "Send out - Franchise Restaurant Information Form",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "https://forms.gle/ATcqCPv37MEUQttC9",
+     "kb": "https://newksit.freshdesk.com/support/solutions/articles/5000880546-nro-checklist-msi-catering-platform-questionnaire-for-new-restaurant-openings-nro-",
+     "form_url": "https://forms.gle/eSxNHbgjsc9gy73H9"
+    },
+    {
+     "key": "itf_006",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 6,
+     "title": "Send URL - 7 Shifts Sign Up Form",
+     "owner": "newks",
+     "dept": "FBC / IT",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000880618",
+     "form_url": "https://forms.gle/qPMh5kYBjdaiXH376"
+    },
+    {
+     "key": "itf_007",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 7,
+     "title": "Send URL - OPUS Sign Up Form and/or process",
+     "owner": "newks",
+     "dept": "PD&C",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000879141",
+     "form_url": "https://forms.gle/sy3vtw23nc8WvKNE7"
+    },
+    {
+     "key": "itf_008",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 8,
+     "title": "Add Ownership Group Opus? Access if new Franchise Entity",
+     "owner": "newks",
+     "dept": "PD&C",
+     "applies": "Franchise",
+     "lead": "14 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000881318",
+     "form_url": ""
+    },
+    {
+     "key": "itf_009",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 9,
+     "title": "Send CrunchTime Agreement Papework",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "applies": "Franchise",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "billing@crunchtime.com, jkeelin@crunchtime.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000880676",
+     "form_url": "https://drive.google.com/file/d/1VuVNdhbpQctSuTSreIHYW_CsR0kkd7Na/view?usp=sharing"
+    },
+    {
+     "key": "itf_010",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 10,
+     "title": "Create site in OLO",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886481",
+     "form_url": ""
+    },
+    {
+     "key": "itf_011",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 11,
+     "title": "Send Olo - Franchise Onboarding in Dashboard Training",
+     "owner": "franchisee",
+     "dept": "Franchisee / Company",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "rachel.brown@olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886483",
+     "form_url": "https://oloskiptheline.formstack.com/forms/newks_activation"
+    },
+    {
+     "key": "itf_012",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 12,
+     "title": "Send Steps to Complete OloPay Sign Up - Olo Dashboard",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "rachel.brown@olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000875762",
+     "form_url": "https://newksit.freshdesk.com/a/solutions/articles/5000875762"
+    },
+    {
+     "key": "itf_013",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 13,
+     "title": "Send NRO IT Quick Check to Franchisee and/or Operator",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000883856",
+     "form_url": "https://docs.google.com/spreadsheets/d/1HizxGNlXMVAbvXna7lpbLsFJIe0CvXIz9_B7bRMzYHo/edit"
+    },
+    {
+     "key": "itf_014",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 14,
+     "title": "Create Restaurant Login Sheets for Above Store Operator / Owner and AD",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "14 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "itdepartment@newks.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000880548",
+     "form_url": "https://drive.google.com/drive/folders/1Ztt82ESeCHZdVvNsZHcK9i_auE9P9sUl"
+    },
+    {
+     "key": "itf_015",
+     "track": "it_full",
+     "group": "14 WEEKS PRIOR TO OPENING",
+     "order": 15,
+     "title": "Recommended Camera Provider - Envysion",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "Franchise",
+     "lead": "14 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://envysion.com/Newks/",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000880749",
+     "form_url": ""
+    },
+    {
+     "key": "itf_016",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 16,
+     "title": "Website - Send Franchise Website Information Form to Support Center",
+     "owner": "newks",
+     "dept": "Marketing / IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "fieldmarketing@newks.com, itdepartment@newks.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886699",
+     "form_url": "https://docs.google.com/spreadsheets/d/1BZ-nB092FHBWmwmzp3Lou7niHk-8zVtj2P6P48bkyys/edit"
+    },
+    {
+     "key": "itf_017",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 17,
+     "title": "Follow up on EzCater Completion - Form provided in the Restaurant Systems Questionnaire",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://www.ezcater.com/company/catering-growth-platform/#join",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000885824-nro-nso-new-location-sign-up",
+     "form_url": ""
+    },
+    {
+     "key": "itf_018",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 18,
+     "title": "Website - Add Restaurant eMail to Franchise or Company Restaurant List as soon as eMail address is available*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "Google Admin",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886670-task-add-franchise-company-restaurant-to-proper-mailing-list",
+     "form_url": ""
+    },
+    {
+     "key": "itf_019",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 19,
+     "title": "Website (Corp) - Create eMail Address & add GM, Area Director and Store to Company Restaurants, Plate IQ, & Company GM*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "Company",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886671-task-company-restaurant-additional-mailing-lists",
+     "form_url": ""
+    },
+    {
+     "key": "itf_020",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 20,
+     "title": "Set up Location CrunchTime Site*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://newks-em.net-chef.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000703843",
+     "form_url": ""
+    },
+    {
+     "key": "itf_021",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 21,
+     "title": "Check the SQL for accuracy of all fields under Store section for location once Website form is received",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "IT Contacts Portal",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886729",
+     "form_url": ""
+    },
+    {
+     "key": "itf_022",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 22,
+     "title": "Set Up Location in Toast",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896222-nro-checklist-set-up-location-in-toast",
+     "form_url": ""
+    },
+    {
+     "key": "itf_023",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 23,
+     "title": "Toast - Provide Access to Toast Now [App]",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896223-nro-checklist-toastnow-mobile-application-",
+     "form_url": ""
+    },
+    {
+     "key": "itf_024",
+     "track": "it_full",
+     "group": "13 WEEKS PRIOR TO OPENING",
+     "order": 24,
+     "title": "Complete Ovation NRO Sheet",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "13 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "Newk's NSO Sheet",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896225-nro-checklist-ovation-nro-sign-up-sheet",
+     "form_url": ""
+    },
+    {
+     "key": "itf_025",
+     "track": "it_full",
+     "group": "12 WEEKS PRIOR TO OPENING",
+     "order": 25,
+     "title": "Send out Restaurant Login Sheet* - Version 1",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "12 wks",
+     "desc": "newks.info/LoginSheets",
+     "contact": "",
+     "contact_info": "N/a",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886704",
+     "form_url": ""
+    },
+    {
+     "key": "itf_026",
+     "track": "it_full",
+     "group": "12 WEEKS PRIOR TO OPENING",
+     "order": 26,
+     "title": "- Create Monkey User with Manager Role - Leadtracker",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "12 wks",
+     "desc": "newks.info/LoginSheets",
+     "contact": "",
+     "contact_info": "N/a",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_027",
+     "track": "it_full",
+     "group": "12 WEEKS PRIOR TO OPENING",
+     "order": 27,
+     "title": "Submit Request via ProtonMail for Payment Gateway configuration (MSI).",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "applies": "All",
+     "lead": "12 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "http://support.monkeymediasoftware.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000876171",
+     "form_url": "https://newksit.freshdesk.com/a/solutions/articles/5000861116"
+    },
+    {
+     "key": "itf_028",
+     "track": "it_full",
+     "group": "12 WEEKS PRIOR TO OPENING",
+     "order": 28,
+     "title": "Music Provider - DirecTV",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "12 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881276-nro-checklist-directv-music-choice-for-new-restaurant-openings-nro-",
+     "form_url": ""
+    },
+    {
+     "key": "itf_029",
+     "track": "it_full",
+     "group": "9 WEEKS PRIOR TO OPENING",
+     "order": 29,
+     "title": "Aloha - Check System -> Site Setup - Make Sure site is present w/ all applicable information so the Software Install Requests can be submitted*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "9 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "blake@aloharadiant.com, michael@aloharadiant.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886685",
+     "form_url": ""
+    },
+    {
+     "key": "itf_030",
+     "track": "it_full",
+     "group": "9 WEEKS PRIOR TO OPENING",
+     "order": 30,
+     "title": "Toast + OLO - Provide GUID to Olo to Add to Configuration",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "9 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "emailto: help@olo.com",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000893256-task-submit-restaurant-guid-to-olo-for-configuration",
+     "form_url": ""
+    },
+    {
+     "key": "itf_031",
+     "track": "it_full",
+     "group": "9 WEEKS PRIOR TO OPENING",
+     "order": 31,
+     "title": "Toast - Setup Restaurant Specific Security Class when site setup is completed*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "9 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://www.toasttab.com/",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000773167",
+     "form_url": ""
+    },
+    {
+     "key": "itf_032",
+     "track": "it_full",
+     "group": "9 WEEKS PRIOR TO OPENING",
+     "order": 32,
+     "title": "Toast - If this is setup for a new Franchisee create a store group - designated as a Market for that Franchisee*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "Franchise",
+     "lead": "9 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://www.toasttab.com/",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000773167",
+     "form_url": ""
+    },
+    {
+     "key": "itf_033",
+     "track": "it_full",
+     "group": "5 WEEKS PRIOR TO OPENING",
+     "order": 33,
+     "title": "Toast POS Pricing Set up* - Confirm Tier for Dine-In and Catering",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "5 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "mnewcomb@newks.com",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_034",
+     "track": "it_full",
+     "group": "5 WEEKS PRIOR TO OPENING",
+     "order": 34,
+     "title": "Submit ticket to create Ovation Account",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "5 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "michael.sexton@ovationup.com, support@ovationup.com",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000892485-nro-checklist-ovation-new-location-setup",
+     "form_url": ""
+    },
+    {
+     "key": "itf_035",
+     "track": "it_full",
+     "group": "4 WEEKS PRIOR TO OPENING",
+     "order": 35,
+     "title": "Confirm the information is correct in SQL under Store section.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "4 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "IT Contacts Portal",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886729",
+     "form_url": ""
+    },
+    {
+     "key": "itf_036",
+     "track": "it_full",
+     "group": "4 WEEKS PRIOR TO OPENING",
+     "order": 36,
+     "title": "Determine if location wil opt-out of LTO Cycle - If yes, ensure No LTO hierarchies are created to accommodate.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "4 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "itdepartment@newks.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886621",
+     "form_url": ""
+    },
+    {
+     "key": "itf_037",
+     "track": "it_full",
+     "group": "4 WEEKS PRIOR TO OPENING",
+     "order": 37,
+     "title": "Website (Corp) - Verify contact information w/ Adam Karveller and Matt Wilson or Point of Contact*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "Company",
+     "lead": "4 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://www.newks.com",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_038",
+     "track": "it_full",
+     "group": "4 WEEKS PRIOR TO OPENING",
+     "order": 38,
+     "title": "Verify Low Voltage is installed [HonorBuilt or Local GC]",
+     "owner": "franchisee",
+     "dept": "Franchisee",
+     "applies": "All",
+     "lead": "4 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000880593",
+     "form_url": ""
+    },
+    {
+     "key": "itf_039",
+     "track": "it_full",
+     "group": "4 WEEKS PRIOR TO OPENING",
+     "order": 39,
+     "title": "Verify produce company via google.drive sheet - follow up with purchasing for information*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "4 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://newks-em.net-chef.com",
+     "kb": "https://docs.google.com/spreadsheets/d/17k1vHvu3SBERaONcZTj8AfP7S4zSJru3Samw6YvJXsA/edit",
+     "form_url": ""
+    },
+    {
+     "key": "itf_040",
+     "track": "it_full",
+     "group": "4 WEEKS PRIOR TO OPENING",
+     "order": 40,
+     "title": "(Corp) - Send GM their Login Form (Need DTiQ, Envysion, info, Crunchtime, email, Laptop & Mgr logins/pws*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "Company",
+     "lead": "4 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000880548",
+     "form_url": ""
+    },
+    {
+     "key": "itf_041",
+     "track": "it_full",
+     "group": "3 WEEKS PRIOR TO OPENING",
+     "order": 41,
+     "title": "Check Restaurant Systems Questionnaire for Third Party Partners",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "3 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_042",
+     "track": "it_full",
+     "group": "3 WEEKS PRIOR TO OPENING",
+     "order": 42,
+     "title": "Confirm with Restaurant and Point of Contact for opening - MSI/ezCater Integration is in process",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "3 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/A",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886663-email-template-msi-monkey-media-ezcater-integration",
+     "form_url": ""
+    },
+    {
+     "key": "itf_043",
+     "track": "it_full",
+     "group": "2 WEEKS PRIOR TO OPENING",
+     "order": 43,
+     "title": "Log into CrunchTime Site and Clean up Vendor list.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "2 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://newks-em.net-chef.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886632",
+     "form_url": ""
+    },
+    {
+     "key": "itf_044",
+     "track": "it_full",
+     "group": "2 WEEKS PRIOR TO OPENING",
+     "order": 44,
+     "title": "Send Along OLO Expo Sign up Process (Ideal for Curbside Usage)",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "2 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "itdepartment@newks.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000862582",
+     "form_url": ""
+    },
+    {
+     "key": "itf_045",
+     "track": "it_full",
+     "group": "2 WEEKS PRIOR TO OPENING",
+     "order": 45,
+     "title": "For Company Restaurants, send OLO Vendor ID to (Accounting, Marketing, Matt Wislon)",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "2 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_046",
+     "track": "it_full",
+     "group": "2 WEEKS PRIOR TO OPENING",
+     "order": 46,
+     "title": "Submit request to create site to marketing contact and submit email to Punchh to be provisioned",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "2 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://support.punchh.com/hc/en-us/requests/new",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000883904",
+     "form_url": ""
+    },
+    {
+     "key": "itf_047",
+     "track": "it_full",
+     "group": "2 WEEKS PRIOR TO OPENING",
+     "order": 47,
+     "title": "If site is not in my.olo.com. Submit a ticket with Help@olo.com to find out status.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "help@olo.com, rachel.brown@olo.com",
+     "kb": "https://newksit.freshdesk.com/support/solutions/articles/5000886481-nso-how-to-setup-a-store-in-olo-new-store-opening-form-",
+     "form_url": ""
+    },
+    {
+     "key": "itf_048",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 48,
+     "title": "Connect Toast Integration to Toast POS [Toast POS must be installed before connecting]",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_049",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 49,
+     "title": "Add All Toast Self Service Integrations (7Shifts, Shogo, RAD, OLO)",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/a",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896227-nro-checklist-adding-self-service-integrations",
+     "form_url": ""
+    },
+    {
+     "key": "itf_050",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 50,
+     "title": "Check Integrations - MSI, Punchh, and Paytronix. These specific integrations must be added by Toast Support",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/a",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896227-nro-checklist-adding-self-service-integrations",
+     "form_url": ""
+    },
+    {
+     "key": "itf_051",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 51,
+     "title": "Configure OLO Menu*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "my.olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000756521",
+     "form_url": ""
+    },
+    {
+     "key": "itf_052",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 52,
+     "title": "Log into CrunchTime site and post up to start of training week.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "newks.net-chef.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886658",
+     "form_url": ""
+    },
+    {
+     "key": "itf_053",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 53,
+     "title": "Trigger Email for GM in 7 Shifts",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://app.7shifts.com/",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000880753",
+     "form_url": ""
+    },
+    {
+     "key": "itf_054",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 54,
+     "title": "DTiQ (Corp) - Setup DTiQ In store Camera Review user (For Phone App, at the Server Review). Setup Web Portal username (email address naming convention) for new Company General Manager - put the in a team to allow them access to the store via the web portal*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "Company",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "DTiQ/Envysion",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000717567%20/%20https:/newksit.freshdesk.com/a/solutions/articles/5000886738",
+     "form_url": ""
+    },
+    {
+     "key": "itf_055",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 55,
+     "title": "Aloha POS - Push RPTSET to server -D:\\POS\\AlohaQS\\RPTSET*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886719",
+     "form_url": ""
+    },
+    {
+     "key": "itf_056",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 56,
+     "title": "Aloha - Schedule Key Statistics & Comps - AR | Daily & Weekly Report | Aloha Daily Sales Group to restaurant account*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://newks.alohaenterprise.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000708684",
+     "form_url": ""
+    },
+    {
+     "key": "itf_057",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 57,
+     "title": "Send out Restaurant Login Sheet & Website Form if Neccessary* - 2nd Version (even if the same)",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "N/a",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886704",
+     "form_url": ""
+    },
+    {
+     "key": "itf_058",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 58,
+     "title": "Submit ticket to Monkey Media with Toast Restaurant GUID - to provision site for Go Live.*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "https://ezpoints.ezcater.com/hc/en-us/restricted?return_to=https%3A%2F%2Fmonkeymediasoftware.zendesk.com%2Fhc%2Fen-us",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000862320",
+     "form_url": ""
+    },
+    {
+     "key": "itf_059",
+     "track": "it_full",
+     "group": "1 WEEK PRIOR TO OPENING – PRE-TRAINING",
+     "order": 59,
+     "title": "Submit email to support@crunchtime.com - Connex Configuration (Include date of Wednesday before opening date to include sales)*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "support@crunchtime.com",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000827958-new-activation-request-newk-s-eatery-connex",
+     "form_url": ""
+    },
+    {
+     "key": "itf_060",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 60,
+     "title": "Test Punchh on Terminals* - Test Punchh promotion code to ensure site is configured for redemption.*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000876936%20https:/newksit.freshdesk.com/a/solutions/articles/5000876937",
+     "form_url": ""
+    },
+    {
+     "key": "itf_061",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 61,
+     "title": "Setup OLO Accounts in User Management - if not created.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "my.olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000873509",
+     "form_url": ""
+    },
+    {
+     "key": "itf_062",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 62,
+     "title": "Verify Location Phone number via Website Form or Management - Be sure number is updated in proper places (CT / Toast / SQL / Website)*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "Multiple Areas",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886737/",
+     "form_url": ""
+    },
+    {
+     "key": "itf_063",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 63,
+     "title": "OLO - Verify test order shows up in POS Terminal via SureMDM",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "order.newks.com / my.olo.com",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896671-task-olo-toast-verify-test-order-shows-up-in-pos-terminal-via-suremdm",
+     "form_url": ""
+    },
+    {
+     "key": "itf_064",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 64,
+     "title": "OLO - Verify Order Modes are Present in Web and App - Pick up, Third Party Ordering, Dine-In and Curbside (Optional)",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "order.newks.com / my.olo.com",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886758-task-confirm-olo-order-modes-are-in-place",
+     "form_url": ""
+    },
+    {
+     "key": "itf_065",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 65,
+     "title": "Toast POS - Send e-mail to opener, GM and Ownership requesting verification of pricing, taxes, and setup.*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896605-task-toast-opening-day-checklist",
+     "form_url": ""
+    },
+    {
+     "key": "itf_066",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 66,
+     "title": "Toast - Make sure Store is Setup in Shogo for GL Integration or FTP Setup for non Shogo Store.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_067",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 67,
+     "title": "Check with Don on Company Store Toast Payroll",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "None wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_068",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 68,
+     "title": "Add order.newks.com link for OLO to contacts database*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "IT Contacts Portal",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886735",
+     "form_url": ""
+    },
+    {
+     "key": "itf_069",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 69,
+     "title": "Toast - Verify Sales Numbers are or are not showing for Training Week",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "Toast Now Mobile App",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_070",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 70,
+     "title": "Disable OLO And POS LTOs, & animations until the next LTO Cycle*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "my.olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886669",
+     "form_url": ""
+    },
+    {
+     "key": "itf_071",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 71,
+     "title": "Check Toast Customer Displays for Right Imagey and Capability for guest to self check into Loyalty",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896606-task-toast-guest-display-configuration",
+     "form_url": ""
+    },
+    {
+     "key": "itf_072",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 72,
+     "title": "Send out Vendor Contact sheet and Olo Help Guide. FSC Managed Network. Send to GM and Restaurant. (Jon W's 1 Page Version)",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "Form →",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000883859",
+     "form_url": "https://drive.google.com/file/d/10IWEWAO3c4gEvx2L11mHJEz6IhXUCWV7/view?usp=sharing"
+    },
+    {
+     "key": "itf_073",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 73,
+     "title": "Confirm RAILS Menu Access has been granted to the store by the OLO Help team or our self management tool*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "my.olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000885858",
+     "form_url": ""
+    },
+    {
+     "key": "itf_074",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 74,
+     "title": "Send Marketing links for Olo (unique to location) and Monkey Media (https://catering.newks.com/)*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "fieldmarketing@newks.com",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_075",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 75,
+     "title": "Ask FBCs if this location will go live w/ both Rails and Dispatch*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "Locations FBC",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_076",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 76,
+     "title": "Add https://catering.newks.com link for MonkeyMedia to contacts database*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "IT Contacts Portal",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886757-task-",
+     "form_url": ""
+    },
+    {
+     "key": "itf_077",
+     "track": "it_full",
+     "group": "TRAINING WEEK TASKS",
+     "order": 77,
+     "title": "Check to see if location is able to be searched on order.newks.com and the Mobile App.*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "1 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886672-task-online-ordering-search-for-new-location-web-mobile-app-",
+     "form_url": ""
+    },
+    {
+     "key": "itf_078",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 78,
+     "title": "Toast - Stay in Training Mode - Until opening out side of tests. Do not process more than $50 in CC's in live mode or it stays live. Long term come up with a plan for logging into labs for training.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_079",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 79,
+     "title": "Don Wilson - Solve for Store Groups, and then determine Royalty Report Source.",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_080",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 80,
+     "title": "MonkeyMedia - Enable site for Online Ordering in Monkey*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "newks.info/cateringadmin",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886668-location-maintenance-online-order-radio-button-",
+     "form_url": ""
+    },
+    {
+     "key": "itf_081",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 81,
+     "title": "Update Grand Opening Date SQL Store Maintenance Forms*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_082",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 82,
+     "title": "Toast - Add Location to Appropriate Store Groups",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000896674-task-toast-add-location-to-appropriate-store-groups",
+     "form_url": ""
+    },
+    {
+     "key": "itf_083",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 83,
+     "title": "Toast - Any applicable accounting security classes for that group*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_084",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 84,
+     "title": "OLO - Enable in OLO*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "my.olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000886664",
+     "form_url": ""
+    },
+    {
+     "key": "itf_085",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 85,
+     "title": "Determine PCI / FSC Managed Network update IT List* Update in internal contacts portal",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "https://newksit.freshdesk.com/en/support/solutions/articles/5000886760-task-pci-compliance-partner-update-contacts",
+     "form_url": ""
+    },
+    {
+     "key": "itf_086",
+     "track": "it_full",
+     "group": "OPENING WEEK",
+     "order": 86,
+     "title": "Aloha - ** Franchisee All Stores & Franchise_Level_XXXX Security Classes - Opening Day*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "0 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "newks.alohaenterprise.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000720531",
+     "form_url": ""
+    },
+    {
+     "key": "itf_087",
+     "track": "it_full",
+     "group": "3 WEEKS AFTER OPENING",
+     "order": 87,
+     "title": "Toast POS - Add LTO's schedule for the next LTO cycle*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "-3 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "itf_088",
+     "track": "it_full",
+     "group": "3 WEEKS AFTER OPENING",
+     "order": 88,
+     "title": "Remove Guest Facing Message - Now Open! from site*",
+     "owner": "newks",
+     "dept": "IT",
+     "applies": "All",
+     "lead": "-3 wks",
+     "desc": "",
+     "contact": "",
+     "contact_info": "my.olo.com",
+     "kb": "https://newksit.freshdesk.com/a/solutions/articles/5000738062",
+     "form_url": ""
+    }
+   ]
+  },
+  "marketing": {
+   "label": "Marketing Opening Toolkit",
+   "audience": "franchisee",
+   "blurb": "The marketing playbook — 126 days out through training week.",
+   "infoFields": [
+    "Restaurant # / Name & Address",
+    "Projected Open Date",
+    "Hiring Date",
+    "Training Week"
+   ],
+   "accounts": [
+    {
+     "name": "Newk's Toolkit",
+     "desc": "Marketing collateral, POP kits & digital brand assets for the opening.",
+     "url": "https://newkstoolkit.com/"
+    },
+    {
+     "name": "CardFoundry",
+     "desc": "Gift card ordering & stock for the new location.",
+     "url": ""
+    },
+    {
+     "name": "Threds / NewksGear",
+     "desc": "Uniforms, training shirts & branded apparel.",
+     "url": "https://newksgear.com"
+    },
+    {
+     "name": "Yext",
+     "desc": "Local listings — Facebook, Google, Apple Maps, GrubHub, Yelp, TripAdvisor.",
+     "url": "https://yext.com"
+    },
+    {
+     "name": "EventBrite",
+     "desc": "Training-day event registration page.",
+     "url": "https://eventbrite.com"
+    },
+    {
+     "name": "NSO Kit #1",
+     "desc": "First point-of-purchase / interior kit — ordered ~90 days out.",
+     "url": ""
+    },
+    {
+     "name": "NSO Kit #2",
+     "desc": "Second POP kit — ordered ~30 days out.",
+     "url": ""
+    }
+   ],
+   "groups": [
+    {
+     "id": "1",
+     "label": "Kickoff & Marketing Accounts",
+     "range": "126–112 Days Out",
+     "blurb": "Initial NSO marketing meeting, set up Toolkit / CardFoundry / Threds logins, and confirm store details & opening date.",
+     "order": 1
+    },
+    {
+     "id": "2",
+     "label": "Coming Soon & 90-Day Plan",
+     "range": "98–90 Days Out",
+     "blurb": "Coming-soon visual noise, catering van wrap, Yext listing, the 90-Day call, and NSO Kit #1.",
+     "order": 2
+    },
+    {
+     "id": "3",
+     "label": "Pricing, Interior & Orders",
+     "range": "83–70 Days Out",
+     "blurb": "Confirm pricing tiers & interior specs, order essentials, gift cards, apparel, and request opening creative.",
+     "order": 3
+    },
+    {
+     "id": "4",
+     "label": "Strategy, PR & Influencers",
+     "range": "45–40 Days Out",
+     "blurb": "The 45-Day call, press/PR planning, and local influencer outreach for the grand opening.",
+     "order": 4
+    },
+    {
+     "id": "5",
+     "label": "Invites & Training-Day Events",
+     "range": "30 Days Out",
+     "blurb": "The 30-Day call, NSO Kit #2, EventBrite setup, and collecting the store's invite list.",
+     "order": 5
+    },
+    {
+     "id": "6",
+     "label": "Final Prep & Press Launch",
+     "range": "15 Days Out",
+     "blurb": "The 15-Day call, verify menu/POP, submit the press release, and send training-day invites.",
+     "order": 6
+    },
+    {
+     "id": "7",
+     "label": "Launch",
+     "range": "Training Week",
+     "blurb": "Coming-soon teaser social campaign and training week kickoff.",
+     "order": 7
+    }
+   ],
+   "tasks": [
+    {
+     "key": "mkt_000",
+     "track": "marketing",
+     "group": "1",
+     "order": 0,
+     "title": "Initial meeting to discuss NSO marketing plan",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "126 days out",
+     "is_call": false,
+     "desc": "Discuss different marketing accounts (Toolkit, CardFoundry, Threds) Discuss projected opening date Marketing recommendations for uniform order Discuss timeline of pre-opening plan",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_001",
+     "track": "marketing",
+     "group": "1",
+     "order": 1,
+     "title": "Send store info for marketing logins",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "119 days out",
+     "is_call": false,
+     "desc": "Toolkit, CardFoundry, Threds",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_002",
+     "track": "marketing",
+     "group": "1",
+     "order": 2,
+     "title": "Confirm support center has correct store details",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "112 days out",
+     "is_call": false,
+     "desc": "Address, Phone Number, Email, Hours",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_003",
+     "track": "marketing",
+     "group": "1",
+     "order": 3,
+     "title": "Confirm Projected Grand Opening date",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "112 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_004",
+     "track": "marketing",
+     "group": "2",
+     "order": 4,
+     "title": "Ask store if they are needing any unique Coming Soon visual noise (banners, window clings, fence wraps, post sign)",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "98 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_005",
+     "track": "marketing",
+     "group": "2",
+     "order": 5,
+     "title": "Ask store if catering van artwork wrap is needed",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "98 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_006",
+     "track": "marketing",
+     "group": "2",
+     "order": 6,
+     "title": "Add location to Yext Platform/Website as a coming soon location",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "98 days out",
+     "is_call": false,
+     "desc": "Facebook, Google, Apple Maps, GrubHub, Yelp, TripAdvisor",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_007",
+     "track": "marketing",
+     "group": "2",
+     "order": 7,
+     "title": "90 Day Call to discuss next steps and Pre-Opening Marketing Campaign",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "90 days out",
+     "is_call": true,
+     "desc": "Determine opening day offers to promote leading up to the opening Discuss pricing tiers - dine in and catering Walk through items in POP Kit #1 Interior items Provide store with invite list spreadsheet",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_008",
+     "track": "marketing",
+     "group": "2",
+     "order": 8,
+     "title": "Direct store to order NSO Kit #1",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "90 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_009",
+     "track": "marketing",
+     "group": "3",
+     "order": 9,
+     "title": "Ask store what pricing tiers for Dine-In and Catering are determined",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "83 days out",
+     "is_call": false,
+     "desc": "Also what FMD tier, opting in for $9.99 deal?",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_010",
+     "track": "marketing",
+     "group": "3",
+     "order": 10,
+     "title": "Ask store for interior specs so marketing team can order interior items (fountain drink machine, GNG cooler, Brand wall, etc)",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "83 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_011",
+     "track": "marketing",
+     "group": "3",
+     "order": 11,
+     "title": "Direct store to order business essentials-business cards,pens,letterhead,etc.",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "70 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_012",
+     "track": "marketing",
+     "group": "3",
+     "order": 12,
+     "title": "Direct store to order gift cards through CardFoundry",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "70 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_013",
+     "track": "marketing",
+     "group": "3",
+     "order": 13,
+     "title": "Direct store to order apparel and training shirts through Threds",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "70 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_014",
+     "track": "marketing",
+     "group": "3",
+     "order": 14,
+     "title": "Direct store to join the Chamber of Commerce",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "70 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_015",
+     "track": "marketing",
+     "group": "3",
+     "order": 15,
+     "title": "Direct store to inquire with local highway logo DOT boards to determine availability and cost",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "70 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_016",
+     "track": "marketing",
+     "group": "3",
+     "order": 16,
+     "title": "Marketing request creative for: Training Day Menu, Countdown Social Posts, Training Day Email, Training Day Flyer",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "70 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_017",
+     "track": "marketing",
+     "group": "4",
+     "order": 17,
+     "title": "45 Day Call",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "45 days out",
+     "is_call": true,
+     "desc": "Finalize Pre Opening Marketing Strategy + Opening Day Offers Discuss utilizing local influencers to further promote new location Check in with store regarding hiring - do they need any \"Now Hiring\" support? Discuss training day events - dates, times, how many people/tickets Touch on invite list",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_018",
+     "track": "marketing",
+     "group": "4",
+     "order": 18,
+     "title": "Organize PR/Press Release/Interviews to promote Grand Opening with Champion",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "40 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_019",
+     "track": "marketing",
+     "group": "4",
+     "order": 19,
+     "title": "Contact local influencers to help promote Grand Opening",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "40 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_020",
+     "track": "marketing",
+     "group": "5",
+     "order": 20,
+     "title": "30 Day Call",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "30 days out",
+     "is_call": true,
+     "desc": "Let store know we need finalized invite list in 1 week Discuss EventBrite Page for training days Walk through items in NSO Kit #2 Update team on influencer outreach",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_021",
+     "track": "marketing",
+     "group": "5",
+     "order": 21,
+     "title": "Direct store to order NSO Kit #2",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "30 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_022",
+     "track": "marketing",
+     "group": "5",
+     "order": 22,
+     "title": "Set up EventBrite page for Training Days",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "30 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_023",
+     "track": "marketing",
+     "group": "5",
+     "order": 23,
+     "title": "Ask store for final spreadsheet of contact list - this is for invite list for Training Days",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "30 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_024",
+     "track": "marketing",
+     "group": "6",
+     "order": 24,
+     "title": "15 Day Out Call",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "15 days out",
+     "is_call": true,
+     "desc": "Ensure store has received all items in NSO Kit #1 and Kit #2 Discuss Training Days/Eventbrite page Walk through social media pre opening campaign with store",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_025",
+     "track": "marketing",
+     "group": "6",
+     "order": 25,
+     "title": "Verify with store that All Prices on the Menu Boards, Printed Menus,Catering Menus and POS as well as the Tax Rates are Accurate and consistant",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "15 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_026",
+     "track": "marketing",
+     "group": "6",
+     "order": 26,
+     "title": "Confirm with store that all POP received and placed prior to training",
+     "owner": "franchisee",
+     "dept": "Marketing",
+     "lead": "15 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_027",
+     "track": "marketing",
+     "group": "6",
+     "order": 27,
+     "title": "Submit Press Release to local and regional news sources",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "15 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_028",
+     "track": "marketing",
+     "group": "6",
+     "order": 28,
+     "title": "Distribute Training Day Invite Email to spreadsheet provided by store",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "15 days out",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_029",
+     "track": "marketing",
+     "group": "7",
+     "order": 29,
+     "title": "Launch \"Coming Soon\" teaser social post, advertise grand opening giveaways if applicable",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "Training wk",
+     "is_call": false,
+     "desc": "Social countdown",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    },
+    {
+     "key": "mkt_030",
+     "track": "marketing",
+     "group": "7",
+     "order": 30,
+     "title": "Training Begins",
+     "owner": "newks",
+     "dept": "Marketing",
+     "lead": "Training wk",
+     "is_call": false,
+     "desc": "",
+     "contact": "",
+     "contact_info": "",
+     "kb": "",
+     "form_url": ""
+    }
+   ]
+  }
+ },
+ "reference": {
+  "contacts": {
+   "1 · Openings & Sales": {
+    "headers": [
+     "Vendor",
+     "Contact Name",
+     "Role",
+     "Email",
+     "Phone",
+     "Category",
+     "Required vs Optional"
+    ],
+    "rows": [
+     {
+      "cat": "Back Office",
+      "Vendor": "CrunchTime",
+      "Contact Name": "Contract Team / Accounting",
+      "Role": "Accounting",
+      "Email": "billing@crunchtime.com",
+      "Category": "Back Office",
+      "Required vs Optional": "Leaving System"
+     },
+     {
+      "cat": "Cameras",
+      "Vendor": "DTiQ",
+      "Contact Name": "Kevin Babu",
+      "Role": "Sales / NRO",
+      "Email": "kbabu@dtiq.com",
+      "Category": "Cameras",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Cameras",
+      "Vendor": "Envysion",
+      "Contact Name": "Justin Hammond",
+      "Role": "Sales Executive",
+      "Email": "jhammond@envysion.com",
+      "Phone": "(970) 420-5766",
+      "Category": "Cameras",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Digital Ordering",
+      "Vendor": "OLO",
+      "Contact Name": "See NRO Sign Up Forms tab",
+      "Category": "Digital Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Gift Card Stock",
+      "Vendor": "CardFoundry – Newk's Gift Cards",
+      "Contact Name": "Lena Thomas",
+      "Role": "Newk's Account Manager",
+      "Email": "lena.thomas@mycardmarket.com",
+      "Category": "Gift Card Stock",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Labor Management",
+      "Vendor": "7Shifts",
+      "Contact Name": "Kyle Chatterley",
+      "Role": "Newk's Account Manager",
+      "Email": "kyle.chatterley@7shifts.com",
+      "Category": "Labor Management",
+      "Required vs Optional": "Leaving System"
+     },
+     {
+      "cat": "Labor Management",
+      "Vendor": "Opus",
+      "Contact Name": "Newk's Training Team",
+      "Role": "Newk's Training Department",
+      "Email": "pdc@newks.com",
+      "Category": "Labor Management",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Low Voltage Cabling",
+      "Vendor": "Staley Technologies",
+      "Contact Name": "Tyler Pickett",
+      "Role": "Project Manager",
+      "Email": "tpickett@staleyinc.com",
+      "Phone": "501-801-8383",
+      "Category": "Low Voltage Cabling",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "DoorDash",
+      "Contact Name": "Andrew Erace",
+      "Role": "Newk's Account Manager",
+      "Email": "andrew.erace@doordash.com",
+      "Phone": "Email Only",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "ezCater",
+      "Contact Name": "Matt Coccoluto",
+      "Role": "Newk's Account Manager",
+      "Email": "matt.coccoluto@ezcater.com",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "ezCater",
+      "Contact Name": "Andrea Brown",
+      "Role": "Newk's Account Manager",
+      "Email": "andrea.brown@ezcater.com",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "Favor Delivery",
+      "Contact Name": "Morgan McCall",
+      "Role": "Newk's Account Manager",
+      "Email": "morgan.mccall@favordelivery.com",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Texas Only"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "GrubHub",
+      "Contact Name": "Morgan Golden",
+      "Role": "Newk's Account Manager",
+      "Email": "mgolden@grubhub.com",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "UberEats / Postmates",
+      "Contact Name": "Ashley Woodson",
+      "Role": "Newk's Account Manager",
+      "Email": "awoodson@uber.com",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Music",
+      "Vendor": "DirecTV",
+      "Contact Name": "Jacob Cordova",
+      "Role": "Newk's Account Manager",
+      "Email": "jacob.cordova@directv.com",
+      "Phone": "303.999.7437",
+      "Category": "Music / Visuals",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Network Security",
+      "Vendor": "FSC IT — FSC Managed Network",
+      "Contact Name": "FSC IT Department",
+      "Role": "Managed Network (network, Wi-Fi, cellular backup)",
+      "Email": "itdepartment@newks.com",
+      "Category": "Network Security",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "POS/Ordering",
+      "Vendor": "AbsolutePOS",
+      "Contact Name": "Ashley Reeves",
+      "Role": "Project Manager",
+      "Email": "ashley.reeves@theabsolutepos.com",
+      "Category": "POS",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "POS/Ordering",
+      "Vendor": "Toast",
+      "Contact Name": "Timothy Carlo",
+      "Role": "Enterprise Sales Coordinator",
+      "Email": "timothy.carlo@toasttab.com",
+      "Category": "POS",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Payments / CC",
+      "Vendor": "American Express",
+      "Contact Name": "Franchise Support",
+      "Role": "Franchise Support Hotline",
+      "Email": "Phone Only",
+      "Phone": "1-800-528-5200",
+      "Category": "Payments / CC",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Payments / CC",
+      "Vendor": "FiServ",
+      "Contact Name": "John Suski",
+      "Role": "Newk's Account Manager",
+      "Email": "john.suski@fiserv.com",
+      "Phone": "872.365.6463",
+      "Category": "Payments / CC",
+      "Required vs Optional": "Required"
+     }
+    ]
+   },
+   "2 · NRO Signup Forms": {
+    "headers": [
+     "Vendor",
+     "Form Type",
+     "Open Form",
+     "Description",
+     "Category",
+     "Required vs Optional"
+    ],
+    "rows": [
+     {
+      "cat": null,
+      "Vendor": "OLO",
+      "Form Type": "New Store Sign Up Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "http://newks.info/NewksOLOSignup"
+      },
+      "Category": "Digital Ordering",
+      "Required vs Optional": "Required – Openings"
+     },
+     {
+      "cat": null,
+      "Vendor": "OLO",
+      "Form Type": "Store Ownership Transfer Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "http://newks.info/OLOTransferForm"
+      },
+      "Category": "Digital Ordering",
+      "Required vs Optional": "Required – Transfers"
+     },
+     {
+      "cat": null,
+      "Vendor": "OLO",
+      "Form Type": "OLO Pay Kiosk Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://olo-signup.formstack.com/forms/olopaycardpresent"
+      },
+      "Description": "Password: OloPay",
+      "Category": "Digital Ordering",
+      "Required vs Optional": "Required – Openings"
+     },
+     {
+      "cat": null,
+      "Vendor": "DoorDash",
+      "Form Type": "Newk's Onboarding Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://lemonade.workflowcloud.com/forms/9545858c-0dac-4807-be4a-95fa9a996880?rID=94ecf64647c76e3db8bc188e036a2fcf1d84640d7973c10dbb52949ada9b1bd3"
+      },
+      "Description": "See Instructions Guide for onboarding assistance",
+      "Category": "Digital Ordering",
+      "Required vs Optional": "Required – Openings"
+     },
+     {
+      "cat": "Network Security",
+      "Vendor": "FSC IT — FSC Managed Network",
+      "Contact Name": "FSC IT Department",
+      "Role": "Managed Network (network, Wi-Fi, cellular backup)",
+      "Email": "itdepartment@newks.com",
+      "Category": "Network Security",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": null,
+      "Vendor": "FSC Managed Network",
+      "Form Type": "Managed Network / Total PCI Order Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://drive.google.com/file/d/1s0VtdWOmiAoCDuqYSjWbhPQIuCBdtR_c/"
+      },
+      "Description": "Return completed forms to orders@mdtusa.com",
+      "Category": "Network Security",
+      "Required vs Optional": "Required – MD Sites Only"
+     },
+     {
+      "cat": null,
+      "Vendor": "Paytronix",
+      "Form Type": "Paytronix Sign Up Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://paytronix.formstack.com/forms/franchisee_ach_agreement"
+      },
+      "Category": "POS",
+      "Required vs Optional": "Required – Openings"
+     },
+     {
+      "cat": null,
+      "Vendor": "CrunchTime",
+      "Form Type": "Franchise Agreement",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000722242-crunchtime-franchisee-agreement-pdf-exhibit-f"
+      },
+      "Category": "Back Office",
+      "Required vs Optional": "Required – Openings"
+     },
+     {
+      "cat": null,
+      "Vendor": "Newk's Eatery",
+      "Form Type": "NRO – Restaurant Info Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://forms.gle/7byHyBpf1GLayYXb8"
+      },
+      "Description": "Provide info for new restaurants / franchisees to Support",
+      "Category": "Support Center",
+      "Required vs Optional": "Required – Openings"
+     },
+     {
+      "cat": null,
+      "Vendor": "Newk's Eatery",
+      "Form Type": "Restaurant Systems Questionnaire",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://forms.gle/hVKbcSwYZvU2b67cA"
+      },
+      "Description": "Local settings for multiple systems",
+      "Category": "Support Center",
+      "Required vs Optional": "Required – Openings"
+     },
+     {
+      "cat": null,
+      "Vendor": "Envysion",
+      "Form Type": "Envysion Interest / Onboarding Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://www.envysion.com/newks"
+      },
+      "Description": "Use if choosing Envysion as your CCTV provider",
+      "Category": "Cameras",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": null,
+      "Vendor": "CrunchTime",
+      "Form Type": "Franchise Agreement (Leaving System)",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000722242-crunchtime-franchisee-agreement-pdf-exhibit-f"
+      },
+      "Category": "Back Office",
+      "Required vs Optional": "Leaving the System"
+     },
+     {
+      "cat": null,
+      "Vendor": "7Shifts",
+      "Form Type": "Sign Up Form",
+      "Open Form": {
+       "text": "Open Form ↗",
+       "url": "https://forms.gle/qPMh5kYBjdaiXH376"
+      },
+      "Category": "Labor Management",
+      "Required vs Optional": "Leaving the System"
+     }
+    ]
+   },
+   "3 · Support & Helpdesk": {
+    "headers": [
+     "Vendor",
+     "Description",
+     "Email / Support Link",
+     "Phone",
+     "Category",
+     "Required vs Optional"
+    ],
+    "rows": [
+     {
+      "cat": "Back Office",
+      "Vendor": "CrunchTime",
+      "Description": "Support",
+      "Email / Support Link": "CrunchTime@newks.com",
+      "Phone": "601-203-2398",
+      "Category": "Back Office",
+      "Required vs Optional": "Leaving the System"
+     },
+     {
+      "cat": "Cameras",
+      "Vendor": "DTiQ",
+      "Description": "Support / Helpdesk",
+      "Email / Support Link": "support@dtiq.com",
+      "Phone": "323-576-1459",
+      "Category": "Cameras",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Cameras",
+      "Vendor": "Envysion",
+      "Description": "Support / Helpdesk",
+      "Email / Support Link": {
+       "text": "Open Portal ↗",
+       "url": "https://envysion.com/contact-us/"
+      },
+      "Phone": "1-877-258-9441",
+      "Category": "Cameras",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Gift Cards",
+      "Vendor": "Card Foundry",
+      "Description": "Support for CardFoundry Website",
+      "Email / Support Link": "support@cardfoundry.com",
+      "Category": "Gift Cards",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Gift Cards",
+      "Vendor": "Paytronix Support",
+      "Description": "Support / Helpdesk",
+      "Email / Support Link": {
+       "text": "Open Portal ↗",
+       "url": "https://pxsweb.com/merchant"
+      },
+      "Category": "Gift Cards",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Guest Feedback",
+      "Vendor": "Ovation",
+      "Description": "Support",
+      "Email / Support Link": "support@ovationup.com",
+      "Category": "Guest Feedback",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Labor Management",
+      "Vendor": "7Shifts",
+      "Description": "Helpdesk",
+      "Email / Support Link": "support@7shifts.com",
+      "Phone": "1-888-979-5877",
+      "Category": "Labor Management",
+      "Required vs Optional": "Leaving the System"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "DeliverLogic",
+      "Description": "Restaurant Support",
+      "Email / Support Link": {
+       "text": "Open Portal ↗",
+       "url": "https://www.deliverlogic.com/restaurant-support/"
+      },
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "DoorDash",
+      "Description": "VIP Support Line",
+      "Email / Support Link": "mxpsupport@doordash.com",
+      "Phone": "855-231-4434",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "ezCater Marketplace",
+      "Description": "Support / Helpdesk",
+      "Email / Support Link": "support@ezcater.com",
+      "Phone": "1-800-488-1803",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "Foodsby",
+      "Description": "Support / Helpdesk",
+      "Email / Support Link": "success@foodsby.com",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "GrubHub",
+      "Description": "Support",
+      "Email / Support Link": {
+       "text": "Open Portal ↗",
+       "url": "https://restaurant.grubhub.com/login"
+      },
+      "Phone": "1-877-585-7878",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "UberEats",
+      "Description": "Support / Helpdesk",
+      "Email / Support Link": "restaurants@uber.com",
+      "Phone": "1-833-275-3287",
+      "Category": "Marketplace Ordering",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Network Security",
+      "Vendor": "FSC IT — FSC Managed Network",
+      "Contact Name": "FSC IT Department",
+      "Role": "Managed Network (network, Wi-Fi, cellular backup)",
+      "Email": "itdepartment@newks.com",
+      "Category": "Network Security",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Network Security",
+      "Vendor": "Millennium Digital Tech.",
+      "Description": "Helpdesk",
+      "Email / Support Link": "tickets@mdtusa.com",
+      "Phone": "1-877-263-8324",
+      "Category": "Network Security",
+      "Required vs Optional": "Optional"
+     },
+     {
+      "cat": "Payments / CC",
+      "Vendor": "FiServ",
+      "Description": "MSI Catering Payments Gateway",
+      "Email / Support Link": "john.suski@fiserv.com",
+      "Category": "Payments / CC",
+      "Required vs Optional": "Required"
+     },
+     {
+      "cat": "Training",
+      "Vendor": "Opus",
+      "Description": "Support / Helpdesk",
+      "Email / Support Link": "pdc@newks.com",
+      "Category": "Training",
+      "Required vs Optional": "Required"
+     }
+    ]
+   },
+   "4 · Escalation Contacts": {
+    "headers": [
+     "Vendor",
+     "Contact Name",
+     "Role",
+     "Email",
+     "Phone",
+     "Category"
+    ],
+    "rows": [
+     {
+      "cat": "Cameras",
+      "Vendor": "DTiQ",
+      "Contact Name": "Gianfranco Arteaga",
+      "Role": "Technical Support Rep.",
+      "Email": "garteaga@dtiq.com",
+      "Phone": "702-425-2468",
+      "Category": "Cameras"
+     },
+     {
+      "cat": "Cameras",
+      "Vendor": "DTiQ",
+      "Contact Name": "Mark Mullane",
+      "Role": "Customer Success Manager",
+      "Email": "mamullane@dtiq.com",
+      "Category": "Cameras"
+     },
+     {
+      "cat": "Cameras",
+      "Vendor": "Envysion",
+      "Contact Name": "Ariel Fernandez-Monteith",
+      "Role": "Customer Success Manager",
+      "Email": "ariel.fernandez-monteith@motorolasolutions.com",
+      "Phone": "(505) 413-1837",
+      "Category": "Cameras"
+     },
+     {
+      "cat": "Digital Ordering",
+      "Vendor": "OLO",
+      "Contact Name": "Rachel Brown",
+      "Role": "Customer Success Manager",
+      "Email": "rachel.brown@olo.com",
+      "Category": "Digital Ordering"
+     },
+     {
+      "cat": "Facilities",
+      "Vendor": "Clark National Accounts",
+      "Contact Name": "Dan Varner",
+      "Role": "Point of Contact",
+      "Email": "dvarner@clarknationalaccounts.com",
+      "Category": "Facilities"
+     },
+     {
+      "cat": "Gift Cards",
+      "Vendor": "CardFoundry (Card Market)",
+      "Contact Name": "Lena Thomas",
+      "Role": "Newk's Account Manager",
+      "Email": "lena.thomas@mycardmarket.com",
+      "Phone": "615-534-8307",
+      "Category": "Gift Cards"
+     },
+     {
+      "cat": "Guest Feedback",
+      "Vendor": "Ovation",
+      "Contact Name": "Amanda Spradlin",
+      "Role": "Customer Success Manager",
+      "Email": "amanda@ovationup.com",
+      "Category": "Guest Feedback"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "DoorDash",
+      "Contact Name": "Nick Hodges",
+      "Role": "DoorDash Marketplace",
+      "Email": "nick.hodges@doordash.com",
+      "Category": "Marketplace Ordering"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "ezCater",
+      "Contact Name": "Andrea Brown",
+      "Role": "Newk's Account Manager",
+      "Email": "andrea.brown@ezcater.com",
+      "Category": "Marketplace Ordering"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "ezCater",
+      "Contact Name": "Matt Coccoluto",
+      "Role": "Newk's Account Manager",
+      "Email": "matt.coccoluto@ezcater.com",
+      "Category": "Marketplace Ordering"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "GrubHub",
+      "Contact Name": "Morgan Golden",
+      "Role": "Client Success Manager",
+      "Email": "mgolden@grubhub.com",
+      "Category": "Marketplace Ordering"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "UberEats / Postmates",
+      "Contact Name": "Aruba Sami",
+      "Role": "Brand Rates / Online Rate Reliability",
+      "Email": "aruba@uber.com",
+      "Category": "Marketplace Ordering"
+     },
+     {
+      "cat": "Marketplace Ordering",
+      "Vendor": "UberEats / Postmates",
+      "Contact Name": "Ashley Woodson",
+      "Role": "Newk's Account Manager",
+      "Email": "awoodson@uber.com",
+      "Category": "Marketplace Ordering"
+     },
+     {
+      "cat": "Music / Visuals",
+      "Vendor": "DirecTV",
+      "Contact Name": "Susan Berg",
+      "Role": "National Account Manager",
+      "Email": "sberg@directv.com",
+      "Category": "Music / Visuals"
+     },
+     {
+      "cat": "POS",
+      "Vendor": "Toast",
+      "Contact Name": "Brandy Hubbard",
+      "Role": "Enterprise Account Manager",
+      "Category": "POS"
+     },
+     {
+      "cat": "Payments / CC",
+      "Vendor": "FiServ",
+      "Contact Name": "John Suski",
+      "Role": "Account Manager",
+      "Email": "john.suski@fiserv.com",
+      "Category": "Payments / CC"
+     }
+    ]
+   },
+   "5 · Billing": {
+    "headers": [
+     "Vendor",
+     "Contact / Team",
+     "Billing Email",
+     "Billing Phone",
+     "Notes"
+    ],
+    "rows": [
+     {
+      "cat": null,
+      "Vendor": "CrunchTime",
+      "Contact / Team": "CrunchTime Accounting Team",
+      "Billing Email": "accounting@crunchtime.com"
+     }
+    ]
+   }
+  },
+  "systems": [
+   {
+    "section": "IT-MANAGED SYSTEMS",
+    "name": "Monkey Media (Admin Console)",
+    "url": "https://www.mnkysoft.com/admin/dev308/home/login",
+    "url_label": "https://www.mnkysoft.com/admin/dev308/home/login",
+    "desc": "Admin console for catering power users",
+    "managed": "Newk's IT",
+    "rest_acct": "—  No",
+    "fran_acct": "✓  Yes",
+    "status": ""
+   },
+   {
+    "section": "IT-MANAGED SYSTEMS",
+    "name": "Monkey Media (Store Console)",
+    "url": "https://www.mnkysoft.com/admin/dev308/home/storeLogin",
+    "url_label": "https://www.mnkysoft.com/admin/dev308/home/storeLogin",
+    "desc": "Store-level catering online orders and CRM",
+    "managed": "Newk's IT",
+    "rest_acct": "✓  Yes",
+    "fran_acct": "—  No",
+    "status": ""
+   },
+   {
+    "section": "IT-MANAGED SYSTEMS",
+    "name": "OLO",
+    "url": "https://my.olo.com",
+    "url_label": "https://my.olo.com",
+    "desc": "Digital orders for pick-up, curbside, and delivery",
+    "managed": "Newk's IT",
+    "rest_acct": "✓  Yes",
+    "fran_acct": "✓  Yes",
+    "status": ""
+   },
+   {
+    "section": "IT-MANAGED SYSTEMS",
+    "name": "Ovation",
+    "url": "https://ovationup.com/",
+    "url_label": "https://ovationup.com/",
+    "desc": "Guest experience and customer feedback platform",
+    "managed": "Newk's IT",
+    "rest_acct": "✓  Yes",
+    "fran_acct": "✓  Yes",
+    "status": ""
+   },
+   {
+    "section": "IT-MANAGED SYSTEMS",
+    "name": "Toast",
+    "url": "https://toasttab.com",
+    "url_label": "https://toasttab.com",
+    "desc": "Point of Sale system",
+    "managed": "Newk's IT",
+    "rest_acct": "—  No",
+    "fran_acct": "✓  Yes",
+    "status": ""
+   },
+   {
+    "section": "IT-MANAGED SYSTEMS",
+    "name": "Paytronix Gift Cards",
+    "url": "https://www.pxsweb.com/merchant/home.srv",
+    "url_label": "https://www.pxsweb.com/merchant/home.srv",
+    "desc": "Gift card management and ACH",
+    "managed": "Newk's IT",
+    "rest_acct": "—  No",
+    "fran_acct": "✓  Yes",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "Punchh",
+    "url": "https://dashboard.punchh.com",
+    "url_label": "https://dashboard.punchh.com",
+    "desc": "Loyalty and offer management",
+    "managed": "Marketing",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "NewksGear (Threds)",
+    "url": "https://newksgear.com",
+    "url_label": "https://newksgear.com",
+    "desc": "Uniforms and branded merchandise",
+    "managed": "Marketing",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "Newks Toolkit",
+    "url": "https://newkstoolkit.com/",
+    "url_label": "https://newkstoolkit.com/",
+    "desc": "Marketing assets and brand toolkit",
+    "managed": "Marketing",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "Yext",
+    "url": "https://yext.com",
+    "url_label": "https://yext.com",
+    "desc": "Marketing listings and reputation management",
+    "managed": "Marketing",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "OPUS Training Platform",
+    "url": "https://www.dashboard.opus.so/",
+    "url_label": "https://www.dashboard.opus.so/",
+    "desc": "eLearning and training platform",
+    "managed": "Ops Services/Training",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "ezCater",
+    "url": "https://www.ezcater.com/",
+    "url_label": "https://www.ezcater.com/",
+    "desc": "Catering marketplace",
+    "managed": "Vendor",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "DoorDash",
+    "url": "https://merchant.doordash.com",
+    "url_label": "https://merchant.doordash.com",
+    "desc": "Third-party delivery",
+    "managed": "Vendor",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "UberEats",
+    "url": "https://merchants.ubereats.com/",
+    "url_label": "https://merchants.ubereats.com/",
+    "desc": "Third-party delivery",
+    "managed": "Vendor",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "GrubHub",
+    "url": "https://restaurant.grubhub.com/",
+    "url_label": "https://restaurant.grubhub.com/",
+    "desc": "Third-party delivery",
+    "managed": "Vendor",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "DirecTV / Music Choice",
+    "url": "https://manage.musicchoiceforbusiness.com/",
+    "url_label": "https://manage.musicchoiceforbusiness.com/",
+    "desc": "In-restaurant music service",
+    "managed": "Vendor",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "3RD PARTY & OUTSIDE-IT SYSTEMS",
+    "name": "Prep n Print Flex",
+    "url": "https://www.prepnprintflex.com/",
+    "url_label": "https://www.prepnprintflex.com/",
+    "desc": "Flex label printers for food labeling",
+    "managed": "Vendor",
+    "rest_acct": "No IT Action",
+    "fran_acct": "No IT Action",
+    "status": ""
+   },
+   {
+    "section": "COMPANY-ONLY SYSTEMS",
+    "name": "DTiQ Cameras",
+    "url": "https://www.dtiq.com/",
+    "url_label": "https://www.dtiq.com/",
+    "desc": "Loss prevention and intelligent video — Company locations",
+    "managed": "Company Only",
+    "rest_acct": "—  No",
+    "fran_acct": "✓  Yes",
+    "status": "⚠  Possibly Leaving"
+   },
+   {
+    "section": "COMPANY-ONLY SYSTEMS",
+    "name": "Envysion Cameras",
+    "url": "https://envysion.com/",
+    "url_label": "https://envysion.com/",
+    "desc": "AI cloud video security — Company locations",
+    "managed": "Company Only",
+    "rest_acct": "—  No",
+    "fran_acct": "✓  Yes",
+    "status": "⚠  Possibly Leaving"
+   },
+   {
+    "section": "COMPANY-ONLY SYSTEMS",
+    "name": "Microsoft 365 (Outlook)",
+    "url": "https://www.microsoft.com/en-us/microsoft-365/outlook/log-in",
+    "url_label": "https://www.microsoft.com/en-us/microsoft-365/outlook/log-in",
+    "desc": "Email and productivity — replacing Google Workspace",
+    "managed": "Newk's IT",
+    "rest_acct": "✓  Yes",
+    "fran_acct": "✓  Yes",
+    "status": "🟢  Coming 2026"
+   },
+   {
+    "section": "SUNSETTING IN 2026",
+    "name": "CrunchTime — Net Chef",
+    "url": "https://newks-em.net-chef.com",
+    "url_label": "https://newks-em.net-chef.com",
+    "desc": "Inventory, COGs, and orders — being replaced by Restaurant365",
+    "managed": "Newk's IT",
+    "rest_acct": "✓  Yes",
+    "fran_acct": "✓  Yes",
+    "status": "⛔  Leaving 2026"
+   },
+   {
+    "section": "SUNSETTING IN 2026",
+    "name": "7Shifts",
+    "url": "https://www.7shifts.com/",
+    "url_label": "https://www.7shifts.com/",
+    "desc": "Labor scheduling and workforce management — being replaced by Restaurant365",
+    "managed": "Newk's IT",
+    "rest_acct": "✓  Yes",
+    "fran_acct": "✓  Yes",
+    "status": "⛔  Leaving 2026"
+   },
+   {
+    "section": "INCOMING — 2026 PLATFORMS",
+    "name": "Restaurant365",
+    "url": "",
+    "url_label": "Production URL TBD",
+    "desc": "Food cost, inventory, and labor management — replaces CrunchTime and 7Shifts",
+    "managed": "Newk's IT",
+    "rest_acct": "—  No",
+    "fran_acct": "✓  Yes",
+    "status": "🟢  Coming 2026"
+   },
+   {
+    "section": "INCOMING — 2026 PLATFORMS",
+    "name": "FSC Camera Platform",
+    "url": "",
+    "url_label": "TBD",
+    "desc": "Self-managed camera platform for company locations",
+    "managed": "Company Only",
+    "rest_acct": "✓  Yes",
+    "fran_acct": "✓  Yes",
+    "status": "🟢  Coming 2026"
+   }
+  ],
+  "forms": [
+   {
+    "name": "Restaurant Systems Questionnaire",
+    "url": "https://forms.office.com/Pages/ResponsePage.aspx?id=pWcF-m4YjU2KnnYaEa3pf4zki5x00C1Ku8Nm10fGsC9UM0JMV0ZNOURLQlNUWEFCWTk5Q0haT0UxMSQlQCN0PWcu"
+   },
+   {
+    "name": "Franchise Info Form",
+    "url": "https://forms.office.com/Pages/ResponsePage.aspx?id=pWcF-m4YjU2KnnYaEa3pf4zki5x00C1Ku8Nm10fGsC9URFJETE1WUjlHNDlNRERLTEsxUkZPMzVaOSQlQCN0PWcu"
+   }
+  ],
+  "call45": {
+   "sections": [
+    {
+     "title": "Marketing Updates: (Matilyn/Madison)",
+     "items": [
+      {
+       "text": "Newk’s Gear Account Setup/uniforms ordered",
+       "yn": true
+      },
+      {
+       "text": "MIT Uniforms Yes, Staff",
+       "yn": true
+      },
+      {
+       "text": "Gift Cards ordered",
+       "yn": true
+      },
+      {
+       "text": "Grand Opening Kit ordered",
+       "yn": true
+      },
+      {
+       "text": "Menus ordered and pricing tiers set",
+       "yn": true
+      },
+      {
+       "text": "Music installation scheduled (Direct TV)",
+       "yn": true
+      },
+      {
+       "text": "Marketing will need an email list of people to invite for the training days and will set up a social sign-up for remaining spots. No e-vite, will handle.",
+       "yn": false
+      },
+      {
+       "text": "Marketing to provide an update for the Marketing plan leading up to the opening.",
+       "yn": true
+      },
+      {
+       "text": "Punch Account set-up",
+       "yn": true
+      }
+     ]
+    },
+    {
+     "title": "IT Updates:",
+     "items": [
+      {
+       "text": "Website information form filled out",
+       "yn": true
+      },
+      {
+       "text": "Plug-N-Pay Merchant Gateway form completed and mailed to Barbara Volpe",
+       "yn": true
+      },
+      {
+       "text": "Before Plug-N-Pay can be completed, you will need to contact Angela Cherry with SecureStream - IT will send information.",
+       "yn": false
+      },
+      {
+       "text": "Toast POS order and scheduled install",
+       "yn": true
+      },
+      {
+       "text": "FSC Managed Network ordered and scheduled (network, internet, phone & firewall)",
+       "yn": true
+      },
+      {
+       "text": "Paytronix Gift Card Processing Paperwork returned",
+       "yn": true
+      },
+      {
+       "text": "Newk’s Paytronix Gift Card ACH Program set up",
+       "yn": true
+      },
+      {
+       "text": "Toast Credit Card Processors and AMEX set up",
+       "yn": true
+      },
+      {
+       "text": "Monkey Media account set up",
+       "yn": true
+      },
+      {
+       "text": "Online Ordering paperwork completed",
+       "yn": true
+      },
+      {
+       "text": "R365 Account (JD Just added this 7.31.26)",
+       "yn": false
+      },
+      {
+       "text": "Omni Rev (?)",
+       "yn": false
+      },
+      {
+       "text": "Ovation Account set up",
+       "yn": true
+      },
+      {
+       "text": "Special Taxes or Fees (Ex. Public Improvement Fee - PIF)",
+       "yn": true
+      },
+      {
+       "text": "Telephone number and address",
+       "yn": false
+      }
+     ]
+    },
+    {
+     "title": "Purchasing Updates: (Veronica)",
+     "items": [
+      {
+       "text": "Sysco Accounts set up",
+       "yn": false
+      },
+      {
+       "text": "Produce Company set up",
+       "yn": false
+      },
+      {
+       "text": "Coke install set up",
+       "yn": false
+      },
+      {
+       "text": "Tea machine install set up",
+       "yn": false
+      },
+      {
+       "text": "Cintas Account set up/opening order placed",
+       "yn": false
+      },
+      {
+       "text": "Air Gas set up/installed",
+       "yn": false
+      },
+      {
+       "text": "Prep-N-Print Machines (2) ordered",
+       "yn": false
+      },
+      {
+       "text": "Georgia Pacific order placed",
+       "yn": false
+      },
+      {
+       "text": "Dish Machine Order",
+       "yn": false
+      }
+     ]
+    },
+    {
+     "title": "Accounting needs or updates:",
+     "items": [
+      {
+       "text": "Email ACH Franchise Document to Accounting?Loyalty & Marketing fees (Ron checking on it)",
+       "yn": true
+      },
+      {
+       "text": "W9 form from Ownership (coke rebate) No",
+       "yn": false
+      },
+      {
+       "text": "Good contact information for any accounting questions. Ron to send)",
+       "yn": false
+      }
+     ]
+    },
+    {
+     "title": "Development & Construction Updates:",
+     "items": [
+      {
+       "text": "Smallwares package ordered",
+       "yn": true
+      },
+      {
+       "text": "℅ Date",
+       "yn": false
+      },
+      {
+       "text": "Signage (DesignTeam)",
+       "yn": false
+      }
+     ]
+    },
+    {
+     "title": "Training Updates: (PD&C)",
+     "items": [
+      {
+       "text": "Opus (E-Learning Account) set-up",
+       "yn": true
+      },
+      {
+       "text": "EZ-Cater account set up? https://url.us.m.mimecastprotect.com/s/hDUgCv2pAOU7BQlRsYUZsQcQxX?domain=ezcater.com(now JD)",
+       "yn": true
+      },
+      {
+       "text": "Managers Servsafe",
+       "yn": true
+      },
+      {
+       "text": "Hiring Par Sheet updates:",
+       "yn": false
+      },
+      {
+       "text": "New Hire orientation date:",
+       "yn": false
+      },
+      {
+       "text": "All new hires placed in Toast prior to training week with proper job codes.",
+       "yn": false
+      },
+      {
+       "text": "All job aids, recipe cards, signs etc put up prior to training week.",
+       "yn": false
+      },
+      {
+       "text": "PD&C will provide a recommended Sysco/Produce Opening order. JD to provide / Sysco M & TH, Produ",
+       "yn": false
+      },
+      {
+       "text": "Manager meetings: will be held daily during training week to cover any issues with staffing, operations, and any additional observations",
+       "yn": false
+      },
+      {
+       "text": "Line Checks: will be performed by the MOD prior to each shift beginning",
+       "yn": false
+      },
+      {
+       "text": "Pre-shift Meetings: will be done prior to each shift",
+       "yn": false
+      }
+     ]
+    },
+    {
+     "title": "Training Week:",
+     "items": [
+      {
+       "text": "Tuesday - Saturday",
+       "yn": false
+      },
+      {
+       "text": "AM: 9am-2:00 pm BOH & FOH",
+       "yn": false
+      },
+      {
+       "text": "8am-2:00 pm Prep Team",
+       "yn": false
+      },
+      {
+       "text": "PM: 4pm-9:00 pm BOH & FOH",
+       "yn": false
+      },
+      {
+       "text": "Training Team:",
+       "yn": false
+      },
+      {
+       "text": "The training team will travel on Monday of training week and provide classroom/set up. Prep team will be present on Monday to prep for Tuesday training. Training on Tuesday through Friday. VIP invite session on Saturday from 11:00 am to 4:00 pm. Closed Sunday, inventory can be counted on Sunday or early Monday morning before staff arrives.",
+       "yn": false
+      },
+      {
+       "text": "Monday, October 5th will be the soft opening with the grand opening on _________. The training team will be present opening to support through Wednesday of opening week. Ferro will be present opening week to suppor.",
+       "yn": false
+      },
+      {
+       "text": "The Product Manager will be responsible for training the prep team. A Certified Manager will run expo until an hourly partner is identified to be trained.",
+       "yn": false
+      }
+     ]
+    }
+   ]
+  },
+  "itquick": [
+   {
+    "title": "DOCUMENTS & SETUP — COMPLETE FIRST",
+    "items": [
+     {
+      "name": "Newk's Franchisee Information Form",
+      "desc": "Detail your ownership structure, contact information, business emails, above-store management, and more.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "180 Days from Opening",
+      "url": "https://newksit.freshdesk.com/support/solutions/articles/5000880525-newk-s-website-information-form-for-new-restaurant-openings-nro-",
+      "ref": ""
+     },
+     {
+      "name": "Restaurant Systems Questionnaire",
+      "desc": "Complete document provided by Newk's IT to establish Catering fees, contact info, and billing.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "180 Days from Opening",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000880546-msi-catering-platform-questionnaire-for-new-restaurant-openings-nro-",
+      "ref": ""
+     },
+     {
+      "name": "Get Logged Into Restaurant System Accounts",
+      "desc": "Credentials to log in to systems are provided by Newk's IT. Log in and gather account information.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "180 Days from Opening",
+      "url": "https://newksit.freshdesk.com/support/solutions/articles/5000880548-logging-to-accounts-for-new-restaurant-openings-nro-",
+      "ref": ""
+     },
+     {
+      "name": "Review Low Voltage Construction Plans with POS Vendor",
+      "desc": "Ensure adequate drops for POS and Voice, correct terminal positioning, and sufficient local area power for all equipment.",
+      "dept": "Construction/IT",
+      "req": "Required",
+      "timing": "Construction Phase",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000880593-low-voltage-vendors-and-review-plans-with-pos-vendor-for-new-restaur",
+      "ref": ""
+     }
+    ]
+   },
+   {
+    "title": "NATIONAL IT VENDOR AGREEMENTS TO SIGN",
+    "items": [
+     {
+      "name": "Toast",
+      "desc": "Point of Sale and credit card processing vendor for Newk's Eatery.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "Minimum 8 Weeks Prior",
+      "url": "",
+      "ref": "NRO Checklist - Toast Point of Sale and Credit Card Processing : Newk's - Knowledgebase"
+     },
+     {
+      "name": "Managed Network, Phones, Internet & PCI Security",
+      "desc": "Two approved partners: FSC Managed Network (FSC Managed Network — Preferred 2025) or Millennium Digital Technologies (FSC Managed Network). Provides PCI-compliant network, phones, and internet.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "Contact Early",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000880616-choose-a-managed-network-security-provider-for-new-restaurant-openin",
+      "ref": ""
+     },
+     {
+      "name": "Paytronix Gift Cards",
+      "desc": "Complete the Franchisee ACH Participation Form for Newk's x Paytronix Gift Card Program.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/support/solutions/articles/5000892718-nro-checklist-paytronix-gift-card-participation-form",
+      "ref": ""
+     },
+     {
+      "name": "OLO & OLO Pay",
+      "desc": "Digital ordering and OLO Pay card-present payment setup.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "50 Days Prior to Opening",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000880674-olo-and-olo-pay-for-new-restaurant-openings-nro-",
+      "ref": ""
+     },
+     {
+      "name": "Opus (eLearning)",
+      "desc": "eLearning and learning management solution.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000891349-nro-checklist-sign-up-with-opus-training-elearning-platform",
+      "ref": ""
+     },
+     {
+      "name": "R365 Labor Inventory & COGS",
+      "desc": "R365 is our new consolidated platform for labor/scheduling and inventory, ordering, and reconciliation: replacing 7Shifts and CrunchTime. No action needed yet: the FSC Team will send separate instructions on how to sign up for R365 later in your onboarding.",
+      "dept": "IT Department",
+      "req": "Recommended",
+      "timing": "",
+      "url": "",
+      "ref": "Check with your Franchise Business Consultant, for more info on when R365 will be available for you!"
+     },
+     {
+      "name": "American Express",
+      "desc": "National Amex vendor for better rates — requires 2 Merchant IDs (Toast POS + Catering).",
+      "dept": "IT Department",
+      "req": "Recommended",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000866209-american-express-setup-process-for-new-restaurant-opening-nro-",
+      "ref": ""
+     },
+     {
+      "name": "FiServ MID (Monkey Catering Payments)",
+      "desc": "Payment gateway required to process credit cards through Monkey Catering.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000880736-plug-and-pay-for-new-restaurant-openings-and-catering-payments-nro-",
+      "ref": ""
+     },
+     {
+      "name": "DTiQ or Envysion CCTV / Cameras",
+      "desc": "Approved CCTV partners for loss prevention and security camera systems.",
+      "dept": "IT Department",
+      "req": "Recommended",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000880749-dtiq-or-envysion-cctv-cameras-for-new-restaurant-openings-nro-",
+      "ref": ""
+     }
+    ]
+   },
+   {
+    "title": "LOCAL AGREEMENTS & VENDORS",
+    "items": [
+     {
+      "name": "Burglar & Fire Alarm Services",
+      "desc": "Newk's works nationally with ADT but local sourcing is permitted. Must include a cellular unit — Newk's does not use POTS or copper lines.",
+      "dept": "IT Department",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881313-nro-burglar-and-fire-alarm-sourcing",
+      "ref": ""
+     },
+     {
+      "name": "High Speed Internet Provider (Local)",
+      "desc": "Best effort Coax/Fiber with 5 static IPs recommended. Estimated cost: $99–$140/mo regionally. Not required if using FSC Managed Network for network package.",
+      "dept": "IT Department",
+      "req": "Conditional",
+      "timing": "Contact FSC Managed Network First",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881312-nro-high-speed-internet-provider",
+      "ref": ""
+     },
+     {
+      "name": "Voice / VOIP Telephone Provider (Local)",
+      "desc": "UCaaS/VOIP phone platform. Not required if using FSC Managed Network for network package.",
+      "dept": "IT Department",
+      "req": "Conditional",
+      "timing": "Contact FSC Managed Network First",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000880748-nro-checklist-choose-a-voice-telephone-provider-nro-",
+      "ref": ""
+     }
+    ]
+   },
+   {
+    "title": "VENDORS MANAGED BY OTHER DEPARTMENTS",
+    "items": [
+     {
+      "name": "DirecTV / Music Choice",
+      "desc": "Music and audio system for Newk's restaurants.",
+      "dept": "Marketing",
+      "req": "Recommended",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/support/solutions/articles/5000881276-nro-checklist-directv-music-choice-for-new-restaurant-openings-nro-",
+      "ref": ""
+     },
+     {
+      "name": "Prep n Print Flex",
+      "desc": "GnG, shelf life, and catering labeling with flex printers.",
+      "dept": "Ops Services (PDC)",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881323-nro-prep-n-print",
+      "ref": ""
+     },
+     {
+      "name": "Opus — Assigning Courses & Curriculum",
+      "desc": "Course assignments and LMS access managed by PDC/Ops Services.",
+      "dept": "Ops Services (PDC)",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000891349-nro-checklist-sign-up-with-opus-training-elearning-platform",
+      "ref": ""
+     },
+     {
+      "name": "NewksGear (Threds)",
+      "desc": "Uniforms and branded merchandise ordering.",
+      "dept": "Marketing",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881321-nro-newksgear-com",
+      "ref": ""
+     },
+     {
+      "name": "Newks Toolkit",
+      "desc": "Marketing collateral and digital assets for grand opening.",
+      "dept": "Marketing",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881322-nro-newk-s-marketing-toolkit-access",
+      "ref": ""
+     },
+     {
+      "name": "ezCater",
+      "desc": "Third-party catering marketplace with MonkeyMedia integration.",
+      "dept": "Ops Services (PDC)",
+      "req": "Recommended",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881316-nro-ezcater-catering-sales-marketplace",
+      "ref": ""
+     },
+     {
+      "name": "DoorDash, UberEats, GrubHub, ASAP, Favor, etc.",
+      "desc": "Third-party delivery marketplaces integrating into OLO / Newk's POS.",
+      "dept": "Ops Services (PDC)",
+      "req": "Recommended",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881319-nro-establishing-accounts-with-3rd-party-delivery-marketplaces",
+      "ref": ""
+     },
+     {
+      "name": "Punchh Loyalty & Local Promotions",
+      "desc": "Loyalty platform and third-party discounting/offers management.",
+      "dept": "Marketing",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881320-nro-punchh-loyalty-promotion-and-discounting-platform",
+      "ref": ""
+     },
+     {
+      "name": "TripleImpact Call Center for Catering",
+      "desc": "Catering call center services — optional add-on.",
+      "dept": "Ops Services (PDC)",
+      "req": "Optional",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/en/support/solutions/articles/5000881317-nro-triple-impact-catering-call-center-services",
+      "ref": ""
+     },
+     {
+      "name": "Yext (Local Listings)",
+      "desc": "Contact Newk's Support Center Field Marketing team to ensure all local listings and webpage details are entered into Yext.",
+      "dept": "Marketing",
+      "req": "Required",
+      "timing": "",
+      "url": "https://newksit.freshdesk.com/support/solutions/articles/5000892719-nro-checklist-verify-accuracy-of-local-listings-via-yext-platform",
+      "ref": ""
+     }
+    ]
+   }
+  ]
+ }
+}
