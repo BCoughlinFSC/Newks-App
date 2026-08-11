@@ -182,6 +182,15 @@
 
 .nro .empty{padding:34px;text-align:center;color:var(--muted);font-size:14px;}
 
+/* team filter chips */
+.nro .fbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px;}
+.nro .fbar .flabel{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-right:2px;}
+.nro .fchip{border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-family:'Inter',sans-serif;font-weight:600;font-size:12.5px;padding:6px 12px;border-radius:20px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:.12s;}
+.nro .fchip:hover{border-color:var(--red);color:var(--red);}
+.nro .fchip.active{background:var(--red);border-color:var(--red);color:#fff;}
+.nro .fchip .fc{font-size:11px;font-weight:700;opacity:.65;font-variant-numeric:tabular-nums;}
+.nro .fchip.active .fc{opacity:.85;}
+
 /* buttons (scoped) */
 .nro .btn{border:0;cursor:pointer;font-family:'Inter';font-weight:600;font-size:13px;padding:9px 14px;border-radius:9px;display:inline-flex;align-items:center;gap:7px;transition:.15s;}
 .nro .btn-red{background:var(--red);color:#fff;}

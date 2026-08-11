@@ -201,8 +201,9 @@ import json as _json  # noqa: E402
 _CATALOG_JSON_PATH = os.path.join(os.path.dirname(__file__), "data", "onboarding", "catalog_data.json")
 
 # Which tracks a franchisee (magic-link) may see, and in what order. The curated
-# "it" track and the full "it_full" kit are internal-only.
-FRANCHISEE_TRACKS = ["master", "marketing"]
+# "it" track is the franchisee-facing IT setup checklist (the NRO IT onboarding
+# email, cleaned). The full "it_full" week-by-week kit stays internal-only.
+FRANCHISEE_TRACKS = ["master", "it", "marketing"]
 INTERNAL_TRACK_ORDER = ["it", "it_full", "master", "marketing"]
 
 # Reference-block audience: these keys are hidden from franchisees entirely.
@@ -222,10 +223,13 @@ def _normalize_curated() -> None:
 _normalize_curated()
 
 # Public metadata for the curated IT track (mirrors the imported tracks' meta).
+# This is the NRO IT Onboarding email turned into a tracked checklist — shown to
+# both internal staff and franchisees (see FRANCHISEE_TRACKS).
 _IT_TRACK_META = {
-    "label": "IT Vendor Checklist (Curated)",
-    "audience": "internal",
-    "blurb": "The tightened IT/vendor agreement checklist (original app list).",
+    "label": "IT Setup Checklist",
+    "audience": "all",
+    "blurb": "Your IT vendor & systems setup — the key accounts and agreements to "
+             "sign, in the order we recommend tackling them.",
     "groups": [{"id": str(s), "label": STEP_TITLES[s], "order": s} for s in sorted(STEP_TITLES)],
 }
 

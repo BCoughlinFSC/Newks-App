@@ -175,8 +175,43 @@
   <script src="shared-nav.js"></script>
   <script>
     const PRIO={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
-    let OPENINGS=[], CURRENT=null, detailTab=null;
+    let OPENINGS=[], CURRENT=null, detailTab=null, teamFilter=null;
     const linkifyEmail=t=>esc(t).replace(/([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/g,'<a href="mailto:$1">$1</a>');
+
+    // Team filter: map each task to an owning team via its normalized tags
+    // (Master track) or department string (IT / Marketing tracks).
+    const TEAM_ORDER=['Franchisee','IT','Marketing','Training','Development','Purchasing','Accounting','Sales','Other'];
+    const TEAM_LABEL={Franchisee:'Franchisee',IT:'IT Department',Marketing:'Marketing',
+      Training:'PD&C / Training',Development:'Development',Purchasing:'Purchasing',
+      Accounting:'Accounting',Sales:'Sales',Other:'Other'};
+    // A task can belong to several teams (e.g. a franchisee-owned Development
+    // task). Match-any: the task shows under every team it belongs to.
+    function teamsOf(t){
+      const s=new Set();
+      if(Array.isArray(t.tags)) t.tags.forEach(x=>{
+        const m=TEAM_ORDER.find(p=>p.toLowerCase()===String(x).toLowerCase());
+        if(m) s.add(m);
+      });
+      if(!s.size){ // no normalized tags (IT track) — derive from department text
+        const d=(t.dept||'').toLowerCase();
+        if(/pd\s*&?\s*c|training|\bops\b/.test(d)) s.add('Training');
+        else if(/market/.test(d)) s.add('Marketing');
+        else if(/\bit\b|fsc/.test(d)) s.add('IT');
+        else if(/purchas/.test(d)) s.add('Purchasing');
+        else if(/account/.test(d)) s.add('Accounting');
+        else if(/develop/.test(d)) s.add('Development');
+        else if(/sales/.test(d)) s.add('Sales');
+      }
+      if(t.owner==='franchisee') s.add('Franchisee'); // owner marker (all tracks)
+      if(!s.size) s.add('Other');
+      return [...s];
+    }
+    function filterBar(counts,total){
+      const teams=TEAM_ORDER.filter(t=>counts[t]).concat(Object.keys(counts).filter(t=>!TEAM_ORDER.includes(t)));
+      let chips=`<button class="fchip${teamFilter===null?' active':''}" data-team="">All <span class="fc">${total}</span></button>`;
+      chips+=teams.map(t=>`<button class="fchip${teamFilter===t?' active':''}" data-team="${esc(t)}">${esc(TEAM_LABEL[t]||t)} <span class="fc">${counts[t]}</span></button>`).join('');
+      return `<div class="fbar"><span class="flabel">Filter by team</span>${chips}</div>`;
+    }
 
     function authHeaders(){ const t=localStorage.getItem('auth_token');
       return t?{'Authorization':'Bearer '+t,'Content-Type':'application/json'}:{'Content-Type':'application/json'}; }
@@ -265,7 +300,7 @@
       try{
         const res=await api('/api/onboarding/openings/'+id);
         if(!res.ok){toast('Could not load opening ('+res.status+')',true);return;}
-        CURRENT=await res.json();detailTab=null;
+        CURRENT=await res.json();detailTab=null;teamFilter=null;
         renderDetail();
         window.scrollTo({top:0,behavior:'smooth'});
       }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
@@ -330,7 +365,7 @@
       document.getElementById('detailView').innerHTML=h;
       document.getElementById('portfolioView').style.display='none';
       document.getElementById('detailView').style.display='';
-      document.querySelectorAll('#d-tabnav .tabbtn').forEach(b=>b.onclick=()=>{detailTab=b.dataset.tab;renderDetailTab();});
+      document.querySelectorAll('#d-tabnav .tabbtn').forEach(b=>b.onclick=()=>{detailTab=b.dataset.tab;teamFilter=null;renderDetailTab();});
       renderDetailTab();
     }
 
@@ -347,6 +382,7 @@
       document.getElementById('d-tabbody').innerHTML=h;
       // reflect active tab in the nav (in case re-rendered)
       document.querySelectorAll('#d-tabnav .tabbtn').forEach(b=>b.classList.toggle('active',b.dataset.tab===detailTab));
+      document.querySelectorAll('#d-tabbody .fchip').forEach(c=>c.onclick=()=>{teamFilter=c.dataset.team||null;renderDetailTab();});
       document.querySelectorAll('#d-tabbody .cbx input').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
       document.querySelectorAll('#d-tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
     }
@@ -354,8 +390,19 @@
     function renderTrack(tv){
       let h='';
       if(tv.blurb) h+=`<p style="color:#4A4F57;margin:0 0 14px;">${esc(tv.blurb)}</p>`;
+      // Team filter — worth showing once the track spans 2+ departments.
+      const counts={};
+      const trackTotal=tv.groups.reduce((n,g)=>n+g.tasks.length,0);
+      tv.groups.forEach(g=>g.tasks.forEach(t=>teamsOf(t).forEach(k=>{counts[k]=(counts[k]||0)+1;})));
+      const deptCount=Object.keys(counts).filter(k=>k!=='Franchisee').length;
+      if(deptCount>=2){ h+=filterBar(counts,trackTotal); }
+      else { teamFilter=null; }
+      let shown=0;
       tv.groups.forEach(g=>{
-        const done=g.tasks.filter(t=>t.done).length,total=g.tasks.length,pct=total?Math.round(done/total*100):0;
+        const tasks=teamFilter?g.tasks.filter(t=>teamsOf(t).includes(teamFilter)):g.tasks;
+        if(!tasks.length) return;
+        shown+=tasks.length;
+        const done=tasks.filter(t=>t.done).length,total=tasks.length,pct=total?Math.round(done/total*100):0;
         const allDone=total>0&&done===total;
         h+=`<section class="phase${allDone?' done':''}">
           <div class="phase-h">
@@ -364,9 +411,10 @@
             <div class="phase-prog"><div class="txt">${done}/${total} done</div><div class="bar"><i style="width:${pct}%"></i></div></div>
             <div class="chev2">&#9660;</div>
           </div>
-          <ul class="tasklist">${g.tasks.map(taskRow).join('')}</ul>
+          <ul class="tasklist">${tasks.map(taskRow).join('')}</ul>
         </section>`;
       });
+      if(!shown) h+=`<div class="empty">No ${teamFilter?esc(TEAM_LABEL[teamFilter]||teamFilter)+' ':''}tasks in this section.</div>`;
       return h||'<div class="empty">No tasks in this section.</div>';
     }
 

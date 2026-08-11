@@ -49,7 +49,42 @@
 <script>
 const PRIO={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
 const TOKEN=new URLSearchParams(location.search).get('t')||'';
-let DATA=null, activeTab='master';
+let DATA=null, activeTab='master', teamFilter=null;
+
+// Team filter: map each task to an owning team, drawn from its normalized tags
+// (Master track) or its department string (IT/Marketing tracks).
+const TEAM_ORDER=['Franchisee','IT','Marketing','Training','Development','Purchasing','Accounting','Sales','Other'];
+const TEAM_LABEL={Franchisee:'Franchisee (You)',IT:'IT Department',Marketing:'Marketing',
+  Training:'PD&C / Training',Development:'Development',Purchasing:'Purchasing',
+  Accounting:'Accounting',Sales:'Sales',Other:'Other'};
+// A task can belong to several teams (e.g. a franchisee-owned Development task).
+// Match-any semantics: the task shows under every team it belongs to.
+function teamsOf(t){
+  const s=new Set();
+  if(Array.isArray(t.tags)) t.tags.forEach(x=>{
+    const m=TEAM_ORDER.find(p=>p.toLowerCase()===String(x).toLowerCase());
+    if(m) s.add(m);
+  });
+  if(!s.size){ // no normalized tags (IT track) — derive from department text
+    const d=(t.dept||'').toLowerCase();
+    if(/pd\s*&?\s*c|training|\bops\b/.test(d)) s.add('Training');
+    else if(/market/.test(d)) s.add('Marketing');
+    else if(/\bit\b|fsc/.test(d)) s.add('IT');
+    else if(/purchas/.test(d)) s.add('Purchasing');
+    else if(/account/.test(d)) s.add('Accounting');
+    else if(/develop/.test(d)) s.add('Development');
+    else if(/sales/.test(d)) s.add('Sales');
+  }
+  if(t.owner==='franchisee') s.add('Franchisee'); // owner marker (all tracks)
+  if(!s.size) s.add('Other');
+  return [...s];
+}
+function filterBar(counts,total){
+  const teams=TEAM_ORDER.filter(t=>counts[t]).concat(Object.keys(counts).filter(t=>!TEAM_ORDER.includes(t)));
+  let chips=`<button class="fchip${teamFilter===null?' active':''}" data-team="">All <span class="fc">${total}</span></button>`;
+  chips+=teams.map(t=>`<button class="fchip${teamFilter===t?' active':''}" data-team="${esc(t)}">${esc(TEAM_LABEL[t]||t)} <span class="fc">${counts[t]}</span></button>`).join('');
+  return `<div class="fbar"><span class="flabel">Filter by team</span>${chips}</div>`;
+}
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function toast(m,e){const el=document.getElementById('toast');el.textContent=m;el.className='toast show'+(e?' err':'');
@@ -106,7 +141,7 @@ function render(){
 
   h+=`<div id="tabbody"></div>`;
   const app=document.getElementById('app');app.innerHTML=h;
-  document.querySelectorAll('#tabnav .tabbtn').forEach(b=>b.onclick=()=>{activeTab=b.dataset.tab;render();});
+  document.querySelectorAll('#tabnav .tabbtn').forEach(b=>b.onclick=()=>{activeTab=b.dataset.tab;teamFilter=null;render();});
   renderTab();
 }
 
@@ -120,7 +155,8 @@ function renderTab(){
   else if(activeTab==='forms') h=renderForms(ref.forms||[]);
   else if(activeTab==='call45') h=renderCall45(ref.call45||{sections:[]});
   document.getElementById('tabbody').innerHTML=h;
-  // wire checkboxes + notes
+  // wire filter chips + checkboxes + notes
+  document.querySelectorAll('#tabbody .fchip').forEach(c=>c.onclick=()=>{teamFilter=c.dataset.team||null;renderTab();});
   document.querySelectorAll('#tabbody .cbx input:not(:disabled)').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
   document.querySelectorAll('#tabbody .notebox').forEach(inp=>inp.onblur=()=>saveNote(inp.dataset.key,inp));
   document.querySelectorAll('#tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
@@ -133,8 +169,19 @@ function renderTrack(tv){
     h+=`<div class="card"><div class="card-b"><h4 style="margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#8A8F98;">Marketing Accounts &amp; Kits</h4>
       <div class="dir-grid">${tv.accounts.map(a=>`<div class="dir-item"><div class="r">${a.url?`<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)} &#8599;</a>`:esc(a.name)}</div><div class="sd">${esc(a.desc||'')}</div></div>`).join('')}</div></div></div>`;
   }
+  // Team filter — worth showing once the track spans 2+ departments.
+  const counts={};
+  const trackTotal=tv.groups.reduce((n,g)=>n+g.tasks.length,0);
+  tv.groups.forEach(g=>g.tasks.forEach(t=>teamsOf(t).forEach(k=>{counts[k]=(counts[k]||0)+1;})));
+  const deptCount=Object.keys(counts).filter(k=>k!=='Franchisee').length;
+  if(deptCount>=2){ h+=filterBar(counts,trackTotal); }
+  else { teamFilter=null; }
+  let shown=0;
   tv.groups.forEach(g=>{
-    const done=g.tasks.filter(t=>t.done).length, total=g.tasks.length;
+    const tasks=teamFilter?g.tasks.filter(t=>teamsOf(t).includes(teamFilter)):g.tasks;
+    if(!tasks.length) return;
+    shown+=tasks.length;
+    const done=tasks.filter(t=>t.done).length, total=tasks.length;
     const pct=total?Math.round(done/total*100):0;
     const allDone=total>0&&done===total;
     h+=`<section class="phase${allDone?' done':''}">
@@ -144,15 +191,17 @@ function renderTrack(tv){
         <div class="phase-prog"><div class="txt">${done}/${total} done</div><div class="bar"><i style="width:${pct}%"></i></div></div>
         <div class="chev2">&#9660;</div>
       </div>
-      <ul class="tasklist">${g.tasks.map(taskRow).join('')}</ul>
+      <ul class="tasklist">${tasks.map(taskRow).join('')}</ul>
     </section>`;
   });
+  if(!shown) h+=`<div class="empty">No ${teamFilter?esc(TEAM_LABEL[teamFilter]||teamFilter)+' ':''}tasks in this checklist.</div>`;
   return h||'<div class="empty">No tasks in this section yet.</div>';
 }
 
 function taskRow(t){
   const locked=t.locked;
   const meta=[];
+  if(t.prio&&PRIO[t.prio]) meta.push(`<span class="req ${t.prio}">${PRIO[t.prio]}</span>`);
   if(t.lead) meta.push(`<span class="lead">${esc(t.lead)}</span>`);
   if(t.dept) meta.push(`<span class="dtag ${esc((t.dept||'').split(/[\/ ]/)[0])}">${esc(t.dept)}</span>`);
   meta.push(`<span class="own ${locked?'newks':'franchisee'}">${locked?"Newk's team":'You'}</span>`);
