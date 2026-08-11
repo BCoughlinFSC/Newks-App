@@ -198,9 +198,9 @@
         `${stores.length} store(s) · ${data.checkCount || 0} check(s) | ${data.start} → ${data.end} | generated ${data.generatedAt || ''}`;
 
       document.getElementById('grandWrap').innerHTML =
-        `<span class="grand">${fmt$(data.grandTotal)}</span> ` +
-        `<span class="grand-sub">total across ${data.checkCount || 0} "${esc(data.itemName || 'Spirit Night')}" check(s)` +
-        ` &nbsp;·&nbsp; ${fmt$(data.grandNet)} net &nbsp;·&nbsp; ${fmt$(data.grandTax)} tax</span>`;
+        `<span class="grand">${fmt$(data.grandNet)}</span> ` +
+        `<span class="grand-sub">net sales across ${data.checkCount || 0} "${esc(data.itemName || 'Spirit Night')}" check(s)` +
+        ` &nbsp;·&nbsp; ${fmt$(data.grandTax)} tax &nbsp;·&nbsp; ${fmt$(data.grandTotal)} total</span>`;
 
       if (!stores.length) {
         document.getElementById('resultsWrap').innerHTML =
