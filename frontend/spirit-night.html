@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spirit Night – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: #F8FAFC; color: #2c2c2c; min-height: 100vh; }
+    .header { background: #C41E3A; padding: 1.5rem 2rem; border-bottom: 3px solid #A01A2E; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .header-content { display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; color: #fff; font-size: 1.5rem; font-weight: 700; }
+    .header p { margin: 0.25rem 0 0 0; color: rgba(255,255,255,0.85); font-size: 0.85rem; }
+    .home-btn { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; text-decoration: none; }
+    .home-btn:hover { background: rgba(255,255,255,0.25); }
+    .container { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; padding: 1.5rem 2rem; max-width: 1800px; margin: 0 auto; }
+    @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+    .card { background: #fff; border-radius: 12px; padding: 1.5rem; border: 1px solid #e8e0d5; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .card h2 { margin: 0 0 1.25rem 0; color: #C41E3A; font-size: 1.1rem; font-weight: 700; }
+    .controls-row { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .form-group label { font-weight: 600; font-size: 0.85rem; color: #374151; }
+    .form-group input, .form-group select { padding: 0.5rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+    .btn-primary { background: #C41E3A; color: #fff; border: none; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+    .btn-primary:hover:not(:disabled) { background: #A01A2E; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: #374151; color: #fff; border: none; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+    .btn-secondary:hover:not(:disabled) { background: #1F2937; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status-msg { padding: 0.75rem 1rem; border-radius: 8px; margin-top: 1rem; font-size: 0.85rem; display: none; }
+    .status-msg.info { background: #F0F9FF; border: 1px solid #BAE6FD; color: #0369A1; display: block; }
+    .status-msg.error { background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; display: block; }
+    .grand { font-size: 1.6rem; font-weight: 700; color: #C41E3A; }
+    .grand-sub { font-size: 0.85rem; color: #6B7280; }
+    .report-table-wrap { overflow-x: auto; margin-top: 1rem; }
+    table.report { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    table.report th, table.report td { padding: 0.4rem 0.6rem; border: 1px solid #D1D5DB; text-align: right; white-space: nowrap; }
+    table.report th { background: #F3F4F6; font-weight: 600; position: sticky; top: 0; z-index: 1; }
+    table.report td.left { text-align: left; }
+    table.report tr.store-total { background: #FFF8E1; font-weight: 700; }
+    table.report tr.detail:hover { background: #F0F9FF; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>Spirit Night</h1>
+        <p>Every check carrying a "Spirit Night" item — one row per check, with the full check total credited to the fundraiser</p>
+      </div>
+      <a href="/" class="home-btn">Home</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div id="shared-sidebar"></div>
+
+    <div>
+      <div class="card">
+        <h2>Report Controls</h2>
+        <div class="controls-row">
+          <div class="form-group">
+            <label for="startDate">Start (business date)</label>
+            <input type="date" id="startDate" />
+          </div>
+          <div class="form-group">
+            <label for="endDate">End (business date)</label>
+            <input type="date" id="endDate" />
+          </div>
+          <div class="form-group">
+            <label for="storeSelect">Store</label>
+            <select id="storeSelect"><option value="">All stores (slower)</option></select>
+          </div>
+          <div class="form-group">
+            <label for="itemName">Item name contains</label>
+            <input type="text" id="itemName" value="Spirit Night" style="min-width:160px;" />
+          </div>
+          <button class="btn-primary" id="runBtn" onclick="runReport()">Run Report</button>
+          <button class="btn-secondary" id="csvBtn" onclick="downloadCsv()" disabled>Download CSV</button>
+        </div>
+        <p style="margin:0.25rem 0 0 0;font-size:0.8rem;color:#6B7280;">
+          A check qualifies if any item (or modifier) name contains the text above. The whole check is credited — net, tax, and total. Times are the check's opened time (UTC).
+        </p>
+        <div id="statusMsg" class="status-msg"></div>
+      </div>
+
+      <div class="card" style="margin-top:1rem;">
+        <h2>Results <span id="resultsMeta" style="font-weight:400;font-size:0.85rem;color:#6B7280;"></span></h2>
+        <div id="grandWrap" style="margin-bottom:0.5rem;"></div>
+        <div id="resultsWrap" class="report-table-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="shared-nav.js"></script>
+  <script>
+    const API_BASE = '';
+    let lastData = null;
+
+    function getAuthHeaders() {
+      const token = localStorage.getItem('auth_token');
+      return token ? { 'Authorization': 'Bearer ' + token } : {};
+    }
+
+    (function initDates() {
+      const now = new Date();
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      document.getElementById('startDate').value = first.toISOString().split('T')[0];
+      document.getElementById('endDate').value = now.toISOString().split('T')[0];
+    })();
+
+    async function loadStores() {
+      try {
+        const res = await fetch(API_BASE + '/locations', { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const locs = await res.json();
+        locs.sort((a, b) => String(a.externalId || '').localeCompare(String(b.externalId || ''), undefined, { numeric: true }));
+        const sel = document.getElementById('storeSelect');
+        for (const l of locs) {
+          const id = l.externalId || l.restaurantGuid;
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = (l.externalId ? l.externalId + ' – ' : '') + (l.restaurantName || id);
+          sel.appendChild(opt);
+        }
+      } catch (e) { /* store list optional — "All stores" still works */ }
+    }
+    loadStores();
+
+    function showStatus(msg, type) {
+      const el = document.getElementById('statusMsg');
+      el.className = 'status-msg ' + type;
+      el.textContent = msg;
+    }
+    function clearStatus() { document.getElementById('statusMsg').className = 'status-msg'; }
+
+    function fmt$(v) {
+      if (v == null) return '$0.00';
+      return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtInt(v) { return v == null ? '0' : Number(v).toLocaleString('en-US'); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+    function fmtTime(iso) {
+      if (!iso) return '';
+      const m = String(iso).match(/T(\d{2}:\d{2})/);
+      return m ? m[1] : '';
+    }
+
+    async function runReport() {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      const itemName = document.getElementById('itemName').value.trim();
+      if (!start || !end) { showStatus('Pick a start and end date.', 'error'); return; }
+      if (start > end) { showStatus('Start date must be on or before end date.', 'error'); return; }
+      if (!itemName) { showStatus('Enter an item name to match.', 'error'); return; }
+
+      const btn = document.getElementById('runBtn');
+      btn.disabled = true; btn.textContent = 'Loading...';
+      document.getElementById('csvBtn').disabled = true;
+      document.getElementById('resultsWrap').innerHTML = '';
+      document.getElementById('grandWrap').innerHTML = '';
+      document.getElementById('resultsMeta').textContent = '';
+
+      const store = document.getElementById('storeSelect').value;
+      showStatus(store
+        ? 'Pulling "' + itemName + '" checks for store ' + store + '…'
+        : 'Pulling "' + itemName + '" checks across ALL stores — this can take a while for a wide range.', 'info');
+
+      try {
+        const payload = { start_date: start, end_date: end, item_name: itemName };
+        if (store) payload.locations = [store];
+        const resp = await fetch(API_BASE + '/api/spirit-night', {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          let detail = resp.status + ' ' + resp.statusText;
+          try { detail = JSON.parse(text).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        lastData = JSON.parse(text);
+        renderReport(lastData);
+        document.getElementById('csvBtn').disabled = !(lastData.stores && lastData.stores.length);
+        clearStatus();
+      } catch (e) {
+        showStatus('Error: ' + e.message, 'error');
+        lastData = null;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Run Report';
+      }
+    }
+
+    function renderReport(data) {
+      const stores = data.stores || [];
+      document.getElementById('resultsMeta').textContent =
+        `${stores.length} store(s) · ${data.checkCount || 0} check(s) | ${data.start} → ${data.end} | generated ${data.generatedAt || ''}`;
+
+      document.getElementById('grandWrap').innerHTML =
+        `<span class="grand">${fmt$(data.grandTotal)}</span> ` +
+        `<span class="grand-sub">total across ${data.checkCount || 0} "${esc(data.itemName || 'Spirit Night')}" check(s)` +
+        ` &nbsp;·&nbsp; ${fmt$(data.grandNet)} net &nbsp;·&nbsp; ${fmt$(data.grandTax)} tax</span>`;
+
+      if (!stores.length) {
+        document.getElementById('resultsWrap').innerHTML =
+          '<p style="color:#6B7280;">No matching checks found in this range.</p>';
+        return;
+      }
+
+      let html = `<table class="report"><thead><tr>
+        <th class="left">Store</th><th class="left">Date</th><th class="left">Time</th>
+        <th class="left">Order #</th><th class="left">Check #</th><th class="left">Item</th><th>Qty</th>
+        <th>Guests</th><th>Net</th><th>Tax</th><th>Total</th>
+      </tr></thead><tbody>`;
+
+      for (const s of stores) {
+        const label = s.storeId ? `${s.storeId} – ${s.storeName}` : s.storeName;
+        html += `<tr class="store-total"><td class="left">${esc(label)}</td>`
+          + `<td class="left" colspan="7">${s.count} check(s)</td>`
+          + `<td>${fmt$(s.netTotal)}</td><td>${fmt$(s.taxTotal)}</td><td>${fmt$(s.totalTotal)}</td></tr>`;
+        for (const r of (s.rows || [])) {
+          html += `<tr class="detail">
+            <td></td>
+            <td class="left">${esc(r.businessDate)}</td>
+            <td class="left">${esc(fmtTime(r.time))}</td>
+            <td class="left">${esc(r.orderNumber)}</td>
+            <td class="left">${esc(r.checkNumber)}</td>
+            <td class="left">${esc(r.itemName)}</td>
+            <td>${fmtInt(r.quantity)}</td>
+            <td>${fmtInt(r.guestCount)}</td>
+            <td>${fmt$(r.net)}</td>
+            <td>${fmt$(r.tax)}</td>
+            <td>${fmt$(r.total)}</td></tr>`;
+        }
+      }
+      html += '</tbody></table>';
+      document.getElementById('resultsWrap').innerHTML = html;
+    }
+
+    function downloadCsv() {
+      if (!lastData || !lastData.stores || !lastData.stores.length) return;
+      const rows = lastData.stores.flatMap(s => {
+        const label = s.storeId ? s.storeId + ' - ' + s.storeName : s.storeName;
+        return (s.rows || []).map(r => ({ ...r, _store: label }));
+      });
+      const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const header = ['Store', 'Date', 'Time (UTC)', 'Order #', 'Check #', 'Item', 'Qty', 'Guests', 'Net', 'Tax', 'Total'];
+      const lines = [header.map(q).join(',')];
+      for (const r of rows) {
+        lines.push([q(r._store), q(r.businessDate), q(fmtTime(r.time)), q(r.orderNumber), q(r.checkNumber),
+          q(r.itemName), Number(r.quantity || 0), Number(r.guestCount || 0),
+          Number(r.net || 0).toFixed(2), Number(r.tax || 0).toFixed(2), Number(r.total || 0).toFixed(2)].join(','));
+      }
+      lines.push([q('TOTAL'), '', '', '', '', '', '', '',
+        Number(lastData.grandNet || 0).toFixed(2), Number(lastData.grandTax || 0).toFixed(2),
+        Number(lastData.grandTotal || 0).toFixed(2)].join(','));
+
+      const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `spirit_night_${lastData.start}_to_${lastData.end}.csv`;
+      a.click();
+    }
+  </script>
+</body>
+</html>

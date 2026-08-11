@@ -46,6 +46,7 @@
         { key: 'food-cost',        label: 'Food Cost (COGS)', href: '/food-cost.html' },
         { key: 'tax-exempt-sc',    label: 'Tax-Exempt Svc Chg', href: '/tax-exempt-service-charges.html' },
         { key: 'deferred-items',   label: 'Deferred Items',     href: '/deferred-items.html' },
+        { key: 'spirit-night',     label: 'Spirit Night',       href: '/spirit-night.html' },
       ],
     },
     {
@@ -92,6 +93,7 @@
     if (path.endsWith('/loyalty.html'))               return 'loyalty';
     if (path.endsWith('/food-cost.html'))             return 'food-cost';
     if (path.endsWith('/cashier-vs-kiosk.html'))     return 'cashier-vs-kiosk';
+    if (path.endsWith('/spirit-night.html'))          return 'spirit-night';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';

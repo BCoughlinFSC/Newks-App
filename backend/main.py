@@ -1673,6 +1673,7 @@ AVAILABLE_PAGES = {
     "tip_pool":          "Payroll Report",
     "cashier-vs-kiosk":  "Cashier vs Kiosk",
     "food-cost":         "Food Cost (COGS)",
+    "spirit-night":      "Spirit Night",
     # Catering & Loyalty
     "catering":          "Catering Reports",
     "loyalty":           "Loyalty Reports",
@@ -19388,6 +19389,162 @@ def _collect_deferred_selections(selections, out):
         if sel.get("deferred"):
             out.append(sel)
         _collect_deferred_selections(sel.get("modifiers"), out)
+
+
+def _selection_name(sel):
+    """Best-effort display name for a Toast selection."""
+    return (sel.get("displayName")
+            or (sel.get("item") or {}).get("name")
+            or "")
+
+
+def _collect_named_selections(selections, needle, out):
+    """Recurse selections + their modifiers; collect non-voided ones whose
+    name contains `needle` (already lower-cased)."""
+    for sel in (selections or []):
+        if not isinstance(sel, dict) or sel.get("voided"):
+            continue
+        if needle in _selection_name(sel).lower():
+            out.append(sel)
+        _collect_named_selections(sel.get("modifiers"), needle, out)
+
+
+# ------------------------------------------------------------------
+# Spirit Night (recreates the "Spirit Night - Toast" SSRS report)
+# ------------------------------------------------------------------
+# Newk's runs "Spirit Night" fundraisers: an org's supporters order, and a
+# menu item literally named "Spirit Night" is rung on their check to flag it.
+# The org is credited with the ENTIRE check, so this lists one row per check
+# that carries the item, with the check's net / tax / total. Self-contained:
+# Toast Orders API + SQLite cache, no SQL Server.
+
+
+@app.post("/api/spirit-night")
+async def spirit_night(body: dict = Body(...)):
+    """
+    Checks carrying a "Spirit Night" item, across all stores, for a
+    business-date range. Body: {"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD",
+    "locations":[optional store #s/guids/names], "item_name":[optional, default
+    "Spirit Night"]}.
+
+    One row per qualifying check. The grand total is the sum of those check
+    totals -- the figure handed to the organization.
+    """
+    body = body or {}
+    start_s = body.get("start_date")
+    end_s = body.get("end_date")
+    loc_filter = body.get("locations") or None
+    needle = str(body.get("item_name") or "Spirit Night").strip().lower()
+    if not needle:
+        raise HTTPException(status_code=400, detail="item_name cannot be blank")
+    if not start_s or not end_s:
+        raise HTTPException(status_code=400, detail="start_date and end_date are required (YYYY-MM-DD)")
+    try:
+        start_d = date.fromisoformat(str(start_s))
+        end_d = date.fromisoformat(str(end_s))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if start_d > end_d:
+        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+
+    def _s(v):
+        return "" if v is None else str(v)
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        locations = await get_all_active_locations(client)
+        guid_to_name = {loc.restaurantGuid: loc.restaurantName for loc in locations}
+        guid_to_ext = {loc.restaurantGuid: (loc.externalId or "") for loc in locations}
+        guids = _ensure_all_mapped_guids([loc.restaurantGuid for loc in locations])
+        if loc_filter:
+            fs = {str(x) for x in loc_filter}
+            guids = [g for g in guids
+                     if g in fs or guid_to_ext.get(g, "") in fs or guid_to_name.get(g, "") in fs]
+
+        stores_out = []
+        grand_net = 0.0
+        grand_tax = 0.0
+        grand_total = 0.0
+        grand_count = 0
+
+        for guid in guids:
+            rows = []
+            s_net = 0.0
+            s_tax = 0.0
+            s_total = 0.0
+            d = start_d
+            while d <= end_d:
+                bd = to_business_date(d)
+                try:
+                    orders = await _fetch_orders_for_restaurant_day(client, guid, bd)
+                except HTTPException as exc:
+                    logger.warning("spirit-night: orders fetch failed %s|%s: %s", guid[:8], bd, exc.detail)
+                    orders = []
+                bd_iso = d.isoformat()
+                for order in orders:
+                    if order.get("voided"):
+                        continue
+                    order_num = _s(order.get("displayNumber"))
+                    for check in order.get("checks", []):
+                        if check.get("voided") or check.get("deleted"):
+                            continue
+                        matches = []
+                        _collect_named_selections(check.get("selections"), needle, matches)
+                        if not matches:
+                            continue
+                        # Which item(s) matched, and how many, for reference.
+                        item_names = sorted({_selection_name(m) or "(unnamed)" for m in matches})
+                        item_qty = sum(float(m.get("quantity") or 0) for m in matches)
+                        net = float(check.get("amount") or 0)
+                        tax = float(check.get("taxAmount") or 0)
+                        total = float(check.get("totalAmount") or 0)
+                        opened = check.get("openedDate") or order.get("openedDate")
+                        rows.append({
+                            "businessDate": bd_iso,
+                            "time": opened,
+                            "orderNumber": order_num,
+                            "checkNumber": _s(check.get("displayNumber")),
+                            "itemName": ", ".join(item_names),
+                            "quantity": item_qty,
+                            "guestCount": check.get("numberOfGuests") or 0,
+                            "net": round(net, 2),
+                            "tax": round(tax, 2),
+                            "total": round(total, 2),
+                        })
+                        s_net += net
+                        s_tax += tax
+                        s_total += total
+                d += timedelta(days=1)
+                if d <= end_d:
+                    await asyncio.sleep(0.05)
+            if rows:
+                rows.sort(key=lambda r: (r["businessDate"], r["time"] or "", r["orderNumber"]))
+                stores_out.append({
+                    "storeId": guid_to_ext.get(guid, ""),
+                    "storeName": guid_to_name.get(guid, guid[:8]),
+                    "netTotal": round(s_net, 2),
+                    "taxTotal": round(s_tax, 2),
+                    "totalTotal": round(s_total, 2),
+                    "count": len(rows),
+                    "rows": rows,
+                })
+                grand_net += s_net
+                grand_tax += s_tax
+                grand_total += s_total
+                grand_count += len(rows)
+
+    stores_out.sort(key=lambda s: (s["storeId"] or "", s["storeName"]))
+    return {
+        "start": start_d.isoformat(),
+        "end": end_d.isoformat(),
+        "itemName": body.get("item_name") or "Spirit Night",
+        "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime()),
+        "grandNet": round(grand_net, 2),
+        "grandTax": round(grand_tax, 2),
+        "grandTotal": round(grand_total, 2),
+        "checkCount": grand_count,
+        "storeCount": len(stores_out),
+        "stores": stores_out,
+    }
 
 
 @app.post("/api/deferred-items")
