@@ -64,6 +64,7 @@ from email_service import (
     send_invite_email,
     send_password_reset_email,
     send_onboarding_invite_email,
+    send_plain_email,
 )
 import toast_puller_db as repoll_db
 import precompute_cache
@@ -20364,9 +20365,6 @@ async def monkey_lock_the_day_notify(payload: dict = Body(...)):
     Only sends for blockers with "Not Posted" in their issue.
     Groups orders by store so each store gets one email.
     """
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
     from collections import defaultdict
 
     biz_date = payload.get("date", "")
@@ -20377,12 +20375,7 @@ async def monkey_lock_the_day_notify(payload: dict = Body(...)):
     if not unposted:
         return {"sent": 0, "message": "No unposted orders to notify about."}
 
-    gmail_user = os.getenv("GMAIL_ADDRESS")
-    gmail_pass = os.getenv("GMAIL_APP_PASSWORD")
     cc_addresses = ["lpearson@newks.com", "itdepartment@newks.com"]
-
-    if not gmail_user or not gmail_pass:
-        raise HTTPException(status_code=500, detail="GMAIL_ADDRESS / GMAIL_APP_PASSWORD not configured in .env")
 
     # Group orders by store
     by_store: dict = defaultdict(list)
@@ -20404,58 +20397,48 @@ async def monkey_lock_the_day_notify(payload: dict = Body(...)):
     sent = 0
     errors = []
 
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(gmail_user, gmail_pass)
+    for store_name, orders in by_store.items():
+        to_addrs = list(store_emails.get(store_name, set()))
+        if not to_addrs:
+            errors.append(f"No email on file for {store_name}")
+            continue
 
-        for store_name, orders in by_store.items():
-            to_addrs = list(store_emails.get(store_name, set()))
-            if not to_addrs:
-                errors.append(f"No email on file for {store_name}")
-                continue
+        # Build order list for the email body
+        order_lines = "\n".join(
+            f"  - Order {o['orderId']}"
+            + (f" ({o['clientName']})" if o.get("clientName") else "")
+            + (f" — ${o['total']:,.2f}" if o.get("total") else "")
+            for o in orders
+        )
 
-            # Build order list for the email body
-            order_lines = "\n".join(
-                f"  - Order {o['orderId']}"
-                + (f" ({o['clientName']})" if o.get("clientName") else "")
-                + (f" — ${o['total']:,.2f}" if o.get("total") else "")
-                for o in orders
-            )
+        body = (
+            f"Good Morning Team,\n\n"
+            f"As part of our daily review, we noticed the following unposted "
+            f"{'order' if len(orders) == 1 else 'orders'} in Monkey Media "
+            f"from {biz_date} that still {'needs' if len(orders) == 1 else 'need'} attention.\n\n"
+            f"{order_lines}\n\n"
+            f"When you have a moment, please post "
+            f"{'this order' if len(orders) == 1 else 'these orders'}. "
+            f"Posting orders promptly helps ensure sales are accurately reflected "
+            f"and prevents delays with reporting and credit card batching "
+            f"in Monkey Media.\n\n"
+            f"If you have any questions or run into any issues, please let us "
+            f"know — we're happy to help."
+        )
 
-            body = (
-                f"Good Morning Team,\n\n"
-                f"As part of our daily review, we noticed the following unposted "
-                f"{'order' if len(orders) == 1 else 'orders'} in Monkey Media "
-                f"from {biz_date} that still {'needs' if len(orders) == 1 else 'need'} attention.\n\n"
-                f"{order_lines}\n\n"
-                f"When you have a moment, please post "
-                f"{'this order' if len(orders) == 1 else 'these orders'}. "
-                f"Posting orders promptly helps ensure sales are accurately reflected "
-                f"and prevents delays with reporting and credit card batching "
-                f"in Monkey Media.\n\n"
-                f"If you have any questions or run into any issues, please let us "
-                f"know — we're happy to help."
-            )
+        subject = (
+            f"Monkey Media — Unposted Order{'s' if len(orders) > 1 else ''} "
+            f"for {store_name} ({biz_date})"
+        )
 
-            msg = MIMEMultipart()
-            send_as = os.getenv("GMAIL_SEND_AS", gmail_user)
-            msg["From"] = send_as
-            msg["To"] = ", ".join(to_addrs)
-            msg["Cc"] = ", ".join(cc_addresses)
-            msg["Subject"] = f"Monkey Media — Unposted Order{'s' if len(orders) > 1 else ''} for {store_name} ({biz_date})"
-            msg.attach(MIMEText(body, "plain"))
-
-            all_recipients = to_addrs + cc_addresses
-            server.sendmail(gmail_user, all_recipients, msg.as_string())
+        # Routes through the env-driven transport (O365 587 auth on Cloudways),
+        # same path as invites / password resets — no more hardcoded Gmail.
+        if send_plain_email(to_addrs, subject, body, cc=cc_addresses):
             sent += 1
             logger.info("Sent unposted-order reminder to %s for %s (%d orders)",
                         to_addrs, store_name, len(orders))
-
-        server.quit()
-    except Exception as exc:
-        logger.error("SMTP error sending lock-the-day reminders: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Email send failed: {exc}")
+        else:
+            errors.append(f"Email send failed for {store_name}")
 
     return {"sent": sent, "errors": errors}
 

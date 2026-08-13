@@ -75,6 +75,34 @@ def _send(msg: MIMEMultipart, recipients) -> bool:
         return False
 
 
+def send_plain_email(to, subject: str, body: str, cc=None) -> bool:
+    """Send a plain-text email via the configured transport (O365 / relay / Gmail).
+
+    `to` and `cc` may be a str or a list of addresses. The From header is always the
+    configured SMTP_FROM (e.g. reports@newks.com) so authenticated O365 submission is
+    accepted. Returns True on success, False on failure (logged). Never raises.
+    """
+    to_list = [to] if isinstance(to, str) else [a for a in to if a]
+    cc_list = [] if not cc else ([cc] if isinstance(cc, str) else [a for a in cc if a])
+    if not to_list:
+        logger.error("send_plain_email: no recipients")
+        return False
+    if not SMTP_HOST:
+        logger.error("SMTP not configured — cannot send email")
+        return False
+
+    msg = MIMEMultipart()
+    msg["From"] = FROM_HEADER
+    msg["To"] = ", ".join(to_list)
+    if cc_list:
+        msg["Cc"] = ", ".join(cc_list)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    # Envelope recipients include Cc so they actually receive it.
+    return _send(msg, to_list + cc_list)
+
+
 def send_invite_email(to_email: str, user_name: str, invite_url: str) -> bool:
     """Send an account setup invitation email.
 
