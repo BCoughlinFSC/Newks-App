@@ -7140,10 +7140,13 @@ async def nightly_flash_import_job():
 #   misfire_grace_time: if the app is down at 6 AM (e.g. a deploy), still run the
 #     import when it comes back within 6 h instead of skipping the day.
 #   coalesce: collapse multiple missed fires into one run.
-_scheduler.add_job(nightly_flash_import_job,
-                   CronTrigger(hour=6, minute=0, timezone="America/Chicago"),
-                   id="nightly_flash_import", replace_existing=True,
-                   misfire_grace_time=6 * 3600, coalesce=True)
+# DISABLED pending SSRS rebuild — the Daily Sales Flash page was removed from the
+# nav as a failed/unused recreation; its nightly import is turned off so it stops
+# consuming resources. Re-enable by uncommenting if the app-side Flash is revived.
+# _scheduler.add_job(nightly_flash_import_job,
+#                    CronTrigger(hour=6, minute=0, timezone="America/Chicago"),
+#                    id="nightly_flash_import", replace_existing=True,
+#                    misfire_grace_time=6 * 3600, coalesce=True)
 
 
 # ------------------
@@ -17443,6 +17446,28 @@ async def run_daily_flash_report(payload: dict = Body(...)):
         restaurant_ids = [rid for rid in restaurant_ids if guid_to_loc.get(rid) in loc_set]
 
     store_info = aloha_sales_db.get_store_info()
+
+    # Backfill store identity from store_ownership.json (repo-owned, authoritative
+    # for name/company/ownership) for any store the externally-built store_info
+    # table is missing. This is how Toast-only virtual sites / ghost kitchens
+    # (e.g. Rockwall 5002 "Rockwall, TX (Virtual Site)", Newco Dining) get a name
+    # and land in the Company grouping — they never existed in the Aloha store
+    # master that seeds store_info, so without this they either vanished entirely
+    # (no zero-row because the fallback requires presence in store_info) or
+    # rendered as a blank-named row mis-counted as Franchise. Comping is left 'N'
+    # here and corrected by the contacts overlay below.
+    _ownership = _load_store_ownership()
+    for _oid, _o in _ownership.items():
+        if _oid not in store_info:
+            store_info[_oid] = {
+                "restaurant_name": _o.get("restaurantName", "") or _oid,
+                "company": _o.get("companyName", ""),
+                "comping": "N",
+                "comping_date": None,
+                "open_date": None,
+            }
+            logger.info("Flash: backfilled store_info for %s (%s) from store_ownership.json",
+                        _oid, store_info[_oid]["restaurant_name"])
 
     # Single source of truth for the comp set: overlay the master
     # contacts.dbo.Store.StoreIsComping flag onto store_info so the report's

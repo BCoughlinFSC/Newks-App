@@ -20,18 +20,19 @@
       label: 'Sales & Performance',
       links: [
         { key: 'sales_summary',   label: 'Sales Summary',                  href: '/legacy.html?report=sales_summary' },
-        { key: 'metrics',         label: 'Net Sales',                      href: '/legacy.html?report=metrics' },
-        { key: 'netsales_weekly', label: 'Net Sales by Location – Weekly', href: '/legacy.html?report=metrics&preset=netsales_weekly' },
-        { key: 'royalty',         label: 'Royalty Report',                 href: '/legacy.html?report=royalty' },
-        { key: 'daily-flash',     label: 'Daily Sales Flash',              href: '/daily-flash.html' },
-        { key: 'wpy',             label: 'Weekly Sales (WPY)',             href: '/wpy.html' },
+        // ─── Hidden pending SSRS rebuild (failed/unused recreations) ───
+        // { key: 'metrics',         label: 'Net Sales',                      href: '/legacy.html?report=metrics' },
+        // { key: 'netsales_weekly', label: 'Net Sales by Location – Weekly', href: '/legacy.html?report=metrics&preset=netsales_weekly' },
+        // { key: 'royalty',         label: 'Royalty Report',                 href: '/legacy.html?report=royalty' },
+        // { key: 'daily-flash',     label: 'Daily Sales Flash',              href: '/daily-flash.html' },
+        // { key: 'wpy',             label: 'Weekly Sales (WPY)',             href: '/wpy.html' },
       ],
     },
     {
       label: 'Menu & Items',
       links: [
         { key: 'menu',          label: 'Menu Performance', href: '/legacy.html?report=menu' },
-        { key: 'menu-mix',      label: 'Menu Mix Report',  href: '/menu-mix-report.html' },
+        // { key: 'menu-mix',      label: 'Menu Mix Report',  href: '/menu-mix-report.html' },  // Hidden pending SSRS rebuild
         { key: 'pick3',         label: 'Pick 3',           href: '/pick3.html' },
         { key: 'pick2',         label: 'Pick 2',           href: '/pick2.html' },
         { key: 'full-pairings', label: 'Full Pairings',    href: '/full-pairings.html' },
@@ -40,10 +41,10 @@
     {
       label: 'Operations & Labor',
       links: [
-        { key: 'guest_count',      label: 'Guest Count',      href: '/legacy.html?report=guest_count' },
+        // { key: 'guest_count',      label: 'Guest Count',      href: '/legacy.html?report=guest_count' },  // Hidden pending SSRS rebuild
         { key: 'tip_pool',         label: 'Payroll Report',   href: '/legacy.html?report=tip_pool' },
-        { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },
-        { key: 'food-cost',        label: 'Food Cost (COGS)', href: '/food-cost.html' },
+        // { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },  // Hidden pending SSRS rebuild
+        // { key: 'food-cost',        label: 'Food Cost (COGS)', href: '/food-cost.html' },  // Hidden pending SSRS rebuild
         { key: 'tax-exempt-sc',    label: 'Tax-Exempt Svc Chg', href: '/tax-exempt-service-charges.html' },
         { key: 'deferred-items',   label: 'Deferred Items',     href: '/deferred-items.html' },
         { key: 'spirit-night',     label: 'Spirit Night',       href: '/spirit-night.html' },
@@ -151,9 +152,8 @@
       `;
     }).join('');
 
-    // Guide link
-    const guideActive = activePage === 'guide' ? ' active' : '';
-    const guideHtml = `<a href="/toast-reporting-guide.html" class="snav-link${guideActive}" data-key="guide">Toast Reporting Guide</a>`;
+    // Guide link — hidden pending SSRS rebuild (toast-reporting-guide.html not present)
+    const guideHtml = '';
 
     // Projects board — shared team ticket board. Visible to every logged-in
     // user (not permission-gated), like the Guide link.
