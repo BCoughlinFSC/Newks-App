@@ -20359,8 +20359,17 @@ def _areadir_by_store_number() -> dict:
     try:
         conn = contacts_db.get_connection()
         try:
+            # Compose the director name the same way the Contacts UI does:
+            # explicit AreaDirName, else "FirstName LastName". AreaDirName is
+            # often NULL (names live in the first/last columns), which is why a
+            # plain a.AreaDirName select came back empty → everything Unassigned.
             rows = conn.execute("""
-                SELECT s.StoreID, a.AreaDirName
+                SELECT s.StoreID,
+                       COALESCE(
+                           NULLIF(TRIM(a.AreaDirName), ''),
+                           NULLIF(TRIM(COALESCE(a.AreaDirFirstName,'') || ' ' ||
+                                       COALESCE(a.AreaDirLastName,'')), '')
+                       ) AS dir_name
                 FROM Store s
                 LEFT JOIN AreaDir a ON s.StoreAreaDirID = a.AreaDirID
                 WHERE s.StoreID IS NOT NULL
