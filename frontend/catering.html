@@ -262,7 +262,10 @@
             </label>
             <button class="btn" id="od-run">Run Report</button>
             <button class="btn btn-secondary" id="od-csv" style="display:none;">Export CSV</button>
+            <button class="btn btn-secondary" id="od-sync" style="margin-left:auto;">Sync from Monkey Media</button>
+            <span id="od-sync-status" style="font-size:0.82rem;color:#666;"></span>
           </div>
+          <p class="help-text" style="margin-top:0;">Counts <strong>confirmed</strong> orders only (matches the Monkey/SSRS report). For today's date, click <em>Sync</em> first so newly entered orders are included.</p>
           <div id="od-status" class="status" style="display:none;"></div>
           <div id="od-stats" class="stat-cards" style="display:none;"></div>
           <div class="report-table-wrap">
@@ -1102,6 +1105,47 @@
     }
     document.getElementById('od-run').addEventListener('click', loadOrdersDue);
     document.getElementById('od-csv').addEventListener('click', () => exportCsv(odCols, odRows, 'orders_due_today.csv'));
+
+    // Sync from Monkey Media, then reload the report (fresh same-day data)
+    document.getElementById('od-sync').addEventListener('click', async () => {
+      const btn = document.getElementById('od-sync');
+      const statusEl = document.getElementById('od-sync-status');
+      btn.disabled = true;
+      statusEl.textContent = 'Syncing...'; statusEl.style.color = '#92400E';
+      try {
+        const res = await fetch(API + '/api/monkey/sync', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ days: 3 }),
+        });
+        if (!res.ok) throw new Error('Sync request failed');
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          try {
+            const sr = await fetch(API + '/api/monkey/sync/status', { headers: authHeaders() });
+            const st = await sr.json();
+            if (st.status === 'success') {
+              clearInterval(poll);
+              statusEl.textContent = 'Synced ' + (st.rows || 0) + ' rows in ' + (st.elapsed || 0) + 's';
+              statusEl.style.color = '#065F46';
+              btn.disabled = false;
+              loadOrdersDue();
+            } else if (st.status === 'failed') {
+              clearInterval(poll);
+              statusEl.textContent = 'Sync failed: ' + (st.error || 'unknown');
+              statusEl.style.color = '#991B1B'; btn.disabled = false;
+            } else if (attempts > 60) {
+              clearInterval(poll);
+              statusEl.textContent = 'Sync timed out — check server logs';
+              statusEl.style.color = '#991B1B'; btn.disabled = false;
+            }
+          } catch (e) { /* keep polling */ }
+        }, 3000);
+      } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#991B1B'; btn.disabled = false;
+      }
+    });
+
     loadOrdersDue();  // auto-load on page open (Orders Due is the default tab)
 
     // ════════════════════════════════════════════════════
