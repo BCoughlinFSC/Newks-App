@@ -584,25 +584,35 @@ def rpt_refunds_by_user(
     db_path: str = MONKEY_DB_PATH,
 ) -> List[Dict]:
     """
-    Replaces: sp_rpt_Monkey_Refunds_by_User
-    Refunds by who issued them.
+    Replaces: sp_rpt_Monkey_Refunds_by_User  (Monkey "Refunds by User" report)
+
+    Columns match the Monkey export exactly:
+      Refunded By, Refund Date, Restaurant Name, Order Number, Customer Name,
+      Refund Notes, Payment Method, Order Total, Refund Total,
+      Refund Sub Total, Refund Tax Amount.
+
+    Refund money split (from the Monkey refunds table):
+      refundSubTotal = r.amount      (pre-tax portion refunded)
+      refundTaxAmount = r.tax_refund (tax portion refunded)
+      refundTotal     = r.total      (= amount + tax_refund)
     """
     initialize_db(db_path)
     conn = get_connection(db_path)
     try:
         sql = """
             SELECT
-                o.store_id,
-                s.store_name,
-                DATE(r.refund_date) AS refund_date,
-                r.refund_by,
-                r.order_id,
-                r.account_name,
-                r.amount,
-                r.tax_refund,
-                r.total,
-                r.method,
-                r.note
+                r.refund_by                     AS refunded_by,
+                DATE(r.refund_date)             AS refund_date,
+                s.store_name                    AS restaurant_name,
+                r.order_id                      AS order_number,
+                o.client_name                   AS customer_name,
+                r.note                          AS refund_notes,
+                r.method                        AS payment_method,
+                o.total                         AS order_total,
+                r.total                         AS refund_total,
+                r.amount                        AS refund_sub_total,
+                r.tax_refund                    AS refund_tax_amount,
+                o.store_id                      AS store_id
             FROM refunds r
             JOIN orders o ON r.order_id = o.order_id
             LEFT JOIN stores s ON o.store_id = s.store_id
@@ -613,18 +623,211 @@ def rpt_refunds_by_user(
             ph = ",".join("?" * len(store_ids))
             sql += f" AND o.store_id IN ({ph})"
             params.extend(store_ids)
-        sql += " ORDER BY o.store_id, r.refund_date, r.refund_by"
+        sql += " ORDER BY r.refund_date, s.store_name, r.refund_by"
 
         rows = conn.execute(sql, params).fetchall()
         return [
-            {"storeId": r[0], "storeName": r[1], "date": r[2],
-             "refundBy": r[3], "orderId": r[4], "accountName": r[5],
-             "amount": round(r[6] or 0, 2), "taxRefund": round(r[7] or 0, 2),
-             "total": round(r[8] or 0, 2), "method": r[9], "note": r[10]}
+            {"refundedBy": r[0], "refundDate": r[1], "restaurantName": r[2],
+             "orderNumber": r[3], "customerName": r[4], "refundNotes": r[5],
+             "paymentMethod": r[6],
+             "orderTotal": round(r[7] or 0, 2),
+             "refundTotal": round(r[8] or 0, 2),
+             "refundSubTotal": round(r[9] or 0, 2),
+             "refundTaxAmount": round(r[10] or 0, 2),
+             "storeId": r[11]}
             for r in rows
         ]
     finally:
         conn.close()
+
+
+def rpt_orders_due_by_store(
+    biz_date: str,
+    store_ids: Optional[List[int]] = None,
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Monkey "Orders Due For Today - Summary by Store".
+
+    One row per store for the given required date: number of live orders and
+    total dollars. The Monkey export labels each store as
+    "<date> - <store#> - <store name>"; we return the pieces plus a composed
+    label so the UI can match that format.
+    """
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        sql = """
+            SELECT
+                o.store_id,
+                s.store_code,
+                COALESCE(s.store_name, o.region_store_name) AS store_name,
+                COUNT(*)                    AS order_count,
+                COALESCE(SUM(o.total), 0)   AS total_dollars
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE DATE(o.date_reqd) = DATE(?)
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+        """
+        params: list = [biz_date]
+        if store_ids:
+            ph = ",".join("?" * len(store_ids))
+            sql += f" AND o.store_id IN ({ph})"
+            params.extend(store_ids)
+        sql += " GROUP BY o.store_id, s.store_code, store_name"
+        sql += " ORDER BY s.store_code, store_name"
+
+        rows = conn.execute(sql, params).fetchall()
+        out = []
+        for r in rows:
+            store_id, store_code, store_name, order_count, total_dollars = r
+            num = (store_code or "").strip() if store_code else ""
+            label_store = f"{num} - {store_name}" if num else (store_name or "")
+            out.append({
+                "storeId": store_id,
+                "storeNumber": num,
+                "storeName": store_name or "",
+                "restaurant": f"{biz_date} - {label_store}",
+                "orderCount": order_count,
+                "totalDollars": round(total_dollars, 2),
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def rpt_period_catering_by_week(
+    start_date: str, end_date: str,
+    areadir_by_store_number: Optional[Dict[int, str]] = None,
+    basis: str = "subtotal",
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Monkey "Period Catering by Week" — current-year vs prior-year catering
+    dollars by week, grouped by Area Director and restaurant.
+
+    * Weeks are Sunday-start (matches the Monkey export week labels).
+    * Prior year = the SAME week 364 days (52 weeks) earlier, so weekdays align.
+    * `basis` selects the dollar column: 'subtotal' (food net, default) or
+      'total' (order total incl. tax/gratuity/fees).
+    * `areadir_by_store_number` maps a store NUMBER (== Monkey stores.store_code)
+      to an Area Director name. Unmatched stores fall under 'Unassigned',
+      mirroring the blank director groups in the export.
+
+    Returns a list of week blocks, most-recent week first:
+        [{ "weekStart": "2026-01-04",
+           "totals": {currentYear, priorYear, netDifference, percentageChange},
+           "rows": [{areaDirName, restaurantName, storeNumber,
+                     currentYear, priorYear, netDifference, percentageChange}, ...] }]
+    """
+    initialize_db(db_path)
+    areadir_by_store_number = areadir_by_store_number or {}
+    money_col = "o.total" if basis == "total" else "o.subtotal"
+
+    conn = get_connection(db_path)
+    try:
+        # store_id -> (store_number, store_name)
+        store_meta: Dict[int, tuple] = {}
+        for sid, code, name in conn.execute(
+            "SELECT store_id, store_code, store_name FROM stores"
+        ).fetchall():
+            store_meta[sid] = (code, name)
+
+        # Sunday of the week for a date:  date(d, '-<weekday> days')  (%w: Sun=0)
+        week_expr = "DATE(o.date_reqd, '-' || strftime('%w', o.date_reqd) || ' days')"
+
+        # Current-year sums by (week_start, store_id)
+        cy_sql = f"""
+            SELECT {week_expr} AS week_start, o.store_id, COALESCE(SUM({money_col}),0)
+            FROM orders o
+            WHERE DATE(o.date_reqd) BETWEEN DATE(?) AND DATE(?)
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+            GROUP BY week_start, o.store_id
+        """
+        cy = {(w, sid): amt for w, sid, amt in conn.execute(cy_sql, [start_date, end_date]).fetchall()}
+
+        # Prior-year sums: pull the window 364 days earlier, then shift each
+        # week_start forward 364 days so it lines up with its CY week.
+        py_week_expr = "DATE(o.date_reqd, '-' || strftime('%w', o.date_reqd) || ' days', '+364 days')"
+        py_sql = f"""
+            SELECT {py_week_expr} AS week_start, o.store_id, COALESCE(SUM({money_col}),0)
+            FROM orders o
+            WHERE DATE(o.date_reqd) BETWEEN DATE(?, '-364 days') AND DATE(?, '-364 days')
+              AND o.deleted = 0
+              AND o.status NOT IN ('Cancelled', 'Void')
+            GROUP BY week_start, o.store_id
+        """
+        py = {(w, sid): amt for w, sid, amt in conn.execute(py_sql, [start_date, end_date]).fetchall()}
+    finally:
+        conn.close()
+
+    # Union of all (week, store) keys that have any CY or PY dollars
+    keys = set(cy) | set(py)
+
+    # week_start -> areadir -> restaurant_name -> {cy, py, storeNumber}
+    from collections import defaultdict
+    weeks: Dict[str, Dict[str, Dict[str, Dict]]] = defaultdict(lambda: defaultdict(dict))
+
+    for (week_start, sid) in keys:
+        code, name = store_meta.get(sid, (None, None))
+        # store number: prefer numeric store_code
+        store_num = None
+        if code is not None:
+            try:
+                store_num = int(str(code).strip())
+            except (ValueError, TypeError):
+                store_num = None
+        areadir = areadir_by_store_number.get(store_num) if store_num is not None else None
+        areadir = areadir or "Unassigned"
+        rname = name or (f"Store {store_num}" if store_num else f"Store {sid}")
+        cell = weeks[week_start][areadir].setdefault(
+            rname, {"cy": 0.0, "py": 0.0, "storeNumber": store_num}
+        )
+        cell["cy"] += cy.get((week_start, sid), 0.0) or 0.0
+        cell["py"] += py.get((week_start, sid), 0.0) or 0.0
+
+    def _pct(cy_v: float, py_v: float) -> float:
+        if py_v and py_v != 0:
+            return round((cy_v - py_v) / py_v * 100, 2)
+        return 0.0
+
+    out = []
+    for week_start in sorted(weeks.keys(), reverse=True):
+        dir_map = weeks[week_start]
+        rows = []
+        wk_cy = wk_py = 0.0
+        # Area directors alphabetical; restaurants within by CY desc (matches export)
+        for areadir in sorted(dir_map.keys(), key=lambda d: (d == "Unassigned", d.lower())):
+            rest_map = dir_map[areadir]
+            for rname, cell in sorted(rest_map.items(), key=lambda kv: kv[1]["cy"], reverse=True):
+                cy_v = round(cell["cy"], 2)
+                py_v = round(cell["py"], 2)
+                wk_cy += cy_v
+                wk_py += py_v
+                rows.append({
+                    "areaDirName": areadir,
+                    "restaurantName": rname,
+                    "storeNumber": cell["storeNumber"],
+                    "currentYear": cy_v,
+                    "priorYear": py_v,
+                    "netDifference": round(cy_v - py_v, 2),
+                    "percentageChange": _pct(cy_v, py_v),
+                })
+        wk_cy = round(wk_cy, 2)
+        wk_py = round(wk_py, 2)
+        out.append({
+            "weekStart": week_start,
+            "totals": {
+                "currentYear": wk_cy,
+                "priorYear": wk_py,
+                "netDifference": round(wk_cy - wk_py, 2),
+                "percentageChange": _pct(wk_cy, wk_py),
+            },
+            "rows": rows,
+        })
+    return out
 
 
 def rpt_catering_over_500(

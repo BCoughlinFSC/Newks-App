@@ -20327,10 +20327,61 @@ async def monkey_discounts_by_user(payload: dict = Body(...)):
 
 @app.post("/api/monkey/reports/refunds-by-user")
 async def monkey_refunds_by_user(payload: dict = Body(...)):
-    """Refunds by who issued them."""
+    """Refunds by who issued them (Monkey 'Refunds by User' layout)."""
     return monkey_db.rpt_refunds_by_user(
         payload["startDate"], payload["endDate"],
         store_ids=payload.get("storeIds"),
+    )
+
+
+@app.post("/api/monkey/reports/orders-due")
+async def monkey_orders_due(payload: dict = Body(...)):
+    """Orders due for a given day, summarized by store."""
+    return monkey_db.rpt_orders_due_by_store(
+        payload.get("date") or payload.get("bizDate"),
+        store_ids=payload.get("storeIds"),
+    )
+
+
+def _areadir_by_store_number() -> dict:
+    """Build {store_number: AreaDirName} from the contacts store master.
+
+    Read-only. Returns {} if the contacts DB is missing/empty so the caller
+    degrades gracefully (all stores land under 'Unassigned').
+    """
+    import contacts_db
+    mapping: dict = {}
+    try:
+        conn = contacts_db.get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT s.StoreID, a.AreaDirName
+                FROM Store s
+                LEFT JOIN AreaDir a ON s.StoreAreaDirID = a.AreaDirID
+                WHERE s.StoreID IS NOT NULL
+            """).fetchall()
+        finally:
+            conn.close()
+        for store_id, dir_name in rows:
+            if store_id is None:
+                continue
+            name = (dir_name or "").strip()
+            if name:
+                mapping[int(store_id)] = name
+    except Exception as exc:
+        logger.warning("Area-director map unavailable: %s", exc)
+    return mapping
+
+
+@app.post("/api/monkey/reports/period-catering-by-week")
+async def monkey_period_catering_by_week(payload: dict = Body(...)):
+    """Weekly catering sales, current year vs prior year, by Area Director."""
+    areadir_map = await asyncio.to_thread(_areadir_by_store_number)
+    return await asyncio.to_thread(
+        monkey_db.rpt_period_catering_by_week,
+        payload["startDate"], payload["endDate"],
+        areadir_map,
+        payload.get("basis", "subtotal"),
     )
 
 

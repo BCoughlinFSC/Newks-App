@@ -243,19 +243,61 @@
       <!-- Tab Navigation -->
       <div class="content-card" style="padding-bottom: 0;">
         <div class="tab-bar" id="tabBar">
-          <button class="tab-btn active" data-tab="sales-channel">Sales by Channel</button>
-          <button class="tab-btn" data-tab="delivery">Delivery Partners</button>
-          <button class="tab-btn" data-tab="handoff">Handoff Mode</button>
-          <button class="tab-btn" data-tab="top-clients">Top Clients</button>
-          <button class="tab-btn" data-tab="discounts">Discounts</button>
-          <button class="tab-btn" data-tab="refunds">Refunds</button>
+          <button class="tab-btn active" data-tab="orders-due">Orders Due Today</button>
+          <button class="tab-btn" data-tab="refunds">Refunds by User</button>
+          <button class="tab-btn" data-tab="period-week">Period Catering by Week</button>
           <button class="tab-btn" data-tab="lock-the-day">Lock the Day</button>
-          <button class="tab-btn" data-tab="alerts">Alerts<span class="badge" id="alertsBadge" style="display:none;">0</span></button>
         </div>
       </div>
 
-      <!-- ============ Sales by Channel ============ -->
-      <div class="tab-panel active" id="panel-sales-channel">
+      <!-- ============ Orders Due Today ============ -->
+      <div class="tab-panel active" id="panel-orders-due">
+        <div class="content-card">
+          <h2>Orders Due For Today — Summary by Store</h2>
+          <p class="help-text">Live catering orders due on the selected date, summarized by store (order count and total dollars).</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Date</span> <input type="date" id="od-date" /></label>
+            <label><span>Store</span>
+              <select id="od-store"><option value="">All Stores</option></select>
+            </label>
+            <button class="btn" id="od-run">Run Report</button>
+            <button class="btn btn-secondary" id="od-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="od-status" class="status" style="display:none;"></div>
+          <div id="od-stats" class="stat-cards" style="display:none;"></div>
+          <div class="report-table-wrap">
+            <table class="report-table" id="od-table" style="display:none;">
+              <thead><tr id="od-thead"></tr></thead>
+              <tbody id="od-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Period Catering by Week ============ -->
+      <div class="tab-panel" id="panel-period-week">
+        <div class="content-card">
+          <h2>Period Catering by Week</h2>
+          <p class="help-text">Weekly catering sales (Sunday&ndash;Saturday), current year vs. prior year (same week 52 weeks back), grouped by Area Director. Dollars shown are order <strong id="pw-basis-label">subtotal</strong>.</p>
+          <div class="date-inputs" style="margin-bottom: 1rem;">
+            <label><span>Start</span> <input type="date" id="pw-start" /></label>
+            <label><span>End</span> <input type="date" id="pw-end" /></label>
+            <label><span>Dollar basis</span>
+              <select id="pw-basis">
+                <option value="subtotal">Subtotal (food net)</option>
+                <option value="total">Order Total (incl. tax/fees)</option>
+              </select>
+            </label>
+            <button class="btn" id="pw-run">Run Report</button>
+            <button class="btn btn-secondary" id="pw-csv" style="display:none;">Export CSV</button>
+          </div>
+          <div id="pw-status" class="status" style="display:none;"></div>
+          <div id="pw-container"></div>
+        </div>
+      </div>
+
+      <!-- ============ Sales by Channel (hidden) ============ -->
+      <div class="tab-panel" id="panel-sales-channel">
         <div class="content-card">
           <h2>Sales by Channel</h2>
           <p class="help-text">Sales breakdown by channel (Online, Store, Voice, CSM, Marketplace) and weekday.</p>
@@ -523,6 +565,15 @@
         if (s) s.value = startVal;
         if (e) e.value = endVal;
       });
+      // Orders Due defaults to today
+      const od = document.getElementById('od-date');
+      if (od) od.value = endVal;
+      // Period Catering by Week defaults to the last ~4 weeks
+      const pwStart = new Date(now); pwStart.setDate(pwStart.getDate() - 28);
+      const pws = document.getElementById('pw-start');
+      const pwe = document.getElementById('pw-end');
+      if (pws) pws.value = pwStart.toISOString().slice(0, 10);
+      if (pwe) pwe.value = endVal;
     }
     setDefaultDates();
 
@@ -547,7 +598,7 @@
         const res = await fetch(API + '/api/monkey/stores', { headers: authHeaders() });
         if (!res.ok) return;
         const stores = await res.json();
-        const selects = document.querySelectorAll('#sc-store, #del-store, #ho-store, #disc-store, #ref-store, #ltd-store');
+        const selects = document.querySelectorAll('#od-store, #sc-store, #del-store, #ho-store, #disc-store, #ref-store, #ltd-store');
         selects.forEach(sel => {
           (stores || []).forEach(s => {
             const opt = document.createElement('option');
@@ -978,21 +1029,30 @@
 
         refRows = Array.isArray(data) ? data : (data.rows || []);
         refCols = [
-          { key: 'userName', label: 'User', type: 'string' },
-          { key: 'reason', label: 'Reason', type: 'string' },
-          { key: 'count', label: 'Count', type: 'num' },
-          { key: 'totalRefund', label: 'Total Refunded', type: 'money' },
-          { key: 'avgRefund', label: 'Avg Refund', type: 'money' },
+          { key: 'refundedBy', label: 'Refunded By', type: 'string' },
+          { key: 'refundDate', label: 'Refund Date', type: 'string' },
+          { key: 'restaurantName', label: 'Restaurant', type: 'string' },
+          { key: 'orderNumber', label: 'Order #', type: 'string' },
+          { key: 'customerName', label: 'Customer', type: 'string' },
+          { key: 'refundNotes', label: 'Refund Notes', type: 'string' },
+          { key: 'paymentMethod', label: 'Payment', type: 'string' },
+          { key: 'orderTotal', label: 'Order Total', type: 'money' },
+          { key: 'refundTotal', label: 'Refund Total', type: 'money' },
+          { key: 'refundSubTotal', label: 'Refund Sub Total', type: 'money' },
+          { key: 'refundTaxAmount', label: 'Refund Tax', type: 'money' },
         ];
 
-        const totals = { userName: 'TOTAL', reason: '', count: 0, totalRefund: 0, avgRefund: 0 };
-        refRows.forEach(r => { totals.count += (r.count || 0); totals.totalRefund += (r.totalRefund || 0); });
-        if (totals.count > 0) totals.avgRefund = totals.totalRefund / totals.count;
+        const totals = { refundedBy: 'TOTAL', refundDate: '', restaurantName: '', orderNumber: '', customerName: '', refundNotes: '', paymentMethod: '', orderTotal: null, refundTotal: 0, refundSubTotal: 0, refundTaxAmount: 0 };
+        refRows.forEach(r => {
+          totals.refundTotal += (r.refundTotal || 0);
+          totals.refundSubTotal += (r.refundSubTotal || 0);
+          totals.refundTaxAmount += (r.refundTaxAmount || 0);
+        });
 
         renderStats('ref-stats', [
-          { value: formatNum(totals.count), label: 'Refunds Issued' },
-          { value: formatMoney(totals.totalRefund), label: 'Total Refunded' },
-          { value: formatMoney(totals.avgRefund), label: 'Avg Refund' },
+          { value: formatNum(refRows.length), label: 'Refunds Issued' },
+          { value: formatMoney(totals.refundTotal), label: 'Total Refunded' },
+          { value: formatMoney(refRows.length ? totals.refundTotal / refRows.length : 0), label: 'Avg Refund' },
         ]);
         renderTable('ref', refCols, refRows, totals);
         document.getElementById('ref-csv').style.display = 'inline-flex';
@@ -1002,6 +1062,131 @@
       } finally { btn.disabled = false; }
     });
     document.getElementById('ref-csv').addEventListener('click', () => exportCsv(refCols, refRows, 'catering_refunds.csv'));
+
+    // ════════════════════════════════════════════════════
+    // ORDERS DUE TODAY
+    // ════════════════════════════════════════════════════
+    let odRows = [], odCols = [];
+    async function loadOrdersDue() {
+      const dateVal = document.getElementById('od-date').value;
+      if (!dateVal) { showStatus('od-status', 'Select a date.', 'error'); return; }
+      const btn = document.getElementById('od-run'); btn.disabled = true;
+      showStatus('od-status', 'Loading orders due...', 'loading');
+      try {
+        const body = { date: dateVal };
+        const sf = storeFilter('od'); if (sf) body.storeIds = sf;
+        const res = await fetch(API + '/api/monkey/reports/orders-due', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+        odRows = Array.isArray(data) ? data : (data.rows || []);
+        odCols = [
+          { key: 'restaurant', label: 'Restaurant', type: 'string' },
+          { key: 'orderCount', label: 'Number Of Orders', type: 'num' },
+          { key: 'totalDollars', label: 'Total Dollars', type: 'money' },
+        ];
+        const totals = { restaurant: 'TOTAL', orderCount: 0, totalDollars: 0 };
+        odRows.forEach(r => { totals.orderCount += (r.orderCount || 0); totals.totalDollars += (r.totalDollars || 0); });
+        renderStats('od-stats', [
+          { value: formatNum(odRows.length), label: 'Stores' },
+          { value: formatNum(totals.orderCount), label: 'Orders Due' },
+          { value: formatMoney(totals.totalDollars), label: 'Total Dollars' },
+        ]);
+        renderTable('od', odCols, odRows, totals);
+        document.getElementById('od-csv').style.display = 'inline-flex';
+        showStatus('od-status', 'Report complete: ' + formatNum(odRows.length) + ' store(s)', 'success');
+      } catch (e) {
+        showStatus('od-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    }
+    document.getElementById('od-run').addEventListener('click', loadOrdersDue);
+    document.getElementById('od-csv').addEventListener('click', () => exportCsv(odCols, odRows, 'orders_due_today.csv'));
+    loadOrdersDue();  // auto-load on page open (Orders Due is the default tab)
+
+    // ════════════════════════════════════════════════════
+    // PERIOD CATERING BY WEEK
+    // ════════════════════════════════════════════════════
+    let pwData = [];
+    const pwBasisSel = document.getElementById('pw-basis');
+    pwBasisSel.addEventListener('change', () => {
+      document.getElementById('pw-basis-label').textContent = pwBasisSel.value === 'total' ? 'total' : 'subtotal';
+    });
+    function pctCell(v) {
+      const n = Number(v || 0);
+      const color = n > 0 ? '#065F46' : (n < 0 ? '#991B1B' : '#666');
+      return '<span style="color:' + color + '">' + n.toFixed(2) + '%</span>';
+    }
+    function renderPeriodWeek(weeks) {
+      const c = document.getElementById('pw-container');
+      if (!weeks.length) { c.innerHTML = '<p style="color:#666;padding:0.5rem 0;">No catering orders found for this range.</p>'; return; }
+      let html = '';
+      weeks.forEach(w => {
+        const t = w.totals || {};
+        html += '<div style="margin-top:1.25rem;">';
+        html += '<h3 style="color:#1E3A5F;margin:0 0 0.5rem 0;">Week of ' + escapeHtml(w.weekStart) + '</h3>';
+        html += '<div class="report-table-wrap"><table class="report-table"><thead><tr>'
+          + '<th>Area Director</th><th>Restaurant</th>'
+          + '<th class="num">Current Year</th><th class="num">Prior Year</th>'
+          + '<th class="num">Net Difference</th><th class="num">% Change</th></tr></thead><tbody>';
+        html += '<tr class="total-row"><td>Totals</td><td></td>'
+          + '<td class="num">' + formatMoney(t.currentYear) + '</td>'
+          + '<td class="num">' + formatMoney(t.priorYear) + '</td>'
+          + '<td class="num">' + formatMoney(t.netDifference) + '</td>'
+          + '<td class="num">' + pctCell(t.percentageChange) + '</td></tr>';
+        let lastDir = null;
+        (w.rows || []).forEach(r => {
+          const dirCell = (r.areaDirName !== lastDir) ? escapeHtml(r.areaDirName) : '';
+          lastDir = r.areaDirName;
+          html += '<tr><td>' + dirCell + '</td>'
+            + '<td>' + escapeHtml(r.restaurantName) + '</td>'
+            + '<td class="num">' + formatMoney(r.currentYear) + '</td>'
+            + '<td class="num">' + formatMoney(r.priorYear) + '</td>'
+            + '<td class="num">' + formatMoney(r.netDifference) + '</td>'
+            + '<td class="num">' + pctCell(r.percentageChange) + '</td></tr>';
+        });
+        html += '</tbody></table></div></div>';
+      });
+      c.innerHTML = html;
+    }
+    async function loadPeriodWeek() {
+      const startDate = document.getElementById('pw-start').value;
+      const endDate = document.getElementById('pw-end').value;
+      if (!startDate || !endDate) { showStatus('pw-status', 'Select both dates.', 'error'); return; }
+      const btn = document.getElementById('pw-run'); btn.disabled = true;
+      showStatus('pw-status', 'Loading weekly catering...', 'loading');
+      try {
+        const body = { startDate, endDate, basis: pwBasisSel.value };
+        const res = await fetch(API + '/api/monkey/reports/period-catering-by-week', {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Report failed');
+        pwData = Array.isArray(data) ? data : (data.weeks || []);
+        renderPeriodWeek(pwData);
+        document.getElementById('pw-csv').style.display = 'inline-flex';
+        const totalRows = pwData.reduce((s, w) => s + (w.rows ? w.rows.length : 0), 0);
+        showStatus('pw-status', 'Report complete: ' + formatNum(pwData.length) + ' week(s), ' + formatNum(totalRows) + ' store rows', 'success');
+      } catch (e) {
+        showStatus('pw-status', 'Error: ' + e.message, 'error');
+      } finally { btn.disabled = false; }
+    }
+    document.getElementById('pw-run').addEventListener('click', loadPeriodWeek);
+    document.getElementById('pw-csv').addEventListener('click', () => {
+      const cols = [
+        { key: 'weekStart', label: 'Week' }, { key: 'areaDirName', label: 'Area Director' },
+        { key: 'restaurantName', label: 'Restaurant' }, { key: 'currentYear', label: 'Current Year' },
+        { key: 'priorYear', label: 'Prior Year' }, { key: 'netDifference', label: 'Net Difference' },
+        { key: 'percentageChange', label: '% Change' }];
+      const flat = [];
+      pwData.forEach(w => {
+        flat.push({ weekStart: w.weekStart, areaDirName: '', restaurantName: 'Totals',
+          currentYear: w.totals.currentYear, priorYear: w.totals.priorYear,
+          netDifference: w.totals.netDifference, percentageChange: w.totals.percentageChange });
+        (w.rows || []).forEach(r => flat.push({ weekStart: w.weekStart, ...r }));
+      });
+      exportCsv(cols, flat, 'period_catering_by_week.csv');
+    });
 
     // ════════════════════════════════════════════════════
     // ALERTS
@@ -1315,22 +1500,6 @@
       }
     });
 
-    // Load alert counts on page load (for badge)
-    (async function loadAlertBadge() {
-      try {
-        const [na, np, uc] = await Promise.all([
-          fetch(API + '/api/monkey/alerts/not-accepted', { headers: authHeaders() }).then(r => r.json().catch(() => ([]))),
-          fetch(API + '/api/monkey/alerts/not-posted', { headers: authHeaders() }).then(r => r.json().catch(() => ([]))),
-          fetch(API + '/api/monkey/alerts/unconfirmed', { headers: authHeaders() }).then(r => r.json().catch(() => ([]))),
-        ]);
-        const total = (na.rows || na || []).length + (np.rows || np || []).length + (uc.rows || uc || []).length;
-        const badge = document.getElementById('alertsBadge');
-        if (total > 0) {
-          badge.textContent = total;
-          badge.style.display = 'inline-flex';
-        }
-      } catch (e) { /* silent */ }
-    })();
   </script>
   <script src="/shared-nav.js"></script>
 </body>
