@@ -281,10 +281,11 @@
       <div class="tab-panel" id="panel-period-week">
         <div class="content-card">
           <h2>Period Catering by Week</h2>
-          <p class="help-text">Weekly catering sales (Sunday&ndash;Saturday), current year vs. prior year (same week 52 weeks back), grouped by Area Director. Dollars shown are order <strong id="pw-basis-label">subtotal</strong>.</p>
+          <p class="help-text">Weekly catering sales (Sunday&ndash;Saturday) for a fiscal year, current year vs. prior year (fiscal prior-year week), grouped by Area Director. Dollars shown are order <strong id="pw-basis-label">subtotal</strong>.</p>
           <div class="date-inputs" style="margin-bottom: 1rem;">
-            <label><span>Start</span> <input type="date" id="pw-start" /></label>
-            <label><span>End</span> <input type="date" id="pw-end" /></label>
+            <label><span>Fiscal Year</span>
+              <select id="pw-fy"><option value="">Loading&hellip;</option></select>
+            </label>
             <label><span>Dollar basis</span>
               <select id="pw-basis">
                 <option value="subtotal">Subtotal (food net)</option>
@@ -1193,14 +1194,32 @@
       });
       c.innerHTML = html;
     }
-    async function loadPeriodWeek() {
-      const startDate = document.getElementById('pw-start').value;
-      const endDate = document.getElementById('pw-end').value;
-      if (!startDate || !endDate) { showStatus('pw-status', 'Select both dates.', 'error'); return; }
-      const btn = document.getElementById('pw-run'); btn.disabled = true;
-      showStatus('pw-status', 'Loading weekly catering...', 'loading');
+    // Populate the fiscal-year dropdown from the fiscal_calendar
+    async function loadFiscalYears() {
+      const sel = document.getElementById('pw-fy');
       try {
-        const body = { startDate, endDate, basis: pwBasisSel.value };
+        const res = await fetch(API + '/api/monkey/fiscal-years', { headers: authHeaders() });
+        const years = await res.json().catch(() => []);
+        if (!Array.isArray(years) || years.length === 0) {
+          sel.innerHTML = '<option value="">No fiscal calendar loaded</option>';
+          return;
+        }
+        sel.innerHTML = years.map((y, i) =>
+          '<option value="' + y.fiscalYear + '"' + (i === 0 ? ' selected' : '') + '>FY' + y.fiscalYear + '</option>'
+        ).join('');
+      } catch (e) {
+        sel.innerHTML = '<option value="">Could not load fiscal years</option>';
+      }
+    }
+    loadFiscalYears();
+
+    async function loadPeriodWeek() {
+      const fy = document.getElementById('pw-fy').value;
+      if (!fy) { showStatus('pw-status', 'Select a fiscal year.', 'error'); return; }
+      const btn = document.getElementById('pw-run'); btn.disabled = true;
+      showStatus('pw-status', 'Loading weekly catering for FY' + fy + '...', 'loading');
+      try {
+        const body = { fiscalYear: Number(fy), basis: pwBasisSel.value };
         const res = await fetch(API + '/api/monkey/reports/period-catering-by-week', {
           method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
         });
@@ -1210,7 +1229,7 @@
         renderPeriodWeek(pwData);
         document.getElementById('pw-csv').style.display = 'inline-flex';
         const totalRows = pwData.reduce((s, w) => s + (w.rows ? w.rows.length : 0), 0);
-        showStatus('pw-status', 'Report complete: ' + formatNum(pwData.length) + ' week(s), ' + formatNum(totalRows) + ' store rows', 'success');
+        showStatus('pw-status', 'FY' + fy + ': ' + formatNum(pwData.length) + ' week(s), ' + formatNum(totalRows) + ' store rows', 'success');
       } catch (e) {
         showStatus('pw-status', 'Error: ' + e.message, 'error');
       } finally { btn.disabled = false; }

@@ -20378,15 +20378,77 @@ def _areadir_by_store_number() -> dict:
     return mapping
 
 
+def _fiscal_dates_for_year(fiscal_year: int) -> list:
+    """Return [(date, ly_date), ...] for every day in a fiscal year, from the
+    fiscal_calendar table (aloha_sales.db). Empty list if unavailable."""
+    try:
+        conn = aloha_sales_db.get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT date, ly_date FROM fiscal_calendar "
+                "WHERE fiscal_year = ? ORDER BY date",
+                (fiscal_year,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [(r[0], r[1]) for r in rows]
+    except Exception as exc:
+        logger.warning("fiscal_calendar lookup failed for FY%s: %s", fiscal_year, exc)
+        return []
+
+
+@app.get("/api/monkey/fiscal-years")
+async def monkey_fiscal_years():
+    """List fiscal years available in the fiscal_calendar table (newest first)."""
+    try:
+        conn = aloha_sales_db.get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT fiscal_year, MIN(date), MAX(date), COUNT(*) "
+                "FROM fiscal_calendar WHERE fiscal_year IS NOT NULL "
+                "GROUP BY fiscal_year ORDER BY fiscal_year DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            {"fiscalYear": r[0], "startDate": r[1], "endDate": r[2], "days": r[3]}
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.warning("fiscal-years lookup failed: %s", exc)
+        return []
+
+
 @app.post("/api/monkey/reports/period-catering-by-week")
 async def monkey_period_catering_by_week(payload: dict = Body(...)):
-    """Weekly catering sales, current year vs prior year, by Area Director."""
+    """Weekly catering sales, current year vs prior year, by Area Director.
+
+    Two modes:
+      * fiscal   — payload has "fiscalYear": weeks + prior-year come from the
+                   fiscal_calendar (matches the SSRS report).
+      * calendar — payload has "startDate"/"endDate": Sunday weeks, PY = 364d back.
+    """
     areadir_map = await asyncio.to_thread(_areadir_by_store_number)
+    basis = payload.get("basis", "subtotal")
+    fiscal_year = payload.get("fiscalYear")
+
+    if fiscal_year:
+        fiscal_dates = await asyncio.to_thread(_fiscal_dates_for_year, int(fiscal_year))
+        if not fiscal_dates:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No fiscal_calendar data for FY{fiscal_year}. "
+                       "Load the fiscal calendar (load_fiscal_csv.py) first.",
+            )
+        return await asyncio.to_thread(
+            monkey_db.rpt_period_catering_by_week_fiscal,
+            fiscal_dates, areadir_map, basis,
+        )
+
     return await asyncio.to_thread(
         monkey_db.rpt_period_catering_by_week,
         payload["startDate"], payload["endDate"],
-        areadir_map,
-        payload.get("basis", "subtotal"),
+        areadir_map, basis,
     )
 
 

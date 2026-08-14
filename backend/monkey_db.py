@@ -698,6 +698,15 @@ def rpt_orders_due_by_store(
         conn.close()
 
 
+def _sunday_of(date_str: str) -> str:
+    """Return the Sunday (Sun-start week) of a 'YYYY-MM-DD' date, as 'YYYY-MM-DD'."""
+    from datetime import date, timedelta
+    y, m, d = (int(x) for x in date_str[:10].split("-"))
+    dt = date(y, m, d)
+    # date.weekday(): Mon=0 .. Sun=6 → days since Sunday = (weekday + 1) % 7
+    return (dt - timedelta(days=(dt.weekday() + 1) % 7)).isoformat()
+
+
 def rpt_period_catering_by_week(
     start_date: str, end_date: str,
     areadir_by_store_number: Optional[Dict[int, str]] = None,
@@ -705,22 +714,67 @@ def rpt_period_catering_by_week(
     db_path: str = MONKEY_DB_PATH,
 ) -> List[Dict]:
     """
-    Monkey "Period Catering by Week" — current-year vs prior-year catering
-    dollars by week, grouped by Area Director and restaurant.
+    Calendar-mode "Period Catering by Week": Sunday-start weeks spanning
+    [start_date, end_date], prior year = same weekday 364 days back.
+    Thin wrapper over _period_catering_core.
+    """
+    from datetime import date, timedelta
+    d0 = date.fromisoformat(start_date[:10])
+    d1 = date.fromisoformat(end_date[:10])
+    cy_date_to_week: Dict[str, str] = {}
+    py_date_to_week: Dict[str, str] = {}
+    d = d0
+    while d <= d1:
+        wk = _sunday_of(d.isoformat())
+        cy_date_to_week[d.isoformat()] = wk
+        py_date_to_week[(d - timedelta(days=364)).isoformat()] = wk
+        d += timedelta(days=1)
+    return _period_catering_core(cy_date_to_week, py_date_to_week,
+                                 areadir_by_store_number, basis, db_path)
 
-    * Weeks are Sunday-start (matches the Monkey export week labels).
-    * Prior year = the SAME week 364 days (52 weeks) earlier, so weekdays align.
-    * `basis` selects the dollar column: 'subtotal' (food net, default) or
-      'total' (order total incl. tax/gratuity/fees).
-    * `areadir_by_store_number` maps a store NUMBER (== Monkey stores.store_code)
-      to an Area Director name. Unmatched stores fall under 'Unassigned',
-      mirroring the blank director groups in the export.
 
-    Returns a list of week blocks, most-recent week first:
-        [{ "weekStart": "2026-01-04",
-           "totals": {currentYear, priorYear, netDifference, percentageChange},
-           "rows": [{areaDirName, restaurantName, storeNumber,
-                     currentYear, priorYear, netDifference, percentageChange}, ...] }]
+def rpt_period_catering_by_week_fiscal(
+    fiscal_dates: List[tuple],
+    areadir_by_store_number: Optional[Dict[int, str]] = None,
+    basis: str = "subtotal",
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Fiscal-mode "Period Catering by Week", matching the SSRS report.
+
+    `fiscal_dates` is a list of (cy_date, ly_date) pairs from the fiscal_calendar
+    for one fiscal year (cy_date = a date in the fiscal year, ly_date = its
+    fiscal prior-year date). Weeks are the Sunday-start weeks of those cy_dates;
+    prior year uses the authoritative ly_date mapping (not a 364-day shift).
+    """
+    cy_date_to_week: Dict[str, str] = {}
+    py_date_to_week: Dict[str, str] = {}
+    for cy_date, ly_date in fiscal_dates:
+        if not cy_date:
+            continue
+        wk = _sunday_of(cy_date)
+        cy_date_to_week[cy_date[:10]] = wk
+        if ly_date:
+            py_date_to_week[ly_date[:10]] = wk
+    return _period_catering_core(cy_date_to_week, py_date_to_week,
+                                 areadir_by_store_number, basis, db_path)
+
+
+def _period_catering_core(
+    cy_date_to_week: Dict[str, str],
+    py_date_to_week: Dict[str, str],
+    areadir_by_store_number: Optional[Dict[int, str]] = None,
+    basis: str = "subtotal",
+    db_path: str = MONKEY_DB_PATH,
+) -> List[Dict]:
+    """
+    Core weekly-catering aggregator. `cy_date_to_week` / `py_date_to_week` map a
+    business date ('YYYY-MM-DD') to the CY week label (Sunday) it belongs to;
+    PY dates map to the CY week they should be compared against. This lets the
+    caller define weeks either by calendar or by fiscal calendar.
+
+    Returns week blocks (most-recent first) with per-Area-Director rows and
+    per-week totals — same shape as the SSRS export.
     """
     initialize_db(db_path)
     areadir_by_store_number = areadir_by_store_number or {}
@@ -735,34 +789,30 @@ def rpt_period_catering_by_week(
         ).fetchall():
             store_meta[sid] = (code, name)
 
-        # Sunday of the week for a date:  date(d, '-<weekday> days')  (%w: Sun=0)
-        week_expr = "DATE(o.date_reqd, '-' || strftime('%w', o.date_reqd) || ' days')"
+        def _sum_by_week(date_to_week: Dict[str, str]) -> Dict[tuple, float]:
+            """Sum confirmed, non-quote order dollars into (week_label, store_id)."""
+            if not date_to_week:
+                return {}
+            lo, hi = min(date_to_week), max(date_to_week)
+            sql = f"""
+                SELECT DATE(o.date_reqd) AS d, o.store_id, COALESCE(SUM({money_col}), 0)
+                FROM orders o
+                WHERE DATE(o.date_reqd) BETWEEN ? AND ?
+                  AND o.deleted = 0
+                  AND LOWER(TRIM(o.status)) = 'confirmed'
+                  AND COALESCE(LOWER(TRIM(o.order_type)), '') <> 'quote'
+                GROUP BY d, o.store_id
+            """
+            acc: Dict[tuple, float] = {}
+            for d, sid, amt in conn.execute(sql, [lo, hi]).fetchall():
+                wk = date_to_week.get(d)
+                if wk is None:
+                    continue
+                acc[(wk, sid)] = acc.get((wk, sid), 0.0) + (amt or 0.0)
+            return acc
 
-        # Current-year sums by (week_start, store_id)
-        cy_sql = f"""
-            SELECT {week_expr} AS week_start, o.store_id, COALESCE(SUM({money_col}),0)
-            FROM orders o
-            WHERE DATE(o.date_reqd) BETWEEN DATE(?) AND DATE(?)
-              AND o.deleted = 0
-              AND LOWER(TRIM(o.status)) = 'confirmed'
-              AND COALESCE(LOWER(TRIM(o.order_type)), '') <> 'quote'
-            GROUP BY week_start, o.store_id
-        """
-        cy = {(w, sid): amt for w, sid, amt in conn.execute(cy_sql, [start_date, end_date]).fetchall()}
-
-        # Prior-year sums: pull the window 364 days earlier, then shift each
-        # week_start forward 364 days so it lines up with its CY week.
-        py_week_expr = "DATE(o.date_reqd, '-' || strftime('%w', o.date_reqd) || ' days', '+364 days')"
-        py_sql = f"""
-            SELECT {py_week_expr} AS week_start, o.store_id, COALESCE(SUM({money_col}),0)
-            FROM orders o
-            WHERE DATE(o.date_reqd) BETWEEN DATE(?, '-364 days') AND DATE(?, '-364 days')
-              AND o.deleted = 0
-              AND LOWER(TRIM(o.status)) = 'confirmed'
-              AND COALESCE(LOWER(TRIM(o.order_type)), '') <> 'quote'
-            GROUP BY week_start, o.store_id
-        """
-        py = {(w, sid): amt for w, sid, amt in conn.execute(py_sql, [start_date, end_date]).fetchall()}
+        cy = _sum_by_week(cy_date_to_week)
+        py = _sum_by_week(py_date_to_week)
     finally:
         conn.close()
 
