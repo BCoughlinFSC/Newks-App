@@ -20406,6 +20406,43 @@ def _fiscal_dates_for_year(fiscal_year: int) -> list:
         return []
 
 
+@app.get("/api/monkey/debug/areadir")
+async def monkey_debug_areadir():
+    """Diagnose why the Store→Area Director map may be empty (contacts join)."""
+    import contacts_db
+    info: dict = {}
+
+    def _try(label, fn):
+        try:
+            info[label] = fn()
+        except Exception as e:
+            info[label + "_err"] = str(e)
+
+    try:
+        conn = contacts_db.get_connection()
+    except Exception as e:
+        return {"connect_err": str(e)}
+    try:
+        _try("storeCols", lambda: [r[1] for r in conn.execute("PRAGMA table_info(Store)").fetchall()])
+        _try("areadirCols", lambda: [r[1] for r in conn.execute("PRAGMA table_info(AreaDir)").fetchall()])
+        _try("storeCount", lambda: conn.execute("SELECT COUNT(*) FROM Store").fetchone()[0])
+        _try("storeWithDirId", lambda: conn.execute(
+            "SELECT COUNT(*) FROM Store WHERE StoreAreaDirID IS NOT NULL").fetchone()[0])
+        _try("areadirCount", lambda: conn.execute("SELECT COUNT(*) FROM AreaDir").fetchone()[0])
+        _try("sampleStores", lambda: [list(r) for r in conn.execute(
+            "SELECT StoreID, StoreName, StoreAreaDirID FROM Store "
+            "WHERE StoreAreaDirID IS NOT NULL LIMIT 5").fetchall()])
+        _try("sampleAreadir", lambda: [list(r) for r in conn.execute(
+            "SELECT * FROM AreaDir LIMIT 3").fetchall()])
+    finally:
+        conn.close()
+
+    m = _areadir_by_store_number()
+    info["mapSize"] = len(m)
+    info["mapSample"] = dict(list(m.items())[:5])
+    return info
+
+
 @app.get("/api/monkey/fiscal-years")
 async def monkey_fiscal_years():
     """List fiscal years available in the fiscal_calendar table (newest first)."""
@@ -20440,6 +20477,11 @@ async def monkey_period_catering_by_week(payload: dict = Body(...)):
     areadir_map = await asyncio.to_thread(_areadir_by_store_number)
     basis = payload.get("basis", "subtotal")
     fiscal_year = payload.get("fiscalYear")
+    # Only scope to company stores when we actually resolved Area Directors;
+    # otherwise show all stores rather than returning an empty report.
+    company_only = bool(areadir_map)
+    if not areadir_map:
+        logger.warning("Period-by-Week: area-director map empty — showing all stores (unscoped)")
 
     if fiscal_year:
         fiscal_dates = await asyncio.to_thread(_fiscal_dates_for_year, int(fiscal_year))
@@ -20451,13 +20493,13 @@ async def monkey_period_catering_by_week(payload: dict = Body(...)):
             )
         return await asyncio.to_thread(
             monkey_db.rpt_period_catering_by_week_fiscal,
-            fiscal_dates, areadir_map, basis,
+            fiscal_dates, areadir_map, basis, monkey_db.MONKEY_DB_PATH, company_only,
         )
 
     return await asyncio.to_thread(
         monkey_db.rpt_period_catering_by_week,
         payload["startDate"], payload["endDate"],
-        areadir_map, basis,
+        areadir_map, basis, monkey_db.MONKEY_DB_PATH, company_only,
     )
 
 
