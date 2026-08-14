@@ -20408,38 +20408,62 @@ def _fiscal_dates_for_year(fiscal_year: int) -> list:
 
 @app.get("/api/monkey/debug/areadir")
 async def monkey_debug_areadir():
-    """Diagnose why the Store→Area Director map may be empty (contacts join)."""
+    """Diagnose why the Store→Area Director map may be empty (contacts join).
+
+    Every value is stringified so the endpoint can never fail to serialize.
+    """
     import contacts_db
     info: dict = {}
 
     def _try(label, fn):
         try:
-            info[label] = fn()
+            v = fn()
+            info[label] = v
         except Exception as e:
             info[label + "_err"] = str(e)
 
+    info["contactsDbPath"] = str(getattr(contacts_db, "CONTACTS_DB_PATH", "?"))
+    info["contactsDbExists"] = os.path.exists(getattr(contacts_db, "CONTACTS_DB_PATH", ""))
+
+    conn = None
     try:
         conn = contacts_db.get_connection()
     except Exception as e:
-        return {"connect_err": str(e)}
-    try:
-        _try("storeCols", lambda: [r[1] for r in conn.execute("PRAGMA table_info(Store)").fetchall()])
-        _try("areadirCols", lambda: [r[1] for r in conn.execute("PRAGMA table_info(AreaDir)").fetchall()])
-        _try("storeCount", lambda: conn.execute("SELECT COUNT(*) FROM Store").fetchone()[0])
-        _try("storeWithDirId", lambda: conn.execute(
-            "SELECT COUNT(*) FROM Store WHERE StoreAreaDirID IS NOT NULL").fetchone()[0])
-        _try("areadirCount", lambda: conn.execute("SELECT COUNT(*) FROM AreaDir").fetchone()[0])
-        _try("sampleStores", lambda: [list(r) for r in conn.execute(
-            "SELECT StoreID, StoreName, StoreAreaDirID FROM Store "
-            "WHERE StoreAreaDirID IS NOT NULL LIMIT 5").fetchall()])
-        _try("sampleAreadir", lambda: [list(r) for r in conn.execute(
-            "SELECT * FROM AreaDir LIMIT 3").fetchall()])
-    finally:
-        conn.close()
+        info["connect_err"] = str(e)
 
-    m = _areadir_by_store_number()
-    info["mapSize"] = len(m)
-    info["mapSample"] = dict(list(m.items())[:5])
+    if conn is not None:
+        try:
+            _try("storeCols", lambda: [str(r[1]) for r in conn.execute("PRAGMA table_info(Store)").fetchall()])
+            _try("areadirCols", lambda: [str(r[1]) for r in conn.execute("PRAGMA table_info(AreaDir)").fetchall()])
+            _try("storeCount", lambda: int(conn.execute("SELECT COUNT(*) FROM Store").fetchone()[0]))
+            _try("storeWithDirId", lambda: int(conn.execute(
+                "SELECT COUNT(*) FROM Store WHERE StoreAreaDirID IS NOT NULL").fetchone()[0]))
+            _try("areadirCount", lambda: int(conn.execute("SELECT COUNT(*) FROM AreaDir").fetchone()[0]))
+            _try("sampleStores", lambda: [
+                {"StoreID": str(r[0]), "StoreName": str(r[1]), "StoreAreaDirID": str(r[2])}
+                for r in conn.execute(
+                    "SELECT StoreID, StoreName, StoreAreaDirID FROM Store LIMIT 8").fetchall()])
+            _try("sampleAreadir", lambda: [
+                {"AreaDirID": str(r[0]), "AreaDirName": str(r[1]),
+                 "First": str(r[2]), "Last": str(r[3])}
+                for r in conn.execute(
+                    "SELECT AreaDirID, AreaDirName, AreaDirFirstName, AreaDirLastName "
+                    "FROM AreaDir LIMIT 8").fetchall()])
+            # The exact join the report uses:
+            _try("joinRowCount", lambda: int(conn.execute("""
+                SELECT COUNT(*) FROM Store s
+                JOIN AreaDir a ON s.StoreAreaDirID = a.AreaDirID
+            """).fetchone()[0]))
+        finally:
+            conn.close()
+
+    try:
+        m = _areadir_by_store_number()
+        info["mapSize"] = len(m)
+        info["mapSample"] = {str(k): str(v) for k, v in list(m.items())[:5]}
+    except Exception as e:
+        info["map_err"] = str(e)
+
     return info
 
 
