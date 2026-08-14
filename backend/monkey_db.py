@@ -669,6 +669,7 @@ def rpt_orders_due_by_store(
             WHERE DATE(o.date_reqd) = DATE(?)
               AND o.deleted = 0
               AND LOWER(TRIM(o.status)) = 'confirmed'
+              AND COALESCE(LOWER(TRIM(o.order_type)), '') <> 'quote'
         """
         params: list = [biz_date]
         if store_ids:
@@ -744,6 +745,7 @@ def rpt_period_catering_by_week(
             WHERE DATE(o.date_reqd) BETWEEN DATE(?) AND DATE(?)
               AND o.deleted = 0
               AND LOWER(TRIM(o.status)) = 'confirmed'
+              AND COALESCE(LOWER(TRIM(o.order_type)), '') <> 'quote'
             GROUP BY week_start, o.store_id
         """
         cy = {(w, sid): amt for w, sid, amt in conn.execute(cy_sql, [start_date, end_date]).fetchall()}
@@ -757,6 +759,7 @@ def rpt_period_catering_by_week(
             WHERE DATE(o.date_reqd) BETWEEN DATE(?, '-364 days') AND DATE(?, '-364 days')
               AND o.deleted = 0
               AND LOWER(TRIM(o.status)) = 'confirmed'
+              AND COALESCE(LOWER(TRIM(o.order_type)), '') <> 'quote'
             GROUP BY week_start, o.store_id
         """
         py = {(w, sid): amt for w, sid, amt in conn.execute(py_sql, [start_date, end_date]).fetchall()}
