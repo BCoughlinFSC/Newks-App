@@ -712,6 +712,7 @@ def rpt_period_catering_by_week(
     areadir_by_store_number: Optional[Dict[int, str]] = None,
     basis: str = "subtotal",
     db_path: str = MONKEY_DB_PATH,
+    company_only: bool = True,
 ) -> List[Dict]:
     """
     Calendar-mode "Period Catering by Week": Sunday-start weeks spanning
@@ -730,7 +731,8 @@ def rpt_period_catering_by_week(
         py_date_to_week[(d - timedelta(days=364)).isoformat()] = wk
         d += timedelta(days=1)
     return _period_catering_core(cy_date_to_week, py_date_to_week,
-                                 areadir_by_store_number, basis, db_path)
+                                 areadir_by_store_number, basis, db_path,
+                                 company_only=company_only)
 
 
 def rpt_period_catering_by_week_fiscal(
@@ -738,6 +740,7 @@ def rpt_period_catering_by_week_fiscal(
     areadir_by_store_number: Optional[Dict[int, str]] = None,
     basis: str = "subtotal",
     db_path: str = MONKEY_DB_PATH,
+    company_only: bool = True,
 ) -> List[Dict]:
     """
     Fiscal-mode "Period Catering by Week", matching the SSRS report.
@@ -757,7 +760,8 @@ def rpt_period_catering_by_week_fiscal(
         if ly_date:
             py_date_to_week[ly_date[:10]] = wk
     return _period_catering_core(cy_date_to_week, py_date_to_week,
-                                 areadir_by_store_number, basis, db_path)
+                                 areadir_by_store_number, basis, db_path,
+                                 company_only=company_only)
 
 
 def _period_catering_core(
@@ -766,6 +770,7 @@ def _period_catering_core(
     areadir_by_store_number: Optional[Dict[int, str]] = None,
     basis: str = "subtotal",
     db_path: str = MONKEY_DB_PATH,
+    company_only: bool = True,
 ) -> List[Dict]:
     """
     Core weekly-catering aggregator. `cy_date_to_week` / `py_date_to_week` map a
@@ -773,8 +778,12 @@ def _period_catering_core(
     PY dates map to the CY week they should be compared against. This lets the
     caller define weeks either by calendar or by fiscal calendar.
 
-    Returns week blocks (most-recent first) with per-Area-Director rows and
-    per-week totals — same shape as the SSRS export.
+    `company_only`: when True (default), include only stores that map to an Area
+    Director — matching the SSRS report, which is scoped to company stores and
+    has no "Unassigned" group. Franchise/unmapped stores are excluded.
+
+    Returns week blocks (chronological) with per-Area-Director rows and per-week
+    totals — same shape as the SSRS export.
     """
     initialize_db(db_path)
     areadir_by_store_number = areadir_by_store_number or {}
@@ -833,6 +842,10 @@ def _period_catering_core(
             except (ValueError, TypeError):
                 store_num = None
         areadir = areadir_by_store_number.get(store_num) if store_num is not None else None
+        if company_only and not areadir:
+            # SSRS scopes this report to company stores (those with an Area
+            # Director); skip franchise/unmapped stores entirely.
+            continue
         areadir = areadir or "Unassigned"
         rname = name or (f"Store {store_num}" if store_num else f"Store {sid}")
         cell = weeks[week_start][areadir].setdefault(
@@ -847,7 +860,7 @@ def _period_catering_core(
         return 0.0
 
     out = []
-    for week_start in sorted(weeks.keys(), reverse=True):
+    for week_start in sorted(weeks.keys()):  # chronological, like the SSRS sheets
         dir_map = weeks[week_start]
         rows = []
         wk_cy = wk_py = 0.0
