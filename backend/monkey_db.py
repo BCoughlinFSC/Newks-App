@@ -605,7 +605,7 @@ def rpt_refunds_by_user(
                 DATE(r.refund_date)             AS refund_date,
                 s.store_name                    AS restaurant_name,
                 r.order_id                      AS order_number,
-                o.client_name                   AS customer_name,
+                COALESCE(o.client_name, r.account_name) AS customer_name,
                 r.note                          AS refund_notes,
                 r.method                        AS payment_method,
                 o.total                         AS order_total,
@@ -614,7 +614,7 @@ def rpt_refunds_by_user(
                 r.tax_refund                    AS refund_tax_amount,
                 o.store_id                      AS store_id
             FROM refunds r
-            JOIN orders o ON r.order_id = o.order_id
+            LEFT JOIN orders o ON r.order_id = o.order_id
             LEFT JOIN stores s ON o.store_id = s.store_id
             WHERE DATE(r.refund_date) BETWEEN ? AND ?
         """

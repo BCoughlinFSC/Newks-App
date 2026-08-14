@@ -7196,11 +7196,16 @@ def _run_monkey_sync(days: int | None = None, tables: list | None = None):
     tables_to_sync = tables or list(sm.TABLES.keys())
     total_rows = 0
     try:
+        # refunds/payments have no reliable incremental date column but are small
+        # and change often — full-reload them on every sync (even incremental) so
+        # the Refunds report stays current. Without this, incremental syncs skip
+        # them and the refunds table goes stale/empty.
+        _FULL_EACH_SYNC = {"refunds", "payments"}
         for table in tables_to_sync:
             config = sm.TABLES[table]
             table_since = since if "date_col" in config else None
-            if since and table_since is None:
-                continue  # Skip non-date tables for incremental sync
+            if since and table_since is None and table not in _FULL_EACH_SYNC:
+                continue  # Skip other non-date tables for incremental sync
             rows = sm.sync_table(azure_conn, sqlite_conn, table, config, since=table_since)
             total_rows += rows
 
