@@ -20356,32 +20356,44 @@ def _areadir_by_store_number() -> dict:
     """
     import contacts_db
     mapping: dict = {}
+
+    def _rows_as_dicts(conn, table):
+        cur = conn.execute(f"SELECT * FROM {table}")
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def _compose(d):
+        name = (d.get("AreaDirName") or "").strip()
+        if name:
+            return name
+        first = (d.get("AreaDirFirstName") or "").strip()
+        last = (d.get("AreaDirLastName") or "").strip()
+        return (first + " " + last).strip()
+
     try:
         conn = contacts_db.get_connection()
         try:
-            # Compose the director name the same way the Contacts UI does:
-            # explicit AreaDirName, else "FirstName LastName". AreaDirName is
-            # often NULL (names live in the first/last columns), which is why a
-            # plain a.AreaDirName select came back empty → everything Unassigned.
-            rows = conn.execute("""
-                SELECT s.StoreID,
-                       COALESCE(
-                           NULLIF(TRIM(a.AreaDirName), ''),
-                           NULLIF(TRIM(COALESCE(a.AreaDirFirstName,'') || ' ' ||
-                                       COALESCE(a.AreaDirLastName,'')), '')
-                       ) AS dir_name
-                FROM Store s
-                LEFT JOIN AreaDir a ON s.StoreAreaDirID = a.AreaDirID
-                WHERE s.StoreID IS NOT NULL
-            """).fetchall()
+            # Read by SELECT * and access columns by name in Python, so a
+            # renamed/missing column in the exported schema can't blow up the
+            # whole query (which would empty the map → everything "Unassigned").
+            dirs = {}
+            for d in _rows_as_dicts(conn, "AreaDir"):
+                aid = d.get("AreaDirID")
+                nm = _compose(d)
+                if aid is not None and nm:
+                    dirs[aid] = nm
+            for s in _rows_as_dicts(conn, "Store"):
+                sid, did = s.get("StoreID"), s.get("StoreAreaDirID")
+                if sid is None or did is None:
+                    continue
+                nm = dirs.get(did)
+                if nm:
+                    try:
+                        mapping[int(sid)] = nm
+                    except (ValueError, TypeError):
+                        pass
         finally:
             conn.close()
-        for store_id, dir_name in rows:
-            if store_id is None:
-                continue
-            name = (dir_name or "").strip()
-            if name:
-                mapping[int(store_id)] = name
     except Exception as exc:
         logger.warning("Area-director map unavailable: %s", exc)
     return mapping
