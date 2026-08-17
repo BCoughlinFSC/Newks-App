@@ -20420,63 +20420,41 @@ def _fiscal_dates_for_year(fiscal_year: int) -> list:
 
 @app.get("/api/monkey/debug/areadir")
 async def monkey_debug_areadir():
-    """Diagnose why the Store→Area Director map may be empty (contacts join).
-
-    Every value is stringified so the endpoint can never fail to serialize.
-    """
+    """Diagnose the Store→Area Director map. Returns PLAIN TEXT with a full
+    traceback on any failure, so it can never produce an opaque 500."""
+    import traceback
     import contacts_db
-    info: dict = {}
+    out = []
 
-    def _try(label, fn):
+    def q(conn, sql):
         try:
-            v = fn()
-            info[label] = v
+            return [tuple(r) for r in conn.execute(sql).fetchall()]
         except Exception as e:
-            info[label + "_err"] = str(e)
+            return "ERR: " + str(e)
 
-    info["contactsDbPath"] = str(getattr(contacts_db, "CONTACTS_DB_PATH", "?"))
-    info["contactsDbExists"] = os.path.exists(getattr(contacts_db, "CONTACTS_DB_PATH", ""))
-
-    conn = None
     try:
+        path = getattr(contacts_db, "CONTACTS_DB_PATH", "?")
+        out.append("CONTACTS_DB_PATH = " + str(path))
+        out.append("exists = " + str(os.path.exists(path) if isinstance(path, str) else "?"))
         conn = contacts_db.get_connection()
-    except Exception as e:
-        info["connect_err"] = str(e)
-
-    if conn is not None:
         try:
-            _try("storeCols", lambda: [str(r[1]) for r in conn.execute("PRAGMA table_info(Store)").fetchall()])
-            _try("areadirCols", lambda: [str(r[1]) for r in conn.execute("PRAGMA table_info(AreaDir)").fetchall()])
-            _try("storeCount", lambda: int(conn.execute("SELECT COUNT(*) FROM Store").fetchone()[0]))
-            _try("storeWithDirId", lambda: int(conn.execute(
-                "SELECT COUNT(*) FROM Store WHERE StoreAreaDirID IS NOT NULL").fetchone()[0]))
-            _try("areadirCount", lambda: int(conn.execute("SELECT COUNT(*) FROM AreaDir").fetchone()[0]))
-            _try("sampleStores", lambda: [
-                {"StoreID": str(r[0]), "StoreName": str(r[1]), "StoreAreaDirID": str(r[2])}
-                for r in conn.execute(
-                    "SELECT StoreID, StoreName, StoreAreaDirID FROM Store LIMIT 8").fetchall()])
-            _try("sampleAreadir", lambda: [
-                {"AreaDirID": str(r[0]), "AreaDirName": str(r[1]),
-                 "First": str(r[2]), "Last": str(r[3])}
-                for r in conn.execute(
-                    "SELECT AreaDirID, AreaDirName, AreaDirFirstName, AreaDirLastName "
-                    "FROM AreaDir LIMIT 8").fetchall()])
-            # The exact join the report uses:
-            _try("joinRowCount", lambda: int(conn.execute("""
-                SELECT COUNT(*) FROM Store s
-                JOIN AreaDir a ON s.StoreAreaDirID = a.AreaDirID
-            """).fetchone()[0]))
+            out.append("Store cols   : " + str(q(conn, "PRAGMA table_info(Store)")))
+            out.append("AreaDir cols : " + str(q(conn, "PRAGMA table_info(AreaDir)")))
+            out.append("Store count  : " + str(q(conn, "SELECT COUNT(*) FROM Store")))
+            out.append("Store w/dirID: " + str(q(conn, "SELECT COUNT(*) FROM Store WHERE StoreAreaDirID IS NOT NULL")))
+            out.append("AreaDir count: " + str(q(conn, "SELECT COUNT(*) FROM AreaDir")))
+            out.append("JOIN count   : " + str(q(conn, "SELECT COUNT(*) FROM Store s JOIN AreaDir a ON s.StoreAreaDirID = a.AreaDirID")))
+            out.append("sample Store : " + str(q(conn, "SELECT StoreID, StoreName, StoreAreaDirID FROM Store LIMIT 8")))
+            out.append("sample AreaDir: " + str(q(conn, "SELECT * FROM AreaDir LIMIT 5")))
         finally:
             conn.close()
-
-    try:
         m = _areadir_by_store_number()
-        info["mapSize"] = len(m)
-        info["mapSample"] = {str(k): str(v) for k, v in list(m.items())[:5]}
-    except Exception as e:
-        info["map_err"] = str(e)
+        out.append("mapSize = " + str(len(m)))
+        out.append("mapSample = " + str(dict(list(m.items())[:5])))
+    except Exception:
+        out.append("FATAL:\n" + traceback.format_exc())
 
-    return info
+    return Response(content="\n".join(out), media_type="text/plain")
 
 
 @app.get("/api/monkey/fiscal-years")
