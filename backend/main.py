@@ -20489,6 +20489,27 @@ async def monkey_debug_fiscal():
                    str(sorted(wk.items())[:12]))
         bad = {k: v for k, v in wk.items() if v != 7}
         out.append("week labels with != 7 days: " + str(sorted(bad.items())))
+
+        # Monkey company-store confirmed CY per date around the 02-01 boundary,
+        # so we can see which dates actually sum to SSRS's ~2x value.
+        out.append("")
+        out.append("Monkey company-store confirmed subtotal per date, 2026-01-18..2026-02-08:")
+        mconn = monkey_db.get_connection()
+        try:
+            rows = mconn.execute("""
+                SELECT DATE(o.date_reqd) d, COUNT(*) n, COALESCE(SUM(o.subtotal),0) amt
+                FROM orders o JOIN stores s ON o.store_id = s.store_id
+                WHERE DATE(o.date_reqd) BETWEEN '2026-01-18' AND '2026-02-08'
+                  AND o.deleted = 0 AND LOWER(TRIM(o.status)) = 'confirmed'
+                  AND COALESCE(LOWER(TRIM(o.order_type)),'') <> 'quote'
+                  AND LOWER(COALESCE(s.region_name,'')) LIKE '%company%'
+                GROUP BY d ORDER BY d
+            """).fetchall()
+            for x in rows:
+                out.append("  %s  n=%s  $%.2f  -> week %s" %
+                           (x[0], x[1], x[2] or 0, monkey_db._sunday_of(str(x[0]))))
+        finally:
+            mconn.close()
     except Exception:
         import traceback
         out.append("FATAL:\n" + traceback.format_exc())
