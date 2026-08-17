@@ -699,12 +699,19 @@ def rpt_orders_due_by_store(
 
 
 def _sunday_of(date_str: str) -> str:
-    """Return the Sunday (Sun-start week) of a 'YYYY-MM-DD' date, as 'YYYY-MM-DD'."""
+    """Return the SSRS week label for a date: the Monday–Sunday fiscal week's
+    ENDING Sunday, as 'YYYY-MM-DD'.
+
+    SSRS "Period Catering by Week" buckets Mon–Sun and labels each week by the
+    Sunday that ends it (verified: our Sunday-start labels were consistently one
+    week early vs SSRS, and SSRS's first FY week — the dead holiday week ending
+    2026-01-04 — is tiny, which only fits the week-ending convention).
+    """
     from datetime import date, timedelta
     y, m, d = (int(x) for x in date_str[:10].split("-"))
     dt = date(y, m, d)
-    # date.weekday(): Mon=0 .. Sun=6 → days since Sunday = (weekday + 1) % 7
-    return (dt - timedelta(days=(dt.weekday() + 1) % 7)).isoformat()
+    # date.weekday(): Mon=0 .. Sun=6 → days until the week's ending Sunday
+    return (dt + timedelta(days=(6 - dt.weekday()) % 7)).isoformat()
 
 
 def rpt_period_catering_by_week(
@@ -791,12 +798,25 @@ def _period_catering_core(
 
     conn = get_connection(db_path)
     try:
-        # store_id -> (store_number, store_name)
+        # store_id -> (store_number, store_name, region_name)
         store_meta: Dict[int, tuple] = {}
-        for sid, code, name in conn.execute(
-            "SELECT store_id, store_code, store_name FROM stores"
+        for sid, code, name, region in conn.execute(
+            "SELECT store_id, store_code, store_name, region_name FROM stores"
         ).fetchall():
-            store_meta[sid] = (code, name)
+            store_meta[sid] = (code, name, region)
+
+        # Company-store set: SSRS scopes this report to company restaurants,
+        # which Monkey marks in region_name (e.g. "… - Company Restaurants")
+        # vs franchise groups. Fall back to "all stores" if nothing matches, so
+        # a naming difference can't blank the report.
+        company_store_ids = {
+            sid for sid, (_c, _n, region) in store_meta.items()
+            if region and "company" in str(region).lower()
+        }
+        if company_only and not company_store_ids:
+            logger.warning("Period-by-Week: no company stores matched region_name — "
+                           "showing all stores")
+            company_only = False
 
         def _sum_by_week(date_to_week: Dict[str, str]) -> Dict[tuple, float]:
             """Sum confirmed, non-quote order dollars into (week_label, store_id)."""
@@ -833,7 +853,10 @@ def _period_catering_core(
     weeks: Dict[str, Dict[str, Dict[str, Dict]]] = defaultdict(lambda: defaultdict(dict))
 
     for (week_start, sid) in keys:
-        code, name = store_meta.get(sid, (None, None))
+        if company_only and sid not in company_store_ids:
+            # SSRS scopes this report to company restaurants; skip franchise.
+            continue
+        code, name, _region = store_meta.get(sid, (None, None, None))
         # store number: prefer numeric store_code
         store_num = None
         if code is not None:
@@ -842,10 +865,6 @@ def _period_catering_core(
             except (ValueError, TypeError):
                 store_num = None
         areadir = areadir_by_store_number.get(store_num) if store_num is not None else None
-        if company_only and not areadir:
-            # SSRS scopes this report to company stores (those with an Area
-            # Director); skip franchise/unmapped stores entirely.
-            continue
         areadir = areadir or "Unassigned"
         rname = name or (f"Store {store_num}" if store_num else f"Store {sid}")
         cell = weeks[week_start][areadir].setdefault(
