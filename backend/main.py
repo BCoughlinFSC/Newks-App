@@ -20371,8 +20371,8 @@ def _areadir_by_store_number() -> dict:
         return (first + " " + last).strip()
 
     try:
-        conn = contacts_db.get_connection()
-        try:
+        # get_connection() is a @contextmanager — must use `with`, not a bare call.
+        with contacts_db.get_connection() as conn:
             # Read by SELECT * and access columns by name in Python, so a
             # renamed/missing column in the exported schema can't blow up the
             # whole query (which would empty the map → everything "Unassigned").
@@ -20392,8 +20392,6 @@ def _areadir_by_store_number() -> dict:
                         mapping[int(sid)] = nm
                     except (ValueError, TypeError):
                         pass
-        finally:
-            conn.close()
     except Exception as exc:
         logger.warning("Area-director map unavailable: %s", exc)
     return mapping
@@ -20436,8 +20434,7 @@ async def monkey_debug_areadir():
         path = getattr(contacts_db, "CONTACTS_DB_PATH", "?")
         out.append("CONTACTS_DB_PATH = " + str(path))
         out.append("exists = " + str(os.path.exists(path) if isinstance(path, str) else "?"))
-        conn = contacts_db.get_connection()
-        try:
+        with contacts_db.get_connection() as conn:
             out.append("Store cols   : " + str(q(conn, "PRAGMA table_info(Store)")))
             out.append("AreaDir cols : " + str(q(conn, "PRAGMA table_info(AreaDir)")))
             out.append("Store count  : " + str(q(conn, "SELECT COUNT(*) FROM Store")))
@@ -20446,8 +20443,6 @@ async def monkey_debug_areadir():
             out.append("JOIN count   : " + str(q(conn, "SELECT COUNT(*) FROM Store s JOIN AreaDir a ON s.StoreAreaDirID = a.AreaDirID")))
             out.append("sample Store : " + str(q(conn, "SELECT StoreID, StoreName, StoreAreaDirID FROM Store LIMIT 8")))
             out.append("sample AreaDir: " + str(q(conn, "SELECT * FROM AreaDir LIMIT 5")))
-        finally:
-            conn.close()
         m = _areadir_by_store_number()
         out.append("mapSize = " + str(len(m)))
         out.append("mapSample = " + str(dict(list(m.items())[:5])))
