@@ -757,20 +757,39 @@ def rpt_period_catering_by_week_fiscal(
     the week's days and pass it to the core.
     """
     from collections import defaultdict
-    cy_date_to_week: Dict[str, str] = {}
-    py_date_to_week: Dict[str, str] = {}
+    from datetime import date, timedelta
+
+    # First pass: week labels (ending Sundays), authoritative ly_date per day,
+    # and the fiscal periods each week touches (for the ×N period multiplier).
+    ly_of: Dict[str, str] = {}
     week_periods: Dict[str, set] = defaultdict(set)
+    week_labels: set = set()
     for row in fiscal_dates:
         cy_date, ly_date = row[0], row[1]
         period = row[2] if len(row) > 2 else None
         if not cy_date:
             continue
         wk = _sunday_of(cy_date)
-        cy_date_to_week[cy_date[:10]] = wk
+        week_labels.add(wk)
         if ly_date:
-            py_date_to_week[ly_date[:10]] = wk
+            ly_of[cy_date[:10]] = ly_date[:10]
         if period is not None:
             week_periods[wk].add(period)
+
+    # Expand every week to its full Mon–Sun span, so boundary weeks include the
+    # trailing days that fall in the prior/next calendar year (e.g. the week
+    # ending 2026-01-04 pulls in Dec 29–31, 2025 — which SSRS counts).
+    cy_date_to_week: Dict[str, str] = {}
+    py_date_to_week: Dict[str, str] = {}
+    for wk in week_labels:
+        sunday = date.fromisoformat(wk)
+        for i in range(7):
+            day = (sunday - timedelta(days=i)).isoformat()
+            cy_date_to_week[day] = wk
+            ly = ly_of.get(day) or (
+                date.fromisoformat(day) - timedelta(days=364)).isoformat()
+            py_date_to_week[ly] = wk
+
     week_multiplier = {wk: max(1, len(ps)) for wk, ps in week_periods.items()}
     return _period_catering_core(cy_date_to_week, py_date_to_week,
                                  areadir_by_store_number, basis, db_path,
@@ -854,8 +873,15 @@ def _period_catering_core(
     finally:
         conn.close()
 
-    # Union of all (week, store) keys that have any CY or PY dollars
-    keys = set(cy) | set(py)
+    # Which (week, store) cells to emit. SSRS lists EVERY company store on every
+    # week (even $0), so build the full grid of company stores × all weeks; then
+    # a store with no orders that week still shows as $0. Non-scoped mode falls
+    # back to only the (week, store) pairs that actually have dollars.
+    all_weeks = set(cy_date_to_week.values()) | set(py_date_to_week.values())
+    if company_only:
+        keys = {(wk, sid) for wk in all_weeks for sid in company_store_ids}
+    else:
+        keys = set(cy) | set(py)
 
     # week_start -> areadir -> restaurant_name -> {cy, py, storeNumber}
     from collections import defaultdict
