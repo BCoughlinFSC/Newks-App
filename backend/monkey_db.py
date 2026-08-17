@@ -699,21 +699,14 @@ def rpt_orders_due_by_store(
 
 
 def _sunday_of(date_str: str) -> str:
-    """Return the SSRS week label for a date, as 'YYYY-MM-DD'.
-
-    SSRS "Period Catering by Week" buckets Sunday–Saturday and labels each week
-    by the FOLLOWING Sunday (the day after the week's Saturday). So the week
-    Sun 01-04 … Sat 01-10 is labeled "2026-01-11". Verified two ways: our old
-    Sunday-start labels matched SSRS exactly one week later (145 next-week
-    matches, 0 same-week), and SSRS's tiny first FY week labeled 2026-01-04
-    corresponds to the pre-holiday week 12-28 … 01-03.
-    """
+    """Return the fiscal week label for a date: the Monday–Sunday week's ENDING
+    Sunday, as 'YYYY-MM-DD' — matching the fiscal_calendar's weeks and the SSRS
+    week labels (e.g. Mon 01-26 … Sun 02-01 → "2026-02-01")."""
     from datetime import date, timedelta
     y, m, d = (int(x) for x in date_str[:10].split("-"))
     dt = date(y, m, d)
-    # Start Sunday of the Sun–Sat week, then label by the following Sunday (+7).
-    start_sunday = dt - timedelta(days=(dt.weekday() + 1) % 7)
-    return (start_sunday + timedelta(days=7)).isoformat()
+    # date.weekday(): Mon=0 .. Sun=6 → days forward to the week's ending Sunday
+    return (dt + timedelta(days=(6 - dt.weekday()) % 7)).isoformat()
 
 
 def rpt_period_catering_by_week(
@@ -754,23 +747,35 @@ def rpt_period_catering_by_week_fiscal(
     """
     Fiscal-mode "Period Catering by Week", matching the SSRS report.
 
-    `fiscal_dates` is a list of (cy_date, ly_date) pairs from the fiscal_calendar
-    for one fiscal year (cy_date = a date in the fiscal year, ly_date = its
-    fiscal prior-year date). Weeks are the Sunday-start weeks of those cy_dates;
-    prior year uses the authoritative ly_date mapping (not a 364-day shift).
+    `fiscal_dates` is a list of (cy_date, ly_date, fiscal_period) triples from
+    the fiscal_calendar for one fiscal year. Weeks are the fiscal Mon–Sun weeks
+    (label = ending Sunday); prior year uses the authoritative ly_date mapping.
+
+    SSRS quirk reproduced: a fiscal week that straddles a PERIOD boundary is
+    counted once per period it touches (so a week spanning two periods is ×2).
+    We compute a per-week multiplier = number of distinct fiscal periods among
+    the week's days and pass it to the core.
     """
+    from collections import defaultdict
     cy_date_to_week: Dict[str, str] = {}
     py_date_to_week: Dict[str, str] = {}
-    for cy_date, ly_date in fiscal_dates:
+    week_periods: Dict[str, set] = defaultdict(set)
+    for row in fiscal_dates:
+        cy_date, ly_date = row[0], row[1]
+        period = row[2] if len(row) > 2 else None
         if not cy_date:
             continue
         wk = _sunday_of(cy_date)
         cy_date_to_week[cy_date[:10]] = wk
         if ly_date:
             py_date_to_week[ly_date[:10]] = wk
+        if period is not None:
+            week_periods[wk].add(period)
+    week_multiplier = {wk: max(1, len(ps)) for wk, ps in week_periods.items()}
     return _period_catering_core(cy_date_to_week, py_date_to_week,
                                  areadir_by_store_number, basis, db_path,
-                                 company_only=company_only)
+                                 company_only=company_only,
+                                 week_multiplier=week_multiplier)
 
 
 def _period_catering_core(
@@ -780,6 +785,7 @@ def _period_catering_core(
     basis: str = "subtotal",
     db_path: str = MONKEY_DB_PATH,
     company_only: bool = True,
+    week_multiplier: Optional[Dict[str, int]] = None,
 ) -> List[Dict]:
     """
     Core weekly-catering aggregator. `cy_date_to_week` / `py_date_to_week` map a
@@ -796,6 +802,7 @@ def _period_catering_core(
     """
     initialize_db(db_path)
     areadir_by_store_number = areadir_by_store_number or {}
+    week_multiplier = week_multiplier or {}
     money_col = "o.total" if basis == "total" else "o.subtotal"
 
     conn = get_connection(db_path)
@@ -883,14 +890,16 @@ def _period_catering_core(
     out = []
     for week_start in sorted(weeks.keys()):  # chronological, like the SSRS sheets
         dir_map = weeks[week_start]
+        # SSRS counts a period-straddling week once per period it touches.
+        mult = week_multiplier.get(week_start, 1)
         rows = []
         wk_cy = wk_py = 0.0
         # Area directors alphabetical; restaurants within by CY desc (matches export)
         for areadir in sorted(dir_map.keys(), key=lambda d: (d == "Unassigned", d.lower())):
             rest_map = dir_map[areadir]
             for rname, cell in sorted(rest_map.items(), key=lambda kv: kv[1]["cy"], reverse=True):
-                cy_v = round(cell["cy"], 2)
-                py_v = round(cell["py"], 2)
+                cy_v = round(cell["cy"] * mult, 2)
+                py_v = round(cell["py"] * mult, 2)
                 wk_cy += cy_v
                 wk_py += py_v
                 rows.append({

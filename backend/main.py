@@ -20398,19 +20398,21 @@ def _areadir_by_store_number() -> dict:
 
 
 def _fiscal_dates_for_year(fiscal_year: int) -> list:
-    """Return [(date, ly_date), ...] for every day in a fiscal year, from the
-    fiscal_calendar table (aloha_sales.db). Empty list if unavailable."""
+    """Return [(date, ly_date, fiscal_period), ...] for every day in a fiscal
+    year, from the fiscal_calendar table (aloha_sales.db). The fiscal_period is
+    used to reproduce SSRS's period-straddling-week double-count. Empty list if
+    unavailable."""
     try:
         conn = aloha_sales_db.get_connection()
         try:
             rows = conn.execute(
-                "SELECT date, ly_date FROM fiscal_calendar "
+                "SELECT date, ly_date, fiscal_period FROM fiscal_calendar "
                 "WHERE fiscal_year = ? ORDER BY date",
                 (fiscal_year,),
             ).fetchall()
         finally:
             conn.close()
-        return [(r[0], r[1]) for r in rows]
+        return [(r[0], r[1], r[2]) for r in rows]
     except Exception as exc:
         logger.warning("fiscal_calendar lookup failed for FY%s: %s", fiscal_year, exc)
         return []
