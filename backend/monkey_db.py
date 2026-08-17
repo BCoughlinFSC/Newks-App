@@ -699,19 +699,21 @@ def rpt_orders_due_by_store(
 
 
 def _sunday_of(date_str: str) -> str:
-    """Return the SSRS week label for a date: the Monday–Sunday fiscal week's
-    ENDING Sunday, as 'YYYY-MM-DD'.
+    """Return the SSRS week label for a date, as 'YYYY-MM-DD'.
 
-    SSRS "Period Catering by Week" buckets Mon–Sun and labels each week by the
-    Sunday that ends it (verified: our Sunday-start labels were consistently one
-    week early vs SSRS, and SSRS's first FY week — the dead holiday week ending
-    2026-01-04 — is tiny, which only fits the week-ending convention).
+    SSRS "Period Catering by Week" buckets Sunday–Saturday and labels each week
+    by the FOLLOWING Sunday (the day after the week's Saturday). So the week
+    Sun 01-04 … Sat 01-10 is labeled "2026-01-11". Verified two ways: our old
+    Sunday-start labels matched SSRS exactly one week later (145 next-week
+    matches, 0 same-week), and SSRS's tiny first FY week labeled 2026-01-04
+    corresponds to the pre-holiday week 12-28 … 01-03.
     """
     from datetime import date, timedelta
     y, m, d = (int(x) for x in date_str[:10].split("-"))
     dt = date(y, m, d)
-    # date.weekday(): Mon=0 .. Sun=6 → days until the week's ending Sunday
-    return (dt + timedelta(days=(6 - dt.weekday()) % 7)).isoformat()
+    # Start Sunday of the Sun–Sat week, then label by the following Sunday (+7).
+    start_sunday = dt - timedelta(days=(dt.weekday() + 1) % 7)
+    return (start_sunday + timedelta(days=7)).isoformat()
 
 
 def rpt_period_catering_by_week(
