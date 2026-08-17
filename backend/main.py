@@ -20452,6 +20452,49 @@ async def monkey_debug_areadir():
     return Response(content="\n".join(out), media_type="text/plain")
 
 
+@app.get("/api/monkey/debug/fiscal")
+async def monkey_debug_fiscal():
+    """Dump fiscal_calendar coverage for FY2026 around a period boundary, plus
+    how many distinct days land in each week label. Plain text."""
+    out = []
+    try:
+        conn = aloha_sales_db.get_connection()
+        try:
+            r = conn.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT date), MIN(date), MAX(date) "
+                "FROM fiscal_calendar WHERE fiscal_year = 2026").fetchone()
+            out.append("FY2026 rows=%s distinctDates=%s min=%s max=%s" % tuple(r))
+            dups = conn.execute(
+                "SELECT date, COUNT(*) c FROM fiscal_calendar WHERE fiscal_year=2026 "
+                "GROUP BY date HAVING c>1 LIMIT 10").fetchall()
+            out.append("duplicate dates (FY2026): " + str([tuple(x) for x in dups]))
+            out.append("")
+            out.append("rows 2026-01-22 .. 2026-02-03 (date, ly_date, period, week):")
+            rows = conn.execute(
+                "SELECT date, ly_date, fiscal_period, fiscal_week FROM fiscal_calendar "
+                "WHERE date BETWEEN '2026-01-22' AND '2026-02-03' ORDER BY date").fetchall()
+            for x in rows:
+                out.append("  " + str(tuple(x)))
+        finally:
+            conn.close()
+        # How many distinct CY dates map to each week label (should be 7 each)
+        fd = _fiscal_dates_for_year(2026)
+        from collections import Counter
+        wk = Counter()
+        for cy, _ly in fd:
+            if cy:
+                wk[monkey_db._sunday_of(cy)] += 1
+        out.append("")
+        out.append("days per week label (first 12): " +
+                   str(sorted(wk.items())[:12]))
+        bad = {k: v for k, v in wk.items() if v != 7}
+        out.append("week labels with != 7 days: " + str(sorted(bad.items())))
+    except Exception:
+        import traceback
+        out.append("FATAL:\n" + traceback.format_exc())
+    return Response(content="\n".join(out), media_type="text/plain")
+
+
 @app.get("/api/monkey/fiscal-years")
 async def monkey_fiscal_years():
     """List fiscal years available in the fiscal_calendar table (newest first)."""
