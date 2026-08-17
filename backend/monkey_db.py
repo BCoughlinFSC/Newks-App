@@ -410,7 +410,7 @@ def rpt_sales_by_channel(
                    DATE(o.date_reqd) AS d,
                    {_CHANNEL_CASE_SQL} AS channel,
                    COUNT(*) AS n,
-                   COALESCE(SUM(o.subtotal), 0) AS amt
+                   COALESCE(SUM(COALESCE(o.subtotal, 0) - COALESCE(o.discount, 0)), 0) AS amt
             FROM orders o
             LEFT JOIN stores s ON o.store_id = s.store_id
             WHERE DATE(o.date_reqd) BETWEEN ? AND ?
