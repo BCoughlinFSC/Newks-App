@@ -361,7 +361,8 @@ _CHANNEL_CASE_SQL = """
         WHEN LOWER(COALESCE(o.order_source, '')) = 'marketplace' THEN 'marketplace'
         WHEN TRIM(o.entered_by) = 'Online' THEN 'online'
         WHEN TRIM(o.entered_by) = 'Store'  THEN 'store'
-        WHEN o.entered_by LIKE 'TCOT%'     THEN 'callCenter'
+        WHEN o.entered_by LIKE 'TCOT%'
+             OR o.entered_by LIKE 'COT %'   THEN 'callCenter'
         ELSE 'csm'
     END
 """
