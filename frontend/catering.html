@@ -246,6 +246,7 @@
           <button class="tab-btn active" data-tab="orders-due">Orders Due Today</button>
           <button class="tab-btn" data-tab="refunds">Refunds by User</button>
           <button class="tab-btn" data-tab="period-week">Period Catering by Week</button>
+          <button class="tab-btn" data-tab="sales-channel">Sales by Channel</button>
           <button class="tab-btn" data-tab="lock-the-day">Lock the Day</button>
         </div>
       </div>
@@ -300,28 +301,26 @@
         </div>
       </div>
 
-      <!-- ============ Sales by Channel (hidden) ============ -->
+      <!-- ============ Sales by Channel by Weekday ============ -->
       <div class="tab-panel" id="panel-sales-channel">
         <div class="content-card">
-          <h2>Sales by Channel</h2>
-          <p class="help-text">Sales breakdown by channel (Online, Store, Voice, CSM, Marketplace) and weekday.</p>
+          <h2>Sales by Channel by Weekday</h2>
+          <p class="help-text">Daily catering sales split by channel (Online, Store, CSM, Sales Team, Call Center, Marketplace) with order counts. Dollars are order <strong>subtotal</strong>.</p>
           <div class="date-inputs" style="margin-bottom: 1rem;">
             <label><span>Start</span> <input type="date" id="sc-start" /></label>
             <label><span>End</span> <input type="date" id="sc-end" /></label>
-            <label><span>Store</span>
-              <select id="sc-store"><option value="">All Stores</option></select>
+            <label><span>Group by</span>
+              <select id="sc-groupby">
+                <option value="system">System Wide</option>
+                <option value="market">Market</option>
+                <option value="store">Store</option>
+              </select>
             </label>
             <button class="btn" id="sc-run">Run Report</button>
             <button class="btn btn-secondary" id="sc-csv" style="display:none;">Export CSV</button>
           </div>
           <div id="sc-status" class="status" style="display:none;"></div>
-          <div id="sc-stats" class="stat-cards" style="display:none;"></div>
-          <div class="report-table-wrap">
-            <table class="report-table" id="sc-table" style="display:none;">
-              <thead><tr id="sc-thead"></tr></thead>
-              <tbody id="sc-tbody"></tbody>
-            </table>
-          </div>
+          <div id="sc-container"></div>
         </div>
       </div>
 
@@ -769,55 +768,80 @@
     }
 
     // ════════════════════════════════════════════════════
-    // SALES BY CHANNEL
+    // SALES BY CHANNEL BY WEEKDAY
     // ════════════════════════════════════════════════════
-    let scRows = [], scCols = [];
-    document.getElementById('sc-run').addEventListener('click', async () => {
+    let scData = null;
+    const SC_CHANNELS = [
+      { key: 'online', label: 'Online' }, { key: 'store', label: 'Store' },
+      { key: 'csm', label: 'CSM' }, { key: 'salesTeam', label: 'Sales Team' },
+      { key: 'callCenter', label: 'Call Center' }, { key: 'marketplace', label: 'Marketplace' },
+    ];
+    function scRenderRow(r, isTotal) {
+      let h = '<tr' + (isTotal ? ' class="total-row"' : '') + '>';
+      h += '<td>' + escapeHtml(isTotal ? 'Total' : r.date) + '</td>';
+      h += '<td>' + escapeHtml(r.dayOfWeek || '') + '</td>';
+      SC_CHANNELS.forEach(c => {
+        h += '<td class="num">' + formatNum(r[c.key + 'Count'] || 0) + '</td>';
+        h += '<td class="num">' + formatMoney(r[c.key] || 0) + '</td>';
+      });
+      h += '<td class="num">' + formatMoney(r.total || 0) + '</td></tr>';
+      return h;
+    }
+    function scRenderReport(data) {
+      const c = document.getElementById('sc-container');
+      if (!data || !data.groups || !data.groups.length) {
+        c.innerHTML = '<p style="color:#666;padding:0.5rem 0;">No catering orders found for this range.</p>';
+        return;
+      }
+      let thead = '<tr><th>Date</th><th>Day</th>';
+      SC_CHANNELS.forEach(ch => { thead += '<th class="num">' + ch.label + ' #</th><th class="num">' + ch.label + ' $</th>'; });
+      thead += '<th class="num">Total</th></tr>';
+      let html = '';
+      data.groups.forEach(g => {
+        html += '<div style="margin-top:1.25rem;">';
+        if (data.groupBy !== 'system') html += '<h3 style="color:#1E3A5F;margin:0 0 0.5rem 0;">' + escapeHtml(g.name) + '</h3>';
+        html += '<div class="report-table-wrap"><table class="report-table"><thead>' + thead + '</thead><tbody>';
+        html += scRenderRow(g.totals, true);
+        (g.rows || []).forEach(r => { html += scRenderRow(r, false); });
+        html += '</tbody></table></div></div>';
+      });
+      c.innerHTML = html;
+    }
+    async function loadSalesChannel() {
       const startDate = document.getElementById('sc-start').value;
       const endDate = document.getElementById('sc-end').value;
       if (!startDate || !endDate) { showStatus('sc-status', 'Select both dates.', 'error'); return; }
-      const btn = document.getElementById('sc-run');
-      btn.disabled = true;
+      const btn = document.getElementById('sc-run'); btn.disabled = true;
       showStatus('sc-status', 'Loading sales by channel...', 'loading');
       try {
-        const body = { startDate, endDate };
-        const sf = storeFilter('sc');
-        if (sf) body.storeIds = sf;
+        const body = { startDate, endDate, groupBy: document.getElementById('sc-groupby').value };
         const res = await fetch(API + '/api/monkey/reports/sales-by-channel', {
           method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Report failed');
-
-        scRows = Array.isArray(data) ? data : (Array.isArray(data) ? data : (data.rows || []));
-        scCols = [
-          { key: 'channel', label: 'Channel', type: 'string' },
-          { key: 'weekday', label: 'Day', type: 'string' },
-          { key: 'orderCount', label: 'Orders', type: 'num' },
-          { key: 'subtotal', label: 'Subtotal', type: 'money' },
-          { key: 'tax', label: 'Tax', type: 'money' },
-          { key: 'total', label: 'Total', type: 'money' },
-          { key: 'avgOrder', label: 'Avg Order', type: 'money' },
-        ];
-
-        // Compute totals
-        const totals = { channel: 'TOTAL', weekday: '', orderCount: 0, subtotal: 0, tax: 0, total: 0, avgOrder: 0 };
-        scRows.forEach(r => { totals.orderCount += (r.orderCount || 0); totals.subtotal += (r.subtotal || 0); totals.tax += (r.tax || 0); totals.total += (r.total || 0); });
-        if (totals.orderCount > 0) totals.avgOrder = totals.total / totals.orderCount;
-
-        renderStats('sc-stats', [
-          { value: formatNum(totals.orderCount), label: 'Total Orders' },
-          { value: formatMoney(totals.total), label: 'Total Revenue' },
-          { value: formatMoney(totals.avgOrder), label: 'Avg Order' },
-        ]);
-        renderTable('sc', scCols, scRows, totals);
+        scData = data;
+        scRenderReport(scData);
         document.getElementById('sc-csv').style.display = 'inline-flex';
-        showStatus('sc-status', 'Report complete: ' + formatNum(scRows.length) + ' rows', 'success');
+        const nGroups = (scData.groups || []).length;
+        showStatus('sc-status', 'Report complete: ' + formatNum(nGroups) + ' group(s)', 'success');
       } catch (e) {
         showStatus('sc-status', 'Error: ' + e.message, 'error');
       } finally { btn.disabled = false; }
+    }
+    document.getElementById('sc-run').addEventListener('click', loadSalesChannel);
+    document.getElementById('sc-csv').addEventListener('click', () => {
+      if (!scData) return;
+      const cols = [{ key: 'group', label: 'Group' }, { key: 'date', label: 'Date' }, { key: 'dayOfWeek', label: 'Day' }];
+      SC_CHANNELS.forEach(ch => { cols.push({ key: ch.key + 'Count', label: ch.label + ' Count' }); cols.push({ key: ch.key, label: ch.label + ' $' }); });
+      cols.push({ key: 'total', label: 'Total' });
+      const flat = [];
+      (scData.groups || []).forEach(g => {
+        flat.push(Object.assign({ group: g.name }, g.totals));
+        (g.rows || []).forEach(r => flat.push(Object.assign({ group: g.name }, r)));
+      });
+      exportCsv(cols, flat, 'sales_by_channel.csv');
     });
-    document.getElementById('sc-csv').addEventListener('click', () => exportCsv(scCols, scRows, 'catering_sales_by_channel.csv'));
 
     // ════════════════════════════════════════════════════
     // DELIVERY PARTNERS

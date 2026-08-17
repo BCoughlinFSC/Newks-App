@@ -20284,10 +20284,12 @@ async def monkey_stats():
 
 @app.post("/api/monkey/reports/sales-by-channel")
 async def monkey_sales_by_channel(payload: dict = Body(...)):
-    """Catering sales by channel and weekday."""
-    return monkey_db.rpt_sales_by_channel_by_weekday(
+    """Daily catering sales by channel (Online/Store/CSM/Sales Team/Call Center/
+    Marketplace), grouped by System Wide / Market / Store."""
+    return await asyncio.to_thread(
+        monkey_db.rpt_sales_by_channel,
         payload["startDate"], payload["endDate"],
-        store_ids=payload.get("storeIds"),
+        payload.get("groupBy", "system"),
     )
 
 

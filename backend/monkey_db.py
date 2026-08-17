@@ -350,6 +350,132 @@ def rpt_sales_by_channel_by_weekday(
         conn.close()
 
 
+# Channel classification for "Sales by Channel by Weekday" — driven by how the
+# order was entered (entered_by) plus marketplace order_source. Verified against
+# the Monkey export: marketplace=order_source, Online/Store are literal
+# entered_by values, Call Center = TCOT-prefixed agents, everything else named
+# is a CSM. (Sales Team was 0 across the whole export; kept as its own bucket
+# for anyone entered_by a Sales Team member — currently none matched.)
+_CHANNEL_CASE_SQL = """
+    CASE
+        WHEN LOWER(COALESCE(o.order_source, '')) = 'marketplace' THEN 'marketplace'
+        WHEN TRIM(o.entered_by) = 'Online' THEN 'online'
+        WHEN TRIM(o.entered_by) = 'Store'  THEN 'store'
+        WHEN o.entered_by LIKE 'TCOT%'     THEN 'callCenter'
+        ELSE 'csm'
+    END
+"""
+
+# Display order + labels, matching the export's column order.
+SALES_CHANNELS = [
+    ("online", "Online"),
+    ("store", "Store"),
+    ("csm", "CSM"),
+    ("salesTeam", "Sales Team"),
+    ("callCenter", "Call Center"),
+    ("marketplace", "Marketplace"),
+]
+
+_WEEKDAY_NAMES = {
+    "0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday",
+    "4": "Thursday", "5": "Friday", "6": "Saturday",
+}
+
+
+def rpt_sales_by_channel(
+    start_date: str, end_date: str,
+    group_by: str = "system",
+    db_path: str = MONKEY_DB_PATH,
+) -> Dict:
+    """
+    Monkey "Sales by Channel by Weekday" — daily catering sales split into the
+    six channels (Online, Store, CSM, Sales Team, Call Center, Marketplace),
+    with per-day order counts and subtotal dollars.
+
+    `group_by`: 'system' (all stores combined), 'market' (by Monkey region_name),
+    or 'store' (per store). Returns groups, each with per-date rows + a total row.
+    """
+    initialize_db(db_path)
+    group_expr = {
+        "system": "'System Wide'",
+        "market": "COALESCE(s.region_name, '(No Market)')",
+        "store":  "COALESCE(s.store_name, '(No Store)')",
+    }.get(group_by, "'System Wide'")
+
+    conn = get_connection(db_path)
+    try:
+        sql = f"""
+            SELECT {group_expr} AS grp,
+                   DATE(o.date_reqd) AS d,
+                   {_CHANNEL_CASE_SQL} AS channel,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(o.subtotal), 0) AS amt
+            FROM orders o
+            LEFT JOIN stores s ON o.store_id = s.store_id
+            WHERE DATE(o.date_reqd) BETWEEN ? AND ?
+              AND o.deleted = 0
+              AND LOWER(TRIM(o.status)) = 'confirmed'
+              AND COALESCE(LOWER(TRIM(o.order_type)), '') <> 'quote'
+            GROUP BY grp, d, channel
+        """
+        rows = conn.execute(sql, [start_date, end_date]).fetchall()
+    finally:
+        conn.close()
+
+    from collections import defaultdict
+
+    def _blank_cell():
+        return {f"{k}Count": 0 for k, _ in SALES_CHANNELS} | \
+               {k: 0.0 for k, _ in SALES_CHANNELS} | {"total": 0.0}
+
+    # grp -> date -> cell
+    grouped: Dict[str, Dict[str, dict]] = defaultdict(lambda: defaultdict(_blank_cell))
+    for grp, d, channel, n, amt in rows:
+        cell = grouped[grp][d]
+        cell[f"{channel}Count"] += n
+        cell[channel] += amt or 0.0
+        cell["total"] += amt or 0.0
+
+    out_groups = []
+    for grp in sorted(grouped.keys()):
+        date_map = grouped[grp]
+        day_rows = []
+        total_cell = _blank_cell()
+        for d in sorted(date_map.keys()):
+            cell = date_map[d]
+            row = {"date": d, "dayOfWeek": _weekday_name(d)}
+            for k, _ in SALES_CHANNELS:
+                row[f"{k}Count"] = cell[f"{k}Count"]
+                row[k] = round(cell[k], 2)
+                total_cell[f"{k}Count"] += cell[f"{k}Count"]
+                total_cell[k] += cell[k]
+            row["total"] = round(cell["total"], 2)
+            total_cell["total"] += cell["total"]
+            day_rows.append(row)
+        totals = {"date": "Total", "dayOfWeek": ""}
+        for k, _ in SALES_CHANNELS:
+            totals[f"{k}Count"] = total_cell[f"{k}Count"]
+            totals[k] = round(total_cell[k], 2)
+        totals["total"] = round(total_cell["total"], 2)
+        out_groups.append({"name": grp, "rows": day_rows, "totals": totals})
+
+    return {
+        "groupBy": group_by,
+        "channels": [{"key": k, "label": lbl} for k, lbl in SALES_CHANNELS],
+        "groups": out_groups,
+    }
+
+
+def _weekday_name(date_str: str) -> str:
+    from datetime import date
+    try:
+        y, m, d = (int(x) for x in date_str[:10].split("-"))
+        # date.weekday(): Mon=0..Sun=6 → convert to strftime %w (Sun=0)
+        return _WEEKDAY_NAMES[str((date(y, m, d).weekday() + 1) % 7)]
+    except Exception:
+        return ""
+
+
 def rpt_delivery_counts_by_partner(
     start_date: str, end_date: str,
     store_ids: Optional[List[int]] = None,
