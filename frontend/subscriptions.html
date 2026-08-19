@@ -436,10 +436,7 @@
       // Prefill with the signed-in account's email, but shared/admin logins
       // often carry a placeholder address — so ask, don't assume.
       const me = (JSON.parse(localStorage.getItem('user')||'{}').email) || '';
-      const to = prompt('Send a test copy to which address?
-
-' +
-                        'Goes only to this address — the real Cc and Bcc lists are skipped.', me);
+      const to = prompt('Send a test copy to which address?\n\nGoes only to this address — the real Cc and Bcc lists are skipped.', me);
       if(!to) return;
       showStatus('Sending test…', 'info');
       try{
