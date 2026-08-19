@@ -106,16 +106,24 @@ def send_plain_email(to, subject: str, body: str, cc=None) -> bool:
 
 
 def send_report_email(to, subject: str, html_body: str, cc=None,
-                      attachments=None) -> bool:
+                      attachments=None, bcc=None, reply_to: str = "") -> bool:
     """Send a subscribed report: HTML body plus optional file attachments.
 
     `attachments` is a list of (filename, bytes, mime_subtype) tuples — e.g.
     ("Refunds.xlsx", b"...", "vnd.openxmlformats-officedocument.spreadsheetml.sheet").
-    Used by the report-subscription dispatcher (see report_email.py). Returns
-    True on success, False on failure (logged). Never raises.
+    Used by the report-subscription dispatcher (see report_email.py).
+
+    `bcc` recipients get the mail without appearing in any header — every SSRS
+    subscription these replace BCC'd reports@newks.com to keep an archive copy,
+    so bcc addresses go into the SMTP envelope only. `reply_to` sets Reply-To
+    (SSRS used itdepartment@newks.com) so replies don't land on the send-only
+    reports@ mailbox.
+
+    Returns True on success, False on failure (logged). Never raises.
     """
-    to_list = [to] if isinstance(to, str) else [a for a in (to or []) if a]
-    cc_list = [] if not cc else ([cc] if isinstance(cc, str) else [a for a in cc if a])
+    to_list  = [to] if isinstance(to, str) else [a for a in (to or []) if a]
+    cc_list  = [] if not cc  else ([cc]  if isinstance(cc, str)  else [a for a in cc  if a])
+    bcc_list = [] if not bcc else ([bcc] if isinstance(bcc, str) else [a for a in bcc if a])
     if not to_list:
         logger.error("send_report_email: no recipients for %r", subject)
         return False
@@ -125,6 +133,8 @@ def send_report_email(to, subject: str, html_body: str, cc=None,
     msg["To"] = ", ".join(to_list)
     if cc_list:
         msg["Cc"] = ", ".join(cc_list)
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
@@ -135,7 +145,8 @@ def send_report_email(to, subject: str, html_body: str, cc=None,
         part.add_header("Content-Disposition", "attachment", filename=filename)
         msg.attach(part)
 
-    return _send(msg, to_list + cc_list)
+    # Bcc is envelope-only — deliberately never written into a header.
+    return _send(msg, to_list + cc_list + bcc_list)
 
 
 def send_invite_email(to_email: str, user_name: str, invite_url: str) -> bool:

@@ -293,6 +293,46 @@ def get_stats(db_path: str = MONKEY_DB_PATH) -> dict:
 # ── Report Functions (matching SQL Server SPs) ──────────────────────
 
 
+def store_ids_by_scope(scope: str, db_path: str = MONKEY_DB_PATH) -> Optional[List[int]]:
+    """Resolve a store scope to Monkey store_ids, or None for "no filter".
+
+    The SSRS subscriptions these reports replace scoped themselves with
+    get_StoresIncluded(grouping 9, group 79=Corporate / group 8=Franchise).
+    We can't reach contacts.dbo.internal_StoreGroupMembers from here, but
+    Monkey tags each store's region_name ("... - Company Restaurants" vs the
+    franchise group names) — the same signal _period_catering_core already
+    uses to scope Period Catering by Week to company restaurants.
+
+    scope: 'company' | 'franchise' | 'all' (anything else = all).
+    Returns None when the scope is 'all' OR when nothing matched, so a naming
+    change in Monkey can never silently empty a report — it degrades to
+    all-stores instead.
+    """
+    scope = (scope or "all").strip().lower()
+    if scope not in ("company", "franchise"):
+        return None
+
+    initialize_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT store_id, COALESCE(region_name, '') FROM stores"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    company = {sid for sid, region in rows if "company" in region.lower()}
+    if not company:
+        logger.warning("store_ids_by_scope(%s): no store matched 'company' in "
+                       "region_name — falling back to all stores", scope)
+        return None
+
+    if scope == "company":
+        return sorted(company)
+    franchise = sorted({sid for sid, _ in rows} - company)
+    return franchise or None
+
+
 def rpt_sales_by_channel_by_weekday(
     start_date: str, end_date: str,
     store_ids: Optional[List[int]] = None,

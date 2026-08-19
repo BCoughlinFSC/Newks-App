@@ -46,6 +46,11 @@ class RenderedReport:
     sheets: List[Sheet] = field(default_factory=list)
     row_count: int = 0
     filename_stem: str = "report"
+    # Cap how many sheets the EMAIL BODY shows. The .xlsx always carries all of
+    # them. SSRS treated the Excel attachment as the deliverable and the body as
+    # a one-line comment, so a full fiscal year of weeks belongs in the file, not
+    # inline. 0 = show everything.
+    html_max_sheets: int = 0
 
 
 # ── date-window resolution ───────────────────────────────────────────
@@ -137,13 +142,25 @@ def render_html(rep: RenderedReport, footer_note: str = "") -> str:
     )
     parts.append('<tr><td style="padding:22px 28px 8px 28px;">')
 
-    if not rep.sheets or all(not s.rows for s in rep.sheets):
+    if not rep.sheets or all(not sh.rows for sh in rep.sheets):
         parts.append(
             f'<p style="font-size:14px;color:{MUTED};margin:8px 0 20px 0;">'
             f'No rows for this period.</p>'
         )
 
-    for sheet in rep.sheets:
+    shown = rep.sheets
+    hidden = 0
+    if rep.html_max_sheets and len(rep.sheets) > rep.html_max_sheets:
+        shown = rep.sheets[-rep.html_max_sheets:]
+        hidden = len(rep.sheets) - len(shown)
+    if hidden:
+        parts.append(
+            f'<p style="font-size:13px;color:{MUTED};margin:0 0 6px 0;">'
+            f'Showing the most recent {len(shown)} of {len(rep.sheets)} — '
+            f'the attached spreadsheet has all {len(rep.sheets)}.</p>'
+        )
+
+    for sheet in shown:
         if sheet.title:
             parts.append(
                 f'<div style="font-size:15px;font-weight:700;color:{INK};'
@@ -278,13 +295,29 @@ def render_xlsx(rep: RenderedReport) -> bytes:
     return buf.getvalue()
 
 
+def _scope_store_ids(params: Dict[str, Any]) -> Optional[List[int]]:
+    """Store filter for a subscription, mirroring the SSRS StoreGroup parameter.
+
+    SSRS scoped these with get_StoresIncluded(grouping 9, group 79=Corporate /
+    group 8=Franchise). We resolve the same split off Monkey's own
+    stores.region_name — see monkey_db.store_ids_by_scope.
+    """
+    return monkey_db.store_ids_by_scope(params.get("scope") or "all")
+
+
+def _scope_label(scope: Optional[str]) -> str:
+    return {"company": "Corporate stores", "franchise": "Franchise stores"}.get(
+        (scope or "all").lower(), "All stores")
+
+
 # ══ report builders ══════════════════════════════════════════════════
 
 def _build_orders_due(params: Dict[str, Any], run_date: date) -> RenderedReport:
     """Monkey 'Orders Due For Today - Summary by Store'."""
     offset = int(params.get("dayOffset") or 0)
     biz_date = run_date + timedelta(days=offset)
-    rows = monkey_db.rpt_orders_due_by_store(biz_date.isoformat())
+    store_ids = _scope_store_ids(params)
+    rows = monkey_db.rpt_orders_due_by_store(biz_date.isoformat(), store_ids=store_ids)
 
     out_rows = [{
         "storeNumber": r["storeNumber"],
@@ -299,9 +332,10 @@ def _build_orders_due(params: Dict[str, Any], run_date: date) -> RenderedReport:
         "totalDollars": round(sum(r["totalDollars"] for r in out_rows), 2),
     }
     pretty = biz_date.strftime("%A, %B ") + f"{biz_date.day}, {biz_date.year}"
+    scope_lbl = _scope_label(params.get("scope"))
     return RenderedReport(
-        subject=f"Monkey Orders Due — {biz_date.isoformat()}",
-        headline="Monkey Orders Due For Today",
+        subject=f"Monkey Orders Due — {scope_lbl} — {biz_date.isoformat()}",
+        headline=f"Monkey Orders Due For Today — {scope_lbl}",
         subhead=f"Summary by store · {pretty}",
         sheets=[Sheet(
             title="",
@@ -312,14 +346,15 @@ def _build_orders_due(params: Dict[str, Any], run_date: date) -> RenderedReport:
             rows=out_rows, total_row=total,
         )],
         row_count=len(out_rows),
-        filename_stem=f"Monkey_Orders_Due_{biz_date.isoformat()}",
+        filename_stem=f"Monkey_Orders_Due_{(params.get('scope') or 'all')}_{biz_date.isoformat()}",
     )
 
 
 def _build_refunds_by_user(params: Dict[str, Any], run_date: date) -> RenderedReport:
     """Monkey 'Refunds by User'."""
     start, end, label = resolve_window(params, run_date)
-    rows = monkey_db.rpt_refunds_by_user(start, end)
+    store_ids = _scope_store_ids(params)
+    rows = monkey_db.rpt_refunds_by_user(start, end, store_ids=store_ids)
 
     cols = [("refundDate", "Refund Date", "text"),
             ("refundedBy", "Refunded By", "text"),
@@ -343,7 +378,7 @@ def _build_refunds_by_user(params: Dict[str, Any], run_date: date) -> RenderedRe
     return RenderedReport(
         subject=f"Monkey Refunds by User — {start} to {end}",
         headline="Monkey — Refunds by User",
-        subhead=label,
+        subhead=f"{label} · {_scope_label(params.get('scope'))}",
         sheets=[Sheet(title="", columns=cols, rows=rows, total_row=total)],
         row_count=len(rows),
         filename_stem=f"Monkey_Refunds_by_User_{start}_{end}",
@@ -389,7 +424,9 @@ def _build_period_catering_by_week(params: Dict[str, Any], run_date: date) -> Re
     import main  # lazy: main imports this module at load time
 
     basis = params.get("basis") or "subtotal"
-    weeks_back = int(params.get("weeks") or 4)          # 0 = whole fiscal year
+    # SSRS passed [Year] = datepart(year, getdate()) — i.e. the WHOLE year, not a
+    # trailing window. Default to that; htmlWeeks keeps the email body readable.
+    weeks_back = int(params.get("weeks") or 0)          # 0 = whole fiscal year
     fiscal_year = params.get("fiscalYear")
 
     if not fiscal_year:
@@ -441,6 +478,7 @@ def _build_period_catering_by_week(params: Dict[str, Any], run_date: date) -> Re
         sheets=sheets,
         row_count=n_rows,
         filename_stem=f"Period_Catering_by_Week_FY{fiscal_year}",
+        html_max_sheets=int(params.get("htmlWeeks") or 4),
     )
 
 
@@ -477,10 +515,13 @@ REPORTS: Dict[str, Dict[str, Any]] = {
         "page": "/catering.html",
         "build": _build_orders_due,
         "defaults": {"daysOfWeek": "mon,tue,wed,thu,fri,sat,sun", "hour": 7, "minute": 50,
-                     "params": {"dayOffset": 0}},
+                     "params": {"dayOffset": 0, "scope": "company"}},
         "paramSpec": [
             {"key": "dayOffset", "label": "Day offset", "type": "int",
              "help": "0 = orders due today, 1 = tomorrow"},
+            {"key": "scope", "label": "Store scope", "type": "select",
+             "options": ["all", "company", "franchise"],
+             "help": "Mirrors the SSRS StoreGroup param (79=Corporate, 8=Franchise)"},
         ],
     },
     "period_catering_by_week": {
@@ -489,10 +530,12 @@ REPORTS: Dict[str, Dict[str, Any]] = {
         "page": "/catering.html",
         "build": _build_period_catering_by_week,
         "defaults": {"daysOfWeek": "mon", "hour": 7, "minute": 45,
-                     "params": {"weeks": 4, "basis": "subtotal"}},
+                     "params": {"weeks": 0, "htmlWeeks": 4, "basis": "subtotal"}},
         "paramSpec": [
-            {"key": "weeks", "label": "Weeks to include", "type": "int",
-             "help": "Most recent completed fiscal weeks; 0 = whole fiscal year"},
+            {"key": "weeks", "label": "Weeks in the spreadsheet", "type": "int",
+             "help": "0 = whole fiscal year, matching the SSRS [Year] parameter"},
+            {"key": "htmlWeeks", "label": "Weeks in the email body", "type": "int",
+             "help": "Keeps the email readable; the .xlsx always has them all"},
             {"key": "basis", "label": "Dollar basis", "type": "select",
              "options": ["subtotal", "total"]},
             {"key": "fiscalYear", "label": "Fiscal year", "type": "int",
@@ -505,12 +548,15 @@ REPORTS: Dict[str, Dict[str, Any]] = {
         "page": "/catering.html",
         "build": _build_refunds_by_user,
         "defaults": {"daysOfWeek": "mon", "hour": 7, "minute": 45,
-                     "params": {"window": "last_full_week"}},
+                     "params": {"window": "last_full_week", "scope": "company"}},
         "paramSpec": [
             {"key": "window", "label": "Date window", "type": "select",
              "options": ["last_full_week", "last_n_days", "month_to_date",
                          "yesterday", "today"]},
             {"key": "days", "label": "Days (for last_n_days)", "type": "int"},
+            {"key": "scope", "label": "Store scope", "type": "select",
+             "options": ["all", "company", "franchise"],
+             "help": "Mirrors the SSRS StoreGroup param (79=Corporate, 8=Franchise)"},
         ],
     },
     "monkey_sales_by_channel_weekday": {

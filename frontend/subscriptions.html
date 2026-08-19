@@ -157,6 +157,17 @@
         </div>
       </div>
 
+      <div class="row grid2">
+        <div>
+          <label class="fld">Bcc <span class="hint">— archive copy; never shown in the email</span></label>
+          <textarea id="fBcc" placeholder="reports"></textarea>
+        </div>
+        <div>
+          <label class="fld">Reply-To <span class="hint">— where replies should go</span></label>
+          <input type="text" id="fReplyTo" placeholder="itdepartment@newks.com" />
+        </div>
+      </div>
+
       <div class="row">
         <label class="fld">Report options</label>
         <div id="fParams" class="grid3"></div>
@@ -245,7 +256,8 @@
                 ${esc(rep ? rep.label : s.report_key)} · <b>${esc(s.scheduleLabel)}</b>
                 · next ${esc(fmtTime(s.nextRunAt))}<br />
                 To: ${s.toList.length ? esc(s.toList.join('; ')) : '<span style="color:#B91C1C;">none</span>'}
-                ${s.ccList.length ? ' · Cc: ' + esc(s.ccList.join('; ')) : ''}<br />
+                ${s.ccList.length ? ' · Cc: ' + esc(s.ccList.join('; ')) : ''}
+                ${s.bccList && s.bccList.length ? ' · Bcc: ' + esc(s.bccList.join('; ')) : ''}<br />
                 Last: ${last}${s.last_row_count!=null ? ' · '+esc(s.last_row_count)+' rows' : ''}
               </div>
               ${err}
@@ -302,6 +314,8 @@
       document.getElementById('fMinute').value = sub ? sub.minute : (def.minute != null ? def.minute : 45);
       document.getElementById('fTo').value     = sub ? (sub.recipients_to || '') : '';
       document.getElementById('fCc').value     = sub ? (sub.recipients_cc || '') : '';
+      document.getElementById('fBcc').value     = sub ? (sub.recipients_bcc || '') : 'reports@newks.com';
+      document.getElementById('fReplyTo').value = sub ? (sub.reply_to || '') : 'itdepartment@newks.com';
       document.getElementById('fNotes').value  = sub ? (sub.notes || '') : '';
       document.getElementById('fXlsx').checked  = sub ? sub.attachXlsx  : true;
       document.getElementById('fEmpty').checked = sub ? sub.sendIfEmpty : false;
@@ -378,6 +392,8 @@
         minute:       parseInt(document.getElementById('fMinute').value, 10),
         recipientsTo: document.getElementById('fTo').value.trim(),
         recipientsCc: document.getElementById('fCc').value.trim(),
+        recipientsBcc: document.getElementById('fBcc').value.trim(),
+        replyTo:      document.getElementById('fReplyTo').value.trim(),
         attachXlsx:   document.getElementById('fXlsx').checked,
         sendIfEmpty:  document.getElementById('fEmpty').checked,
         notes:        document.getElementById('fNotes').value.trim(),
@@ -427,7 +443,7 @@
     }
     async function runNow(id, name){
       const s = SUBS.find(x => x.id === id);
-      const who = s ? s.toList.concat(s.ccList).join('; ') : '';
+      const who = s ? s.toList.concat(s.ccList, s.bccList || []).join('; ') : '';
       if(!confirm(`Send "${name}" now to the real recipients?\n\n${who}`)) return;
       showStatus('Sending…', 'info');
       try{

@@ -7380,8 +7380,11 @@ def _run_subscription_sync(sub: Dict[str, Any], triggered_by: str,
     sub_id = sub["id"]
     name = sub.get("name") or sub.get("report_key")
     report_key = sub["report_key"]
-    to_list = override_to if override_to is not None else sub.get("toList") or []
-    cc_list = [] if override_to is not None else (sub.get("ccList") or [])
+    # A test send goes ONLY to the tester — never to the real cc/bcc lists.
+    to_list  = override_to if override_to is not None else sub.get("toList") or []
+    cc_list  = [] if override_to is not None else (sub.get("ccList") or [])
+    bcc_list = [] if override_to is not None else (sub.get("bccList") or [])
+    reply_to = sub.get("replyTo") or ""
 
     try:
         rendered = report_email.build_report(
@@ -7434,12 +7437,13 @@ def _run_subscription_sync(sub: Dict[str, Any], triggered_by: str,
     )
     ok = send_report_email(
         to_list, rendered.subject, report_email.render_html(rendered, footer),
-        cc=cc_list, attachments=attachments,
+        cc=cc_list, attachments=attachments, bcc=bcc_list, reply_to=reply_to,
     )
     elapsed = round(time.time() - started, 2)
     subscriptions_db.record_run(
         sub_id, name, report_key, "success" if ok else "failed",
-        row_count=rendered.row_count, recipients="; ".join(to_list + cc_list),
+        row_count=rendered.row_count,
+        recipients="; ".join(to_list + cc_list + bcc_list),
         duration_s=elapsed, triggered_by=triggered_by,
         error="" if ok else "SMTP send failed — see app log",
     )
@@ -7447,7 +7451,7 @@ def _run_subscription_sync(sub: Dict[str, Any], triggered_by: str,
                 sub_id, name, "sent" if ok else "SEND FAILED",
                 rendered.row_count, elapsed, "; ".join(to_list))
     return {"status": "success" if ok else "failed", "rowCount": rendered.row_count,
-            "subject": rendered.subject, "recipients": to_list + cc_list,
+            "subject": rendered.subject, "recipients": to_list + cc_list + bcc_list,
             "elapsedS": elapsed}
 
 

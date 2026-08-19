@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS report_subscriptions (
     minute        INTEGER NOT NULL DEFAULT 45,
     recipients_to TEXT    NOT NULL DEFAULT '',
     recipients_cc TEXT    NOT NULL DEFAULT '',
+    recipients_bcc TEXT   NOT NULL DEFAULT '',
+    reply_to      TEXT    NOT NULL DEFAULT '',
     attach_xlsx   INTEGER NOT NULL DEFAULT 1,
     send_if_empty INTEGER NOT NULL DEFAULT 0,
     params_json   TEXT    NOT NULL DEFAULT '{}',
@@ -80,6 +82,14 @@ def initialize_schema(db_path: str = SUBS_DB_PATH) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(_SCHEMA)
+        # Added after the first deploy — the SSRS originals all BCC'd
+        # reports@newks.com and set Reply-To to itdepartment@newks.com.
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(report_subscriptions)")}
+        for col in ("recipients_bcc", "reply_to"):
+            if col not in existing:
+                conn.execute(
+                    f"ALTER TABLE report_subscriptions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
         conn.commit()
     finally:
         conn.close()
@@ -118,6 +128,8 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         d["params"] = {}
     d["toList"] = parse_recipients(d.get("recipients_to") or "")
     d["ccList"] = parse_recipients(d.get("recipients_cc") or "")
+    d["bccList"] = parse_recipients(d.get("recipients_bcc") or "")
+    d["replyTo"] = (d.get("reply_to") or "").strip()
     d["daysList"] = [x for x in (d.get("days_of_week") or "").split(",") if x]
     d["scheduleLabel"] = schedule_label(d.get("days_of_week") or "", d.get("hour") or 0,
                                         d.get("minute") or 0)
@@ -168,8 +180,8 @@ def get_subscription(sub_id: int, db_path: str = SUBS_DB_PATH) -> Optional[Dict[
 
 
 _FIELDS = ("report_key", "name", "enabled", "days_of_week", "hour", "minute",
-           "recipients_to", "recipients_cc", "attach_xlsx", "send_if_empty",
-           "params_json", "notes")
+           "recipients_to", "recipients_cc", "recipients_bcc", "reply_to",
+           "attach_xlsx", "send_if_empty", "params_json", "notes")
 
 
 def _coerce(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -183,6 +195,8 @@ def _coerce(payload: Dict[str, Any]) -> Dict[str, Any]:
         "minute":        payload.get("minute"),
         "recipients_to": payload.get("recipientsTo",  payload.get("recipients_to", "")),
         "recipients_cc": payload.get("recipientsCc",  payload.get("recipients_cc", "")),
+        "recipients_bcc": payload.get("recipientsBcc", payload.get("recipients_bcc", "")),
+        "reply_to":      payload.get("replyTo",       payload.get("reply_to", "")),
         "attach_xlsx":   payload.get("attachXlsx",    payload.get("attach_xlsx", True)),
         "send_if_empty": payload.get("sendIfEmpty",   payload.get("send_if_empty", False)),
         "notes":         payload.get("notes"),
