@@ -7,6 +7,7 @@ Tables: stores, accounts, clients_and_leads, orders, order_items,
 """
 
 import os
+import re
 import sqlite3
 import logging
 from typing import Optional, List, Dict, Any
@@ -293,6 +294,18 @@ def get_stats(db_path: str = MONKEY_DB_PATH) -> dict:
 # ── Report Functions (matching SQL Server SPs) ──────────────────────
 
 
+# Monkey sorts non-operating stores to the bottom of every picker with an
+# "x." / "y." region-name prefix: "x. Test LAB", "y.Closed Locations",
+# "y.Inactive But Open Locations". Those are not restaurants anyone reports on,
+# and the SSRS store groups never contained them.
+_NON_OPERATING_REGION_RE = re.compile(r"^\s*[xy]\s*\.", re.IGNORECASE)
+
+
+def is_operating_region(region_name: str) -> bool:
+    """False for Monkey's test / closed / inactive region buckets."""
+    return not _NON_OPERATING_REGION_RE.match(region_name or "")
+
+
 def store_ids_by_scope(scope: str, db_path: str = MONKEY_DB_PATH) -> Optional[List[int]]:
     """Resolve a store scope to Monkey store_ids, or None for "no filter".
 
@@ -300,13 +313,17 @@ def store_ids_by_scope(scope: str, db_path: str = MONKEY_DB_PATH) -> Optional[Li
     get_StoresIncluded(grouping 9, group 79=Corporate / group 8=Franchise).
     We can't reach contacts.dbo.internal_StoreGroupMembers from here, but
     Monkey tags each store's region_name ("... - Company Restaurants" vs the
-    franchise group names) — the same signal _period_catering_core already
+    franchisee company names) — the same signal _period_catering_core already
     uses to scope Period Catering by Week to company restaurants.
+
+    Test labs, closed and inactive locations (Monkey's "x." / "y." region
+    prefixes) are excluded from BOTH scopes — 55 closed + 5 test stores would
+    otherwise land in Franchise, which no SSRS store group ever included.
 
     scope: 'company' | 'franchise' | 'all' (anything else = all).
     Returns None when the scope is 'all' OR when nothing matched, so a naming
-    change in Monkey can never silently empty a report — it degrades to
-    all-stores instead.
+    change in Monkey degrades to all-stores rather than silently emptying a
+    report. Use check_store_scopes.py to confirm the split before relying on it.
     """
     scope = (scope or "all").strip().lower()
     if scope not in ("company", "franchise"):
@@ -321,15 +338,16 @@ def store_ids_by_scope(scope: str, db_path: str = MONKEY_DB_PATH) -> Optional[Li
     finally:
         conn.close()
 
-    company = {sid for sid, region in rows if "company" in region.lower()}
+    operating = [(sid, region) for sid, region in rows if is_operating_region(region)]
+    company = {sid for sid, region in operating if "company" in region.lower()}
     if not company:
-        logger.warning("store_ids_by_scope(%s): no store matched 'company' in "
-                       "region_name — falling back to all stores", scope)
+        logger.warning("store_ids_by_scope(%s): no operating store matched 'company' "
+                       "in region_name — falling back to all stores", scope)
         return None
 
     if scope == "company":
         return sorted(company)
-    franchise = sorted({sid for sid, _ in rows} - company)
+    franchise = sorted({sid for sid, _ in operating} - company)
     return franchise or None
 
 

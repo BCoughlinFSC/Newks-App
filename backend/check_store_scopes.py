@@ -82,8 +82,9 @@ def main() -> int:
         print(f"!! {len(overlap)} store(s) in BOTH scopes — that shouldn't happen.")
         return 2
 
-    print("Split looks clean: the two scopes are separate and neither is empty.")
-    print("Compare the counts above against yesterday's SSRS emails before enabling.")
+    print(f"Split looks clean: {len(company)} Corporate + {len(franchise)} Franchise "
+          f"= {len(company) + len(franchise)} operating stores, no overlap.")
+    print("Compare those counts against yesterday's SSRS emails before enabling.")
     return 0
 
 
