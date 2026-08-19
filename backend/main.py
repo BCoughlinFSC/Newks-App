@@ -1657,28 +1657,13 @@ class User(BaseModel):
 # Report keys match the nav link keys in shared-nav.js (Reports section only;
 # Admin & Data items are role-gated, not page-gated).
 AVAILABLE_PAGES = {
-    # Sales & Performance
-    "sales_summary":     "Sales Summary",
-    "metrics":           "Net Sales",
-    "netsales_weekly":   "Net Sales by Location – Weekly",
-    "royalty":           "Royalty Report",
-    "daily-flash":       "Daily Sales Flash",
-    "wpy":               "Weekly Sales (WPY)",
-    # Menu & Items
-    "menu":              "Menu Performance",
-    "menu-mix":          "Menu Mix Report",
-    "pick3":             "Pick 3",
-    "pick2":             "Pick 2",
-    "full-pairings":     "Full Pairings",
-    # Operations & Labor
-    "guest_count":       "Guest Count",
-    "tip_pool":          "Payroll Report",
-    "cashier-vs-kiosk":  "Cashier vs Kiosk",
-    "food-cost":         "Food Cost (COGS)",
-    "spirit-night":      "Spirit Night",
     # Catering & Loyalty
     "catering":          "Catering Reports",
     "loyalty":           "Loyalty Reports",
+    # Operations
+    "tax-exempt-sc":     "Tax-Exempt Svc Chg",
+    "deferred-items":    "Deferred Items",
+    "spirit-night":      "Spirit Night",
 }
 
 class UserCreate(BaseModel):
@@ -6612,8 +6597,13 @@ async def nightly_historical_backfill():
     _backfill_status.update({"status": "complete", "days_done_tonight": days_done})
 
 
-_scheduler.add_job(nightly_historical_backfill, CronTrigger(hour=3, minute=15),
-                   id="nightly_historical_backfill", replace_existing=True)
+# DISABLED 2026-08-19 — the historical backfill only deepened the orders cache
+# for the Sales Summary / Menu Performance / Pick reports, which moved to the
+# Snowflake dashboards. The 3 AM nightly_orders_cache_job stays: Spirit Night,
+# Tax-Exempt Service Charges and Deferred Items still read that cache, and on a
+# miss they fall back to a live per-store-per-day Toast pull.
+# _scheduler.add_job(nightly_historical_backfill, CronTrigger(hour=3, minute=15),
+#                    id="nightly_historical_backfill", replace_existing=True)
 
 
 # ------------------
@@ -7343,8 +7333,11 @@ async def nightly_menu_precompute_job():
 
 # Schedule: 5:00 AM daily, after monkey sync (4:30) finishes. Gives the
 # 12-shape pass ~4 hours of headroom before a 9 AM analyst arrives.
-_scheduler.add_job(nightly_menu_precompute_job, CronTrigger(hour=5, minute=0),
-                   id="nightly_menu_precompute", replace_existing=True)
+# DISABLED 2026-08-19 — Menu Performance moved to the Snowflake dashboards, so
+# there is no longer a page reading this cache. Re-enable by uncommenting if the
+# in-app Menu Performance report ever comes back.
+# _scheduler.add_job(nightly_menu_precompute_job, CronTrigger(hour=5, minute=0),
+#                    id="nightly_menu_precompute", replace_existing=True)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -7436,7 +7429,7 @@ def _run_subscription_sync(sub: Dict[str, Any], triggered_by: str,
         f"Newk's Reporting · {rendered.row_count:,} row(s) · "
         f"generated {datetime.now().strftime('%Y-%m-%d %H:%M')} · "
         f"subscription \"{name}\" · run it any time at "
-        f"{os.getenv('APP_BASE_URL', 'https://reporting.newks.com')}"
+        f"{APP_BASE_URL}"
         f"{report_email.REPORTS.get(report_key, {}).get('page', '/')}"
     )
     ok = send_report_email(
@@ -7644,8 +7637,7 @@ async def _on_startup():
         logger.error("Failed to register report-subscription jobs: %s", exc, exc_info=True)
     logger.info(
         "APScheduler started — nightly jobs scheduled "
-        "(orders@3AM, flash@4AM, monkey@4:30AM, menu_precompute@5AM) "
-        "+ %d report subscription(s) [%s]",
+        "(orders@3AM, monkey@4:30AM) + %d report subscription(s) [%s]",
         n_subs, SUBSCRIPTION_TZ,
     )
 

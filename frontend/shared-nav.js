@@ -15,46 +15,25 @@
   // ─── Nav structure ──────────────────────────────
   // Reports are organized into categories. Reorder items inside each
   // group (or reorder the groups themselves) by editing this array.
+  // Reports still owned by this app. Sales, menu and labor reporting moved to
+  // the Snowflake / Power BI dashboards at fscreporting.com (2026-08) — those
+  // entries were removed rather than hidden, because they are not coming back.
+  // What's left is the app's remaining charter: vendor reporting (Monkey Media
+  // catering, loyalty) and the Toast-API reports nobody else runs.
   const REPORT_GROUPS = [
-    {
-      label: 'Sales & Performance',
-      links: [
-        { key: 'sales_summary',   label: 'Sales Summary',                  href: '/legacy.html?report=sales_summary' },
-        // ─── Hidden pending SSRS rebuild (failed/unused recreations) ───
-        // { key: 'metrics',         label: 'Net Sales',                      href: '/legacy.html?report=metrics' },
-        // { key: 'netsales_weekly', label: 'Net Sales by Location – Weekly', href: '/legacy.html?report=metrics&preset=netsales_weekly' },
-        // { key: 'royalty',         label: 'Royalty Report',                 href: '/legacy.html?report=royalty' },
-        // { key: 'daily-flash',     label: 'Daily Sales Flash',              href: '/daily-flash.html' },
-        // { key: 'wpy',             label: 'Weekly Sales (WPY)',             href: '/wpy.html' },
-      ],
-    },
-    {
-      label: 'Menu & Items',
-      links: [
-        { key: 'menu',          label: 'Menu Performance', href: '/legacy.html?report=menu' },
-        // { key: 'menu-mix',      label: 'Menu Mix Report',  href: '/menu-mix-report.html' },  // Hidden pending SSRS rebuild
-        { key: 'pick3',         label: 'Pick 3',           href: '/pick3.html' },
-        { key: 'pick2',         label: 'Pick 2',           href: '/pick2.html' },
-        { key: 'full-pairings', label: 'Full Pairings',    href: '/full-pairings.html' },
-      ],
-    },
-    {
-      label: 'Operations & Labor',
-      links: [
-        // { key: 'guest_count',      label: 'Guest Count',      href: '/legacy.html?report=guest_count' },  // Hidden pending SSRS rebuild
-        { key: 'tip_pool',         label: 'Payroll Report',   href: '/legacy.html?report=tip_pool' },
-        // { key: 'cashier-vs-kiosk', label: 'Cashier vs Kiosk', href: '/cashier-vs-kiosk.html' },  // Hidden pending SSRS rebuild
-        // { key: 'food-cost',        label: 'Food Cost (COGS)', href: '/food-cost.html' },  // Hidden pending SSRS rebuild
-        { key: 'tax-exempt-sc',    label: 'Tax-Exempt Svc Chg', href: '/tax-exempt-service-charges.html' },
-        { key: 'deferred-items',   label: 'Deferred Items',     href: '/deferred-items.html' },
-        { key: 'spirit-night',     label: 'Spirit Night',       href: '/spirit-night.html' },
-      ],
-    },
     {
       label: 'Catering & Loyalty',
       links: [
         { key: 'catering', label: 'Catering Reports', href: '/catering.html' },
         { key: 'loyalty',  label: 'Loyalty Reports',  href: '/loyalty.html' },
+      ],
+    },
+    {
+      label: 'Operations',
+      links: [
+        { key: 'tax-exempt-sc',  label: 'Tax-Exempt Svc Chg', href: '/tax-exempt-service-charges.html' },
+        { key: 'deferred-items', label: 'Deferred Items',     href: '/deferred-items.html' },
+        { key: 'spirit-night',   label: 'Spirit Night',       href: '/spirit-night.html' },
       ],
     },
   ];
@@ -73,29 +52,16 @@
   // ─── Detect active page ─────────────────────────
   function getActivePage() {
     const path = window.location.pathname.replace(/\/$/, '');
-    const params = new URLSearchParams(window.location.search);
 
     if (path === '' || path === '/' || path.endsWith('/index.html')) {
       return 'home';
     }
-    if (path.endsWith('/legacy.html')) {
-      // The "Net Sales by Location – Weekly" preset shares reportType=metrics
-      // but is a distinct sidebar entry. Disambiguate via ?preset=.
-      if (params.get('preset') === 'netsales_weekly') return 'netsales_weekly';
-      return params.get('report') || 'sales_summary';
-    }
-    if (path.endsWith('/pick3.html'))                return 'pick3';
-    if (path.endsWith('/pick2.html'))                return 'pick2';
-    if (path.endsWith('/full-pairings.html'))        return 'full-pairings';
-    if (path.endsWith('/wpy.html'))                  return 'wpy';
-    if (path.endsWith('/daily-flash.html'))         return 'daily-flash';
-    if (path.endsWith('/menu-mix-report.html'))     return 'menu-mix';
     if (path.endsWith('/olo.html'))                   return 'olo';
     if (path.endsWith('/catering.html'))              return 'catering';
     if (path.endsWith('/loyalty.html'))               return 'loyalty';
-    if (path.endsWith('/food-cost.html'))             return 'food-cost';
-    if (path.endsWith('/cashier-vs-kiosk.html'))     return 'cashier-vs-kiosk';
     if (path.endsWith('/spirit-night.html'))          return 'spirit-night';
+    if (path.endsWith('/tax-exempt-service-charges.html')) return 'tax-exempt-sc';
+    if (path.endsWith('/deferred-items.html'))        return 'deferred-items';
     if (path.endsWith('/mapping.html'))               return 'mapping';
     if (path.endsWith('/msi-discrepancy.html'))       return 'msi-discrepancy';
     if (path.endsWith('/toast-reporting-guide.html')) return 'guide';
