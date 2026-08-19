@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Report Subscriptions – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui,-apple-system,sans-serif; margin:0; background:#F8FAFC; color:#2c2c2c; min-height:100vh; }
+    .header { background:#C41E3A; padding:1.5rem 2rem; border-bottom:3px solid #A01A2E; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+    .header-content { display:flex; justify-content:space-between; align-items:center; }
+    .header h1 { margin:0; color:#fff; font-size:1.5rem; font-weight:700; }
+    .header p { margin:.25rem 0 0 0; color:rgba(255,255,255,.85); font-size:.85rem; }
+    .home-btn { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.3); padding:.4rem .8rem; border-radius:6px; font-size:.85rem; text-decoration:none; }
+    .container { display:grid; grid-template-columns:280px 1fr; gap:1.5rem; padding:1.5rem 2rem; max-width:1800px; margin:0 auto; }
+    @media (max-width:900px){ .container{ grid-template-columns:1fr; } }
+    .card { background:#fff; border-radius:12px; padding:1.5rem; border:1px solid #e8e0d5; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+    .card + .card { margin-top:1rem; }
+    .card h2 { margin:0 0 1rem 0; color:#C41E3A; font-size:1.1rem; font-weight:700; display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+
+    .sub { border:1px solid #EDE7DE; border-radius:10px; padding:.9rem 1rem; margin-bottom:.75rem; background:#fff; }
+    .sub.disabled { background:#FAFAFA; opacity:.72; }
+    .sub-top { display:flex; align-items:flex-start; gap:1rem; }
+    .sub-main { flex:1; min-width:0; }
+    .sub-name { font-weight:700; font-size:.98rem; }
+    .sub-meta { font-size:.8rem; color:#6B7280; margin-top:.15rem; line-height:1.5; }
+    .sub-meta code { background:#F3F4F6; padding:.05rem .3rem; border-radius:4px; font-size:.75rem; }
+    .sub-actions { display:flex; gap:.4rem; flex-wrap:wrap; justify-content:flex-end; }
+
+    .btn { border:none; padding:.4rem .8rem; border-radius:6px; font-weight:600; cursor:pointer; font-size:.8rem; font-family:inherit; }
+    .btn-primary { background:#C41E3A; color:#fff; }
+    .btn-primary:hover:not(:disabled){ background:#A01A2E; }
+    .btn-ghost { background:#fff; color:#374151; border:1px solid #D1D5DB; }
+    .btn-ghost:hover:not(:disabled){ background:#F9FAFB; }
+    .btn-danger { background:#fff; color:#B91C1C; border:1px solid #FCA5A5; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+
+    .badge { display:inline-block; padding:.1rem .5rem; border-radius:99px; font-size:.72rem; font-weight:700; }
+    .badge.success { background:#DCFCE7; color:#166534; }
+    .badge.failed { background:#FEE2E2; color:#991B1B; }
+    .badge.skipped_empty { background:#FEF3C7; color:#92400E; }
+    .badge.on { background:#DCFCE7; color:#166534; }
+    .badge.off { background:#F3F4F6; color:#6B7280; }
+
+    label.fld { display:block; font-size:.78rem; font-weight:600; color:#374151; margin-bottom:.25rem; }
+    .hint { font-size:.72rem; color:#9CA3AF; font-weight:400; }
+    input[type=text], input[type=number], select, textarea {
+      width:100%; padding:.42rem .55rem; border:1px solid #D1D5DB; border-radius:6px;
+      font-size:.85rem; font-family:inherit; background:#fff; }
+    textarea { min-height:58px; resize:vertical; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:.9rem; }
+    .grid3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:.9rem; }
+    @media (max-width:820px){ .grid2,.grid3{ grid-template-columns:1fr; } }
+    .row { margin-bottom:.9rem; }
+    .days { display:flex; gap:.35rem; flex-wrap:wrap; }
+    .day { border:1px solid #D1D5DB; border-radius:6px; padding:.32rem .6rem; font-size:.78rem;
+           cursor:pointer; user-select:none; background:#fff; font-weight:600; color:#6B7280; }
+    .day.on { background:#C41E3A; border-color:#C41E3A; color:#fff; }
+    .checkrow { display:flex; align-items:center; gap:.45rem; font-size:.82rem; margin-top:.55rem; }
+
+    table.runs { width:100%; border-collapse:collapse; font-size:.82rem; }
+    table.runs th, table.runs td { padding:.38rem .5rem; border-bottom:1px solid #eee; text-align:left; white-space:nowrap; }
+    table.runs th { color:#6B7280; font-weight:600; }
+    table.runs td.err { color:#B91C1C; white-space:normal; }
+
+    .status-msg { padding:.6rem .9rem; border-radius:8px; margin-bottom:1rem; font-size:.85rem; display:none; }
+    .status-msg.error { background:#FEF2F2; border:1px solid #FCA5A5; color:#B91C1C; display:block; }
+    .status-msg.info  { background:#F0F9FF; border:1px solid #BAE6FD; color:#0369A1; display:block; }
+    .status-msg.ok    { background:#F0FDF4; border:1px solid #86EFAC; color:#166534; display:block; }
+
+    .modal-back { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; z-index:50;
+                  align-items:flex-start; justify-content:center; padding:2.5rem 1rem; overflow:auto; }
+    .modal-back.open { display:flex; }
+    .modal { background:#fff; border-radius:12px; width:820px; max-width:100%; padding:1.5rem; }
+    .modal h3 { margin:0 0 1rem 0; color:#C41E3A; font-size:1.05rem; }
+    .modal-foot { display:flex; justify-content:space-between; gap:.5rem; margin-top:1.2rem;
+                  border-top:1px solid #eee; padding-top:1rem; }
+    iframe.preview { width:100%; height:560px; border:1px solid #E5E7EB; border-radius:8px; background:#fff; }
+  </style>
+</head>
+<body>
+  <div class="header"><div class="header-content">
+    <div>
+      <h1>Report Subscriptions</h1>
+      <p>Scheduled report emails — the in-app replacement for SSRS subscriptions</p>
+    </div>
+    <a href="/" class="home-btn">Home</a>
+  </div></div>
+
+  <div class="container">
+    <div id="shared-sidebar"></div>
+    <div>
+      <div id="statusMsg" class="status-msg"></div>
+
+      <div class="card">
+        <h2>Subscriptions
+          <button class="btn btn-primary" onclick="openEditor(null)">+ New subscription</button>
+        </h2>
+        <div id="subsWrap"><p style="color:#6B7280;">Loading…</p></div>
+        <p id="tzNote" style="font-size:.76rem;color:#9CA3AF;margin:.75rem 0 0 0;"></p>
+      </div>
+
+      <div class="card">
+        <h2>Recent Sends</h2>
+        <div id="runsWrap"><p style="color:#6B7280;">Loading…</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Editor ─────────────────────────────────────────── -->
+  <div class="modal-back" id="editorBack">
+    <div class="modal">
+      <h3 id="editorTitle">New subscription</h3>
+      <div class="row grid2">
+        <div>
+          <label class="fld">Report</label>
+          <select id="fReport" onchange="onReportChange()"></select>
+          <div class="hint" id="replacesNote" style="margin-top:.3rem;"></div>
+        </div>
+        <div>
+          <label class="fld">Subscription name</label>
+          <input type="text" id="fName" placeholder="e.g. Orders Due — Sales Team" />
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="fld">Runs on <span class="hint">— Central time</span></label>
+        <div class="days" id="fDays"></div>
+      </div>
+
+      <div class="row grid3">
+        <div>
+          <label class="fld">Send at</label>
+          <div style="display:flex;gap:.4rem;align-items:center;">
+            <input type="number" id="fHour" min="0" max="23" style="width:80px;" />
+            <span style="color:#9CA3AF;">:</span>
+            <input type="number" id="fMinute" min="0" max="59" style="width:80px;" />
+            <span class="hint" id="clockNote"></span>
+          </div>
+        </div>
+        <div class="checkrow" style="align-self:end;">
+          <input type="checkbox" id="fXlsx" /> <label for="fXlsx" style="font-size:.82rem;">Attach Excel file</label>
+        </div>
+        <div class="checkrow" style="align-self:end;">
+          <input type="checkbox" id="fEmpty" /> <label for="fEmpty" style="font-size:.82rem;">Send even if empty</label>
+        </div>
+      </div>
+
+      <div class="row grid2">
+        <div>
+          <label class="fld">To <span class="hint">— semicolons; bare aliases get @newks.com</span></label>
+          <textarea id="fTo" placeholder="salesteam; companygms; fbcs"></textarea>
+        </div>
+        <div>
+          <label class="fld">Cc <span class="hint">— optional</span></label>
+          <textarea id="fCc" placeholder="itdepartment"></textarea>
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="fld">Report options</label>
+        <div id="fParams" class="grid3"></div>
+      </div>
+
+      <div class="row">
+        <label class="fld">Notes <span class="hint">— why this exists / who asked for it</span></label>
+        <input type="text" id="fNotes" placeholder="Replaces SSRS subscription retired 2026-08" />
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn btn-ghost" onclick="previewCurrent()">Preview</button>
+        <div style="display:flex;gap:.5rem;">
+          <button class="btn btn-ghost" onclick="closeEditor()">Cancel</button>
+          <button class="btn btn-primary" id="saveBtn" onclick="saveEditor()">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Preview ────────────────────────────────────────── -->
+  <div class="modal-back" id="previewBack">
+    <div class="modal">
+      <h3 id="previewTitle">Preview</h3>
+      <iframe class="preview" id="previewFrame"></iframe>
+      <div class="modal-foot">
+        <span class="hint" id="previewMeta"></span>
+        <button class="btn btn-ghost" onclick="document.getElementById('previewBack').classList.remove('open')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="shared-nav.js"></script>
+  <script>
+    const API_BASE = '';
+    const DAY_LABELS = { mon:'Mon', tue:'Tue', wed:'Wed', thu:'Thu', fri:'Fri', sat:'Sat', sun:'Sun' };
+    let CATALOG = [], SUBS = [], EDIT_ID = null, DAYS = [];
+
+    function getAuthHeaders(extra){ const t=localStorage.getItem('auth_token');
+      return Object.assign(t?{'Authorization':'Bearer '+t}:{}, extra||{}); }
+    function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+    function showStatus(m,t){ const e=document.getElementById('statusMsg'); e.className='status-msg '+t; e.textContent=m; }
+    function clearStatus(){ document.getElementById('statusMsg').className='status-msg'; }
+    function fmtTime(iso){ if(!iso) return '—'; return String(iso).replace('T',' ').replace(/(\+\d\d:\d\d|Z)$/,'').slice(0,16); }
+    function clock(h,m){ const ap=h<12?'AM':'PM'; return ((h%12)||12)+':'+String(m).padStart(2,'0')+' '+ap; }
+
+    async function api(path, opts){
+      const res = await fetch(API_BASE+path, Object.assign({ headers: getAuthHeaders({'Content-Type':'application/json'}) }, opts||{}));
+      if(!res.ok){ throw new Error((await res.json().catch(()=>({}))).detail || (res.status+' '+res.statusText)); }
+      return res.status === 204 ? null : res.json();
+    }
+
+    // ─── load ────────────────────────────────────────────
+    async function loadAll(){
+      try{
+        const cat = await api('/api/subscriptions/catalog');
+        CATALOG = cat.reports || []; DAYS = cat.days || [];
+        document.getElementById('tzNote').textContent =
+          'All send times are ' + (cat.timezone || 'America/Chicago') + '. The app must be running for a subscription to fire.';
+        SUBS = await api('/api/subscriptions');
+        renderSubs();
+        renderRuns(await api('/api/subscriptions/runs?limit=40'));
+        clearStatus();
+      }catch(e){ showStatus('Error: '+e.message, 'error'); }
+    }
+
+    function renderSubs(){
+      const wrap = document.getElementById('subsWrap');
+      if(!SUBS.length){
+        wrap.innerHTML = '<p style="color:#6B7280;">No subscriptions yet. Click <b>+ New subscription</b> to add one.</p>';
+        return;
+      }
+      wrap.innerHTML = SUBS.map(s => {
+        const rep = CATALOG.find(r => r.key === s.report_key);
+        const last = s.last_status
+          ? `<span class="badge ${esc(s.last_status)}">${esc(s.last_status)}</span> ${esc(fmtTime(s.last_run_at))}`
+          : '<span style="color:#9CA3AF;">never run</span>';
+        const err = s.last_error ? `<div style="color:#B91C1C;font-size:.76rem;margin-top:.2rem;">${esc(s.last_error)}</div>` : '';
+        return `<div class="sub ${s.enabled?'':'disabled'}">
+          <div class="sub-top">
+            <div class="sub-main">
+              <div class="sub-name">${esc(s.name)}
+                <span class="badge ${s.enabled?'on':'off'}" style="margin-left:.4rem;">${s.enabled?'ON':'OFF'}</span>
+              </div>
+              <div class="sub-meta">
+                ${esc(rep ? rep.label : s.report_key)} · <b>${esc(s.scheduleLabel)}</b>
+                · next ${esc(fmtTime(s.nextRunAt))}<br />
+                To: ${s.toList.length ? esc(s.toList.join('; ')) : '<span style="color:#B91C1C;">none</span>'}
+                ${s.ccList.length ? ' · Cc: ' + esc(s.ccList.join('; ')) : ''}<br />
+                Last: ${last}${s.last_row_count!=null ? ' · '+esc(s.last_row_count)+' rows' : ''}
+              </div>
+              ${err}
+            </div>
+            <div class="sub-actions">
+              <button class="btn btn-ghost" onclick="previewSub(${s.id})">Preview</button>
+              <button class="btn btn-ghost" onclick="sendTest(${s.id})">Send test to me</button>
+              <button class="btn btn-ghost" onclick="runNow(${s.id}, '${esc(s.name).replace(/'/g,"\\'")}')">Send now</button>
+              <button class="btn btn-ghost" onclick="toggle(${s.id}, ${!s.enabled})">${s.enabled?'Disable':'Enable'}</button>
+              <button class="btn btn-ghost" onclick="openEditor(${s.id})">Edit</button>
+              <button class="btn btn-danger" onclick="removeSub(${s.id})">Delete</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function renderRuns(runs){
+      const wrap = document.getElementById('runsWrap');
+      if(!runs || !runs.length){ wrap.innerHTML = '<p style="color:#6B7280;">No sends yet.</p>'; return; }
+      wrap.innerHTML = `<table class="runs"><tr>
+          <th>When</th><th>Subscription</th><th>Status</th><th>Rows</th>
+          <th>Recipients</th><th>By</th><th>Detail</th></tr>` +
+        runs.map(r => `<tr>
+          <td>${esc(fmtTime(r.ran_at))}</td>
+          <td>${esc(r.name || r.report_key)}</td>
+          <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+          <td>${r.row_count==null?'—':esc(r.row_count)}</td>
+          <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;">${esc(r.recipients||'')}</td>
+          <td>${esc(r.triggered_by||'')}</td>
+          <td class="err">${esc(r.error||'')}</td>
+        </tr>`).join('') + '</table>';
+    }
+
+    // ─── editor ──────────────────────────────────────────
+    function openEditor(id){
+      EDIT_ID = id;
+      const sub = id ? SUBS.find(s => s.id === id) : null;
+      document.getElementById('editorTitle').textContent = sub ? 'Edit subscription' : 'New subscription';
+
+      document.getElementById('fReport').innerHTML =
+        CATALOG.map(r => `<option value="${esc(r.key)}">${esc(r.label)}</option>`).join('');
+      const key = sub ? sub.report_key : (CATALOG[0] && CATALOG[0].key);
+      document.getElementById('fReport').value = key;
+
+      document.getElementById('fDays').innerHTML = DAYS.map(d =>
+        `<div class="day" data-day="${d}" onclick="this.classList.toggle('on');">${DAY_LABELS[d]||d}</div>`).join('');
+
+      const def = (CATALOG.find(r => r.key === key) || {}).defaults || {};
+      const days = sub ? sub.daysList : String(def.daysOfWeek||'').split(',').filter(Boolean);
+      setDays(days);
+      document.getElementById('fName').value   = sub ? sub.name : ((CATALOG.find(r=>r.key===key)||{}).label || '');
+      document.getElementById('fHour').value   = sub ? sub.hour   : (def.hour   != null ? def.hour   : 7);
+      document.getElementById('fMinute').value = sub ? sub.minute : (def.minute != null ? def.minute : 45);
+      document.getElementById('fTo').value     = sub ? (sub.recipients_to || '') : '';
+      document.getElementById('fCc').value     = sub ? (sub.recipients_cc || '') : '';
+      document.getElementById('fNotes').value  = sub ? (sub.notes || '') : '';
+      document.getElementById('fXlsx').checked  = sub ? sub.attachXlsx  : true;
+      document.getElementById('fEmpty').checked = sub ? sub.sendIfEmpty : false;
+
+      renderParams(key, sub ? sub.params : (def.params || {}));
+      updateClockNote();
+      document.getElementById('editorBack').classList.add('open');
+    }
+    function closeEditor(){ document.getElementById('editorBack').classList.remove('open'); }
+    function setDays(list){
+      document.querySelectorAll('#fDays .day').forEach(el =>
+        el.classList.toggle('on', list.includes(el.dataset.day)));
+    }
+    function getDays(){
+      return Array.from(document.querySelectorAll('#fDays .day.on')).map(el => el.dataset.day);
+    }
+    function onReportChange(){
+      const key = document.getElementById('fReport').value;
+      const rep = CATALOG.find(r => r.key === key) || {};
+      const def = rep.defaults || {};
+      setDays(String(def.daysOfWeek||'').split(',').filter(Boolean));
+      document.getElementById('fHour').value   = def.hour   != null ? def.hour   : 7;
+      document.getElementById('fMinute').value = def.minute != null ? def.minute : 45;
+      if(!EDIT_ID) document.getElementById('fName').value = rep.label || '';
+      renderParams(key, def.params || {});
+      updateClockNote();
+    }
+    function updateClockNote(){
+      const h = +document.getElementById('fHour').value || 0;
+      const m = +document.getElementById('fMinute').value || 0;
+      document.getElementById('clockNote').textContent = clock(h, m) + ' Central';
+      const rep = CATALOG.find(r => r.key === document.getElementById('fReport').value);
+      document.getElementById('replacesNote').textContent =
+        rep && rep.replaces ? 'Replaces SSRS ' + rep.replaces : '';
+    }
+    document.addEventListener('input', e => {
+      if(e.target.id === 'fHour' || e.target.id === 'fMinute') updateClockNote();
+    });
+
+    function renderParams(key, values){
+      const rep = CATALOG.find(r => r.key === key) || {};
+      const spec = rep.paramSpec || [];
+      const box = document.getElementById('fParams');
+      if(!spec.length){ box.innerHTML = '<div class="hint">This report has no options.</div>'; return; }
+      box.innerHTML = spec.map(p => {
+        const v = values && values[p.key] != null ? values[p.key] : '';
+        const help = p.help ? `<div class="hint">${esc(p.help)}</div>` : '';
+        if(p.type === 'select'){
+          return `<div><label class="fld">${esc(p.label)}</label>
+            <select data-param="${esc(p.key)}" data-type="select">
+              ${(p.options||[]).map(o => `<option value="${esc(o)}"${o===v?' selected':''}>${esc(o)}</option>`).join('')}
+            </select>${help}</div>`;
+        }
+        return `<div><label class="fld">${esc(p.label)}</label>
+          <input type="${p.type==='int'?'number':'text'}" data-param="${esc(p.key)}"
+                 data-type="${esc(p.type)}" value="${esc(v)}" />${help}</div>`;
+      }).join('');
+    }
+    function getParams(){
+      const out = {};
+      document.querySelectorAll('#fParams [data-param]').forEach(el => {
+        const raw = el.value;
+        if(raw === '' || raw == null) return;
+        out[el.dataset.param] = el.dataset.type === 'int' ? parseInt(raw, 10) : raw;
+      });
+      return out;
+    }
+    function formPayload(){
+      return {
+        reportKey:    document.getElementById('fReport').value,
+        name:         document.getElementById('fName').value.trim(),
+        daysOfWeek:   getDays(),
+        hour:         parseInt(document.getElementById('fHour').value, 10),
+        minute:       parseInt(document.getElementById('fMinute').value, 10),
+        recipientsTo: document.getElementById('fTo').value.trim(),
+        recipientsCc: document.getElementById('fCc').value.trim(),
+        attachXlsx:   document.getElementById('fXlsx').checked,
+        sendIfEmpty:  document.getElementById('fEmpty').checked,
+        notes:        document.getElementById('fNotes').value.trim(),
+        enabled:      EDIT_ID ? (SUBS.find(s=>s.id===EDIT_ID)||{}).enabled !== false : true,
+        params:       getParams(),
+      };
+    }
+
+    async function saveEditor(){
+      const p = formPayload();
+      if(!p.name){ showStatus('Give the subscription a name.', 'error'); return; }
+      if(!p.daysOfWeek.length){ showStatus('Pick at least one day.', 'error'); return; }
+      const btn = document.getElementById('saveBtn'); btn.disabled = true;
+      try{
+        if(EDIT_ID) await api('/api/subscriptions/'+EDIT_ID, { method:'PUT',  body: JSON.stringify(p) });
+        else        await api('/api/subscriptions',           { method:'POST', body: JSON.stringify(p) });
+        closeEditor(); await loadAll();
+        showStatus('Saved.', 'ok');
+      }catch(e){ showStatus('Save failed: '+e.message, 'error'); }
+      finally { btn.disabled = false; }
+    }
+
+    // ─── actions ─────────────────────────────────────────
+    async function toggle(id, enabled){
+      try{ await api(`/api/subscriptions/${id}/enabled`, { method:'POST', body: JSON.stringify({enabled}) });
+           await loadAll(); }
+      catch(e){ showStatus('Error: '+e.message, 'error'); }
+    }
+    async function removeSub(id){
+      const s = SUBS.find(x => x.id === id);
+      if(!confirm(`Delete "${s ? s.name : id}"? This stops the scheduled email.`)) return;
+      try{ await api('/api/subscriptions/'+id, { method:'DELETE' }); await loadAll(); }
+      catch(e){ showStatus('Error: '+e.message, 'error'); }
+    }
+    async function sendTest(id){
+      const me = (JSON.parse(localStorage.getItem('user')||'{}').email) || '';
+      const to = prompt('Send a test copy to:', me);
+      if(!to) return;
+      showStatus('Sending test…', 'info');
+      try{
+        const r = await api(`/api/subscriptions/${id}/run-now`, { method:'POST', body: JSON.stringify({testTo: to}) });
+        showStatus(r.status === 'success'
+          ? `Test sent to ${to} (${r.rowCount} rows).`
+          : `Test ${r.status}${r.error ? ': '+r.error : ''}`, r.status === 'success' ? 'ok' : 'error');
+        await loadAll();
+      }catch(e){ showStatus('Error: '+e.message, 'error'); }
+    }
+    async function runNow(id, name){
+      const s = SUBS.find(x => x.id === id);
+      const who = s ? s.toList.concat(s.ccList).join('; ') : '';
+      if(!confirm(`Send "${name}" now to the real recipients?\n\n${who}`)) return;
+      showStatus('Sending…', 'info');
+      try{
+        const r = await api(`/api/subscriptions/${id}/run-now`, { method:'POST', body: JSON.stringify({}) });
+        showStatus(r.status === 'success'
+          ? `Sent (${r.rowCount} rows) to ${(r.recipients||[]).join('; ')}.`
+          : `${r.status}${r.error ? ': '+r.error : ''}`, r.status === 'success' ? 'ok' : 'error');
+        await loadAll();
+      }catch(e){ showStatus('Error: '+e.message, 'error'); }
+    }
+
+    async function previewCurrent(){
+      const p = formPayload();
+      await doPreview(p.reportKey, p.params, p.name);
+    }
+    async function previewSub(id){
+      const s = SUBS.find(x => x.id === id);
+      if(s) await doPreview(s.report_key, s.params, s.name);
+    }
+    async function doPreview(reportKey, params, title){
+      showStatus('Building preview…', 'info');
+      try{
+        const r = await api('/api/subscriptions/preview', {
+          method:'POST', body: JSON.stringify({reportKey, params})
+        });
+        document.getElementById('previewTitle').textContent = title || 'Preview';
+        document.getElementById('previewMeta').textContent  = r.subject + ' · ' + r.rowCount + ' rows';
+        document.getElementById('previewFrame').srcdoc = r.html;
+        document.getElementById('previewBack').classList.add('open');
+        clearStatus();
+      }catch(e){ showStatus('Preview failed: '+e.message, 'error'); }
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>

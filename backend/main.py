@@ -65,6 +65,7 @@ from email_service import (
     send_password_reset_email,
     send_onboarding_invite_email,
     send_plain_email,
+    send_report_email,
 )
 import toast_puller_db as repoll_db
 import precompute_cache
@@ -7346,6 +7347,268 @@ _scheduler.add_job(nightly_menu_precompute_job, CronTrigger(hour=5, minute=0),
                    id="nightly_menu_precompute", replace_existing=True)
 
 
+# ══════════════════════════════════════════════════════════════════════
+# Emailed report subscriptions  (the SSRS subscription replacement)
+#
+# subscriptions_db  — schedule + recipients + params, one row per subscription
+# report_email      — turns a (report_key, params, run_date) into HTML + .xlsx
+# here              — the dispatcher, the APScheduler wiring, and the API
+#
+# Cron triggers are pinned to America/Chicago: the Cloudways box runs UTC, and
+# an unpinned CronTrigger(hour=7) would fire at 2 AM Central (same bug that made
+# the old Flash import pull an in-progress day). Recipients are stored exactly
+# as SSRS had them — bare aliases like "salesteam" expand to @newks.com.
+# ══════════════════════════════════════════════════════════════════════
+
+import subscriptions_db
+import report_email
+
+SUBSCRIPTION_TZ = "America/Chicago"
+_XLSX_MIME = "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _subscription_run_date() -> date:
+    """Today in Central — the basis for every relative date window."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(SUBSCRIPTION_TZ)).date()
+    except Exception:
+        return date.today()
+
+
+def _run_subscription_sync(sub: Dict[str, Any], triggered_by: str,
+                           override_to: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Build + send one subscription. Blocking; call via asyncio.to_thread.
+
+    Never raises — a failure is recorded in subscription_runs and returned, so
+    one broken subscription can't take down the others or the scheduler.
+    """
+    started = time.time()
+    sub_id = sub["id"]
+    name = sub.get("name") or sub.get("report_key")
+    report_key = sub["report_key"]
+    to_list = override_to if override_to is not None else sub.get("toList") or []
+    cc_list = [] if override_to is not None else (sub.get("ccList") or [])
+
+    try:
+        rendered = report_email.build_report(
+            report_key, sub.get("params") or {}, _subscription_run_date()
+        )
+    except Exception as exc:
+        logger.error("Subscription %s (%s) failed to build: %s", sub_id, name, exc,
+                     exc_info=True)
+        subscriptions_db.record_run(
+            sub_id, name, report_key, "failed", recipients="; ".join(to_list),
+            duration_s=round(time.time() - started, 2), triggered_by=triggered_by,
+            error=f"build failed: {exc}",
+        )
+        return {"status": "failed", "error": str(exc)}
+
+    if rendered.row_count == 0 and not sub.get("sendIfEmpty"):
+        subscriptions_db.record_run(
+            sub_id, name, report_key, "skipped_empty", row_count=0,
+            recipients="; ".join(to_list),
+            duration_s=round(time.time() - started, 2), triggered_by=triggered_by,
+        )
+        logger.info("Subscription %s (%s): 0 rows — skipped (send_if_empty off)", sub_id, name)
+        return {"status": "skipped_empty", "rowCount": 0}
+
+    if not to_list:
+        subscriptions_db.record_run(
+            sub_id, name, report_key, "failed", row_count=rendered.row_count,
+            duration_s=round(time.time() - started, 2), triggered_by=triggered_by,
+            error="no recipients configured",
+        )
+        return {"status": "failed", "error": "no recipients configured"}
+
+    attachments = []
+    if sub.get("attachXlsx"):
+        try:
+            attachments.append(
+                (f"{rendered.filename_stem}.xlsx", report_email.render_xlsx(rendered), _XLSX_MIME)
+            )
+        except Exception as exc:
+            # An unbuildable workbook shouldn't cost the recipient the email.
+            logger.warning("Subscription %s: xlsx build failed (%s) — sending HTML only",
+                           sub_id, exc)
+
+    footer = (
+        f"Newk's Reporting · {rendered.row_count:,} row(s) · "
+        f"generated {datetime.now().strftime('%Y-%m-%d %H:%M')} · "
+        f"subscription \"{name}\" · run it any time at "
+        f"{os.getenv('APP_BASE_URL', 'https://reporting.newks.com')}"
+        f"{report_email.REPORTS.get(report_key, {}).get('page', '/')}"
+    )
+    ok = send_report_email(
+        to_list, rendered.subject, report_email.render_html(rendered, footer),
+        cc=cc_list, attachments=attachments,
+    )
+    elapsed = round(time.time() - started, 2)
+    subscriptions_db.record_run(
+        sub_id, name, report_key, "success" if ok else "failed",
+        row_count=rendered.row_count, recipients="; ".join(to_list + cc_list),
+        duration_s=elapsed, triggered_by=triggered_by,
+        error="" if ok else "SMTP send failed — see app log",
+    )
+    logger.info("Subscription %s (%s): %s, %d rows, %ss -> %s",
+                sub_id, name, "sent" if ok else "SEND FAILED",
+                rendered.row_count, elapsed, "; ".join(to_list))
+    return {"status": "success" if ok else "failed", "rowCount": rendered.row_count,
+            "subject": rendered.subject, "recipients": to_list + cc_list,
+            "elapsedS": elapsed}
+
+
+async def run_subscription_job(sub_id: int):
+    """APScheduler entry point — reload the row so edits take effect immediately."""
+    sub = await asyncio.to_thread(subscriptions_db.get_subscription, sub_id)
+    if not sub or not sub.get("enabled"):
+        logger.info("Subscription %s fired but is missing/disabled — skipping", sub_id)
+        return
+    await asyncio.to_thread(_run_subscription_sync, sub, "schedule")
+
+
+def _subscription_job_id(sub_id: int) -> str:
+    return f"report_subscription_{sub_id}"
+
+
+def register_subscription_jobs() -> int:
+    """(Re)build the scheduler's subscription jobs from the DB. Idempotent."""
+    for job in list(_scheduler.get_jobs()):
+        if job.id.startswith("report_subscription_"):
+            _scheduler.remove_job(job.id)
+
+    count = 0
+    for sub in subscriptions_db.list_subscriptions():
+        if not sub.get("enabled"):
+            continue
+        days = sub.get("days_of_week") or ",".join(subscriptions_db.DAYS)
+        _scheduler.add_job(
+            run_subscription_job,
+            CronTrigger(day_of_week=days, hour=sub["hour"], minute=sub["minute"],
+                        timezone=SUBSCRIPTION_TZ),
+            id=_subscription_job_id(sub["id"]), replace_existing=True,
+            args=[sub["id"]],
+            # A deploy over the send window shouldn't silently drop the day's email.
+            misfire_grace_time=3 * 3600, coalesce=True,
+        )
+        count += 1
+    logger.info("Report subscriptions: %d scheduled job(s) registered", count)
+    return count
+
+
+def _next_fire(sub_id: int) -> Optional[str]:
+    job = _scheduler.get_job(_subscription_job_id(sub_id))
+    if job and job.next_run_time:
+        return job.next_run_time.isoformat()
+    return None
+
+
+# ── Subscription API (admin only) ────────────────────────────────────
+
+@app.get("/api/subscriptions/catalog")
+async def subscriptions_catalog(admin_user: User = Depends(get_current_admin_user)):
+    """Subscribable reports + their params, for the Admin UI's picker."""
+    return {"reports": report_email.catalog(), "days": subscriptions_db.DAYS,
+            "timezone": SUBSCRIPTION_TZ}
+
+
+@app.get("/api/subscriptions")
+async def subscriptions_list(admin_user: User = Depends(get_current_admin_user)):
+    subs = await asyncio.to_thread(subscriptions_db.list_subscriptions)
+    for s in subs:
+        s["nextRunAt"] = _next_fire(s["id"])
+    return subs
+
+
+@app.post("/api/subscriptions")
+async def subscriptions_create(payload: dict = Body(...),
+                               admin_user: User = Depends(get_current_admin_user)):
+    if payload.get("reportKey", payload.get("report_key")) not in report_email.REPORTS:
+        raise HTTPException(status_code=400, detail="Unknown reportKey")
+    sub = await asyncio.to_thread(subscriptions_db.create_subscription, payload,
+                                  admin_user.email)
+    register_subscription_jobs()
+    sub["nextRunAt"] = _next_fire(sub["id"])
+    return sub
+
+
+@app.put("/api/subscriptions/{sub_id}")
+async def subscriptions_update(sub_id: int, payload: dict = Body(...),
+                               admin_user: User = Depends(get_current_admin_user)):
+    sub = await asyncio.to_thread(subscriptions_db.update_subscription, sub_id, payload)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    register_subscription_jobs()
+    sub["nextRunAt"] = _next_fire(sub_id)
+    return sub
+
+
+@app.post("/api/subscriptions/{sub_id}/enabled")
+async def subscriptions_set_enabled(sub_id: int, payload: dict = Body(...),
+                                    admin_user: User = Depends(get_current_admin_user)):
+    sub = await asyncio.to_thread(subscriptions_db.set_enabled, sub_id,
+                                  bool(payload.get("enabled")))
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    register_subscription_jobs()
+    sub["nextRunAt"] = _next_fire(sub_id)
+    return sub
+
+
+@app.delete("/api/subscriptions/{sub_id}")
+async def subscriptions_delete(sub_id: int,
+                               admin_user: User = Depends(get_current_admin_user)):
+    ok = await asyncio.to_thread(subscriptions_db.delete_subscription, sub_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    register_subscription_jobs()
+    return {"deleted": True}
+
+
+@app.post("/api/subscriptions/{sub_id}/run-now")
+async def subscriptions_run_now(sub_id: int, payload: dict = Body(default={}),
+                                admin_user: User = Depends(get_current_admin_user)):
+    """Send this subscription immediately.
+
+    Pass {"testTo": "me@newks.com"} to send only to yourself — the usual way to
+    eyeball the layout without mailing a whole distribution list.
+    """
+    sub = await asyncio.to_thread(subscriptions_db.get_subscription, sub_id)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    test_to = payload.get("testTo")
+    override = subscriptions_db.parse_recipients(test_to) if test_to else None
+    return await asyncio.to_thread(
+        _run_subscription_sync, sub,
+        f"{admin_user.email}{' (test)' if override else ''}", override,
+    )
+
+
+@app.post("/api/subscriptions/preview")
+async def subscriptions_preview(payload: dict = Body(...),
+                                admin_user: User = Depends(get_current_admin_user)):
+    """Render a report to HTML without sending — powers the Admin preview pane."""
+    report_key = payload.get("reportKey") or payload.get("report_key")
+    if report_key not in report_email.REPORTS:
+        raise HTTPException(status_code=400, detail="Unknown reportKey")
+    try:
+        rendered = await asyncio.to_thread(
+            report_email.build_report, report_key, payload.get("params") or {},
+            _subscription_run_date(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"subject": rendered.subject, "rowCount": rendered.row_count,
+            "html": report_email.render_html(rendered, "Preview — not sent.")}
+
+
+@app.get("/api/subscriptions/runs")
+async def subscriptions_runs(limit: int = 100, subscriptionId: Optional[int] = None,
+                             admin_user: User = Depends(get_current_admin_user)):
+    return await asyncio.to_thread(subscriptions_db.list_runs, limit, subscriptionId)
+
+
+
 @app.on_event("startup")
 async def _on_startup():
     toast_orders_db.initialize_db()
@@ -7368,10 +7631,22 @@ async def _on_startup():
         onboarding_db.initialize_schema()
     except Exception as exc:
         logger.warning("onboarding_db.initialize_schema failed (non-fatal): %s", exc)
+    # Emailed report subscriptions — app-local SQLite; jobs registered below.
+    try:
+        subscriptions_db.initialize_schema()
+    except Exception as exc:
+        logger.warning("subscriptions_db.initialize_schema failed (non-fatal): %s", exc)
     _scheduler.start()
+    try:
+        n_subs = register_subscription_jobs()
+    except Exception as exc:
+        n_subs = 0
+        logger.error("Failed to register report-subscription jobs: %s", exc, exc_info=True)
     logger.info(
         "APScheduler started — nightly jobs scheduled "
-        "(orders@3AM, flash@4AM, monkey@4:30AM, menu_precompute@5AM)"
+        "(orders@3AM, flash@4AM, monkey@4:30AM, menu_precompute@5AM) "
+        "+ %d report subscription(s) [%s]",
+        n_subs, SUBSCRIPTION_TZ,
     )
 
 

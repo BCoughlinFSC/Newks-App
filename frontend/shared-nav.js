@@ -66,6 +66,7 @@
     { key: 'olo',              label: 'Digital Orders by Platform',   href: '/olo.html' },
     { key: 'contacts',         label: 'Contacts (forms.nfc.local)',   href: '/contacts.html' },
     { key: 'integrations',     label: 'Integrations / Re-run',        href: '/integrations.html' },
+    { key: 'subscriptions',    label: 'Report Subscriptions',         href: '/subscriptions.html' },
     { key: 'onboarding',       label: 'NRO Onboarding',               href: '/onboarding.html' },
   ];
 
@@ -101,6 +102,7 @@
     if (path.endsWith('/admin.html'))                 return 'admin';
     if (path.endsWith('/projects.html'))              return 'projects';
     if (path.endsWith('/onboarding.html'))            return 'onboarding';
+    if (path.endsWith('/subscriptions.html'))         return 'subscriptions';
     return '';
   }
 

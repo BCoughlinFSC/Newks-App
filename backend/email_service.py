@@ -16,6 +16,8 @@ import logging
 import os
 import smtplib
 import ssl
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List
@@ -100,6 +102,39 @@ def send_plain_email(to, subject: str, body: str, cc=None) -> bool:
     msg.attach(MIMEText(body, "plain"))
 
     # Envelope recipients include Cc so they actually receive it.
+    return _send(msg, to_list + cc_list)
+
+
+def send_report_email(to, subject: str, html_body: str, cc=None,
+                      attachments=None) -> bool:
+    """Send a subscribed report: HTML body plus optional file attachments.
+
+    `attachments` is a list of (filename, bytes, mime_subtype) tuples — e.g.
+    ("Refunds.xlsx", b"...", "vnd.openxmlformats-officedocument.spreadsheetml.sheet").
+    Used by the report-subscription dispatcher (see report_email.py). Returns
+    True on success, False on failure (logged). Never raises.
+    """
+    to_list = [to] if isinstance(to, str) else [a for a in (to or []) if a]
+    cc_list = [] if not cc else ([cc] if isinstance(cc, str) else [a for a in cc if a])
+    if not to_list:
+        logger.error("send_report_email: no recipients for %r", subject)
+        return False
+
+    msg = MIMEMultipart("mixed")
+    msg["From"] = FROM_HEADER
+    msg["To"] = ", ".join(to_list)
+    if cc_list:
+        msg["Cc"] = ", ".join(cc_list)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    for filename, blob, subtype in (attachments or []):
+        part = MIMEBase("application", subtype)
+        part.set_payload(blob)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(part)
+
     return _send(msg, to_list + cc_list)
 
 
