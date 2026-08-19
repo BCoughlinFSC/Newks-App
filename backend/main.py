@@ -7504,9 +7504,18 @@ def _next_fire(sub_id: int) -> Optional[str]:
 
 @app.get("/api/subscriptions/catalog")
 async def subscriptions_catalog(admin_user: User = Depends(get_current_admin_user)):
-    """Subscribable reports + their params, for the Admin UI's picker."""
+    """Subscribable reports + their params, for the Admin UI's picker.
+
+    Also reports the From address so the Admin page can show what recipients
+    will actually see. It is the same SMTP_FROM that sends invites and password
+    resets — one .env setting for all app mail — and O365 requires it to equal
+    the authenticated mailbox or the send is rejected as spoofing.
+    """
+    import email_service
     return {"reports": report_email.catalog(), "days": subscriptions_db.DAYS,
-            "timezone": SUBSCRIPTION_TZ}
+            "timezone": SUBSCRIPTION_TZ,
+            "fromAddress": email_service.FROM_HEADER,
+            "smtpHost": email_service.SMTP_HOST}
 
 
 @app.get("/api/subscriptions")

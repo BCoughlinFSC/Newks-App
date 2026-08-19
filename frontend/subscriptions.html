@@ -225,8 +225,12 @@
       try{
         const cat = await api('/api/subscriptions/catalog');
         CATALOG = cat.reports || []; DAYS = cat.days || [];
-        document.getElementById('tzNote').textContent =
-          'All send times are ' + (cat.timezone || 'America/Chicago') + '. The app must be running for a subscription to fire.';
+        document.getElementById('tzNote').innerHTML =
+          'Sent from <b>' + esc(cat.fromAddress || '(SMTP_FROM not set)') + '</b>'
+          + (cat.smtpHost ? ' via ' + esc(cat.smtpHost) : '')
+          + ' — the same sender as invites and password resets.<br />'
+          + 'All send times are ' + esc(cat.timezone || 'America/Chicago')
+          + '. The app must be running for a subscription to fire.';
         SUBS = await api('/api/subscriptions');
         renderSubs();
         renderRuns(await api('/api/subscriptions/runs?limit=40'));
@@ -429,8 +433,13 @@
       catch(e){ showStatus('Error: '+e.message, 'error'); }
     }
     async function sendTest(id){
+      // Prefill with the signed-in account's email, but shared/admin logins
+      // often carry a placeholder address — so ask, don't assume.
       const me = (JSON.parse(localStorage.getItem('user')||'{}').email) || '';
-      const to = prompt('Send a test copy to:', me);
+      const to = prompt('Send a test copy to which address?
+
+' +
+                        'Goes only to this address — the real Cc and Bcc lists are skipped.', me);
       if(!to) return;
       showStatus('Sending test…', 'info');
       try{
