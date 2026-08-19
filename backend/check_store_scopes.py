@@ -15,6 +15,7 @@ emails identical. This script tells you which case you're in.
 
     python check_store_scopes.py
 """
+import os
 import sys
 from collections import Counter
 
@@ -22,8 +23,10 @@ import monkey_db
 
 
 def main() -> int:
-    if not monkey_db.db_available():
-        print("Monkey DB not available — run sync_monkey.py first.")
+    # NB: not monkey_db.db_available() — that requires rows in `orders`, and this
+    # script only reads `stores`. A freshly synced DB would be rejected wrongly.
+    if not os.path.exists(monkey_db.MONKEY_DB_PATH):
+        print(f"No Monkey DB at {monkey_db.MONKEY_DB_PATH} — run sync_monkey.py first.")
         return 1
 
     conn = monkey_db.get_connection()
@@ -41,9 +44,18 @@ def main() -> int:
 
     print(f"{len(rows)} stores in the Monkey DB.\n")
     print("Region names as Monkey reports them:")
+    excluded_n = 0
     for region, n in sorted(Counter(r[3] for r in rows).items()):
-        flag = "  <-- counted as COMPANY" if "company" in region.lower() else ""
+        if not monkey_db.is_operating_region(region):
+            flag = "  <-- EXCLUDED (test / closed / inactive)"
+            excluded_n += n
+        elif "company" in region.lower():
+            flag = "  <-- COMPANY"
+        else:
+            flag = ""
         print(f"   {n:4d}  {region or '(blank)'}{flag}")
+    print()
+    print(f"{excluded_n} store(s) excluded as non-operating (Monkey's 'x.' / 'y.' region prefixes).")
 
     company   = monkey_db.store_ids_by_scope("company")
     franchise = monkey_db.store_ids_by_scope("franchise")
