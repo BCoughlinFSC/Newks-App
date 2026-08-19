@@ -306,8 +306,21 @@ def _scope_store_ids(params: Dict[str, Any]) -> Optional[List[int]]:
 
 
 def _scope_label(scope: Optional[str]) -> str:
-    return {"company": "Corporate stores", "franchise": "Franchise stores"}.get(
+    """Human wording for a store scope.
+
+    "Company" rather than SSRS's "Corporate" — it is both Kim's word and
+    Monkey's own ("... - Company Restaurants"), and the reports are read by
+    people who say company store.
+    """
+    return {"company": "Company stores", "franchise": "Franchise stores"}.get(
         (scope or "all").lower(), "All stores")
+
+
+def _scope_suffix(scope: Optional[str]) -> str:
+    """Subject-line fragment — empty when the report isn't scoped at all."""
+    if (scope or "all").lower() in ("company", "franchise"):
+        return f" — {_scope_label(scope)} only"
+    return ""
 
 
 # ══ report builders ══════════════════════════════════════════════════
@@ -332,10 +345,10 @@ def _build_orders_due(params: Dict[str, Any], run_date: date) -> RenderedReport:
         "totalDollars": round(sum(r["totalDollars"] for r in out_rows), 2),
     }
     pretty = biz_date.strftime("%A, %B ") + f"{biz_date.day}, {biz_date.year}"
-    scope_lbl = _scope_label(params.get("scope"))
+    scope_sfx = _scope_suffix(params.get("scope"))
     return RenderedReport(
-        subject=f"Monkey Orders Due — {scope_lbl} — {biz_date.isoformat()}",
-        headline=f"Monkey Orders Due For Today — {scope_lbl}",
+        subject=f"Monkey Orders Due For Today{scope_sfx} — {biz_date.isoformat()}",
+        headline=f"Monkey Orders Due For Today{scope_sfx}",
         subhead=f"Summary by store · {pretty}",
         sheets=[Sheet(
             title="",
@@ -375,10 +388,11 @@ def _build_refunds_by_user(params: Dict[str, Any], run_date: date) -> RenderedRe
         "refundTaxAmount": round(sum(r["refundTaxAmount"] for r in rows), 2),
         "refundTotal":     round(sum(r["refundTotal"] for r in rows), 2),
     }
+    scope_sfx = _scope_suffix(params.get("scope"))
     return RenderedReport(
-        subject=f"Monkey Refunds by User — {start} to {end}",
-        headline="Monkey — Refunds by User",
-        subhead=f"{label} · {_scope_label(params.get('scope'))}",
+        subject=f"Monkey Refunds by User{scope_sfx} — {start} to {end}",
+        headline=f"Monkey Refunds by User{scope_sfx}",
+        subhead=label,
         sheets=[Sheet(title="", columns=cols, rows=rows, total_row=total)],
         row_count=len(rows),
         filename_stem=f"Monkey_Refunds_by_User_{start}_{end}",

@@ -36,7 +36,7 @@ SEEDS = [
     # land each morning, so we reproduce two subscriptions rather than merging.
     {
         "reportKey": "monkey_orders_due",
-        "name": "Monkey Orders Due For Today — Corporate",
+        "name": "Monkey Orders Due For Today — Company Stores",
         "recipientsTo": "salesteam; companygms; fbcs",
         "recipientsCc": "",
         "recipientsBcc": _BCC,
@@ -51,7 +51,7 @@ SEEDS = [
     },
     {
         "reportKey": "monkey_orders_due",
-        "name": "Monkey Orders Due For Today — Franchise",
+        "name": "Monkey Orders Due For Today — Franchise Stores",
         "recipientsTo": "salesteam; companygms; fbcs",
         "recipientsCc": "",
         "recipientsBcc": _BCC,
@@ -82,7 +82,7 @@ SEEDS = [
     },
     {
         "reportKey": "monkey_refunds_by_user",
-        "name": "Monkey — Refunds by User",
+        "name": "Monkey Refunds by User — Company Stores Only",
         "recipientsTo": "accounting; salesteam",
         "recipientsCc": "itdepartment",
         "recipientsBcc": _BCC,
@@ -114,12 +114,18 @@ SEEDS = [
     },
 ]
 
-# Seed rows that an earlier version of this script created under a different
-# name. The first cut merged Corporate + Franchise "Orders Due" into one row;
-# the ReportServer dump showed SSRS actually ran two, so the row was split and
-# renamed. Clean up the superseded row rather than leaving a confusing orphan —
-# but only if nobody has enabled or hand-edited it.
-RETIRED_NAMES = ["Monkey Orders Due For Today"]
+# Seed rows an earlier version of this script created under a different name:
+# the pre-split single "Orders Due" row, and three renamed to state their store
+# scope (an unlabelled "Refunds by User" reads as all-stores when it is company
+# only — which is exactly what confused us on 2026-08-19). Clean these up rather
+# than leave confusing orphans, but ONLY when still disabled and seed-created —
+# an enabled row is somebody's live subscription and is never deleted.
+RETIRED_NAMES = [
+    "Monkey Orders Due For Today",          # pre-split single row
+    "Monkey — Refunds by User",             # renamed to say the scope
+    "Monkey Orders Due For Today — Corporate",
+    "Monkey Orders Due For Today — Franchise",
+]
 
 
 def _clean_retired(dry_run: bool) -> int:
