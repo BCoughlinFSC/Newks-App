@@ -241,9 +241,18 @@
    here already knowing the workbook, so matching it beats a prettier layout
    they'd have to re-learn. */
 .nro .wbwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:#fff;}
-.nro table.wb{border-collapse:collapse;width:100%;min-width:940px;font-size:12.5px;}
+.nro table.wb{border-collapse:collapse;width:100%;min-width:860px;font-size:12.5px;
+  table-layout:fixed;}   /* fixed: obey the colgroup, wrap long prose */
+/* The IT sheet has one fewer column and no wide contact-info cell. */
+.nro table.wb.wb-it{min-width:760px;}
+/* The NRO Info tables are two- and three-column; they never need a floor. */
+.nro table.wb.wb-plain{min-width:0;}
+.nro table.wb td{word-wrap:break-word;overflow-wrap:anywhere;}
 .nro table.wb th{background:#203864;color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;
-  text-align:left;padding:8px 9px;border:1px solid #1a2e52;white-space:nowrap;position:sticky;top:0;z-index:2;}
+  text-align:left;padding:8px 9px;border:1px solid #1a2e52;position:sticky;top:0;z-index:2;
+  /* headers wrap: "Newk's Resources" is wider than its column and nowrap
+     made it overhang, which scrolled the table by ~25px for no reason. */
+  white-space:normal;line-height:1.25;vertical-align:bottom;}
 .nro table.wb td{border:1px solid var(--line);padding:7px 9px;vertical-align:top;color:var(--ink);}
 .nro table.wb tbody tr:nth-child(even) td{background:#F7F9FC;}
 .nro table.wb tbody tr.done td{background:#E2F0D9;}

@@ -17,8 +17,10 @@
   .header p{margin:.25rem 0 0;color:rgba(255,255,255,.85);font-size:.85rem;}
   .home-btn{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);padding:.4rem .8rem;border-radius:6px;font-size:.85rem;text-decoration:none;}
   .home-btn:hover{background:rgba(255,255,255,.25);}
-  .container{display:grid;grid-template-columns:280px 1fr;gap:1.5rem;padding:1.5rem 2rem;max-width:1500px;margin:0 auto;}
-  @media (max-width:900px){.container{grid-template-columns:1fr;}}
+  .container{display:grid;grid-template-columns:280px minmax(0,1fr);gap:1.5rem;padding:1.5rem 2rem;max-width:1500px;margin:0 auto;}
+  /* minmax(0,1fr) not 1fr: a 1fr track floors at min-content, so a wide
+     sheet would stretch the page instead of scrolling inside .wbwrap. */
+  @media (max-width:900px){.container{grid-template-columns:minmax(0,1fr);}}
   .card{background:#fff;border-radius:12px;padding:1.5rem;border:1px solid #e8e0d5;box-shadow:0 2px 8px rgba(0,0,0,.08);}
   .card h2{margin:0 0 1rem;color:#D9272C;font-size:1.1rem;font-weight:700;}
   .btn-primary{background:#D9272C;color:#fff;border:none;padding:.55rem 1.25rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:.9rem;}
@@ -458,11 +460,11 @@
           restaurant details and the Support Center contact for each area.</p>
         <section class="sheet">
           <div class="sheet-h"><h3>Restaurant Information</h3></div>
-          <div class="wbwrap"><table class="wb" style="min-width:520px;"><tbody>${rows}</tbody></table></div>
+          <div class="wbwrap"><table class="wb wb-plain"><tbody>${rows}</tbody></table></div>
         </section>
         <section class="sheet">
           <div class="sheet-h"><h3>Support Center Contacts</h3></div>
-          <div class="wbwrap"><table class="wb" style="min-width:520px;">
+          <div class="wbwrap"><table class="wb wb-plain">
             <thead><tr><th>Email</th><th>Department</th><th>Representative</th></tr></thead>
             <tbody>${contacts}</tbody></table></div>
         </section>
@@ -569,6 +571,8 @@
                    'Company','Vendor Contact','Vendor Contact Info.',"Newk's Resources"];
     const IT_COLS=['Vendor / Document','Description','Department','Required?',
                    'Timing / Lead Time','KB Article / Reference','Completed'];
+    const WB_COLGROUP=`<colgroup><col style="width:64px;"><col style="width:92px;"><col style="width:40px;"><col style="width:30%;"><col style="width:12%;"><col style="width:11%;"><col style="width:16%;"><col style="width:10%;"></colgroup>`;
+    const IT_COLGROUP=`<colgroup><col style="width:17%;"><col style="width:29%;"><col style="width:10%;"><col style="width:10%;"><col style="width:11%;"><col style="width:13%;"><col style="width:44px;"></colgroup>`;
     const PRIO_LABEL={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
 
     function ownCell(t){
@@ -578,8 +582,8 @@
 
     function wbRow(t){
       return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
-        <td style="width:70px;"><span class="wb-wk ${wkClass(t.weeks)}">${esc(wkText(t.weeks))}</span></td>
-        <td class="wb-date ${t.done?'':'empty'}" style="width:92px;">${t.done_at?esc(fmt(t.done_at)):''}</td>
+        <td><span class="wb-wk ${wkClass(t.weeks)}">${esc(wkText(t.weeks))}</span></td>
+        <td class="wb-date ${t.done?'':'empty'}">${t.done_at?esc(fmt(t.done_at)):''}</td>
         <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''}
             aria-label="Complete: ${esc(t.title)}"></td>
         <td>
@@ -589,23 +593,23 @@
           ${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
           ${taskQuestions(t)}
         </td>
-        <td style="width:130px;">${esc(t.company||'')}</td>
-        <td style="width:120px;">${esc(t.contact||'')}</td>
-        <td style="width:190px;">${linkifyInfo(t.contact_info||'')}</td>
-        <td style="width:110px;">${esc(t.dept||'')}</td>
+        <td>${esc(t.company||'')}</td>
+        <td>${esc(t.contact||'')}</td>
+        <td>${linkifyInfo(t.contact_info||'')}</td>
+        <td>${esc(t.dept||'')}</td>
       </tr>`;
     }
 
     function itRow(t){
       return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
-        <td style="width:180px;"><div class="wb-act">${esc(t.title)}${ownCell(t)}</div>
+        <td><div class="wb-act">${esc(t.title)}${ownCell(t)}</div>
           ${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
           ${taskQuestions(t)}</td>
         <td>${esc(t.desc||'')}</td>
-        <td style="width:110px;">${esc(t.dept||'')}</td>
-        <td style="width:110px;">${t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</td>
-        <td style="width:120px;">${esc(t.lead||'')}</td>
-        <td class="wb-kb" style="width:200px;">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">KB Article ↗</a>`:''}</td>
+        <td>${esc(t.dept||'')}</td>
+        <td>${t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</td>
+        <td>${esc(t.lead||'')}</td>
+        <td class="wb-kb">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">KB Article ↗</a>`:''}</td>
         <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''}
             aria-label="Complete: ${esc(t.title)}"></td>
       </tr>`;
@@ -616,7 +620,8 @@
       const done=tasks.filter(t=>t.done).length;
       return `<section class="sheet">
         <div class="sheet-h"><h3>${esc(label)}</h3><span class="cnt">${done} of ${tasks.length} complete</span></div>
-        <div class="wbwrap"><table class="wb">
+        <div class="wbwrap"><table class="wb${isIT?' wb-it':''}">
+          ${isIT?IT_COLGROUP:WB_COLGROUP}
           <thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
           <tbody>${tasks.map(isIT?itRow:wbRow).join('')}</tbody>
         </table></div>
