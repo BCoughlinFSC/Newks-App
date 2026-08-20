@@ -209,7 +209,10 @@ INTERNAL_TRACK_ORDER = ["it", "it_full", "master", "marketing"]
 # Reference-block audience: these keys are hidden from franchisees entirely.
 _INTERNAL_REFERENCE = {"systems"}
 # Contact groups hidden from franchisees (matched case-insensitively on label).
-_INTERNAL_CONTACT_GROUPS = re.compile(r"escalation|billing", re.I)
+# Escalation contacts ARE restaurant-facing — that vendor workbook is titled
+# "Restaurant Facing – IT Vendor Contacts – NRO & Escalation" and the franchisee
+# is the one who needs an escalation path. Billing stays internal (Newk's AP).
+_INTERNAL_CONTACT_GROUPS = re.compile(r"billing", re.I)
 
 
 def _normalize_curated() -> None:
@@ -247,21 +250,34 @@ _CATALOG = _load_catalog()
 _IMPORTED_TRACKS = _CATALOG.get("tracks", {})
 REFERENCE: Dict[str, Any] = _CATALOG.get("reference", {})
 
+# The "it" track now ships in catalog_data.json too, generated from the IT
+# Department tab of Kim's 180 Day Checklist workbook by
+# build_master_from_workbook.py. When it's there it supersedes the ONBOARDING_TASKS
+# list above — that list stays as the fallback for a missing/short catalog file,
+# and as the origin of the reviewed owner mapping the generator carries forward.
+_IT_FROM_JSON = bool(_IMPORTED_TRACKS.get("it", {}).get("tasks"))
+
 # Combined public track metadata (meta only — no task rows).
 TRACK_META: Dict[str, Dict[str, Any]] = {"it": _IT_TRACK_META}
 for _tr, _data in _IMPORTED_TRACKS.items():
     TRACK_META[_tr] = {k: v for k, v in _data.items() if k != "tasks"}
 
 # Flat template of every task across every track.
-ONBOARDING_TASKS_ALL: List[Dict[str, Any]] = list(ONBOARDING_TASKS)
+ONBOARDING_TASKS_ALL: List[Dict[str, Any]] = [] if _IT_FROM_JSON else list(ONBOARDING_TASKS)
 for _tr, _data in _IMPORTED_TRACKS.items():
     ONBOARDING_TASKS_ALL.extend(_data.get("tasks", []))
 
 # Fast lookup: key -> template dict (spans all tracks).
 _TASK_BY_KEY = {t["key"]: t for t in ONBOARDING_TASKS_ALL}
-# "Required" progress stays scoped to the curated IT track (imported tracks have
-# no req/rec priority — they're tracked by done/total instead).
-_REQUIRED_KEYS = {t["key"] for t in ONBOARDING_TASKS if t.get("prio") == "req"}
+# "Required" progress stays scoped to the IT track (the other tracks carry no
+# req/rec priority — they're tracked by done/total instead).
+_IT_TASKS_LIVE = [t for t in ONBOARDING_TASKS_ALL if t.get("track") == "it"] or ONBOARDING_TASKS
+_REQUIRED_KEYS = {t["key"] for t in _IT_TASKS_LIVE if t.get("prio") == "req"}
+
+
+def task_template(task_key: str) -> Optional[Dict[str, Any]]:
+    """The static template for a task key, or None if the key is unknown."""
+    return _TASK_BY_KEY.get(task_key)
 
 
 @contextmanager
@@ -324,6 +340,41 @@ def initialize_schema() -> None:
                 PRIMARY KEY (opening_id, task_key)
             );
             CREATE INDEX IF NOT EXISTS idx_task_status_opening ON task_status(opening_id);
+
+            -- A franchisee (or staffer) asking about a specific task. Distinct
+            -- from `task_status.note`: a question is addressed to someone, has
+            -- an open/answered lifecycle, and notifies immediately.
+            CREATE TABLE IF NOT EXISTS task_questions (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                opening_id   INTEGER NOT NULL REFERENCES openings(id) ON DELETE CASCADE,
+                task_key     TEXT NOT NULL,
+                body         TEXT NOT NULL,
+                asked_by     TEXT,
+                asked_at     TEXT NOT NULL DEFAULT (datetime('now')),
+                answer       TEXT,
+                answered_by  TEXT,
+                answered_at  TEXT,
+                status       TEXT NOT NULL DEFAULT 'open'   -- open | answered
+            );
+            CREATE INDEX IF NOT EXISTS idx_questions_opening ON task_questions(opening_id);
+            CREATE INDEX IF NOT EXISTS idx_questions_status  ON task_questions(status);
+
+            -- Append-only event feed powering the dashboard's activity panel and
+            -- the end-of-day completion digest. `notified_at` is stamped once an
+            -- event has been included in a digest, so digests never repeat.
+            CREATE TABLE IF NOT EXISTS activity (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                opening_id  INTEGER NOT NULL REFERENCES openings(id) ON DELETE CASCADE,
+                kind        TEXT NOT NULL,   -- task_done|task_undone|question|answer|invite
+                task_key    TEXT,
+                actor       TEXT,
+                detail      TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                notified_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_activity_opening ON activity(opening_id);
+            CREATE INDEX IF NOT EXISTS idx_activity_pending
+                ON activity(notified_at) WHERE notified_at IS NULL;
             """
         )
         conn.commit()
@@ -341,18 +392,24 @@ def catalog() -> Dict[str, Any]:
     }
 
 
-def _assemble_tasks(status_rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
+def _assemble_tasks(status_rows: List[sqlite3.Row],
+                    questions: Optional[Dict[str, List[Dict[str, Any]]]] = None
+                    ) -> List[Dict[str, Any]]:
     """Merge the code+JSON template with an opening's stored status rows."""
     by_key = {r["task_key"]: r for r in status_rows}
+    questions = questions or {}
     out = []
     for t in ONBOARDING_TASKS_ALL:
         s = by_key.get(t["key"])
+        qs = questions.get(t["key"], [])
         out.append({
             **t,
             "done": bool(s["done"]) if s else False,
             "done_by": s["done_by"] if s else None,
             "done_at": s["done_at"] if s else None,
             "note": (s["note"] if s else None),
+            "questions": qs,
+            "open_questions": sum(1 for q in qs if q["status"] == "open"),
         })
     return out
 
@@ -469,6 +526,10 @@ def list_openings(include_archived: bool = False) -> List[Dict[str, Any]]:
         where = "" if include_archived else "WHERE o.status = 'active'"
         rows = conn.execute(f"SELECT * FROM openings o {where}").fetchall()
         status = conn.execute("SELECT * FROM task_status").fetchall()
+        qcounts = dict(conn.execute(
+            "SELECT opening_id, COUNT(*) FROM task_questions "
+            "WHERE status='open' GROUP BY opening_id"
+        ).fetchall())
     by_opening: Dict[int, List[sqlite3.Row]] = {}
     for s in status:
         by_opening.setdefault(s["opening_id"], []).append(s)
@@ -478,6 +539,7 @@ def list_openings(include_archived: bool = False) -> List[Dict[str, Any]]:
         d = dict(o)
         d.pop("token", None)  # never leak the magic-link token to the list view
         d["progress"] = _progress(tasks)
+        d["open_questions"] = qcounts.get(o["id"], 0)
         out.append(d)
     # Sort: openings with a target date first (soonest first), undated last.
     out.sort(key=lambda x: (x["target_open"] is None, x["target_open"] or ""))
@@ -489,7 +551,14 @@ def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection,
     status = conn.execute(
         "SELECT * FROM task_status WHERE opening_id = ?", (o["id"],)
     ).fetchall()
-    tasks = _assemble_tasks(status)
+    qrows = conn.execute(
+        "SELECT * FROM task_questions WHERE opening_id = ? ORDER BY asked_at",
+        (o["id"],),
+    ).fetchall()
+    by_task: Dict[str, List[Dict[str, Any]]] = {}
+    for q in qrows:
+        by_task.setdefault(q["task_key"], []).append(dict(q))
+    tasks = _assemble_tasks(status, by_task)
     track_views = _build_track_views(tasks, for_franchisee)
     # Progress is computed over exactly what this audience can see.
     visible = [t for grp in track_views for g in grp["groups"] for t in g["tasks"]]
@@ -499,6 +568,7 @@ def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection,
     d["reference"] = _reference_view(for_franchisee)
     d["progress"] = _progress(visible if for_franchisee else tasks)
     d["steps"] = STEP_TITLES
+    d["open_questions"] = sum(1 for q in qrows if q["status"] == "open")
     return d
 
 
@@ -634,5 +704,197 @@ def set_task(opening_id: int, task_key: str, *, done: Optional[bool] = None,
         conn.execute(
             "UPDATE openings SET updated_at=datetime('now') WHERE id=?", (opening_id,)
         )
+        # Log only real transitions — re-saving a note shouldn't look like
+        # progress, and the digest counts these rows.
+        if new_done != cur_done:
+            conn.execute(
+                """INSERT INTO activity (opening_id, kind, task_key, actor, detail)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (opening_id, "task_done" if new_done else "task_undone",
+                 task_key, actor or None, tmpl.get("title", task_key)),
+            )
         conn.commit()
         return True
+
+
+# ─── questions ───────────────────────────────────────────────────────────────
+
+def add_question(opening_id: int, task_key: str, body: str,
+                 asked_by: str = "") -> Optional[Dict[str, Any]]:
+    """Raise a question against a task. Returns the stored row (with the task
+    title resolved) so the caller can build a notification, or None if the task
+    key is unknown or the body is empty."""
+    tmpl = _TASK_BY_KEY.get(task_key)
+    if not tmpl:
+        return None
+    body = (body or "").strip()
+    if not body:
+        return None
+    with get_connection() as conn:
+        cur = conn.execute(
+            """INSERT INTO task_questions (opening_id, task_key, body, asked_by)
+               VALUES (?, ?, ?, ?)""",
+            (opening_id, task_key, body, asked_by or None),
+        )
+        qid = int(cur.lastrowid)
+        # notified_at is stamped at insert: a question emails out immediately,
+        # so it must never also turn up in the end-of-day digest.
+        conn.execute(
+            """INSERT INTO activity (opening_id, kind, task_key, actor, detail, notified_at)
+               VALUES (?, 'question', ?, ?, ?, datetime('now'))""",
+            (opening_id, task_key, asked_by or None, body[:200]),
+        )
+        conn.execute(
+            "UPDATE openings SET updated_at=datetime('now') WHERE id=?", (opening_id,)
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM task_questions WHERE id=?", (qid,)).fetchone()
+    d = dict(row)
+    d["task_title"] = tmpl.get("title", task_key)
+    d["track"] = tmpl.get("track")
+    d["group"] = tmpl.get("group")
+    return d
+
+
+def answer_question(question_id: int, answer: str, answered_by: str) -> Optional[Dict[str, Any]]:
+    """Record an internal answer and close the question. Returns the updated row
+    (with task title + the opening's franchisee details) so the caller can reply
+    by email, or None if the id is unknown or already answered."""
+    answer = (answer or "").strip()
+    if not answer:
+        return None
+    with get_connection() as conn:
+        q = conn.execute("SELECT * FROM task_questions WHERE id=?", (question_id,)).fetchone()
+        if not q or q["status"] == "answered":
+            return None
+        conn.execute(
+            """UPDATE task_questions
+                  SET answer=?, answered_by=?, answered_at=datetime('now'), status='answered'
+                WHERE id=?""",
+            (answer, answered_by or None, question_id),
+        )
+        conn.execute(
+            """INSERT INTO activity (opening_id, kind, task_key, actor, detail, notified_at)
+               VALUES (?, 'answer', ?, ?, ?, datetime('now'))""",
+            (q["opening_id"], q["task_key"], answered_by or None, answer[:200]),
+        )
+        conn.commit()
+        row = conn.execute(
+            """SELECT tq.*, o.store_name, o.city, o.state,
+                      o.franchisee_name, o.franchisee_email
+                 FROM task_questions tq
+                 JOIN openings o ON o.id = tq.opening_id
+                WHERE tq.id = ?""",
+            (question_id,),
+        ).fetchone()
+    d = dict(row)
+    d["task_title"] = (_TASK_BY_KEY.get(d["task_key"]) or {}).get("title", d["task_key"])
+    return d
+
+
+def list_questions(opening_id: Optional[int] = None,
+                   status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Questions, newest first. Filter by opening and/or status ('open')."""
+    clauses, params = [], []
+    if opening_id is not None:
+        clauses.append("tq.opening_id = ?")
+        params.append(opening_id)
+    if status:
+        clauses.append("tq.status = ?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""SELECT tq.*, o.store_name, o.city, o.state, o.franchisee_name
+                  FROM task_questions tq
+                  JOIN openings o ON o.id = tq.opening_id
+                  {where}
+                 ORDER BY tq.asked_at DESC""",
+            params,
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        tmpl = _TASK_BY_KEY.get(d["task_key"]) or {}
+        d["task_title"] = tmpl.get("title", d["task_key"])
+        d["track"] = tmpl.get("track")
+        d["group"] = tmpl.get("group")
+        out.append(d)
+    return out
+
+
+def questions_for_opening(opening_id: int) -> Dict[str, List[Dict[str, Any]]]:
+    """All of an opening's questions, bucketed by task_key for the UI."""
+    by_task: Dict[str, List[Dict[str, Any]]] = {}
+    for q in list_questions(opening_id=opening_id):
+        by_task.setdefault(q["task_key"], []).append(q)
+    for v in by_task.values():
+        v.sort(key=lambda x: x["asked_at"])
+    return by_task
+
+
+# ─── activity feed & digest ──────────────────────────────────────────────────
+
+def recent_activity(limit: int = 60, opening_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Newest-first event feed for the internal dashboard."""
+    where, params = "", []
+    if opening_id is not None:
+        where = "WHERE a.opening_id = ?"
+        params.append(opening_id)
+    params.append(int(limit))
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""SELECT a.*, o.store_name, o.city, o.state
+                  FROM activity a
+                  JOIN openings o ON o.id = a.opening_id
+                  {where}
+                 ORDER BY a.id DESC LIMIT ?""",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pending_digest_events() -> Dict[int, Dict[str, Any]]:
+    """Un-notified completion events, grouped by opening, for the daily digest.
+
+    Only task_done / task_undone appear here — questions and answers are sent
+    the moment they happen and are stamped notified at insert time."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT a.*, o.store_name, o.city, o.state, o.target_open,
+                      o.franchisee_name
+                 FROM activity a
+                 JOIN openings o ON o.id = a.opening_id
+                WHERE a.notified_at IS NULL
+                  AND a.kind IN ('task_done','task_undone')
+                  AND o.status = 'active'
+                ORDER BY a.id"""
+        ).fetchall()
+    out: Dict[int, Dict[str, Any]] = {}
+    for r in rows:
+        d = dict(r)
+        b = out.setdefault(d["opening_id"], {
+            "opening_id": d["opening_id"],
+            "store_name": d["store_name"],
+            "city": d["city"],
+            "state": d["state"],
+            "target_open": d["target_open"],
+            "franchisee_name": d["franchisee_name"],
+            "events": [],
+        })
+        b["events"].append(d)
+    return out
+
+
+def mark_digest_sent(event_ids: List[int]) -> int:
+    """Stamp events as included in a digest so the next run skips them."""
+    if not event_ids:
+        return 0
+    with get_connection() as conn:
+        qs = ",".join("?" for _ in event_ids)
+        cur = conn.execute(
+            f"UPDATE activity SET notified_at=datetime('now') WHERE id IN ({qs})",
+            event_ids,
+        )
+        conn.commit()
+        return cur.rowcount

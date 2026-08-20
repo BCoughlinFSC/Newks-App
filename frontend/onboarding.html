@@ -132,11 +132,14 @@
       <!-- PORTFOLIO -->
       <div id="portfolioView">
         <div class="stats" id="stats"></div>
+        <!-- Franchisee questions come first: someone is blocked and waiting. -->
+        <div id="questionsPanel"></div>
         <div class="p-toolbar">
           <h2>Active Openings</h2>
           <button class="btn-primary" onclick="openCreate()">+ New Opening / Invite</button>
         </div>
         <div class="plist" id="plist"><div class="empty">Loading…</div></div>
+        <div id="activityPanel"></div>
       </div>
 
       <!-- DETAIL -->
@@ -237,6 +240,96 @@
         OPENINGS=await res.json();
         renderPortfolio();
       }catch(e){ if(e.message!=='forbidden'&&e.message!=='unauthorized') toast('Load error: '+e.message,true); }
+      loadQuestions();
+      loadActivity();
+    }
+
+    // ── Question inbox ───────────────────────────────────────────────────────
+    let QUESTIONS=[];
+    async function loadQuestions(){
+      try{
+        const res=await api('/api/onboarding/questions?status=open');
+        if(!res.ok) return;
+        QUESTIONS=await res.json();
+        renderQuestions();
+      }catch(e){ /* panel is supplementary — never block the dashboard on it */ }
+    }
+
+    function openingLabel(q){
+      const loc=[q.city,q.state].filter(Boolean).join(', ');
+      return (q.store_name||"Newk's Eatery")+(loc?' — '+loc:'');
+    }
+
+    function renderQuestions(){
+      const el=document.getElementById('questionsPanel');
+      if(!QUESTIONS.length){ el.innerHTML=''; return; }
+      el.innerHTML=`<section class="card" style="border-color:#F0D9A8;">
+        <div class="card-h" style="cursor:default;">
+          <span class="ico">💬</span>
+          <h2>Open questions from franchisees</h2>
+          <span class="qbadge" style="margin-left:auto;">${QUESTIONS.length} waiting</span>
+        </div>
+        <div class="card-b">${QUESTIONS.map(q=>`
+          <div class="qitem" style="border-bottom:1px solid var(--line-soft);padding-bottom:12px;margin-bottom:12px;">
+            <div class="qmeta" style="margin-bottom:4px;">
+              <strong>${esc(openingLabel(q))}</strong> · ${esc(q.task_title)}
+            </div>
+            <div class="qq">${esc(q.body)}</div>
+            <div class="qmeta">Asked by ${esc(q.asked_by||'franchisee')} · ${esc(fmt(q.asked_at))}</div>
+            <div class="qform open" style="margin-top:7px;">
+              <textarea data-ans="${q.id}" placeholder="Type your answer — the franchisee is emailed it automatically…"></textarea>
+              <div class="qactions">
+                <button type="button" class="qsend" data-send="${q.id}">Send answer</button>
+                <button type="button" class="qcancel" data-open="${q.opening_id}">Open this checklist</button>
+              </div>
+            </div>
+          </div>`).join('')}</div>
+      </section>`;
+      el.querySelectorAll('[data-send]').forEach(b=>b.onclick=()=>answerQuestion(b.dataset.send,b));
+      el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openDetail(+b.dataset.open));
+    }
+
+    async function answerQuestion(id,btn){
+      const ta=document.querySelector(`[data-ans="${id}"]`);
+      const answer=(ta?ta.value:'').trim();
+      if(!answer){toast('Type an answer first',true);return;}
+      btn.disabled=true; btn.textContent='Sending…';
+      try{
+        const res=await api('/api/onboarding/questions/'+id+'/answer',
+          {method:'POST',body:JSON.stringify({answer})});
+        if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.detail||res.status);}
+        const out=await res.json();
+        toast(out.emailed?'Answer sent — franchisee emailed'
+                         :'Answer saved (no email on file for this franchisee)');
+        // Refresh the portfolio too — it carries the per-opening "n Q" badge,
+        // which otherwise still shows the question we just closed.
+        loadPortfolio();
+        if(CURRENT) openDetail(CURRENT.id);
+      }catch(e){ btn.disabled=false; btn.textContent='Send answer'; toast('Could not send: '+e.message,true); }
+    }
+
+    // ── Activity feed ────────────────────────────────────────────────────────
+    const ACT_ICON={task_done:'✓',task_undone:'↺',question:'💬',answer:'↩'};
+    async function loadActivity(){
+      try{
+        const res=await api('/api/onboarding/activity?limit=25');
+        if(!res.ok) return;
+        const rows=await res.json();
+        const el=document.getElementById('activityPanel');
+        if(!rows.length){ el.innerHTML=''; return; }
+        el.innerHTML=`<section class="card">
+          <div class="card-h" style="cursor:default;"><span class="ico">🕘</span><h2>Recent activity</h2></div>
+          <div class="card-b"><div style="display:flex;flex-direction:column;gap:9px;">
+            ${rows.map(r=>{
+              const loc=[r.city,r.state].filter(Boolean).join(', ');
+              return `<div style="display:flex;gap:10px;align-items:baseline;font-size:13px;">
+                <span style="width:16px;flex:none;color:${r.kind==='task_done'?'var(--green)':r.kind==='question'?'#B45309':'var(--muted)'};">${ACT_ICON[r.kind]||'•'}</span>
+                <span style="color:var(--ink);flex:1;">${esc(r.detail||'')}</span>
+                <span style="color:var(--muted);white-space:nowrap;">${esc(r.actor||'')} · ${esc(loc||r.store_name||'')} · ${esc(fmt(r.created_at))}</span>
+              </div>`;}).join('')}
+          </div></div>
+        </section>`;
+      }catch(e){ /* supplementary */ }
     }
 
     function renderPortfolio(){
@@ -261,7 +354,7 @@
           <div class="p-store">${esc(o.store_name)} <span class="loc">${esc(loc)}</span></div>
           <div class="p-open"><b>${esc(fmt(o.target_open))}</b><span>${cd}${d>=0?' to open':''}</span></div>
           <div class="pbar-wrap"><div class="pbar"><i style="width:${p}%;background:${barColor(p)}"></i></div><b>${p}%</b></div>
-          <div class="p-block ${bc}">${b===0?'✓ Clear':b+' open'}</div>
+          <div class="p-block ${bc}">${b===0?'✓ Clear':b+' open'}${o.open_questions?` <span class="qbadge" style="margin-left:6px;">${o.open_questions} Q</span>`:''}</div>
           <div class="p-arrow">›</div></div>`;
       }).join('');
       list.innerHTML=`<div class="p-row head"><div>Restaurant</div><div>Opening</div><div>Required progress</div><div>Open</div><div></div></div>${rows}`;
@@ -385,6 +478,7 @@
       document.querySelectorAll('#d-tabbody .fchip').forEach(c=>c.onclick=()=>{teamFilter=c.dataset.team||null;renderDetailTab();});
       document.querySelectorAll('#d-tabbody .cbx input').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
       document.querySelectorAll('#d-tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
+      document.querySelectorAll('#d-tabbody [data-send]').forEach(b=>b.onclick=()=>answerQuestion(b.dataset.send,b));
     }
 
     function renderTrack(tv){
@@ -438,8 +532,29 @@
           ${t.desc?`<div class="t-desc">${esc(t.desc)}</div>`:''}
           ${links.length?`<div class="t-meta">${links.join('')}</div>`:''}
           ${t.note?`<div class="t-note"><span class="lbl">Note${fr?' from franchisee':''}</span>${esc(t.note)}</div>`:''}
+          ${taskQuestions(t)}
           ${t.done?`<div class="t-foot"><span class="ok">✓ Completed${t.done_by?' by '+esc(t.done_by):''}${t.done_at?' · '+esc(fmt(t.done_at)):''}</span></div>`:''}
         </div></li>`;
+    }
+
+    // Question threads shown in task context, with an answer box on the open
+    // ones — so a question can be handled where the task's detail is visible,
+    // not only from the inbox at the top of the portfolio.
+    function taskQuestions(t){
+      const qs=t.questions||[];
+      if(!qs.length) return '';
+      return `<div class="qthread">${qs.map(q=>`
+        <div class="qitem">
+          <div class="qq">${esc(q.body)}</div>
+          <div class="qmeta">Asked by ${esc(q.asked_by||'franchisee')} · ${esc(fmt(q.asked_at))}
+            ${q.status==='answered'?'<span class="qbadge answered">Answered</span>':'<span class="qbadge">Awaiting reply</span>'}</div>
+          ${q.answer
+            ?`<div class="qa"><span class="lbl">${esc(q.answered_by||'You')} replied</span>${esc(q.answer)}</div>`
+            :`<div class="qform open" style="margin-top:6px;">
+                <textarea data-ans="${q.id}" placeholder="Answer this — the franchisee is emailed automatically…"></textarea>
+                <div class="qactions"><button type="button" class="qsend" data-send="${q.id}">Send answer</button></div>
+              </div>`}
+        </div>`).join('')}</div>`;
     }
 
     function renderSystems(systems){
@@ -557,7 +672,10 @@
       }catch(e){toast('Error: '+e.message,true);}
     }
 
+    // The question notification email deep-links straight to the opening.
+    const _deep=new URLSearchParams(location.search).get('opening');
     loadPortfolio();
+    if(_deep) openDetail(+_deep);
   </script>
 </body>
 </html>

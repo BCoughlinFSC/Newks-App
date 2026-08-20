@@ -515,3 +515,255 @@ def send_reconciliation_alert_email(
         return True
     logger.error("Failed to send reconciliation alert email")
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NRO Onboarding notifications
+#
+# Two shapes, deliberately different in urgency:
+#   • A question means a franchisee is blocked — sent the instant it is asked.
+#   • Completions are progress, not events — batched into one end-of-day digest
+#     so an active build doesn't bury the inbox.
+# Recipients default to the NRO owners and are overridable per environment.
+# ─────────────────────────────────────────────────────────────────────────────
+
+import html as _html
+
+NRO_NOTIFY_TO = [
+    e.strip() for e in os.getenv(
+        "NRO_NOTIFY_TO", "kaylesworth@newks.com,bcoughlin@fscfranchiseco.com"
+    ).split(",") if e.strip()
+]
+
+
+def _esc(s) -> str:
+    """Escape user-supplied text before it goes into an HTML email body."""
+    return _html.escape(str(s or ""), quote=False)
+
+
+_SHELL_OPEN = """\
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;background:#F1ECE4;">
+  <div style="max-width:600px;margin:2rem auto;background:#ffffff;border-radius:12px;border:1px solid #E4DBCD;overflow:hidden;">
+    <div style="background:%(bar)s;padding:1.5rem 2rem;">
+      <div style="font-family:Georgia,serif;font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:%(eyebrow)s;">Newk's Eatery &middot; NRO Onboarding</div>
+      <h1 style="margin:0.4rem 0 0;color:#ffffff;font-size:1.35rem;font-weight:normal;font-family:Georgia,serif;">%(heading)s</h1>
+    </div>
+    <div style="height:4px;background:#C9A24B;"></div>
+    <div style="padding:1.75rem 2rem;">
+"""
+
+_SHELL_CLOSE = """\
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+def _shell(heading: str, body_html: str, bar: str = "#9E1B32",
+           eyebrow: str = "#F3C9CF") -> str:
+    return (_SHELL_OPEN % {"bar": bar, "eyebrow": eyebrow, "heading": _esc(heading)}
+            + body_html + _SHELL_CLOSE)
+
+
+def send_task_question_email(store_label: str, task_title: str, question: str,
+                             asked_by: str, dashboard_url: str,
+                             recipients=None) -> bool:
+    """A franchisee has asked about a task — notify the NRO owners immediately.
+    `dashboard_url` deep-links to the opening so it can be answered in one click."""
+    if not SMTP_HOST:
+        logger.error("SMTP not configured - cannot send NRO question notification")
+        return False
+    to = list(recipients or NRO_NOTIFY_TO)
+    if not to:
+        logger.warning("NRO_NOTIFY_TO is empty - question notification not sent")
+        return False
+
+    who = asked_by or "The franchisee"
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"[NRO Question] {store_label} - {task_title[:70]}"
+    msg["From"] = FROM_HEADER
+    msg["To"] = ", ".join(to)
+
+    plain = (
+        f"{who} has a question about an onboarding task.\n\n"
+        f"Opening : {store_label}\n"
+        f"Task    : {task_title}\n\n"
+        f"Question:\n{question}\n\n"
+        f"Answer it here: {dashboard_url}\n"
+    )
+    html = _shell(
+        "A franchisee has a question",
+        f"""
+      <p style="margin:0 0 1rem;color:#3A322D;font-size:0.95rem;line-height:1.6;">
+        <strong>{_esc(who)}</strong> has a question about an onboarding task for
+        <strong>{_esc(store_label)}</strong>.
+      </p>
+      <div style="background:#FAF6EF;border:1px solid #EDE4D5;border-left:4px solid #9E1B32;
+                  border-radius:8px;padding:1rem 1.15rem;margin:0 0 1.25rem;">
+        <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#8A7F73;margin-bottom:.35rem;">Task</div>
+        <div style="color:#2A2320;font-size:0.95rem;font-weight:600;margin-bottom:.9rem;">{_esc(task_title)}</div>
+        <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#8A7F73;margin-bottom:.35rem;">Question</div>
+        <div style="color:#3A322D;font-size:0.95rem;line-height:1.6;white-space:pre-wrap;">{_esc(question)}</div>
+      </div>
+      <div style="text-align:center;margin:1.5rem 0 .5rem;">
+        <a href="{dashboard_url}" style="display:inline-block;background:#9E1B32;color:#ffffff;
+           text-decoration:none;padding:0.75rem 1.75rem;border-radius:8px;font-weight:700;font-size:0.95rem;">
+          Answer in the Dashboard
+        </a>
+      </div>
+      <p style="color:#9CA3AF;font-size:0.8rem;margin-top:1.25rem;border-top:1px solid #EDE4D5;padding-top:1rem;">
+        Replying to this email won't reach the franchisee - answer in the dashboard and
+        they're emailed automatically.
+      </p>
+""")
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    if _send(msg, to):
+        logger.info("NRO question notification sent to %s (%s)", to, store_label)
+        return True
+    logger.error("Failed to send NRO question notification for %s", store_label)
+    return False
+
+
+def send_question_answered_email(to_email: str, franchisee_name: str,
+                                 store_label: str, task_title: str,
+                                 question: str, answer: str,
+                                 answered_by: str, journey_url: str) -> bool:
+    """Reply to the franchisee once their question has been answered."""
+    if not SMTP_HOST or not to_email:
+        return False
+    name = franchisee_name or "there"
+    by = answered_by or "The Newk's team"
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"Re: your question - {task_title[:70]}"
+    msg["From"] = FROM_HEADER
+    msg["To"] = to_email
+
+    plain = (
+        f"Hi {name},\n\n"
+        f"{by} has answered your question about \"{task_title}\" for {store_label}.\n\n"
+        f"You asked:\n{question}\n\n"
+        f"Answer:\n{answer}\n\n"
+        f"Back to your checklist: {journey_url}\n\n"
+        f"- FSC Shared Services IT Team"
+    )
+    html = _shell(
+        "Your question has been answered",
+        f"""
+      <p style="margin:0 0 1rem;color:#3A322D;font-size:0.95rem;line-height:1.6;">
+        Hi {_esc(name)} &mdash; <strong>{_esc(by)}</strong> has answered your question about
+        <strong>{_esc(task_title)}</strong>.
+      </p>
+      <div style="background:#FAF6EF;border:1px solid #EDE4D5;border-radius:8px;padding:1rem 1.15rem;margin:0 0 .75rem;">
+        <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#8A7F73;margin-bottom:.35rem;">You asked</div>
+        <div style="color:#5C534B;font-size:0.92rem;line-height:1.6;white-space:pre-wrap;">{_esc(question)}</div>
+      </div>
+      <div style="background:#F2F7F0;border:1px solid #D9E7D3;border-left:4px solid #1E6B34;
+                  border-radius:8px;padding:1rem 1.15rem;margin:0 0 1.25rem;">
+        <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#5E7A58;margin-bottom:.35rem;">Answer</div>
+        <div style="color:#2A2320;font-size:0.95rem;line-height:1.6;white-space:pre-wrap;">{_esc(answer)}</div>
+      </div>
+      <div style="text-align:center;margin:1.5rem 0 .5rem;">
+        <a href="{journey_url}" style="display:inline-block;background:#9E1B32;color:#ffffff;
+           text-decoration:none;padding:0.75rem 1.75rem;border-radius:8px;font-weight:700;font-size:0.95rem;">
+          Back to Your Checklist
+        </a>
+      </div>
+""", bar="#1E6B34", eyebrow="#CFE3C8")
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    if _send(msg, to_email):
+        logger.info("NRO answer notification sent to %s (%s)", to_email, store_label)
+        return True
+    return False
+
+
+def send_onboarding_digest_email(digests, dashboard_url: str,
+                                 recipients=None) -> bool:
+    """End-of-day completion summary across every opening that moved today.
+
+    `digests` is the list of per-opening dicts from
+    onboarding_db.pending_digest_events().values()."""
+    if not SMTP_HOST:
+        logger.error("SMTP not configured - cannot send NRO digest")
+        return False
+    to = list(recipients or NRO_NOTIFY_TO)
+    if not to or not digests:
+        return False
+
+    total = sum(len(d["events"]) for d in digests)
+    msg = MIMEMultipart("alternative")
+    noun = "update" if total == 1 else "updates"
+    plural = "s" if len(digests) != 1 else ""
+    msg["Subject"] = f"[NRO Daily] {total} {noun} across {len(digests)} opening{plural}"
+    msg["From"] = FROM_HEADER
+    msg["To"] = ", ".join(to)
+
+    plain_parts, html_parts = [], []
+    for d in digests:
+        place = ", ".join([p for p in [d.get("city"), d.get("state")] if p])
+        label = (d.get("store_name") or "Newk's Eatery") + (f" - {place}" if place else "")
+        done = [e for e in d["events"] if e["kind"] == "task_done"]
+        undone = [e for e in d["events"] if e["kind"] == "task_undone"]
+        target = f"  (target open {d['target_open']})" if d.get("target_open") else ""
+
+        plain_parts.append(f"\n{label}{target}")
+        for e in done:
+            plain_parts.append(f"  [x] {e['detail']}  - {e.get('actor') or 'unknown'}")
+        for e in undone:
+            plain_parts.append(f"  [ ] re-opened: {e['detail']}  - {e.get('actor') or 'unknown'}")
+
+        rows = "".join(
+            '<tr><td style="padding:5px 8px 5px 10px;vertical-align:top;font-size:0.95rem;color:'
+            + ("#1E6B34" if e["kind"] == "task_done" else "#B45309") + ';">'
+            + ("&#10003;" if e["kind"] == "task_done" else "&#8634;")
+            + '</td><td style="padding:5px 10px 5px 0;color:#3A322D;font-size:0.9rem;line-height:1.45;">'
+            + _esc(e.get("detail"))
+            + '<span style="color:#9CA3AF;"> &mdash; ' + _esc(e.get("actor") or "unknown")
+            + "</span></td></tr>"
+            for e in done + undone
+        )
+        sub = f"{len(done)} completed"
+        if undone:
+            sub += f" &middot; {len(undone)} re-opened"
+        if d.get("target_open"):
+            sub += f" &middot; target open {_esc(d['target_open'])}"
+        html_parts.append(f"""
+      <div style="margin:0 0 1.5rem;">
+        <div style="font-weight:700;color:#2A2320;font-size:1rem;">{_esc(label)}</div>
+        <div style="color:#8A7F73;font-size:0.8rem;margin-bottom:.5rem;">{sub}</div>
+        <table style="width:100%;border-collapse:collapse;background:#FAF6EF;border:1px solid #EDE4D5;border-radius:8px;">
+          {rows}
+        </table>
+      </div>""")
+
+    plain = ("Today's NRO onboarding progress:\n" + "\n".join(plain_parts)
+             + f"\n\nFull dashboard: {dashboard_url}\n")
+    html = _shell(
+        "Today's onboarding progress",
+        "".join(html_parts) + f"""
+      <div style="text-align:center;margin:1.5rem 0 .5rem;">
+        <a href="{dashboard_url}" style="display:inline-block;background:#9E1B32;color:#ffffff;
+           text-decoration:none;padding:0.75rem 1.75rem;border-radius:8px;font-weight:700;font-size:0.95rem;">
+          Open the NRO Dashboard
+        </a>
+      </div>
+      <p style="color:#9CA3AF;font-size:0.8rem;margin-top:1.25rem;border-top:1px solid #EDE4D5;padding-top:1rem;">
+        Questions from franchisees are emailed the moment they're asked - this daily
+        note covers completed tasks only.
+      </p>
+""", bar="#203864", eyebrow="#B9C7E2")
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html, "html"))
+
+    if _send(msg, to):
+        logger.info("NRO digest sent to %s (%d events, %d openings)",
+                    to, total, len(digests))
+        return True
+    logger.error("Failed to send NRO digest")
+    return False

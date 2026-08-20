@@ -159,6 +159,9 @@ function renderTab(){
   document.querySelectorAll('#tabbody .fchip').forEach(c=>c.onclick=()=>{teamFilter=c.dataset.team||null;renderTab();});
   document.querySelectorAll('#tabbody .cbx input:not(:disabled)').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
   document.querySelectorAll('#tabbody .notebox').forEach(inp=>inp.onblur=()=>saveNote(inp.dataset.key,inp));
+  document.querySelectorAll('#tabbody .qbtn').forEach(b=>b.onclick=()=>toggleQForm(b.dataset.qkey,true));
+  document.querySelectorAll('#tabbody .qcancel').forEach(b=>b.onclick=()=>toggleQForm(b.dataset.qcancel,false));
+  document.querySelectorAll('#tabbody .qsend').forEach(b=>b.onclick=()=>sendQuestion(b.dataset.qsend,b));
   document.querySelectorAll('#tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
 }
 
@@ -218,8 +221,33 @@ function taskRow(t){
       ${t.desc?`<div class="t-desc">${esc(t.desc)}</div>`:''}
       ${links.length?`<div class="t-meta">${links.join('')}</div>`:''}
       ${!locked?`<input class="notebox" data-key="${esc(t.key)}" placeholder="Add a note…" value="${esc(t.note||'')}" style="margin-top:7px;width:100%;max-width:440px;border:1px solid #E7E1D6;border-radius:7px;padding:6px 10px;font:inherit;font-size:12.5px;background:#FAF6EF;">`:(t.note?`<div class="t-note"><span class="lbl">Note</span>${esc(t.note)}</div>`:'')}
+      ${questionBlock(t)}
       ${t.done?`<div class="t-foot"><span class="ok">✓ Completed${t.done_by?' by '+esc(t.done_by):''}${t.done_at?' · '+esc(fmt(t.done_at)):''}</span></div>`:''}
     </div></li>`;
+}
+
+// Questions are offered on EVERY task, locked ones included — "this one isn't
+// mine to tick" is exactly when someone needs to ask about it.
+function questionBlock(t){
+  const qs=t.questions||[];
+  const thread=qs.length?`<div class="qthread">${qs.map(q=>`
+    <div class="qitem">
+      <div class="qq">${esc(q.body)}</div>
+      <div class="qmeta">Asked by ${esc(q.asked_by||'you')} · ${esc(fmt(q.asked_at))}
+        ${q.status==='answered'?'<span class="qbadge answered">Answered</span>':'<span class="qbadge">Awaiting reply</span>'}</div>
+      ${q.answer?`<div class="qa"><span class="lbl">${esc(q.answered_by||"Newk's team")} replied</span>${esc(q.answer)}</div>`:''}
+    </div>`).join('')}</div>`:'';
+  return `<div class="qwrap">
+    ${thread}
+    <button type="button" class="qbtn" data-qkey="${esc(t.key)}">💬 ${qs.length?'Ask another question':'Ask a question'}</button>
+    <div class="qform" data-qform="${esc(t.key)}">
+      <textarea placeholder="What would you like to ask about this task?" aria-label="Your question about ${esc(t.title)}"></textarea>
+      <div class="qactions">
+        <button type="button" class="qsend" data-qsend="${esc(t.key)}">Send to Newk's</button>
+        <button type="button" class="qcancel" data-qcancel="${esc(t.key)}">Cancel</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderItQuick(groups){
@@ -295,6 +323,43 @@ async function saveNote(key,inp){
     if(task)task.note=note;
     toast('Note saved');
   }catch(e){toast('Could not save note',true);}
+}
+
+function findTask(key){
+  let task=null;
+  (DATA.track_views||[]).forEach(tv=>tv.groups.forEach(g=>g.tasks.forEach(t=>{if(t.key===key)task=t;})));
+  return task;
+}
+
+function toggleQForm(key,open){
+  const f=document.querySelector(`#tabbody .qform[data-qform="${CSS.escape(key)}"]`);
+  if(!f) return;
+  f.classList.toggle('open',open);
+  if(open) f.querySelector('textarea').focus(); else f.querySelector('textarea').value='';
+}
+
+async function sendQuestion(key,btn){
+  const f=document.querySelector(`#tabbody .qform[data-qform="${CSS.escape(key)}"]`);
+  const ta=f&&f.querySelector('textarea');
+  const body=(ta?ta.value:'').trim();
+  if(!body){toast('Type your question first',true);return;}
+  btn.disabled=true; btn.textContent='Sending…';
+  try{
+    const res=await fetch('/api/onboarding/journey/'+encodeURIComponent(TOKEN)+
+        '/tasks/'+encodeURIComponent(key)+'/question',
+      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body})});
+    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.detail||res.status);}
+    const out=await res.json();
+    const task=findTask(key);
+    if(task){ (task.questions=task.questions||[]).push(out.question); task.open_questions=(task.open_questions||0)+1; }
+    render();
+    // The dashboard always records it; the email is best-effort on top.
+    toast(out.notified?"Sent — the Newk's team has been emailed"
+                      :'Question saved — the team will see it on the dashboard');
+  }catch(e){
+    btn.disabled=false; btn.textContent="Send to Newk's";
+    toast('Could not send: '+e.message,true);
+  }
 }
 
 function recompute(){

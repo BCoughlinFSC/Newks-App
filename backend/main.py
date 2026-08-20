@@ -66,6 +66,9 @@ from email_service import (
     send_onboarding_invite_email,
     send_plain_email,
     send_report_email,
+    send_task_question_email,
+    send_question_answered_email,
+    send_onboarding_digest_email,
 )
 import toast_puller_db as repoll_db
 import precompute_cache
@@ -7613,6 +7616,38 @@ async def subscriptions_runs(limit: int = 100, subscriptionId: Optional[int] = N
                              admin_user: User = Depends(get_current_admin_user)):
     return await asyncio.to_thread(subscriptions_db.list_runs, limit, subscriptionId)
 
+
+
+async def nro_onboarding_digest_job():
+    """End-of-day NRO completion digest to the watch list (NRO_NOTIFY_TO).
+
+    Only completions are batched here — questions email out the moment they're
+    asked. Events are stamped notified only after a successful send, so a failed
+    SMTP run rolls into tomorrow's digest instead of vanishing."""
+    try:
+        pending = onboarding_db.pending_digest_events()
+        if not pending:
+            logger.info("NRO digest: nothing to report")
+            return
+        digests = list(pending.values())
+        sent = send_onboarding_digest_email(
+            digests, dashboard_url=f"{APP_BASE_URL}/onboarding.html"
+        )
+        if sent:
+            ids = [e["id"] for d in digests for e in d["events"]]
+            onboarding_db.mark_digest_sent(ids)
+            logger.info("NRO digest sent — %d events across %d openings",
+                        len(ids), len(digests))
+        else:
+            logger.warning("NRO digest send failed — events stay pending for tomorrow")
+    except Exception as exc:
+        logger.error("NRO digest job failed: %s", exc, exc_info=True)
+
+
+# 5:00 PM local — end of the working day, so the digest lands while the NRO
+# owners are still at their desks rather than overnight with the batch jobs.
+_scheduler.add_job(nro_onboarding_digest_job, CronTrigger(hour=17, minute=0),
+                   id="nro_onboarding_digest", replace_existing=True)
 
 
 @app.on_event("startup")
@@ -22224,6 +22259,16 @@ class TaskUpdateIn(BaseModel):
     note: Optional[str] = None
 
 
+class QuestionIn(BaseModel):
+    """Raise a question against a task."""
+    body: str
+
+
+class AnswerIn(BaseModel):
+    """Answer an open question (internal)."""
+    answer: str
+
+
 def _store_label(op: Dict[str, Any]) -> str:
     """Human location line, e.g. 'Newk's Eatery — Franklin, TN'."""
     place = ", ".join([p for p in [op.get("city"), op.get("state")] if p])
@@ -22400,6 +22445,125 @@ async def onboarding_journey_set_task(token: str, task_key: str, body: TaskUpdat
             status_code=403,
             detail="That task is handled by the Newk's team and can't be changed here.",
         )
+    return {"success": True}
+
+
+@app.post("/api/onboarding/journey/{token}/tasks/{task_key}/question")
+async def onboarding_journey_ask(token: str, task_key: str, body: QuestionIn):
+    """Franchisee raises a question about a task.
+
+    Unlike ticking a task this is allowed on ANY task they can see — the whole
+    point is to ask about something they can't action themselves. The NRO watch
+    list is emailed immediately; a failed send never fails the request, because
+    the question is already recorded and visible on the dashboard."""
+    op = onboarding_db.get_opening_by_token(token)
+    if not op:
+        raise HTTPException(status_code=404,
+                            detail="This onboarding link is invalid or has expired.")
+    asker = op.get("franchisee_name") or "Franchisee"
+    q = onboarding_db.add_question(op["id"], task_key, body.body, asked_by=asker)
+    if not q:
+        raise HTTPException(status_code=400,
+                            detail="Unknown task, or the question was empty.")
+    notified = False
+    try:
+        notified = send_task_question_email(
+            store_label=_store_label(op),
+            task_title=q["task_title"],
+            question=q["body"],
+            asked_by=asker,
+            dashboard_url=f"{APP_BASE_URL}/onboarding.html?opening={op['id']}#questions",
+        )
+    except Exception as exc:
+        logger.warning("NRO question notification failed (question %s saved): %s",
+                       q["id"], exc)
+    logger.info("NRO question %s raised on %s by %s (notified=%s)",
+                q["id"], task_key, asker, notified)
+    return {"success": True, "question": q, "notified": notified}
+
+
+# ---- Questions & activity (internal) ---------------------------------------
+
+@app.get("/api/onboarding/questions")
+async def onboarding_questions(
+    opening_id: Optional[int] = None, status: Optional[str] = None,
+    _user: User = Depends(get_current_admin_user),
+):
+    """Question inbox. `status=open` for the ones still needing an answer."""
+    try:
+        return onboarding_db.list_questions(opening_id=opening_id, status=status)
+    except Exception as exc:
+        logger.error("onboarding.questions failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.post("/api/onboarding/questions/{question_id}/answer")
+async def onboarding_answer_question(
+    question_id: int, body: AnswerIn,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Answer an open question and email the franchisee the reply."""
+    q = onboarding_db.answer_question(question_id, body.answer, current_user.name)
+    if not q:
+        raise HTTPException(
+            status_code=400,
+            detail="Question not found, already answered, or the answer was empty.",
+        )
+    emailed = False
+    if q.get("franchisee_email"):
+        try:
+            token = onboarding_db.get_token(q["opening_id"])
+            emailed = send_question_answered_email(
+                to_email=q["franchisee_email"],
+                franchisee_name=q.get("franchisee_name") or "",
+                store_label=_store_label(q),
+                task_title=q["task_title"],
+                question=q["body"],
+                answer=q["answer"],
+                answered_by=current_user.name,
+                journey_url=_journey_url(token) if token else APP_BASE_URL,
+            )
+        except Exception as exc:
+            logger.warning("NRO answer notification failed (answer %s saved): %s",
+                           question_id, exc)
+    return {"success": True, "emailed": emailed, "question": q}
+
+
+@app.post("/api/onboarding/openings/{opening_id}/tasks/{task_key}/question")
+async def onboarding_internal_ask(
+    opening_id: int, task_key: str, body: QuestionIn,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Staff can log a question against a task too (e.g. from a phone call)."""
+    op = onboarding_db.get_opening_by_id(opening_id)
+    if not op:
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    q = onboarding_db.add_question(opening_id, task_key, body.body,
+                                   asked_by=current_user.name)
+    if not q:
+        raise HTTPException(status_code=400,
+                            detail="Unknown task, or the question was empty.")
+    return {"success": True, "question": q}
+
+
+@app.get("/api/onboarding/activity")
+async def onboarding_activity(
+    limit: int = 60, opening_id: Optional[int] = None,
+    _user: User = Depends(get_current_admin_user),
+):
+    """Event feed for the dashboard — completions, questions and answers."""
+    try:
+        return onboarding_db.recent_activity(limit=limit, opening_id=opening_id)
+    except Exception as exc:
+        logger.error("onboarding.activity failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+
+@app.post("/api/onboarding/send-digest")
+async def onboarding_send_digest(_user: User = Depends(get_current_admin_user)):
+    """Fire the completion digest now instead of waiting for 5 PM (for testing,
+    and for catching up after an SMTP outage)."""
+    await nro_onboarding_digest_job()
     return {"success": True}
 
 

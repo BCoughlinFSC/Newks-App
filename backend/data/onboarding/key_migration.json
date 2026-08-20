@@ -1,0 +1,224 @@
+{
+ "master": {
+  "mstr_003": "mstr_m_2febd1d4",
+  "mstr_004": "mstr_tpc_9652aaa5",
+  "mstr_005": "mstr_m_75772b8b",
+  "mstr_006": "mstr_m_e58e8c58",
+  "mstr_007": "mstr_d_f48fe4ac",
+  "mstr_008": "mstr_d_524e5b33",
+  "mstr_009": "mstr_d_52899d32",
+  "mstr_012": "mstr_d_c52411df",
+  "mstr_013": "mstr_d_d77a2e82",
+  "mstr_014": "mstr_d_b11d920f",
+  "mstr_015": "mstr_d_7706c121",
+  "mstr_016": "mstr_d_21049a76",
+  "mstr_017": "mstr_m_92396e76",
+  "mstr_018": "mstr_m_8d74aa7a",
+  "mstr_019": "mstr_f_3016d6f4",
+  "mstr_021": "mstr_f_538e631d",
+  "mstr_022": "mstr_l_8f97bd73",
+  "mstr_023": "mstr_f_9c717684",
+  "mstr_024": "mstr_m_cbe93056",
+  "mstr_025": "mstr_p_b76c4623",
+  "mstr_026": "mstr_d_120dc05e",
+  "mstr_027": "mstr_p_46725934",
+  "mstr_028": "mstr_d_f4924965",
+  "mstr_029": "mstr_d_d272b3be",
+  "mstr_030": "mstr_d_d7ae59aa",
+  "mstr_031": "mstr_d_0b9f35d4",
+  "mstr_032": "mstr_d_242c9694",
+  "mstr_033": "mstr_m_7f05c217",
+  "mstr_034": "mstr_tpc_0121e2d1",
+  "mstr_035": "mstr_d_f3f5dfe3",
+  "mstr_036": "mstr_d_9e2c4376",
+  "mstr_037": "mstr_d_964a262d",
+  "mstr_038": "mstr_d_1beab6c6",
+  "mstr_039": "mstr_f_5b598803",
+  "mstr_042": "mstr_d_126bd74a",
+  "mstr_043": "mstr_f_47175ad8",
+  "mstr_044": "mstr_m_8b80263b",
+  "mstr_046": "mstr_m_c3e97637",
+  "mstr_047": "mstr_m_9b4bca32",
+  "mstr_048": "mstr_a_f8769bbc",
+  "mstr_049": "mstr_tpc_1badb693",
+  "mstr_053": "mstr_m_0f16c4be",
+  "mstr_054": "mstr_tpc_4e9ca5d4",
+  "mstr_055": "mstr_f_2659a967",
+  "mstr_056": "mstr_dp_54eadad3",
+  "mstr_058": "mstr_m_491330df",
+  "mstr_059": "mstr_a_e7486e14",
+  "mstr_060": "mstr_a_ccb7d791",
+  "mstr_061": "mstr_f_96f0077b",
+  "mstr_062": "mstr_f_7f8c5cf8",
+  "mstr_063": "mstr_p_f1b62aef",
+  "mstr_064": "mstr_m_a1171391",
+  "mstr_069": "mstr_f_73db3849",
+  "mstr_070": "mstr_f_959e06ca",
+  "mstr_071": "mstr_f_9cc2fd09",
+  "mstr_072": "mstr_f_34ba5c0a",
+  "mstr_073": "mstr_st_89429eb2",
+  "mstr_074": "mstr_f_0983abd6",
+  "mstr_075": "mstr_f_7fcf06b4",
+  "mstr_076": "mstr_f_0b3ab87a",
+  "mstr_077": "mstr_p_c0b89f32",
+  "mstr_079": "mstr_tpc_abdca1a7",
+  "mstr_080": "mstr_f_27d992a9",
+  "mstr_082": "mstr_m_ada5d9e7",
+  "mstr_083": "mstr_p_ef6dcac9",
+  "mstr_084": "mstr_p_f299defe",
+  "mstr_085": "mstr_d_ef0e1984",
+  "mstr_086": "mstr_p_b1b20f8b",
+  "mstr_087": "mstr_m_904f22dd",
+  "mstr_088": "mstr_f_ad1c8e6f",
+  "mstr_089": "mstr_m_85bfcf09",
+  "mstr_090": "mstr_f_d58e8bab",
+  "mstr_091": "mstr_p_c4723309",
+  "mstr_092": "mstr_f_59ffd674",
+  "mstr_094": "mstr_p_402c6ced",
+  "mstr_095": "mstr_p_8fd12efb",
+  "mstr_096": "mstr_f_a1ddecb9",
+  "mstr_098": "mstr_p_fdc7cb6b",
+  "mstr_101": "mstr_tpc_abb733e1",
+  "mstr_103": "mstr_m_93f15eb1",
+  "mstr_104": "mstr_p_1fa38042",
+  "mstr_105": "mstr_f_3b3eb23c",
+  "mstr_106": "mstr_p_c0a17886",
+  "mstr_107": "mstr_f_402284f3",
+  "mstr_108": "mstr_st_35d8130a",
+  "mstr_109": "mstr_f_8f26ad86",
+  "mstr_110": "mstr_f_3fc1122b",
+  "mstr_111": "mstr_tpc_9340e7b4",
+  "mstr_112": "mstr_f_3ec6e89b",
+  "mstr_114": "mstr_f_3bd2328b",
+  "mstr_115": "mstr_f_548f7e69",
+  "mstr_116": "mstr_f_4a5566ac",
+  "mstr_117": "mstr_m_63dfae1d",
+  "mstr_118": "mstr_f_bf801be9",
+  "mstr_119": "mstr_tpc_a7b3bdbb",
+  "mstr_120": "mstr_f_e8faa8ad",
+  "mstr_121": "mstr_p_771a3e4a",
+  "mstr_122": "mstr_f_bb846ac5",
+  "mstr_123": "mstr_f_b173039f",
+  "mstr_124": "mstr_f_7716fa7e",
+  "mstr_125": "mstr_m_754ecabc",
+  "mstr_128": "mstr_tpc_8c350815",
+  "mstr_129": "mstr_d_f00e9b62",
+  "mstr_130": "mstr_d_990d6168",
+  "mstr_131": "mstr_f_e59a018e",
+  "mstr_132": "mstr_f_eeab25e1",
+  "mstr_133": "mstr_f_f19eefbb",
+  "mstr_134": "mstr_f_e2631d12",
+  "mstr_135": "mstr_f_cf6cbfe6",
+  "mstr_136": "mstr_f_1838615f",
+  "mstr_137": "mstr_tpc_900cb2d7",
+  "mstr_138": "mstr_f_cd9c30be",
+  "mstr_139": "mstr_f_83e3c8d3",
+  "mstr_140": "mstr_tpc_c5a49f85",
+  "mstr_141": "mstr_tpc_3a53006f",
+  "mstr_142": "mstr_f_da8756a1",
+  "mstr_143": "mstr_f_c63758c3",
+  "mstr_144": "mstr_f_ffffca04"
+ },
+ "unmatched": [
+  {
+   "key": "mstr_001",
+   "title": "Contact Toast  to Complete Contract for POS + Credit Card"
+  },
+  {
+   "key": "mstr_010",
+   "title": "Follow the OLO Onboarding on my.olo.com dashboard - Franchisee Onboarding in Dashboard. Be sure to sign up for both OLO and OLO Pay services."
+  },
+  {
+   "key": "mstr_011",
+   "title": "Complete OloPay Kiosk Paperwork by following the link https://olo-signup.formstack.com/forms/olopaycardpresent [Use Password OloPay]"
+  },
+  {
+   "key": "mstr_020",
+   "title": "Contact FSC IT to arrange the FSC Managed Network. FSC IT provides and manages the network equipment, wireless networks, and cellular backup connectivity for Toast (included in the franchise agreement). Contact FSC IT early to coordinate equipment placement, installation, and low-voltage cabling."
+  },
+  {
+   "key": "mstr_040",
+   "title": "Contact 7-Shifts to Setup your new Restaurant in their Labor Management/Scheduling Platform"
+  },
+  {
+   "key": "mstr_041",
+   "title": "Complete CrunchTime BOH Solution Forms (Inventory/COGS) return to CrunchTime"
+  },
+  {
+   "key": "mstr_045",
+   "title": "Complete Newk's Gift Card ACH Program information via Paytronix"
+  },
+  {
+   "key": "mstr_050",
+   "title": "Coordintate POS Installation"
+  },
+  {
+   "key": "mstr_051",
+   "title": "Schedule all low voltage pre-wire(POS, security, phones) Coord w/ GC"
+  },
+  {
+   "key": "mstr_052",
+   "title": "Confirm the FSC Managed Network install date, and confirm install dates with your local high-speed internet and voice/telephone providers."
+  },
+  {
+   "key": "mstr_057",
+   "title": "AMEX Card Acceptance: To set up new location please call American Express at 1-800-528-5200"
+  },
+  {
+   "key": "mstr_065",
+   "title": "Purchase Office Workstation Computer so your managers can work in email, excel and back office tools."
+  },
+  {
+   "key": "mstr_066",
+   "title": "Set-up Training and Implementation of 7Shifts Scheduling System - use the below form: https://forms.gle/qPMh5kYBjdaiXH376"
+  },
+  {
+   "key": "mstr_067",
+   "title": "Newk's Eatery - Franchise Restaurant Information Form - Google Forms"
+  },
+  {
+   "key": "mstr_068",
+   "title": "Newk's Eatery - Restaurant Systems Questionnaire"
+  },
+  {
+   "key": "mstr_078",
+   "title": "Ecolab -  Soap Dispensers Order Sysco NEXA Antibacterial Soap #4294874"
+  },
+  {
+   "key": "mstr_081",
+   "title": "Marketing team creates all online listing accounts (Google Business, Imaps, etc) & Facebook page, Facebook pre-opening campaign begins"
+  },
+  {
+   "key": "mstr_093",
+   "title": "Verify Food Vendor and Produce Account are Set-up"
+  },
+  {
+   "key": "mstr_097",
+   "title": "Order 2 Prep and Print Machines"
+  },
+  {
+   "key": "mstr_099",
+   "title": "Register Your Company's Email Domain Name through provider of your choosing(cannot use Newks in domain name)"
+  },
+  {
+   "key": "mstr_100",
+   "title": "Set-up Installation of POS system, verify prices and taxes"
+  },
+  {
+   "key": "mstr_102",
+   "title": "At least one manager is Serve-safe certified (certificate provided to PD&C)"
+  },
+  {
+   "key": "mstr_113",
+   "title": "Grease Guard  Install - if necessary  David  @  972-468-8429"
+  },
+  {
+   "key": "mstr_126",
+   "title": "EZ Cater - Add a new location"
+  },
+  {
+   "key": "mstr_127",
+   "title": "Confirm Cintas mats"
+  }
+ ]
+}
