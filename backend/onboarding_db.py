@@ -212,7 +212,11 @@ FRANCHISEE_TRACKS = ["master", "it"]
 INTERNAL_TRACK_ORDER = ["it", "master", "it_full", "marketing"]
 
 # Reference-block audience: these keys are hidden from franchisees entirely.
-_INTERNAL_REFERENCE = {"systems"}
+# "forms" is hidden from franchisees because its two entries are now folded into
+# the IT Reference block as `form_url` (see merge_forms_into_itquick), so a
+# separate Forms tab would be a second route to links they already have there.
+# Staff keep it: on the dashboard it is a quick index of just the fillable forms.
+_INTERNAL_REFERENCE = {"systems", "forms"}
 # Contact groups hidden from franchisees (matched case-insensitively on label).
 # Escalation contacts ARE restaurant-facing — that vendor workbook is titled
 # "Restaurant Facing – IT Vendor Contacts – NRO & Escalation" and the franchisee

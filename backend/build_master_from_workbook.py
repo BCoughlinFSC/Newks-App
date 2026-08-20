@@ -207,6 +207,34 @@ def read_it_tab(ws) -> List[Dict[str, Any]]:
     return out
 
 
+# The Forms reference block holds direct links to the Microsoft Forms a
+# franchisee actually fills in; the IT Quick-Start block links to the Freshdesk
+# article that explains each task. Same subject, different destination — so the
+# form link is folded onto the matching quick-start item rather than living in a
+# tab of its own. Keyed by exact reference-block name; two entries, both checked.
+FORM_TO_ITQUICK = {
+    "Franchise Info Form": "Newk's Franchisee Information Form",
+    "Restaurant Systems Questionnaire": "Restaurant Systems Questionnaire",
+}
+
+
+def merge_forms_into_itquick(reference: Dict[str, Any]) -> List[str]:
+    """Attach each Forms entry's URL to its IT Quick-Start item as `form_url`."""
+    notes: List[str] = []
+    items = {i.get("name"): i for g in reference.get("itquick", []) for i in g.get("items", [])}
+    for form in reference.get("forms", []):
+        target = FORM_TO_ITQUICK.get(form.get("name"))
+        item = items.get(target) if target else None
+        if item is None:
+            notes.append(f"WARNING: form '{form.get('name')}' has no IT Quick-Start item — "
+                         f"its direct link would be lost if the Forms tab is hidden")
+            continue
+        if item.get("form_url") != form.get("url"):
+            item["form_url"] = form.get("url")
+            notes.append(f"folded into IT Quick-Start: {target}")
+    return notes
+
+
 def read_nro_info(ws) -> Dict[str, Any]:
     """The NRO Info cover sheet -> the Support Center contact directory and the
     restaurant-information field labels, so the app can render that sheet as a
@@ -509,6 +537,11 @@ def main() -> int:
     catalog["tracks"]["it"] = it_track
     if "NRO Info" in wb.sheetnames:
         catalog.setdefault("reference", {})["nro_info"] = read_nro_info(wb["NRO Info"])
+    form_notes = merge_forms_into_itquick(catalog.setdefault("reference", {}))
+    if form_notes:
+        print("\n--- Forms folded into IT Quick-Start ---")
+        for n in form_notes:
+            print(f"  {n}")
     catalog["_generated_by"] = (
         "build_onboarding_catalog.py (it_full, marketing, reference) + "
         "build_master_from_workbook.py (master, it)"

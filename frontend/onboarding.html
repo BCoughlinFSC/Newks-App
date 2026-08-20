@@ -433,7 +433,7 @@
       if(ref.contacts&&Object.keys(ref.contacts).length) extra.push({id:'contacts',label:'Vendor Contacts',kind:'ref'});
       if((ref.forms||[]).length) extra.push({id:'forms',label:'Forms',kind:'ref'});
       if((ref.systems||[]).length) extra.push({id:'systems',label:'Systems',kind:'ref'});
-      if((ref.itquick||[]).length) extra.push({id:'itquick',label:'IT Quick-Start',kind:'ref'});
+      if((ref.itquick||[]).length) extra.push({id:'itquick',label:'IT Reference',kind:'ref'});
       if(ref.call45&&(ref.call45.sections||[]).length) extra.push({id:'call45',label:'45-Day Call',kind:'ref'});
       (CURRENT.track_views||[]).forEach(tv=>{
         if(tv.track==='master'||tv.track==='it') return;
@@ -751,6 +751,7 @@
         h+=g.items.map(i=>`<div class="dir-item">
           <div class="r">${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.name)} &#8599;</a>`:esc(i.name)}</div>
           <div class="sd">${esc(i.desc||'')}</div>
+          ${i.form_url?`<div style="margin-top:5px;font-size:12px;">&#128221; <a href="${esc(i.form_url)}" target="_blank" rel="noopener">Open the form &#8599;</a></div>`:''}
           <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;">${i.req?`<span class="req ${i.req.toLowerCase().startsWith('req')?'req':'opt'}">${esc(i.req)}</span>`:''}${i.timing?`<span class="lead">${esc(i.timing)}</span>`:''}${i.dept?`<span class="chip">${esc(i.dept)}</span>`:''}</div>
         </div>`).join('');
         h+=`</div></div></section>`;

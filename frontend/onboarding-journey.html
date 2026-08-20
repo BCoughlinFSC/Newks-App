@@ -136,7 +136,7 @@ function sheetTabs(){
   const extra=[];
   if(ref.contacts&&Object.keys(ref.contacts).length) extra.push({id:'contacts',label:'Vendor Contacts',kind:'ref'});
   if((ref.forms||[]).length) extra.push({id:'forms',label:'Forms',kind:'ref'});
-  if((ref.itquick||[]).length) extra.push({id:'itquick',label:'IT Quick-Start',kind:'ref'});
+  if((ref.itquick||[]).length) extra.push({id:'itquick',label:'IT Reference',kind:'ref'});
   if(ref.call45&&(ref.call45.sections||[]).length) extra.push({id:'call45',label:'45-Day Call',kind:'ref'});
   (DATA.track_views||[]).forEach(tv=>{
     if(tv.track==='master'||tv.track==='it') return;
@@ -409,12 +409,13 @@ function questionBlock(t,compact){
 }
 
 function renderItQuick(groups){
-  let h='<p style="color:#4A4F57;margin:0 0 14px;">Complete these first — the fastest path to getting your systems set up. (Reference only; track detailed steps in the Master checklist.)</p>';
+  let h='<p style="color:#4A4F57;margin:0 0 14px;">Every IT vendor and system for your opening, with its setup guide and sign-up form. Tick the tasks themselves off on the IT Department tab.</p>';
   groups.forEach(g=>{
     h+=`<section class="card"><div class="card-h"><span class="ico">&#9776;</span><h2>${esc(g.title)}</h2></div><div class="card-b"><div class="dir-grid">`;
     h+=g.items.map(i=>`<div class="dir-item">
       <div class="r">${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.name)} &#8599;</a>`:esc(i.name)}</div>
       <div class="sd">${esc(i.desc||'')}</div>
+      ${i.form_url?`<div style="margin-top:5px;font-size:12px;">&#128221; <a href="${esc(i.form_url)}" target="_blank" rel="noopener">Open the form &#8599;</a></div>`:''}
       <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;">${i.req?`<span class="req ${i.req.toLowerCase().startsWith('req')?'req':'opt'}">${esc(i.req)}</span>`:''}${i.timing?`<span class="lead">${esc(i.timing)}</span>`:''}${i.dept?`<span class="chip">${esc(i.dept)}</span>`:''}</div>
     </div>`).join('');
     h+=`</div></div></section>`;
