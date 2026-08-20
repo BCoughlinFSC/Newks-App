@@ -207,6 +207,41 @@ def read_it_tab(ws) -> List[Dict[str, Any]]:
     return out
 
 
+def read_nro_info(ws) -> Dict[str, Any]:
+    """The NRO Info cover sheet -> the Support Center contact directory and the
+    restaurant-information field labels, so the app can render that sheet as a
+    tab like every other one.
+
+    The restaurant values themselves are NOT read: on the web they come from the
+    opening record, which is the live source. Only the labels travel, so the tab
+    lists the same fields in the same order as the sheet."""
+    contacts = []
+    for r in range(6, 40):
+        email = clean(ws.cell(row=r, column=5).value)
+        dept = clean(ws.cell(row=r, column=6).value)
+        rep = clean(ws.cell(row=r, column=7).value)
+        if not (email or dept):
+            if r > 14:
+                break
+            continue
+        contacts.append({"email": email, "dept": dept, "rep": rep})
+    # Rows 5-14 only: row 17 is the Restaurant Managers table header, whose
+    # "Manager Name" cell sits in the same column and would otherwise be read
+    # as an eleventh restaurant field.
+    fields = []
+    for r in range(5, 15):
+        lab = clean(ws.cell(row=r, column=2).value)
+        if lab:
+            fields.append(lab.rstrip(":"))
+    note = ""
+    for r in range(20, ws.max_row + 1):
+        v = clean(ws.cell(row=r, column=1).value)
+        if v.startswith("⚠"):
+            note = v
+            break
+    return {"contacts": contacts, "fields": fields, "note": note}
+
+
 def prio_from(raw: str) -> str:
     r = raw.lower()
     if "conditional" in r:
@@ -472,6 +507,8 @@ def main() -> int:
 
     catalog.setdefault("tracks", {})["master"] = master
     catalog["tracks"]["it"] = it_track
+    if "NRO Info" in wb.sheetnames:
+        catalog.setdefault("reference", {})["nro_info"] = read_nro_info(wb["NRO Info"])
     catalog["_generated_by"] = (
         "build_onboarding_catalog.py (it_full, marketing, reference) + "
         "build_master_from_workbook.py (master, it)"

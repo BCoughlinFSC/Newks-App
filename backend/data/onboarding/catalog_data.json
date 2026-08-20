@@ -6238,6 +6238,58 @@
      }
     ]
    }
-  ]
+  ],
+  "nro_info": {
+   "contacts": [
+    {
+     "email": "development@newks.com",
+     "dept": "Development",
+     "rep": "Mark / Christie"
+    },
+    {
+     "email": "ksmith@newks.com",
+     "dept": "Legal",
+     "rep": "Klara Smith"
+    },
+    {
+     "email": "fieldmarketing@newks.com",
+     "dept": "Marketing",
+     "rep": "Matilyn Skinner"
+    },
+    {
+     "email": "kaylesworth@newks.com",
+     "dept": "IT Department",
+     "rep": "Kim Aylesworth"
+    },
+    {
+     "email": "purchasing@newks.com",
+     "dept": "Purchasing",
+     "rep": "Veronica"
+    },
+    {
+     "email": "accounting@newks.com",
+     "dept": "Accounting",
+     "rep": "Tonya"
+    },
+    {
+     "email": "pdc@newks.com",
+     "dept": "Training (PD&C)",
+     "rep": "Jessica Drahem"
+    }
+   ],
+   "fields": [
+    "Restaurant #",
+    "Restaurant Name",
+    "Address",
+    "Telephone Number",
+    "Ground Breaking",
+    "Build Time",
+    "Turn Over",
+    "Projected Open Date",
+    "Hiring Date",
+    "Training Week"
+   ],
+   "note": "⚠  Four managers MUST complete MIT Training prior to open.     |     Shaded cells are for you to fill in."
+  }
  }
 }

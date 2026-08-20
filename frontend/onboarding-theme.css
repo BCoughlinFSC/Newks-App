@@ -285,3 +285,7 @@
 .nro .sheet-h h3{margin:0;font-family:'Poppins';font-size:15px;color:var(--ink);}
 .nro .sheet-h .cnt{font-size:11.5px;color:var(--muted);}
 .nro .sheet{margin-bottom:22px;}
+
+/* Separates the workbook's own sheets from everything else in the tab bar. */
+.nro .tabdiv{flex:none;width:1px;align-self:center;height:22px;background:var(--line);margin:0 10px;}
+.nro .tabnav-inner{align-items:stretch;}

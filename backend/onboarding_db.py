@@ -200,11 +200,16 @@ import json as _json  # noqa: E402
 
 _CATALOG_JSON_PATH = os.path.join(os.path.dirname(__file__), "data", "onboarding", "catalog_data.json")
 
-# Which tracks a franchisee (magic-link) may see, and in what order. The curated
-# "it" track is the franchisee-facing IT setup checklist (the NRO IT onboarding
-# email, cleaned). The full "it_full" week-by-week kit stays internal-only.
-FRANCHISEE_TRACKS = ["master", "it", "marketing"]
-INTERNAL_TRACK_ORDER = ["it", "it_full", "master", "marketing"]
+# Which tracks a franchisee (magic-link) may see, and in what order.
+#
+# The franchisee sees the 180 Day Checklist workbook and nothing else: "master"
+# is its nine department sheets and "it" is its IT Department sheet, and the UI
+# renders one tab per sheet. The two prototype-era tracks — the week-by-week
+# "it_full" IT kit and the "marketing" toolkit — have no page in that workbook
+# and are grouped separately, internal-side only, so the franchisee's navigation
+# matches the spreadsheet exactly.
+FRANCHISEE_TRACKS = ["master", "it"]
+INTERNAL_TRACK_ORDER = ["it", "master", "it_full", "marketing"]
 
 # Reference-block audience: these keys are hidden from franchisees entirely.
 _INTERNAL_REFERENCE = {"systems"}

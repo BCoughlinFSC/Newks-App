@@ -400,16 +400,73 @@
     }
     function backToList(){document.getElementById('detailView').style.display='none';document.getElementById('portfolioView').style.display='';CURRENT=null;loadPortfolio();}
 
+    // -- Tabs are the workbook's sheets --------------------------------------
+    // One tab per sheet of the 180 Day Checklist workbook, in workbook order.
+    // The IT Department sheet is its own track; the nine department sheets are
+    // groups inside the master track, flattened out to sit beside it. Content
+    // that is NOT a page of that workbook -- the reference blocks, and the two
+    // legacy prototype tracks -- lives after a divider, internal-side only.
+    const SHEET_ORDER=['IT Department','Marketing','Training (PD&C)','Development','Franchisee',
+                       'Legal','Purchasing','Development & Purchasing','Accounting','Sales Team'];
+
     function detailTabDefs(){
       const tabs=[];
-      (CURRENT.track_views||[]).forEach(tv=>tabs.push({id:tv.track,label:tv.label,count:tv.total}));
       const ref=CURRENT.reference||{};
-      if((ref.systems||[]).length) tabs.push({id:'systems',label:'Systems'});
-      if(ref.contacts&&Object.keys(ref.contacts).length) tabs.push({id:'contacts',label:'Contacts'});
-      if((ref.forms||[]).length) tabs.push({id:'forms',label:'Forms'});
-      if(ref.call45&&(ref.call45.sections||[]).length) tabs.push({id:'call45',label:'45-Day Call'});
-      if((ref.itquick||[]).length) tabs.push({id:'itquick',label:'IT Quick-Start'});
+      if(ref.nro_info) tabs.push({id:'nro',label:'NRO Info',kind:'nro'});
+
+      const byLabel={};
+      (CURRENT.track_views||[]).forEach(tv=>{
+        if(tv.track==='it'){ byLabel['IT Department']={id:'it',label:'IT Department',kind:'track',
+                                                       track:'it',count:tv.total}; return; }
+        if(tv.track!=='master') return;
+        tv.groups.forEach(g=>{
+          byLabel[g.label]={id:'m:'+g.id,label:g.label,kind:'group',track:'master',
+                            group:g.id,count:g.tasks.length};
+        });
+      });
+      SHEET_ORDER.forEach(l=>{ if(byLabel[l]){ tabs.push(byLabel[l]); delete byLabel[l]; } });
+      Object.values(byLabel).forEach(t=>tabs.push(t));   // any sheet added later
+
+      const extra=[];
+      if(ref.contacts&&Object.keys(ref.contacts).length) extra.push({id:'contacts',label:'Vendor Contacts',kind:'ref'});
+      if((ref.forms||[]).length) extra.push({id:'forms',label:'Forms',kind:'ref'});
+      if((ref.systems||[]).length) extra.push({id:'systems',label:'Systems',kind:'ref'});
+      if((ref.itquick||[]).length) extra.push({id:'itquick',label:'IT Quick-Start',kind:'ref'});
+      if(ref.call45&&(ref.call45.sections||[]).length) extra.push({id:'call45',label:'45-Day Call',kind:'ref'});
+      (CURRENT.track_views||[]).forEach(tv=>{
+        if(tv.track==='master'||tv.track==='it') return;
+        extra.push({id:tv.track,label:tv.label,kind:'track',track:tv.track,count:tv.total});
+      });
+      if(extra.length){ tabs.push({id:'__div',divider:true}); extra.forEach(t=>tabs.push(t)); }
       return tabs;
+    }
+
+    function renderNroInfo(info){
+      const o=CURRENT;
+      const loc=[o.city,o.state].filter(Boolean).join(', ');
+      const vals={'Restaurant Name':o.store_name||'','Address':loc,
+                  'Projected Open Date':o.target_open?fmt(o.target_open):''};
+      const rows=(info.fields||[]).map(f=>`<tr>
+          <td style="width:210px;font-weight:600;background:#EAF1FB;">${esc(f)}</td>
+          <td class="${vals[f]?'':'wb-date empty'}" style="text-align:left;">${esc(vals[f]||'')}</td>
+        </tr>`).join('');
+      const contacts=(info.contacts||[]).map(c=>`<tr>
+          <td><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></td>
+          <td style="font-weight:600;">${esc(c.dept)}</td>
+          <td>${esc(c.rep)}</td></tr>`).join('');
+      return `<p style="color:#4A4F57;margin:0 0 14px;">The workbook&rsquo;s cover sheet &mdash; this opening&rsquo;s
+          restaurant details and the Support Center contact for each area.</p>
+        <section class="sheet">
+          <div class="sheet-h"><h3>Restaurant Information</h3></div>
+          <div class="wbwrap"><table class="wb" style="min-width:520px;"><tbody>${rows}</tbody></table></div>
+        </section>
+        <section class="sheet">
+          <div class="sheet-h"><h3>Support Center Contacts</h3></div>
+          <div class="wbwrap"><table class="wb" style="min-width:520px;">
+            <thead><tr><th>Email</th><th>Department</th><th>Representative</th></tr></thead>
+            <tbody>${contacts}</tbody></table></div>
+        </section>
+        ${info.note?`<p style="font-size:12px;color:var(--muted);font-style:italic;">${esc(info.note)}</p>`:''}`;
     }
 
     function renderDetail(){
@@ -417,7 +474,7 @@
       const d=daysUntil(o.target_open),cd=d===null?'—':(d<0?'Open':d+' days');
       const openTasks=(p.total||0)-(p.done||0);
       const tabs=detailTabDefs();
-      if(!detailTab||!tabs.find(t=>t.id===detailTab)) detailTab=tabs[0]?.id;
+      if(!detailTab||!tabs.find(t=>t.id===detailTab&&!t.divider)) detailTab=tabs.find(t=>!t.divider)?.id;
 
       let h=`<button class="backlink" onclick="backToList()">‹ Back to portfolio</button>
         <div class="card">
@@ -451,7 +508,9 @@
 
         <div class="nro">
           <nav class="tabnav"><div class="tabnav-inner" id="d-tabnav">${tabs.map(t=>
-            `<button class="tabbtn${t.id===detailTab?' active':''}" data-tab="${t.id}">${esc(t.label)}${t.count!=null?` <span class="n">${t.count}</span>`:''}</button>`).join('')}</div></nav>
+            t.divider
+              ? `<span class="tabdiv" aria-hidden="true"></span>`
+              : `<button class="tabbtn${t.id===detailTab?' active':''}" data-tab="${t.id}">${esc(t.label)}${t.count!=null?` <span class="n">${t.count}</span>`:''}</button>`).join('')}</div></nav>
           <div id="d-tabbody"></div>
         </div>`;
 
@@ -464,9 +523,18 @@
 
     function renderDetailTab(){
       const ref=CURRENT.reference||{};
-      const tv=(CURRENT.track_views||[]).find(x=>x.track===detailTab);
-      let h='';
-      if(tv) h=renderTrack(tv);
+      const def=detailTabDefs().find(t=>t.id===detailTab);
+      let h='<div class="empty">Nothing here.</div>';
+      if(def&&def.kind==='nro') h=renderNroInfo(ref.nro_info||{});
+      else if(def&&def.kind==='group'){
+        const tv=(CURRENT.track_views||[]).find(x=>x.track===def.track);
+        const g=tv&&tv.groups.find(x=>String(x.id)===String(def.group));
+        h=g?sheetTable(g.label,g.tasks,false):'<div class="empty">No tasks on this sheet.</div>';
+      }
+      else if(def&&def.kind==='track'){
+        const tv=(CURRENT.track_views||[]).find(x=>x.track===def.track);
+        h=tv?renderTrack(tv):h;
+      }
       else if(detailTab==='systems') h=renderSystems(ref.systems||[]);
       else if(detailTab==='contacts') h=renderContacts(ref.contacts||{});
       else if(detailTab==='forms') h=renderForms(ref.forms||[]);
