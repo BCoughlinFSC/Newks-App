@@ -385,9 +385,13 @@ function taskRow(t){
 
 // Questions are offered on EVERY task, locked ones included — "this one isn't
 // mine to tick" is exactly when someone needs to ask about it.
+// `compact` = rendered inside a table row, where the row already draws its own
+// Ask button. Only that button is suppressed — the (hidden) form must always be
+// emitted, because it is what the button reveals. Returning early here when a
+// task had no questions yet meant the form did not exist on any untouched task,
+// so clicking Ask silently did nothing.
 function questionBlock(t,compact){
   const qs=t.questions||[];
-  if(compact&&!qs.length) return '';   // the Ask button already lives in the row
   const thread=qs.length?`<div class="qthread">${qs.map(q=>`
     <div class="qitem">
       <div class="qq">${esc(q.body)}</div>
