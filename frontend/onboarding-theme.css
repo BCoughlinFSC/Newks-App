@@ -234,3 +234,54 @@
 .nro .qbadge{display:inline-block;background:#FEF3C7;color:#92400E;font-size:10.5px;font-weight:700;
   letter-spacing:.4px;text-transform:uppercase;padding:2px 8px;border-radius:20px;}
 .nro .qbadge.answered{background:var(--green-soft);color:var(--green);}
+
+/* ── Workbook table view ─────────────────────────────────────────────────────
+   Renders a track the way the source spreadsheet does: one table per department
+   tab, the sheet's own column order, furthest-out week first. People arrive
+   here already knowing the workbook, so matching it beats a prettier layout
+   they'd have to re-learn. */
+.nro .wbwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:#fff;}
+.nro table.wb{border-collapse:collapse;width:100%;min-width:940px;font-size:12.5px;}
+.nro table.wb th{background:#203864;color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;
+  text-align:left;padding:8px 9px;border:1px solid #1a2e52;white-space:nowrap;position:sticky;top:0;z-index:2;}
+.nro table.wb td{border:1px solid var(--line);padding:7px 9px;vertical-align:top;color:var(--ink);}
+.nro table.wb tbody tr:nth-child(even) td{background:#F7F9FC;}
+.nro table.wb tbody tr.done td{background:#E2F0D9;}
+.nro table.wb tbody tr.done .wb-act{text-decoration:line-through;color:#5C6B54;}
+.nro table.wb tbody tr:hover td{background:#FFF8E7;}
+.nro table.wb tbody tr.done:hover td{background:#D7E9CB;}
+
+/* Weeks Out reads as the workbook's conditional-format chip. */
+.nro .wb-wk{display:block;text-align:center;font-weight:700;font-variant-numeric:tabular-nums;
+  border-radius:5px;padding:2px 0;}
+.nro .wb-wk.urgent{background:#F8D7DA;color:#9C0006;}
+.nro .wb-wk.soon{background:#FCE4D6;color:#974706;}
+.nro .wb-wk.later{background:#EAF1FB;color:#1F4E78;}
+.nro .wb-date{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--ink-soft);text-align:center;}
+.nro .wb-date.empty{background:#FFF2CC;}
+.nro table.wb td.wb-c{text-align:center;width:34px;}
+.nro table.wb td.wb-c input{width:17px;height:17px;cursor:pointer;accent-color:#1E6B34;}
+.nro table.wb td.wb-c input:disabled{cursor:not-allowed;opacity:.45;}
+.nro .wb-act{font-size:13px;line-height:1.45;}
+.nro .wb-own{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;
+  padding:1px 6px;border-radius:20px;margin-left:6px;vertical-align:1px;}
+.nro .wb-own.you{background:#FCE4D6;color:#974706;}
+.nro .wb-own.newks{background:#E7EDF7;color:#1F4E78;}
+.nro .wb-sub{margin-top:5px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+.nro .wb-ask{background:none;border:0;color:var(--red);font:inherit;font-size:11.5px;font-weight:600;
+  cursor:pointer;padding:0;}
+.nro .wb-ask:hover{text-decoration:underline;}
+.nro .wb-note{border:1px solid var(--line);border-radius:6px;padding:3px 7px;font:inherit;font-size:11.5px;
+  background:var(--cream);width:190px;}
+.nro .wb-kb{font-size:11.5px;word-break:break-word;}
+.nro .wb-prio{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;white-space:nowrap;}
+.nro .wb-prio.req{background:#FCE4D6;color:#974706;}
+.nro .wb-prio.rec{background:#E7EDF7;color:#1F4E78;}
+.nro .wb-prio.opt{background:#F0EBE1;color:#6B6257;}
+.nro .wb-prio.cond{background:#FEF3C7;color:#92400E;}
+.nro .wb-band td{background:#1F4E78 !important;color:#fff;font-weight:700;font-size:11px;
+  letter-spacing:.5px;text-transform:uppercase;padding:6px 9px;}
+.nro .sheet-h{display:flex;align-items:baseline;gap:10px;margin:0 0 8px;flex-wrap:wrap;}
+.nro .sheet-h h3{margin:0;font-family:'Poppins';font-size:15px;color:var(--ink);}
+.nro .sheet-h .cnt{font-size:11.5px;color:var(--muted);}
+.nro .sheet{margin-bottom:22px;}

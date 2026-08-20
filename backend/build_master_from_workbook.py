@@ -201,7 +201,7 @@ def read_it_tab(ws) -> List[Dict[str, Any]]:
             "dept": c,
             "prio": prio_from(prio_raw),
             "lead": clean(ws.cell(row=r, column=5).value).replace("—", "").strip(),
-            "kb": kb_url(clean(ws.cell(row=r, column=6).value)),
+            "kb": kb_url(ws.cell(row=r, column=6)),
             "group_label": group,
         })
     return out
@@ -218,8 +218,18 @@ def prio_from(raw: str) -> str:
     return "req"
 
 
-def kb_url(raw: str) -> str:
-    """The KB column holds either a URL or a prose pointer; keep only URLs."""
+def kb_url(cell) -> str:
+    """The article link for a KB Article / Reference cell.
+
+    Prefer the cell's hyperlink target: add_workbook_links.py replaces the raw
+    URL text with a readable "KB Article ↗" and moves the URL onto the
+    hyperlink, so reading the displayed text alone would lose every link. Falls
+    back to the text for a cell that still holds a bare URL, and yields "" for a
+    prose pointer with no link."""
+    target = getattr(cell.hyperlink, "target", None) if cell.hyperlink else None
+    if target and target.lower().startswith("http"):
+        return target
+    raw = clean(cell.value)
     return raw if raw.lower().startswith("http") else ""
 
 
@@ -249,6 +259,9 @@ def build_master(wb) -> Tuple[Dict[str, Any], List[Tuple[str, str, str]]]:
                 "owner": owner,
                 "dept": row["dept"],
                 "lead": row["lead"],
+                # Raw workbook value as well as the prose label — the table view
+                # renders the sheet's own "Weeks Out" column.
+                "weeks": row["weeks"],
                 "desc": "",
                 "contact": row["contact"],
                 "contact_info": row["contact_info"],
@@ -392,6 +405,8 @@ def main() -> int:
         print(f"source workbook not found: {args.src}", file=sys.stderr)
         return 1
 
+    # data_only so the header-band formulas don't come back as strings;
+    # hyperlinks survive either way and carry the KB article targets.
     wb = openpyxl.load_workbook(args.src, data_only=True)
     with open(CATALOG_PATH, encoding="utf-8") as f:
         catalog = json.load(f)

@@ -481,6 +481,80 @@
       document.querySelectorAll('#d-tabbody [data-send]').forEach(b=>b.onclick=()=>answerQuestion(b.dataset.send,b));
     }
 
+    // ── Workbook table rendering ──────────────────────────────────────────────
+    // Same shape as the franchisee hub: each department rendered as its sheet in
+    // Kim's 180 Day Checklist workbook. Staff differ from franchisees in two
+    // ways only — they may tick ANY task, and open questions get an answer box
+    // inline rather than just a thread.
+    function wkClass(w){ if(w==null) return 'later'; return w<=2?'urgent':(w<=6?'soon':'later'); }
+    function wkText(w){ return w==null?'—':String(w); }
+
+    function linkifyInfo(s){
+      if(!s) return '';
+      return esc(s)
+        .replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')
+        .replace(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi,'<a href="mailto:$1">$1</a>')
+        .replace(/\n/g,'<br>');
+    }
+
+    const WB_COLS=['Weeks Out','Completion Date','Completed','Activity To Complete',
+                   'Company','Vendor Contact','Vendor Contact Info.',"Newk's Resources"];
+    const IT_COLS=['Vendor / Document','Description','Department','Required?',
+                   'Timing / Lead Time','KB Article / Reference','Completed'];
+    const PRIO_LABEL={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
+
+    function ownCell(t){
+      const fr=t.owner==='franchisee';
+      return `<span class="wb-own ${fr?'you':'newks'}">${fr?'Franchisee':"Newk's"}</span>`;
+    }
+
+    function wbRow(t){
+      return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
+        <td style="width:70px;"><span class="wb-wk ${wkClass(t.weeks)}">${esc(wkText(t.weeks))}</span></td>
+        <td class="wb-date ${t.done?'':'empty'}" style="width:92px;">${t.done_at?esc(fmt(t.done_at)):''}</td>
+        <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''}
+            aria-label="Complete: ${esc(t.title)}"></td>
+        <td>
+          <div class="wb-act">${esc(t.title)}${ownCell(t)}</div>
+          ${t.desc?`<div style="color:var(--ink-soft);font-size:11.5px;margin-top:3px;">${esc(t.desc)}</div>`:''}
+          ${t.kb?`<div class="wb-kb" style="margin-top:3px;">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></div>`:''}
+          ${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
+          ${taskQuestions(t)}
+        </td>
+        <td style="width:130px;">${esc(t.company||'')}</td>
+        <td style="width:120px;">${esc(t.contact||'')}</td>
+        <td style="width:190px;">${linkifyInfo(t.contact_info||'')}</td>
+        <td style="width:110px;">${esc(t.dept||'')}</td>
+      </tr>`;
+    }
+
+    function itRow(t){
+      return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
+        <td style="width:180px;"><div class="wb-act">${esc(t.title)}${ownCell(t)}</div>
+          ${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
+          ${taskQuestions(t)}</td>
+        <td>${esc(t.desc||'')}</td>
+        <td style="width:110px;">${esc(t.dept||'')}</td>
+        <td style="width:110px;">${t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</td>
+        <td style="width:120px;">${esc(t.lead||'')}</td>
+        <td class="wb-kb" style="width:200px;">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">KB Article ↗</a>`:''}</td>
+        <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''}
+            aria-label="Complete: ${esc(t.title)}"></td>
+      </tr>`;
+    }
+
+    function sheetTable(label,tasks,isIT){
+      const cols=isIT?IT_COLS:WB_COLS;
+      const done=tasks.filter(t=>t.done).length;
+      return `<section class="sheet">
+        <div class="sheet-h"><h3>${esc(label)}</h3><span class="cnt">${done} of ${tasks.length} complete</span></div>
+        <div class="wbwrap"><table class="wb">
+          <thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+          <tbody>${tasks.map(isIT?itRow:wbRow).join('')}</tbody>
+        </table></div>
+      </section>`;
+    }
+
     function renderTrack(tv){
       let h='';
       if(tv.blurb) h+=`<p style="color:#4A4F57;margin:0 0 14px;">${esc(tv.blurb)}</p>`;
@@ -491,22 +565,13 @@
       const deptCount=Object.keys(counts).filter(k=>k!=='Franchisee').length;
       if(deptCount>=2){ h+=filterBar(counts,trackTotal); }
       else { teamFilter=null; }
+      const isIT=tv.track==='it';
       let shown=0;
       tv.groups.forEach(g=>{
         const tasks=teamFilter?g.tasks.filter(t=>teamsOf(t).includes(teamFilter)):g.tasks;
         if(!tasks.length) return;
         shown+=tasks.length;
-        const done=tasks.filter(t=>t.done).length,total=tasks.length,pct=total?Math.round(done/total*100):0;
-        const allDone=total>0&&done===total;
-        h+=`<section class="phase${allDone?' done':''}">
-          <div class="phase-h">
-            <div class="phase-num">${esc(String(g.order||g.id))}</div>
-            <div class="phase-meta">${g.range?`<div class="r">${esc(g.range)}</div>`:''}<h3>${esc(g.label)}</h3>${g.blurb?`<div class="blurb">${esc(g.blurb)}</div>`:''}</div>
-            <div class="phase-prog"><div class="txt">${done}/${total} done</div><div class="bar"><i style="width:${pct}%"></i></div></div>
-            <div class="chev2">&#9660;</div>
-          </div>
-          <ul class="tasklist">${tasks.map(taskRow).join('')}</ul>
-        </section>`;
+        h+=sheetTable(g.label,tasks,isIT);
       });
       if(!shown) h+=`<div class="empty">No ${teamFilter?esc(TEAM_LABEL[teamFilter]||teamFilter)+' ':''}tasks in this section.</div>`;
       return h||'<div class="empty">No tasks in this section.</div>';
