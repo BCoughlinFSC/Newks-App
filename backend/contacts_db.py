@@ -729,14 +729,132 @@ def _store_columns() -> List[str]:
         return [r["name"] for r in rows]
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Ownership — Company-owned vs Franchisee
+#
+# contacts.dbo.Store has no plain "is this ours?" bit. The signal is spread
+# across two FK lookups (Company = the Corp / Franchisee designation,
+# OwnerShip = the legal entity that owns the store) plus
+# backend/store_ownership.json, which the admin "Store Information Excel"
+# upload refreshes and which the Flash / WPY / legacy pages already treat as
+# authoritative for Company-vs-Franchise filtering.
+#
+# resolve_store_ownership() folds all three into one label so the Stores list
+# can render a single column. Precedence:
+#   1. A literal designation in the Company / OwnerShip name ("Company",
+#      "Franchise") — that IS the answer, no guessing involved.
+#   2. store_ownership.json, keyed by StoreID — curated, Excel-backed.
+#   3. Entity-name hints (Newco Dining LLC = ours) — heuristic last resort.
+# Anything unresolved comes back as None so the UI can show "—" rather than
+# guessing a store into the wrong bucket.
+# ──────────────────────────────────────────────────────────────────────────────
+
+OWNERSHIP_JSON_PATH = os.path.join(os.path.dirname(__file__), "store_ownership.json")
+
+# Entity names that mean "Newk's owns it". Every company store sits under
+# Newco Dining LLC today; the extra spellings are here so a rename or an older
+# export degrades to "unknown" rather than silently reading as a franchisee.
+_COMPANY_ENTITY_HINTS = (
+    "newco dining", "newk's franchise co", "newks franchise co",
+    "company restaurant", "company store",
+)
+_COMPANY_WORDS = ("company", "company owned", "company-owned", "corp",
+                  "corporate", "corporate owned", "corporate-owned")
+
+_ownership_json_cache: Dict[str, Any] = {"mtime": None, "data": {}}
+
+
+def _classify_entity_name(name: Any) -> Optional[str]:
+    """'Newco Dining LLC' -> 'Company', 'Temcomp LLC' -> None, 'Franchise' ->
+    'Franchise'. None means "this name doesn't tell us" — the caller falls
+    through to the next source."""
+    n = str(name or "").strip().lower()
+    if not n:
+        return None
+    if n in _COMPANY_WORDS or any(h in n for h in _COMPANY_ENTITY_HINTS):
+        return "Company"
+    # Checked AFTER the company hints on purpose: "Newk's Franchise Company"
+    # is us, not a franchisee.
+    if "franchis" in n:
+        return "Franchise"
+    return None
+
+
+def _load_ownership_json() -> Dict[str, Dict[str, Any]]:
+    """store_ownership.json, reloaded when the file changes on disk (the
+    admin Excel upload rewrites it under a running uvicorn)."""
+    try:
+        mtime = os.path.getmtime(OWNERSHIP_JSON_PATH)
+    except OSError:
+        return {}
+    if _ownership_json_cache["mtime"] != mtime:
+        try:
+            with open(OWNERSHIP_JSON_PATH, "r", encoding="utf-8") as fh:
+                _ownership_json_cache["data"] = json.load(fh) or {}
+            _ownership_json_cache["mtime"] = mtime
+        except Exception as exc:
+            logger.warning("store_ownership.json unreadable: %s", exc)
+            return {}
+    return _ownership_json_cache["data"]
+
+
+def _lookup_name_map(table: str, pk: str, label_col: str) -> Dict[Any, str]:
+    """{id: name} for a lookup table, or {} if the table isn't in the mirror."""
+    with get_connection() as conn:
+        try:
+            rows = conn.execute(f"SELECT {pk}, {label_col} FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    return {r[0]: r[1] for r in rows if r[0] is not None}
+
+
+def resolve_store_ownership(rows: List[Dict[str, Any]]) -> None:
+    """Stamp OwnershipType / OwnershipEntity / OwnershipSource onto each store
+    dict, in place. One pass over the lookup tables for the whole list — no
+    per-store queries."""
+    cols = set(_store_columns())
+    companies = (_lookup_name_map("Company", "CompanyID", "CompanyName")
+                 if "StoreCompany" in cols else {})
+    owners = (_lookup_name_map("OwnerShip", "OwnerShipID", "OwnerShipName")
+              if "StoreOwnershipID" in cols else {})
+    by_id = _load_ownership_json()
+
+    for r in rows:
+        company_name = companies.get(r.get("StoreCompany"))
+        owner_name = owners.get(r.get("StoreOwnershipID"))
+        js = by_id.get(str(r.get("StoreID"))) or {}
+
+        entity = owner_name or company_name or js.get("companyName") or None
+        otype = _classify_entity_name(owner_name) or _classify_entity_name(company_name)
+        source = "contacts" if otype else None
+
+        if not otype:
+            jt = str(js.get("ownershipType") or "").strip().lower()
+            if jt.startswith("company") or jt.startswith("corp"):
+                otype, source = "Company", "store_ownership.json"
+            elif jt.startswith("franchis"):
+                otype, source = "Franchise", "store_ownership.json"
+
+        r["OwnershipType"] = otype
+        r["OwnershipEntity"] = entity
+        r["OwnershipSource"] = source
+
+
 def list_stores() -> List[Dict[str, Any]]:
-    """Return every Store with every column. The list view picks which
-    columns to show; edit modal renders them all."""
+    """Return every Store with every column, plus the derived Ownership*
+    fields (see resolve_store_ownership). The list view picks which columns
+    to show; edit modal renders them all."""
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM Store ORDER BY LOWER(COALESCE(StoreName, ''))"
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        stores = [_row_to_dict(r) for r in rows]
+    try:
+        resolve_store_ownership(stores)
+    except Exception as exc:
+        # Never let the ownership column take the whole directory down.
+        logger.warning("resolve_store_ownership failed: %s", exc, exc_info=True)
+    return stores
 
 
 def list_comping_store_ids() -> List[str]:

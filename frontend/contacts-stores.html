@@ -119,6 +119,16 @@
     .status-closed  { background: #FEE2E2; color: #991B1B; }
     .status-unknown { background: #F3F4F6; color: #6B7280; }
 
+    /* Ownership — Company-owned vs Franchisee */
+    .own-badge {
+      display: inline-block; padding: 0.15rem 0.55rem;
+      border-radius: 10px; font-size: 0.75rem; font-weight: 600;
+      white-space: nowrap;
+    }
+    .own-company   { background: #DBEAFE; color: #1E40AF; }
+    .own-franchise { background: #FEF3C7; color: #92400E; }
+    .own-unknown   { background: #F3F4F6; color: #6B7280; }
+
     /* Modal */
     .modal-overlay {
       position: fixed; inset: 0;
@@ -537,7 +547,10 @@
         if (!q) return true;
         const blob = [
           r.StoreID, r.StoreName, r.StoreCity, r.StoreState,
-          r.StoreStatus, r.StoreAdd1
+          r.StoreStatus, r.StoreAdd1,
+          // Ownership is searchable too — typing "franchise" / "company"
+          // (or a franchisee entity name) filters the list.
+          ownershipLabel(r), r.OwnershipEntity
         ].filter(v => v != null).join(' ').toLowerCase();
         return blob.includes(q);
       });
@@ -574,6 +587,7 @@
         ['StoreName',     'Store'],
         ['StoreCity',     'City'],
         ['StoreState',    'State'],
+        ['OwnershipType', 'Owner'],
         ['StoreStatus',   'Status'],
         ['StoreOpenDate', 'Open'],
         ['LastUpdatedBy', 'Last Edited By'],
@@ -602,6 +616,7 @@
           <td><strong>${escapeHtml(r.StoreName ?? '')}</strong></td>
           <td>${escapeHtml(r.StoreCity ?? '')}</td>
           <td>${escapeHtml(r.StoreState ?? '')}</td>
+          <td>${ownershipBadgeHtml(r)}</td>
           <td>${statusBadge}</td>
           <td>${escapeHtml(r.StoreOpenDate ?? '')}</td>
           <td>${escapeHtml(r.LastUpdatedBy ?? '')}</td>
@@ -623,6 +638,27 @@
           render();
         });
       });
+    }
+
+    // Ownership comes from the backend already resolved (contacts Company /
+    // OwnerShip lookups, then store_ownership.json) — see
+    // contacts_db.resolve_store_ownership. Null = we genuinely don't know,
+    // which shows as "—" rather than guessing the store into a bucket.
+    function ownershipLabel(row) {
+      const t = row.OwnershipType;
+      if (t === 'Company')   return 'Company';
+      if (t === 'Franchise') return 'Franchisee';
+      return '';
+    }
+
+    function ownershipBadgeHtml(row) {
+      const label = ownershipLabel(row);
+      if (!label) {
+        return '<span class="own-badge own-unknown" title="Ownership not set in contacts or store_ownership.json">—</span>';
+      }
+      const cls = row.OwnershipType === 'Company' ? 'own-company' : 'own-franchise';
+      const entity = row.OwnershipEntity ? ` title="${escapeHtml(row.OwnershipEntity)}"` : '';
+      return `<span class="own-badge ${cls}"${entity}>${label}</span>`;
     }
 
     function statusBadgeHtml(row) {
