@@ -321,9 +321,9 @@ IT_TASK_WEEKS: Dict[str, tuple] = {
     "low_voltage_plans": (20, "est"),
 
     # National vendor agreements.
-    # The sheet says "Minimum 8 Weeks Prior" — that is a floor, and the IT NRO
-    # Kit says contact Toast 90 days (22 wks) out. Seeded to the sheet's own
-    # number; 22 is the safer target if you want the alert earlier.
+    # The sheet says "Minimum 8 Weeks Prior" — a floor, where the IT NRO Kit says
+    # contact Toast 90 days (22 wks) out. Raised with Kim 2026-08-31, who
+    # confirmed 8 is right: keep the sheet's own number.
     "toast_pos": (8, "sheet"),
     "managed_network": (20, "est"),      # "Contact Early"
     "internet_local": (20, "est"),       # "Contact Early"
