@@ -284,6 +284,117 @@ _IT_TASKS_LIVE = [t for t in ONBOARDING_TASKS_ALL if t.get("track") == "it"] or 
 _REQUIRED_KEYS = {t["key"] for t in _IT_TASKS_LIVE if t.get("prio") == "req"}
 
 
+# ─── weeks-out timing ────────────────────────────────────────────────────────
+# The department sheets carry a numeric "Weeks Out" column, which the app reads
+# straight through. Two sheets don't:
+#
+#   • it_full / marketing state it as text ("14 wks", "70 days out") — mechanical
+#     to convert, so _derive_weeks() does it.
+#   • the IT Department sheet has a qualitative "Timing / Lead Time" instead
+#     ("Contact Early", "Contact ISS First", blank on 17 of 28 rows). Those
+#     numbers exist nowhere in the workbook, so the table below is a first pass
+#     for review, and every entry records where its number came from:
+#
+#       "sheet" — converted from that row's own Timing text. Trustworthy.
+#       "kit"   — taken from the matching activity on the IT NRO Kit or a
+#                 department sheet, which do carry real week numbers.
+#       "est"   — an estimate from the task's position in the sequence. These
+#                 are the ones to check; the UI flags them.
+#
+# Anything set in the app (task_timing table) wins over all of this.
+WEEKS_SOURCE_LABELS = {
+    "workbook": "From the workbook's Weeks Out column",
+    "sheet": "Converted from this row's Timing / Lead Time text",
+    "kit": "Matched to the same activity on the IT NRO Kit / a department sheet",
+    "est": "Estimated from sequence — please review",
+    "saved": "Set in the app",
+}
+
+IT_TASK_WEEKS: Dict[str, tuple] = {
+    # Documents & setup — the sheet says "180 Days from Opening" = ~26 weeks.
+    "franchisee_info_form": (26, "sheet"),
+    "systems_questionnaire": (26, "sheet"),
+    "account_logins": (26, "sheet"),
+    # "Construction Phase". The kit verifies low voltage is installed at 4 wks;
+    # reviewing the plans with the POS vendor has to happen well before that.
+    "low_voltage_plans": (20, "est"),
+
+    # National vendor agreements.
+    # The sheet says "Minimum 8 Weeks Prior" — that is a floor, and the IT NRO
+    # Kit says contact Toast 90 days (22 wks) out. Seeded to the sheet's own
+    # number; 22 is the safer target if you want the alert earlier.
+    "toast_pos": (8, "sheet"),
+    "managed_network": (20, "est"),      # "Contact Early"
+    "internet_local": (20, "est"),       # "Contact Early"
+    "voip_local": (20, "est"),           # "Contact Early"
+    "paytronix": (12, "est"),            # kit orders gift cards at 8; form is earlier
+    "olo_olopay": (7, "sheet"),          # "50 Days Prior to Opening"
+    "opus_elearning": (14, "kit"),       # kit: "Send URL - OPUS Sign Up Form"
+    "r365": (12, "est"),                 # "Details to follow" — no anchor
+    "amex": (12, "est"),                 # no anchor anywhere
+    "fiserv_mid": (12, "kit"),           # kit: "Create Monkey User with Manager Role"
+    "cctv": (14, "kit"),                 # kit: "Recommended Camera Provider - Envysion"
+
+    # Local agreements.
+    "alarm": (12, "est"),                # no anchor anywhere
+    "it_94d098bf": (20, "est"),          # "Contact ISS First"
+    "it_452e6638": (20, "est"),          # "Contact ISS First"
+
+    # Vendors managed by other departments.
+    "directv": (12, "kit"),              # kit: "Music Provider - DirecTV"
+    "prep_n_print": (6, "est"),
+    "opus_courses": (4, "est"),          # after Opus sign-up, before training week
+    "newksgear": (13, "kit"),            # master: "Set up Threds Acct. & order MIT shirts"
+    "toolkit": (12, "kit"),              # master: "Access Toolkit to obtain Grand Opening Kit"
+    "ezcater": (13, "kit"),              # kit: "Follow up on EzCater Completion"
+    "third_party_delivery": (8, "est"),  # kit checks partners at 3 wks; sign-up earlier
+    "punchh": (2, "kit"),                # kit: "Submit request to create site to marketing"
+    "tripleimpact": (6, "est"),
+    "yext": (12, "kit"),                 # master: "Marketing adds location to Yext"
+}
+
+# "14 wks" · "70 days out" · "-3 wks" · "Training wk" · "None wks"
+_WKS_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(wk|week|day)", re.I)
+
+
+def _derive_weeks(lead: Any) -> Optional[float]:
+    """Weeks-out from a free-text lead time, or None if it isn't a number.
+
+    Days are converted at 7 to the week and rounded, matching how the workbook
+    itself labels them (a 70-day-out task sits on the 10-week row).
+    """
+    if lead is None:
+        return None
+    m = _WKS_RE.search(str(lead))
+    if not m:
+        return None
+    try:
+        n = float(m.group(1))
+    except ValueError:
+        return None
+    if m.group(2).lower().startswith("day"):
+        n = round(n / 7.0)
+    return float(n)
+
+
+def _seed_weeks() -> None:
+    """Stamp `weeks` + `weeks_source` onto every template task, once at import."""
+    for t in ONBOARDING_TASKS_ALL:
+        if t.get("weeks") is not None:
+            t.setdefault("weeks_source", "workbook")
+            continue
+        seeded = IT_TASK_WEEKS.get(t["key"])
+        if seeded:
+            t["weeks"], t["weeks_source"] = float(seeded[0]), seeded[1]
+            continue
+        derived = _derive_weeks(t.get("lead"))
+        t["weeks"] = derived
+        t["weeks_source"] = "sheet" if derived is not None else None
+
+
+_seed_weeks()
+
+
 def task_template(task_key: str) -> Optional[Dict[str, Any]]:
     """The static template for a task key, or None if the key is unknown."""
     return _TASK_BY_KEY.get(task_key)
@@ -396,6 +507,17 @@ def initialize_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_activity_opening ON activity(opening_id);
             CREATE INDEX IF NOT EXISTS idx_activity_pending
                 ON activity(notified_at) WHERE notified_at IS NULL;
+
+            -- Weeks-out overrides for the task *template*, not for one opening:
+            -- "weeks before open" is relative, so a correction applies to every
+            -- opening at once. Seeded values live in IT_TASK_WEEKS; a row here
+            -- means a human has since set it in the app.
+            CREATE TABLE IF NOT EXISTS task_timing (
+                task_key   TEXT PRIMARY KEY,
+                weeks      REAL,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             """
         )
         conn.commit()
@@ -442,17 +564,51 @@ def catalog() -> Dict[str, Any]:
     }
 
 
+def task_weeks_overrides() -> Dict[str, float]:
+    """task_key -> weeks, for every timing a human has set in the app."""
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT task_key, weeks FROM task_timing WHERE weeks IS NOT NULL"
+            ).fetchall()
+        return {r["task_key"]: float(r["weeks"]) for r in rows}
+    except Exception as exc:      # a missing table shouldn't blank the sheets
+        logger.warning("task_weeks_overrides failed: %s", exc)
+        return {}
+
+
+def set_task_weeks(task_key: str, weeks: Optional[float], updated_by: str) -> bool:
+    """Set (or clear, with None) the weeks-out for a template task."""
+    if task_key not in _TASK_BY_KEY:
+        return False
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO task_timing (task_key, weeks, updated_by, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(task_key) DO UPDATE
+               SET weeks = excluded.weeks, updated_by = excluded.updated_by,
+                   updated_at = datetime('now')
+            """,
+            (task_key, weeks, updated_by),
+        )
+        conn.commit()
+    return True
+
+
 def _assemble_tasks(status_rows: List[sqlite3.Row],
-                    questions: Optional[Dict[str, List[Dict[str, Any]]]] = None
+                    questions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+                    weeks_overrides: Optional[Dict[str, float]] = None
                     ) -> List[Dict[str, Any]]:
     """Merge the code+JSON template with an opening's stored status rows."""
     by_key = {r["task_key"]: r for r in status_rows}
     questions = questions or {}
+    overrides = weeks_overrides if weeks_overrides is not None else task_weeks_overrides()
     out = []
     for t in ONBOARDING_TASKS_ALL:
         s = by_key.get(t["key"])
         qs = questions.get(t["key"], [])
-        out.append({
+        row = {
             **t,
             "done": bool(s["done"]) if s else False,
             "done_by": s["done_by"] if s else None,
@@ -460,7 +616,11 @@ def _assemble_tasks(status_rows: List[sqlite3.Row],
             "note": (s["note"] if s else None),
             "questions": qs,
             "open_questions": sum(1 for q in qs if q["status"] == "open"),
-        })
+        }
+        if t["key"] in overrides:
+            row["weeks"] = overrides[t["key"]]
+            row["weeks_source"] = "saved"
+        out.append(row)
     return out
 
 

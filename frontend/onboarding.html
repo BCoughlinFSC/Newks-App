@@ -74,6 +74,21 @@
   .check-row{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:#374151;margin-bottom:.5rem;}
   .hint{font-size:.78rem;color:#9CA3AF;margin:.2rem 0 0;}
 
+  /* editable Weeks Out cell — staff only; the franchisee hub renders a pill */
+  .wk-edit{display:flex;flex-direction:column;gap:2px;align-items:flex-start;}
+  .wk-in{width:52px;padding:.25rem .3rem;border:1px solid #D8DEE7;border-radius:5px;
+         font-family:inherit;font-size:.8rem;font-weight:700;text-align:center;
+         font-variant-numeric:tabular-nums;background:#fff;color:#1F2937;}
+  .wk-in::-webkit-outer-spin-button,.wk-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .wk-in{-moz-appearance:textfield;}
+  .wk-in:focus{outline:none;border-color:#D9272C;box-shadow:0 0 0 2px rgba(217,39,44,.12);}
+  .wk-in.urgent{background:#FDECEC;border-color:#F0B4B4;color:#B3261E;}
+  .wk-in.soon{background:#FDF3E0;border-color:#EAD3A6;color:#8A6A1F;}
+  /* A seeded estimate, until someone saves over it. */
+  .wk-edit.est .wk-in{border-color:#D9272C;border-style:dashed;}
+  .wk-flag{font-size:8.5px;text-transform:uppercase;letter-spacing:.4px;font-weight:700;
+           color:#B3261E;background:#FDECEC;border-radius:3px;padding:1px 4px;}
+
   /* editable cover sheet (NRO Info tab) */
   .nro-in{width:100%;padding:.4rem .55rem;border:1px solid #D8DEE7;border-radius:5px;
           font-family:inherit;font-size:.85rem;color:#1F2937;background:#fff;}
@@ -104,9 +119,6 @@
 
   .task{display:flex;gap:.85rem;padding:.85rem 1rem;border:1px solid #EAE3D8;border-radius:10px;margin-bottom:.55rem;background:#fff;}
   .task.done{background:#F1F7F2;border-color:#CBE3D0;}
-  .cbx{appearance:none;width:22px;height:22px;border:2px solid #B9AF9F;border-radius:6px;cursor:pointer;display:grid;place-items:center;background:#fff;margin-top:1px;flex:0 0 auto;}
-  .cbx:hover{border-color:#D9272C;} .cbx:checked{background:#3F7A52;border-color:#3F7A52;}
-  .cbx:checked::after{content:"";width:6px;height:10px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(43deg) translateY(-1px);}
   .task .tt{font-weight:700;color:#1F2937;font-size:.92rem;}
   .task .tg{display:flex;gap:.4rem;flex-wrap:wrap;margin:.35rem 0;align-items:center;}
   .task .td{font-size:.82rem;color:#5C534B;}
@@ -617,7 +629,7 @@
       else if(def&&def.kind==='group'){
         const tv=(CURRENT.track_views||[]).find(x=>x.track===def.track);
         const g=tv&&tv.groups.find(x=>String(x.id)===String(def.group));
-        h=g?sheetTable(g.label,g.tasks,false):'<div class="empty">No tasks on this sheet.</div>';
+        h=g?sheetTable(g.label,g.tasks):'<div class="empty">No tasks on this sheet.</div>';
       }
       else if(def&&def.kind==='track'){
         const tv=(CURRENT.track_views||[]).find(x=>x.track===def.track);
@@ -632,7 +644,11 @@
       // reflect active tab in the nav (in case re-rendered)
       document.querySelectorAll('#d-tabnav .tabbtn').forEach(b=>b.classList.toggle('active',b.dataset.tab===detailTab));
       document.querySelectorAll('#d-tabbody .fchip').forEach(c=>c.onclick=()=>{teamFilter=c.dataset.team||null;renderDetailTab();});
-      document.querySelectorAll('#d-tabbody .cbx input').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
+      // '.wb-c input' is the sheet checkbox. It used to be wired as '.cbx input',
+      // a selector that only ever matched the retired card renderer — so ticking
+      // anything on a sheet silently did nothing.
+      document.querySelectorAll('#d-tabbody .wb-c input').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
+      document.querySelectorAll('#d-tabbody .wk-in').forEach(i=>i.onchange=()=>saveTaskWeeks(i));
       document.querySelectorAll('#d-tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
       document.querySelectorAll('#d-tabbody [data-send]').forEach(b=>b.onclick=()=>answerQuestion(b.dataset.send,b));
     }
@@ -653,12 +669,18 @@
         .replace(/\n/g,'<br>');
     }
 
-    const WB_COLS=['Weeks Out','Completion Date','Completed','Activity To Complete',
+    // One column shape for every sheet, including IT. The IT Department tab used
+    // to have its own seven columns (Vendor/Document · Description · Department
+    // · Required? · Timing/Lead Time · KB · Completed), which meant you couldn't
+    // read it the same way as the department sheets. Now every sheet renders the
+    // workbook's shape, and IT's extras (description, Required? pill, KB link,
+    // and its original Timing text) fold into the activity and weeks cells.
+    //
+    // "Completion Date" is gone as a column — it was only ever the auto-stamped
+    // tick date, so it now sits as a caption under the checkbox instead.
+    const WB_COLS=['Weeks Out','Done','Activity To Complete',
                    'Company','Vendor Contact','Vendor Contact Info.',"Newk's Resources"];
-    const IT_COLS=['Vendor / Document','Description','Department','Required?',
-                   'Timing / Lead Time','KB Article / Reference','Completed'];
-    const WB_COLGROUP=`<colgroup><col style="width:64px;"><col style="width:92px;"><col style="width:40px;"><col style="width:30%;"><col style="width:12%;"><col style="width:11%;"><col style="width:16%;"><col style="width:10%;"></colgroup>`;
-    const IT_COLGROUP=`<colgroup><col style="width:17%;"><col style="width:29%;"><col style="width:10%;"><col style="width:10%;"><col style="width:11%;"><col style="width:13%;"><col style="width:44px;"></colgroup>`;
+    const WB_COLGROUP=`<colgroup><col style="width:78px;"><col style="width:52px;"><col style="width:34%;"><col style="width:12%;"><col style="width:11%;"><col style="width:16%;"><col style="width:11%;"></colgroup>`;
     const PRIO_LABEL={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
 
     function ownCell(t){
@@ -666,14 +688,37 @@
       return `<span class="wb-own ${fr?'you':'newks'}">${fr?'Franchisee':"Newk's"}</span>`;
     }
 
+    // Weeks Out is editable here (not on the franchisee hub): the IT sheet's
+    // numbers were seeded from a first pass, so they need correcting in place.
+    // `weeks_source==='est'` marks a seeded guess — flagged until someone saves
+    // over it, which is what turns the source into 'saved'.
+    function weeksCell(t){
+      const est=t.weeks_source==='est';
+      const v=t.weeks==null?'':String(t.weeks);
+      return `<div class="wk-edit${est?' est':''}">
+        <input class="wk-in ${wkClass(t.weeks)}" type="number" step="1" min="-52" max="104"
+          data-wkey="${esc(t.key)}" value="${esc(v)}" placeholder="—"
+          title="${est?'Estimated — please review. ':''}Weeks before opening. Applies to every opening." />
+        ${est?`<span class="wk-flag" title="Estimated from sequence — please review">review</span>`:''}
+        ${t.lead&&t.weeks_source!=='workbook'?`<span class="wk-lead" title="Original Timing / Lead Time from the workbook">${esc(t.lead)}</span>`:''}
+      </div>`;
+    }
+
+    function doneCell(t){
+      return `<td class="wb-c">
+        <input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''}
+          aria-label="Complete: ${esc(t.title)}">
+        ${t.done&&t.done_at?`<div class="wb-doneat" title="Marked complete ${esc(fmt(t.done_at))}">${esc(fmt(t.done_at))}</div>`:''}
+      </td>`;
+    }
+
     function wbRow(t){
       return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
-        <td><span class="wb-wk ${wkClass(t.weeks)}">${esc(wkText(t.weeks))}</span></td>
-        <td class="wb-date ${t.done?'':'empty'}">${t.done_at?esc(fmt(t.done_at)):''}</td>
-        <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''}
-            aria-label="Complete: ${esc(t.title)}"></td>
+        <td>${weeksCell(t)}</td>
+        ${doneCell(t)}
         <td>
-          <div class="wb-act">${esc(t.title)}${ownCell(t)}</div>
+          <div class="wb-act">${esc(t.title)}${ownCell(t)}${
+            t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</div>
           ${t.desc?`<div style="color:var(--ink-soft);font-size:11.5px;margin-top:3px;">${esc(t.desc)}</div>`:''}
           ${t.kb?`<div class="wb-kb" style="margin-top:3px;">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></div>`:''}
           ${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
@@ -686,32 +731,38 @@
       </tr>`;
     }
 
-    function itRow(t){
-      return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
-        <td><div class="wb-act">${esc(t.title)}${ownCell(t)}</div>
-          ${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
-          ${taskQuestions(t)}</td>
-        <td>${esc(t.desc||'')}</td>
-        <td>${esc(t.dept||'')}</td>
-        <td>${t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</td>
-        <td>${esc(t.lead||'')}</td>
-        <td class="wb-kb">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">KB Article ↗</a>`:''}</td>
-        <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''}
-            aria-label="Complete: ${esc(t.title)}"></td>
-      </tr>`;
-    }
-
-    function sheetTable(label,tasks,isIT){
-      const cols=isIT?IT_COLS:WB_COLS;
+    function sheetTable(label,tasks){
       const done=tasks.filter(t=>t.done).length;
       return `<section class="sheet">
         <div class="sheet-h"><h3>${esc(label)}</h3><span class="cnt">${done} of ${tasks.length} complete</span></div>
-        <div class="wbwrap"><table class="wb${isIT?' wb-it':''}">
-          ${isIT?IT_COLGROUP:WB_COLGROUP}
-          <thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
-          <tbody>${tasks.map(isIT?itRow:wbRow).join('')}</tbody>
+        <div class="wbwrap"><table class="wb">
+          ${WB_COLGROUP}
+          <thead><tr>${WB_COLS.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+          <tbody>${tasks.map(wbRow).join('')}</tbody>
         </table></div>
       </section>`;
+    }
+
+    // Saving a weeks-out corrects the template, so every open NRO shifts with
+    // it. Reload the detail view after so the row colours/order reflect it.
+    async function saveTaskWeeks(inp){
+      const key=inp.dataset.wkey;
+      const raw=inp.value.trim();
+      const weeks=raw===''?null:Number(raw);
+      if(weeks!==null&&!Number.isFinite(weeks)){toast('Weeks out must be a number',true);return;}
+      inp.disabled=true;
+      try{
+        const res=await api('/api/onboarding/task-timing/'+encodeURIComponent(key),
+          {method:'PUT',body:JSON.stringify({weeks})});
+        if(!res.ok){const d=await res.json().catch(()=>({}));toast('Could not save: '+(d.detail||res.status),true);return;}
+        const t=(CURRENT.tasks||[]).find(x=>x.key===key);
+        if(t){t.weeks=weeks;t.weeks_source=weeks==null?null:'saved';}
+        inp.closest('.wk-edit')?.classList.remove('est');
+        inp.closest('.wk-edit')?.querySelector('.wk-flag')?.remove();
+        inp.className='wk-in '+wkClass(weeks);
+        toast('Weeks out saved ✓');
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+      finally{inp.disabled=false;}
     }
 
     function renderTrack(tv){
@@ -724,41 +775,15 @@
       const deptCount=Object.keys(counts).filter(k=>k!=='Franchisee').length;
       if(deptCount>=2){ h+=filterBar(counts,trackTotal); }
       else { teamFilter=null; }
-      const isIT=tv.track==='it';
       let shown=0;
       tv.groups.forEach(g=>{
         const tasks=teamFilter?g.tasks.filter(t=>teamsOf(t).includes(teamFilter)):g.tasks;
         if(!tasks.length) return;
         shown+=tasks.length;
-        h+=sheetTable(g.label,tasks,isIT);
+        h+=sheetTable(g.label,tasks);
       });
       if(!shown) h+=`<div class="empty">No ${teamFilter?esc(TEAM_LABEL[teamFilter]||teamFilter)+' ':''}tasks in this section.</div>`;
       return h||'<div class="empty">No tasks in this section.</div>';
-    }
-
-    function taskRow(t){
-      const fr=t.owner==='franchisee';
-      const meta=[];
-      if(t.prio&&PRIO[t.prio]) meta.push(`<span class="req ${t.prio}">${PRIO[t.prio]}</span>`);
-      if(t.lead) meta.push(`<span class="lead">${esc(t.lead)}</span>`);
-      if(t.dept) meta.push(`<span class="dtag ${esc((t.dept||'').split(/[\/ ]/)[0])}">${esc(t.dept)}</span>`);
-      meta.push(`<span class="own ${fr?'franchisee':'newks'}">${fr?'Franchisee':"Newk's team"}</span>`);
-      if(t.is_call) meta.push('<span class="callflag">Milestone Call</span>');
-      const links=[];
-      if(t.kb) links.push(`<span class="m">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></span>`);
-      if(t.form_url) links.push(`<span class="m">📝 <a href="${esc(t.form_url)}" target="_blank" rel="noopener">Form</a></span>`);
-      if(t.contact_info) links.push(`<span class="m">✉ ${linkifyEmail(t.contact_info)}</span>`);
-      return `<li class="task${t.done?' checked':''}">
-        <label class="cbx"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} aria-label="Toggle ${esc(t.title)}"></label>
-        <div class="t-body">
-          <div class="t-top">${meta.join('')}</div>
-          <div class="t-act">${esc(t.title)}</div>
-          ${t.desc?`<div class="t-desc">${esc(t.desc)}</div>`:''}
-          ${links.length?`<div class="t-meta">${links.join('')}</div>`:''}
-          ${t.note?`<div class="t-note"><span class="lbl">Note${fr?' from franchisee':''}</span>${esc(t.note)}</div>`:''}
-          ${taskQuestions(t)}
-          ${t.done?`<div class="t-foot"><span class="ok">✓ Completed${t.done_by?' by '+esc(t.done_by):''}${t.done_at?' · '+esc(fmt(t.done_at)):''}</span></div>`:''}
-        </div></li>`;
     }
 
     // Question threads shown in task context, with an answer box on the open

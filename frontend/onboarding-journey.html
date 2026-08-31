@@ -157,7 +157,7 @@ function renderActiveSheet(){
   if(def.kind==='group'){
     const tv=(DATA.track_views||[]).find(x=>x.track===def.track);
     const g=tv&&tv.groups.find(x=>String(x.id)===String(def.group));
-    return g?sheetTable(g.label,g.tasks,false):'<div class="empty">No tasks on this sheet.</div>';
+    return g?sheetTable(g.label,g.tasks):'<div class="empty">No tasks on this sheet.</div>';
   }
   if(def.kind==='track'){
     const tv=(DATA.track_views||[]).find(x=>x.track===def.track);
@@ -259,7 +259,7 @@ function renderTab(){
   document.getElementById('tabbody').innerHTML=renderActiveSheet();
   // wire filter chips + checkboxes + notes
   document.querySelectorAll('#tabbody .fchip').forEach(c=>c.onclick=()=>{teamFilter=c.dataset.team||null;renderTab();});
-  document.querySelectorAll('#tabbody .cbx input:not(:disabled)').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
+  document.querySelectorAll('#tabbody .wb-c input:not(:disabled)').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
   document.querySelectorAll('#tabbody .notebox').forEach(inp=>inp.onblur=()=>saveNote(inp.dataset.key,inp));
   document.querySelectorAll('#tabbody .qbtn').forEach(b=>b.onclick=()=>toggleQForm(b.dataset.qkey,true));
   document.querySelectorAll('#tabbody .qcancel').forEach(b=>b.onclick=()=>toggleQForm(b.dataset.qcancel,false));
@@ -285,25 +285,32 @@ function linkifyInfo(s){
     .replace(/\n/g,'<br>');
 }
 
-const WB_COLS = ['Weeks Out','Completion Date','Completed','Activity To Complete',
+// One column shape for every sheet, IT included — see onboarding.html for the
+// reasoning. Weeks Out is read-only here; only staff correct the timing.
+// "Completion Date" is gone: it was the auto-stamped tick date, now a caption
+// under the checkbox.
+const WB_COLS = ['Weeks Out','Done','Activity To Complete',
                  'Company','Vendor Contact','Vendor Contact Info.',"Newk's Resources"];
-const IT_COLS = ['Vendor / Document','Description','Department','Required?',
-                 'Timing / Lead Time','KB Article / Reference','Completed'];
-const WB_COLGROUP=`<colgroup><col style="width:64px;"><col style="width:92px;"><col style="width:40px;"><col style="width:30%;"><col style="width:12%;"><col style="width:11%;"><col style="width:16%;"><col style="width:10%;"></colgroup>`;
-const IT_COLGROUP=`<colgroup><col style="width:17%;"><col style="width:29%;"><col style="width:10%;"><col style="width:10%;"><col style="width:11%;"><col style="width:13%;"><col style="width:44px;"></colgroup>`;
+const WB_COLGROUP=`<colgroup><col style="width:72px;"><col style="width:52px;"><col style="width:34%;"><col style="width:12%;"><col style="width:11%;"><col style="width:16%;"><col style="width:11%;"></colgroup>`;
 
-// One <tr> in the department-tab shape.
+// One <tr>, the same on every sheet. The IT Department tab used to have its own
+// column set; it now renders in this shape too, with its description, Required?
+// pill, KB link and original Timing text folded into the activity/weeks cells.
+const PRIO_LABEL={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
+
 function wbRow(t){
   const locked=t.locked;
   const q=(t.questions||[]);
   const openQ=q.filter(x=>x.status==='open').length;
   return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
-    <td><span class="wb-wk ${wkClass(t.weeks)}">${esc(wkText(t.weeks))}</span></td>
-    <td class="wb-date ${t.done?'':'empty'}">${t.done_at?esc(fmt(t.done_at)):''}</td>
+    <td><span class="wb-wk ${wkClass(t.weeks)}">${esc(wkText(t.weeks))}</span>${
+      t.lead&&t.weeks_source!=='workbook'?`<div class="wk-lead">${esc(t.lead)}</div>`:''}</td>
     <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} ${locked?'disabled':''}
-        title="${locked?"Handled by the Newk's team":'Mark complete'}" aria-label="Complete: ${esc(t.title)}"></td>
+        title="${locked?"Handled by the Newk's team":'Mark complete'}" aria-label="Complete: ${esc(t.title)}">
+      ${t.done&&t.done_at?`<div class="wb-doneat">${esc(fmt(t.done_at))}</div>`:''}</td>
     <td>
-      <div class="wb-act">${esc(t.title)}<span class="wb-own ${locked?'newks':'you'}">${locked?"Newk's":'You'}</span></div>
+      <div class="wb-act">${esc(t.title)}<span class="wb-own ${locked?'newks':'you'}">${locked?"Newk's":'You'}</span>${
+        t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</div>
       ${t.desc?`<div style="color:var(--ink-soft);font-size:11.5px;margin-top:3px;">${esc(t.desc)}</div>`:''}
       ${t.kb?`<div class="wb-kb" style="margin-top:3px;">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></div>`:''}
       <div class="wb-sub">
@@ -319,38 +326,14 @@ function wbRow(t){
   </tr>`;
 }
 
-// The IT Department tab has a different column set in the workbook; mirror it.
-function itRow(t){
-  const locked=t.locked;
-  const q=(t.questions||[]);
-  const openQ=q.filter(x=>x.status==='open').length;
-  const PRIO_LABEL={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
-  return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
-    <td><div class="wb-act">${esc(t.title)}<span class="wb-own ${locked?'newks':'you'}">${locked?"Newk's":'You'}</span></div>
-      <div class="wb-sub">
-        ${!locked?`<input class="wb-note notebox" data-key="${esc(t.key)}" placeholder="Add a note…" value="${esc(t.note||'')}">`:''}
-        <button type="button" class="wb-ask qbtn" data-qkey="${esc(t.key)}">💬 ${q.length?`${q.length} question${q.length>1?'s':''}${openQ?' · awaiting reply':''}`:'Ask a question'}</button>
-      </div>
-      ${questionBlock(t,true)}</td>
-    <td>${esc(t.desc||'')}</td>
-    <td>${esc(t.dept||'')}</td>
-    <td>${t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</td>
-    <td>${esc(t.lead||'')}</td>
-    <td class="wb-kb">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">KB Article ↗</a>`:''}</td>
-    <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} ${locked?'disabled':''}
-        title="${locked?"Handled by the Newk's team":'Mark complete'}" aria-label="Complete: ${esc(t.title)}"></td>
-  </tr>`;
-}
-
-function sheetTable(label, tasks, isIT){
-  const cols = isIT ? IT_COLS : WB_COLS;
+function sheetTable(label, tasks){
   const done = tasks.filter(t=>t.done).length;
   return `<section class="sheet">
     <div class="sheet-h"><h3>${esc(label)}</h3><span class="cnt">${done} of ${tasks.length} complete</span></div>
-    <div class="wbwrap"><table class="wb${isIT?' wb-it':''}">
-      ${isIT?IT_COLGROUP:WB_COLGROUP}
-      <thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
-      <tbody>${tasks.map(isIT?itRow:wbRow).join('')}</tbody>
+    <div class="wbwrap"><table class="wb">
+      ${WB_COLGROUP}
+      <thead><tr>${WB_COLS.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+      <tbody>${tasks.map(wbRow).join('')}</tbody>
     </table></div>
   </section>`;
 }
@@ -369,50 +352,17 @@ function renderTrack(tv){
   if(deptCount>=2){ h+=filterBar(counts,trackTotal); }
   else { teamFilter=null; }
 
-  const isIT = tv.track==='it';
   let shown=0;
   tv.groups.forEach(g=>{
     const tasks=teamFilter?g.tasks.filter(t=>teamsOf(t).includes(teamFilter)):g.tasks;
     if(!tasks.length) return;
     shown+=tasks.length;
-    h+=sheetTable(g.label, tasks, isIT);
+    h+=sheetTable(g.label, tasks);
   });
   if(!shown) h+=`<div class="empty">No ${teamFilter?esc(TEAM_LABEL[teamFilter]||teamFilter)+' ':''}tasks in this checklist.</div>`;
   return h||'<div class="empty">No tasks in this section yet.</div>';
 }
 
-function taskRow(t){
-  const locked=t.locked;
-  const meta=[];
-  if(t.prio&&PRIO[t.prio]) meta.push(`<span class="req ${t.prio}">${PRIO[t.prio]}</span>`);
-  if(t.lead) meta.push(`<span class="lead">${esc(t.lead)}</span>`);
-  if(t.dept) meta.push(`<span class="dtag ${esc((t.dept||'').split(/[\/ ]/)[0])}">${esc(t.dept)}</span>`);
-  meta.push(`<span class="own ${locked?'newks':'franchisee'}">${locked?"Newk's team":'You'}</span>`);
-  if(t.is_call) meta.push('<span class="callflag">Milestone Call</span>');
-  const links=[];
-  if(t.kb) links.push(`<span class="m">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></span>`);
-  if(t.form_url) links.push(`<span class="m">📝 <a href="${esc(t.form_url)}" target="_blank" rel="noopener">Form</a></span>`);
-  if(t.contact_info) links.push(`<span class="m">✉ ${linkifyEmail(t.contact_info)}</span>`);
-  return `<li class="task${t.done?' checked':''}${locked?' locked':''}">
-    <label class="cbx"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} ${locked?'disabled':''} aria-label="Toggle ${esc(t.title)}"></label>
-    <div class="t-body">
-      <div class="t-top">${meta.join('')}</div>
-      <div class="t-act">${esc(t.title)}</div>
-      ${t.desc?`<div class="t-desc">${esc(t.desc)}</div>`:''}
-      ${links.length?`<div class="t-meta">${links.join('')}</div>`:''}
-      ${!locked?`<input class="notebox" data-key="${esc(t.key)}" placeholder="Add a note…" value="${esc(t.note||'')}" style="margin-top:7px;width:100%;max-width:440px;border:1px solid #E7E1D6;border-radius:7px;padding:6px 10px;font:inherit;font-size:12.5px;background:#FAF6EF;">`:(t.note?`<div class="t-note"><span class="lbl">Note</span>${esc(t.note)}</div>`:'')}
-      ${questionBlock(t)}
-      ${t.done?`<div class="t-foot"><span class="ok">✓ Completed${t.done_by?' by '+esc(t.done_by):''}${t.done_at?' · '+esc(fmt(t.done_at)):''}</span></div>`:''}
-    </div></li>`;
-}
-
-// Questions are offered on EVERY task, locked ones included — "this one isn't
-// mine to tick" is exactly when someone needs to ask about it.
-// `compact` = rendered inside a table row, where the row already draws its own
-// Ask button. Only that button is suppressed — the (hidden) form must always be
-// emitted, because it is what the button reveals. Returning early here when a
-// task had no questions yet meant the form did not exist on any untouched task,
-// so clicking Ask silently did nothing.
 function questionBlock(t,compact){
   const qs=t.questions||[];
   const thread=qs.length?`<div class="qthread">${qs.map(q=>`

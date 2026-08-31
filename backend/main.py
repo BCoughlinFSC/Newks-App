@@ -22272,6 +22272,12 @@ class TaskUpdateIn(BaseModel):
     note: Optional[str] = None
 
 
+class TaskTimingIn(BaseModel):
+    """Weeks-out for a task in the *template* — applies to every opening.
+    null clears the override and falls back to the seeded value."""
+    weeks: Optional[float] = None
+
+
 class QuestionIn(BaseModel):
     """Raise a question against a task."""
     body: str
@@ -22387,6 +22393,26 @@ async def onboarding_set_task(
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unknown task '{task_key}'")
     return {"success": True}
+
+
+@app.put("/api/onboarding/task-timing/{task_key}")
+async def onboarding_set_task_timing(
+    task_key: str, body: TaskTimingIn,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Correct a task's weeks-out. Template-level on purpose: "weeks before
+    open" is relative, so one correction fixes every opening at once."""
+    if body.weeks is not None and not (-52 <= body.weeks <= 104):
+        raise HTTPException(status_code=400,
+                            detail="Weeks out must be between -52 and 104.")
+    try:
+        ok = onboarding_db.set_task_weeks(task_key, body.weeks, current_user.name)
+    except Exception as exc:
+        logger.error("onboarding.set_task_timing failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Unknown task '{task_key}'")
+    return {"task_key": task_key, "weeks": body.weeks, "success": True}
 
 
 @app.post("/api/onboarding/openings/{opening_id}/resend-invite")

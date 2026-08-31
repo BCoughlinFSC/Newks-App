@@ -266,6 +266,14 @@
 .nro .wb-wk.urgent{background:#F8D7DA;color:#9C0006;}
 .nro .wb-wk.soon{background:#FCE4D6;color:#974706;}
 .nro .wb-wk.later{background:#EAF1FB;color:#1F4E78;}
+/* The tick date, now a caption under the Done checkbox rather than its own
+   "Completion Date" column. */
+.nro .wb-doneat{font-size:9.5px;color:var(--muted);margin-top:2px;line-height:1.1;
+                font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* The sheet's original "Timing / Lead Time" wording, kept under the numeric
+   Weeks Out so nothing the workbook said is lost ("Contact Early" etc.). */
+.nro .wk-lead{font-size:9.5px;color:var(--muted);margin-top:3px;line-height:1.15;
+              white-space:normal;word-break:break-word;}
 .nro .wb-date{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--ink-soft);text-align:center;}
 .nro .wb-date.empty{background:#FFF2CC;}
 .nro table.wb td.wb-c{text-align:center;width:34px;}
