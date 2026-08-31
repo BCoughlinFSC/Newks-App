@@ -270,6 +270,12 @@
    "Completion Date" column. */
 .nro .wb-doneat{font-size:9.5px;color:var(--muted);margin-top:2px;line-height:1.1;
                 font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* Description shown under the activity name (department sheets, which have no
+   Description column of their own). */
+.nro .wb-inline-desc{color:var(--ink-soft);font-size:11.5px;margin-top:3px;}
+/* The IT sheet's own Description column. */
+.nro .wb-desc{color:var(--ink-soft);font-size:11.5px;line-height:1.45;}
+
 /* The calendar date a task is due — target open minus its weeks out. */
 .nro .wk-due{display:block;font-size:9.5px;margin-top:3px;line-height:1.1;color:var(--muted);
              font-variant-numeric:tabular-nums;white-space:nowrap;}

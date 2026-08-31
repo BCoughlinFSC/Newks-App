@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- ?v= bumped whenever onboarding-theme.css changes: the hub is franchisee-facing
      and they will not know to hard-refresh a stale stylesheet. -->
-<link rel="stylesheet" href="onboarding-theme.css?v=20260831">
+<link rel="stylesheet" href="onboarding-theme.css?v=20260831b">
 <style>
   *{box-sizing:border-box;}
   body{margin:0;background:#FAF6EF;}
@@ -182,7 +182,7 @@ function renderActiveSheet(){
   if(def.kind==='group'){
     const tv=(DATA.track_views||[]).find(x=>x.track===def.track);
     const g=tv&&tv.groups.find(x=>String(x.id)===String(def.group));
-    return g?sheetTable(g.label,g.tasks):'<div class="empty">No tasks on this sheet.</div>';
+    return g?sheetTable(g.label,g.tasks,def.track):'<div class="empty">No tasks on this sheet.</div>';
   }
   if(def.kind==='track'){
     const tv=(DATA.track_views||[]).find(x=>x.track===def.track);
@@ -351,52 +351,90 @@ function linkifyInfo(s){
 // reasoning. Weeks Out is read-only here; only staff correct the timing.
 // "Completion Date" is gone: it was the auto-stamped tick date, now a caption
 // under the checkbox.
-const WB_COLS = ['Weeks Out','Done','Activity To Complete',
-                 'Company','Vendor Contact','Vendor Contact Info.',"Newk's Resources"];
-const WB_COLGROUP=`<colgroup><col style="width:72px;"><col style="width:52px;"><col style="width:34%;"><col style="width:12%;"><col style="width:11%;"><col style="width:16%;"><col style="width:11%;"></colgroup>`;
+// Per-sheet column sets — see onboarding.html for the reasoning (the IT sheet
+// and the department sheets fill opposite halves of the workbook's columns).
+const COLS_WB=[
+  {id:'weeks',       label:'Weeks Out',            w:'72px'},
+  {id:'done',        label:'Done',                 w:'52px'},
+  {id:'activity',    label:'Activity To Complete', w:'34%'},
+  {id:'company',     label:'Company',              w:'12%'},
+  {id:'contact',     label:'Vendor Contact',       w:'11%'},
+  {id:'contact_info',label:'Vendor Contact Info.', w:'16%'},
+  {id:'dept',        label:"Newk's Resources",     w:'11%'},
+];
+const COLS_IT=[
+  {id:'weeks', label:'Weeks Out',             w:'72px'},
+  {id:'done',  label:'Done',                  w:'52px'},
+  {id:'title', label:'Vendor / Document',     w:'19%'},
+  {id:'desc',  label:'Description',           w:'29%'},
+  {id:'prio',  label:'Required?',             w:'11%'},
+  {id:'dept',  label:'Department',            w:'12%'},
+  {id:'kb',    label:'KB Article / Reference',w:'13%'},
+];
+function colsFor(track){ return track==='it'?COLS_IT:COLS_WB; }
 
 // One <tr>, the same on every sheet. The IT Department tab used to have its own
 // column set; it now renders in this shape too, with its description, Required?
 // pill, KB link and original Timing text folded into the activity/weeks cells.
 const PRIO_LABEL={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
 
-function wbRow(t){
-  const locked=t.locked;
-  const q=(t.questions||[]);
-  const openQ=q.filter(x=>x.status==='open').length;
-  return `<tr class="${t.done?'done':''}${t.overdue?' late':''}" data-row="${esc(t.key)}">
-    <td><span class="wb-wk ${wkClass(t.weeks)}" title="${t.lead?'Sheet said: '+esc(t.lead)+'. ':''}Weeks before opening">${esc(wkText(t.weeks))}</span>${
-      t.due_date?`<div class="wk-due${t.overdue?' late':''}" title="${t.overdue?'Past due — ':''}Due ${esc(fmt(t.due_date))}">${esc(fmtShort(t.due_date))}</div>`:''}${
-      t.weeks==null&&t.lead?`<div class="wk-lead">${esc(t.lead)}</div>`:''}</td>
-    <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} ${locked?'disabled':''}
-        title="${locked?"Handled by the Newk's team":'Mark complete'}" aria-label="Complete: ${esc(t.title)}">
-      ${t.done&&t.done_at?`<div class="wb-doneat">${esc(fmt(t.done_at))}</div>`:''}</td>
-    <td>
-      <div class="wb-act">${esc(t.title)}<span class="wb-own ${locked?'newks':'you'}">${locked?"Newk's":'You'}</span>${
-        t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</div>
-      ${t.desc?`<div style="color:var(--ink-soft);font-size:11.5px;margin-top:3px;">${esc(t.desc)}</div>`:''}
-      ${t.kb?`<div class="wb-kb" style="margin-top:3px;">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></div>`:''}
-      <div class="wb-sub">
-        ${!locked?`<input class="wb-note notebox" data-key="${esc(t.key)}" placeholder="Add a note…" value="${esc(t.note||'')}">`:''}
-        <button type="button" class="wb-ask qbtn" data-qkey="${esc(t.key)}">💬 ${q.length?`${q.length} question${q.length>1?'s':''}${openQ?' · awaiting reply':''}`:'Ask a question'}</button>
-      </div>
-      ${questionBlock(t,true)}
-    </td>
-    <td>${esc(t.company||'')}</td>
-    <td>${esc(t.contact||'')}</td>
-    <td>${linkifyInfo(t.contact_info||'')}</td>
-    <td>${esc(t.dept||'')}</td>
-  </tr>`;
+// One <td> per column id, shared by every sheet so no sheet can drift.
+const CELLS={
+  weeks:        t=>`<td><span class="wb-wk ${wkClass(t.weeks)}" title="${t.lead?'Sheet said: '+esc(t.lead)+'. ':''}Weeks before opening">${esc(wkText(t.weeks))}</span>${
+                  t.due_date?`<div class="wk-due${t.overdue?' late':''}" title="${t.overdue?'Past due — ':''}Due ${esc(fmt(t.due_date))}">${esc(fmtShort(t.due_date))}</div>`:''}${
+                  t.weeks==null&&t.lead?`<div class="wk-lead">${esc(t.lead)}</div>`:''}</td>`,
+  done:         t=>`<td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} ${t.locked?'disabled':''}
+                    title="${t.locked?"Handled by the Newk's team":'Mark complete'}" aria-label="Complete: ${esc(t.title)}">
+                  ${t.done&&t.done_at?`<div class="wb-doneat">${esc(fmt(t.done_at))}</div>`:''}</td>`,
+  activity:     t=>`<td>
+                  <div class="wb-act">${esc(t.title)}${ownPill(t)}${
+                    t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</div>
+                  ${t.desc?`<div class="wb-inline-desc">${esc(t.desc)}</div>`:''}
+                  ${t.kb?`<div class="wb-kb" style="margin-top:3px;">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></div>`:''}
+                  ${rowNotes(t)}
+                </td>`,
+  title:        t=>`<td>
+                  <div class="wb-act">${esc(t.title)}${ownPill(t)}</div>
+                  ${rowNotes(t)}
+                </td>`,
+  desc:         t=>`<td class="wb-desc">${esc(t.desc||'')}</td>`,
+  prio:         t=>`<td>${t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</td>`,
+  dept:         t=>`<td>${esc(t.dept||'')}</td>`,
+  kb:           t=>`<td class="wb-kb">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">KB Article ↗</a>`:''}</td>`,
+  company:      t=>`<td>${esc(t.company||'')}</td>`,
+  contact:      t=>`<td>${esc(t.contact||'')}</td>`,
+  contact_info: t=>`<td>${linkifyInfo(t.contact_info||'')}</td>`,
+};
+
+function ownPill(t){
+  return `<span class="wb-own ${t.locked?'newks':'you'}">${t.locked?"Newk's":'You'}</span>`;
 }
 
-function sheetTable(label, tasks){
+// The note box and question thread, in whichever cell carries the task's name.
+function rowNotes(t){
+  const q=(t.questions||[]);
+  const openQ=q.filter(x=>x.status==='open').length;
+  return `<div class="wb-sub">
+      ${!t.locked?`<input class="wb-note notebox" data-key="${esc(t.key)}" placeholder="Add a note…" value="${esc(t.note||'')}">`:''}
+      <button type="button" class="wb-ask qbtn" data-qkey="${esc(t.key)}">💬 ${q.length?`${q.length} question${q.length>1?'s':''}${openQ?' · awaiting reply':''}`:'Ask a question'}</button>
+    </div>
+    ${questionBlock(t,true)}`;
+}
+
+function sheetRow(t,cols){
+  return `<tr class="${t.done?'done':''}${t.overdue?' late':''}" data-row="${esc(t.key)}">${
+    cols.map(c=>CELLS[c.id](t)).join('')}</tr>`;
+}
+
+function sheetTable(label, tasks, track){
+  const cols=colsFor(track);
   const done = tasks.filter(t=>t.done).length;
   return `<section class="sheet">
     <div class="sheet-h"><h3>${esc(label)}</h3><span class="cnt">${done} of ${tasks.length} complete</span></div>
-    <div class="wbwrap"><table class="wb">
-      ${WB_COLGROUP}
-      <thead><tr>${WB_COLS.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
-      <tbody>${tasks.map(wbRow).join('')}</tbody>
+    <div class="wbwrap"><table class="wb${track==='it'?' wb-it':''}">
+      <colgroup>${cols.map(c=>`<col style="width:${c.w};">`).join('')}</colgroup>
+      <thead><tr>${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead>
+      <tbody>${tasks.map(t=>sheetRow(t,cols)).join('')}</tbody>
     </table></div>
   </section>`;
 }
@@ -420,7 +458,7 @@ function renderTrack(tv){
     const tasks=teamFilter?g.tasks.filter(t=>teamsOf(t).includes(teamFilter)):g.tasks;
     if(!tasks.length) return;
     shown+=tasks.length;
-    h+=sheetTable(g.label, tasks);
+    h+=sheetTable(g.label, tasks, tv.track);
   });
   if(!shown) h+=`<div class="empty">No ${teamFilter?esc(TEAM_LABEL[teamFilter]||teamFilter)+' ':''}tasks in this checklist.</div>`;
   return h||'<div class="empty">No tasks in this section yet.</div>';

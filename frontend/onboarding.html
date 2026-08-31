@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- ?v= bumped whenever onboarding-theme.css changes: the hub is franchisee-facing
      and they will not know to hard-refresh a stale stylesheet. -->
-<link rel="stylesheet" href="onboarding-theme.css?v=20260831">
+<link rel="stylesheet" href="onboarding-theme.css?v=20260831b">
 <style>
   *{box-sizing:border-box;}
   body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0;background:#F8FAFC;color:#2c2c2c;min-height:100vh;}
@@ -880,7 +880,7 @@
       else if(def&&def.kind==='group'){
         const tv=(CURRENT.track_views||[]).find(x=>x.track===def.track);
         const g=tv&&tv.groups.find(x=>String(x.id)===String(def.group));
-        h=g?sheetTable(g.label,g.tasks):'<div class="empty">No tasks on this sheet.</div>';
+        h=g?sheetTable(g.label,g.tasks,def.track):'<div class="empty">No tasks on this sheet.</div>';
       }
       else if(def&&def.kind==='track'){
         const tv=(CURRENT.track_views||[]).find(x=>x.track===def.track);
@@ -932,9 +932,31 @@
     //
     // "Completion Date" is gone as a column — it was only ever the auto-stamped
     // tick date, so it now sits as a caption under the checkbox instead.
-    const WB_COLS=['Weeks Out','Done','Activity To Complete',
-                   'Company','Vendor Contact','Vendor Contact Info.',"Newk's Resources"];
-    const WB_COLGROUP=`<colgroup><col style="width:78px;"><col style="width:52px;"><col style="width:34%;"><col style="width:12%;"><col style="width:11%;"><col style="width:16%;"><col style="width:11%;"></colgroup>`;
+    // Column sets are per sheet, because the sheets genuinely hold different
+    // things: the department sheets fill Company / Vendor Contact / Contact Info
+    // and carry no description, and the IT Department sheet is the exact
+    // opposite — 0 of 28 vendor cells, 28 of 28 descriptions. One shared set
+    // left half of whichever sheet you were looking at blank. Weeks Out and
+    // Done are common to both; Completion Date is a caption, not a column.
+    const COLS_WB=[
+      {id:'weeks',       label:'Weeks Out',            w:'78px'},
+      {id:'done',        label:'Done',                 w:'52px'},
+      {id:'activity',    label:'Activity To Complete', w:'34%'},
+      {id:'company',     label:'Company',              w:'12%'},
+      {id:'contact',     label:'Vendor Contact',       w:'11%'},
+      {id:'contact_info',label:'Vendor Contact Info.', w:'16%'},
+      {id:'dept',        label:"Newk's Resources",     w:'11%'},
+    ];
+    const COLS_IT=[
+      {id:'weeks',   label:'Weeks Out',             w:'78px'},
+      {id:'done',    label:'Done',                  w:'52px'},
+      {id:'title',   label:'Vendor / Document',     w:'19%'},
+      {id:'desc',    label:'Description',           w:'29%'},
+      {id:'prio',    label:'Required?',             w:'11%'},
+      {id:'dept',    label:'Department',            w:'12%'},
+      {id:'kb',      label:'KB Article / Reference',w:'13%'},
+    ];
+    function colsFor(track){ return track==='it'?COLS_IT:COLS_WB; }
     const PRIO_LABEL={req:'★ Required',rec:'◆ Recommended',opt:'○ Optional',cond:'⚠ Conditional'};
 
     function ownCell(t){
@@ -971,33 +993,52 @@
       </td>`;
     }
 
-    function wbRow(t){
-      return `<tr class="${t.done?'done':''}${t.overdue?' late':''}" data-row="${esc(t.key)}">
-        <td>${weeksCell(t)}</td>
-        ${doneCell(t)}
-        <td>
-          <div class="wb-act">${esc(t.title)}${ownCell(t)}${
-            t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</div>
-          ${t.desc?`<div style="color:var(--ink-soft);font-size:11.5px;margin-top:3px;">${esc(t.desc)}</div>`:''}
-          ${t.kb?`<div class="wb-kb" style="margin-top:3px;">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></div>`:''}
-          ${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
-          ${taskQuestions(t)}
-        </td>
-        <td>${esc(t.company||'')}</td>
-        <td>${esc(t.contact||'')}</td>
-        <td>${linkifyInfo(t.contact_info||'')}</td>
-        <td>${esc(t.dept||'')}</td>
-      </tr>`;
+    // One <td> per column id. Every sheet is rendered from this same map, so a
+    // change to (say) the Done cell can't apply to one sheet and not another.
+    // `notes` holds the note + question thread, which sits in whichever cell
+    // carries the task's name: 'activity' on a department sheet, 'title' on IT.
+    const CELLS={
+      weeks:        t=>`<td>${weeksCell(t)}</td>`,
+      done:         t=>doneCell(t),
+      activity:     t=>`<td>
+                      <div class="wb-act">${esc(t.title)}${ownCell(t)}${
+                        t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</div>
+                      ${t.desc?`<div class="wb-inline-desc">${esc(t.desc)}</div>`:''}
+                      ${t.kb?`<div class="wb-kb" style="margin-top:3px;">📄 <a href="${esc(t.kb)}" target="_blank" rel="noopener">Guide</a></div>`:''}
+                      ${rowNotes(t)}
+                    </td>`,
+      title:        t=>`<td>
+                      <div class="wb-act">${esc(t.title)}${ownCell(t)}</div>
+                      ${rowNotes(t)}
+                    </td>`,
+      desc:         t=>`<td class="wb-desc">${esc(t.desc||'')}</td>`,
+      prio:         t=>`<td>${t.prio?`<span class="wb-prio ${t.prio}">${PRIO_LABEL[t.prio]||t.prio}</span>`:''}</td>`,
+      dept:         t=>`<td>${esc(t.dept||'')}</td>`,
+      kb:           t=>`<td class="wb-kb">${t.kb?`<a href="${esc(t.kb)}" target="_blank" rel="noopener">KB Article ↗</a>`:''}</td>`,
+      company:      t=>`<td>${esc(t.company||'')}</td>`,
+      contact:      t=>`<td>${esc(t.contact||'')}</td>`,
+      contact_info: t=>`<td>${linkifyInfo(t.contact_info||'')}</td>`,
+    };
+
+    function rowNotes(t){
+      return `${t.note?`<div class="t-note" style="margin-top:5px;"><span class="lbl">Note</span>${esc(t.note)}</div>`:''}
+              ${taskQuestions(t)}`;
     }
 
-    function sheetTable(label,tasks){
+    function sheetRow(t,cols){
+      return `<tr class="${t.done?'done':''}${t.overdue?' late':''}" data-row="${esc(t.key)}">${
+        cols.map(c=>CELLS[c.id](t)).join('')}</tr>`;
+    }
+
+    function sheetTable(label,tasks,track){
+      const cols=colsFor(track);
       const done=tasks.filter(t=>t.done).length;
       return `<section class="sheet">
         <div class="sheet-h"><h3>${esc(label)}</h3><span class="cnt">${done} of ${tasks.length} complete</span></div>
-        <div class="wbwrap"><table class="wb">
-          ${WB_COLGROUP}
-          <thead><tr>${WB_COLS.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
-          <tbody>${tasks.map(wbRow).join('')}</tbody>
+        <div class="wbwrap"><table class="wb${track==='it'?' wb-it':''}">
+          <colgroup>${cols.map(c=>`<col style="width:${c.w};">`).join('')}</colgroup>
+          <thead><tr>${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead>
+          <tbody>${tasks.map(t=>sheetRow(t,cols)).join('')}</tbody>
         </table></div>
       </section>`;
     }
@@ -1039,7 +1080,7 @@
         const tasks=teamFilter?g.tasks.filter(t=>teamsOf(t).includes(teamFilter)):g.tasks;
         if(!tasks.length) return;
         shown+=tasks.length;
-        h+=sheetTable(g.label,tasks);
+        h+=sheetTable(g.label,tasks,tv.track);
       });
       if(!shown) h+=`<div class="empty">No ${teamFilter?esc(TEAM_LABEL[teamFilter]||teamFilter)+' ':''}tasks in this section.</div>`;
       return h||'<div class="empty">No tasks in this section.</div>';
