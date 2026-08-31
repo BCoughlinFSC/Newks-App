@@ -22244,13 +22244,26 @@ async def projects_delete(project_id: int, current_user: User = Depends(get_curr
 # ─────────────────────────────────────────────────────────────────────────────
 
 class OpeningIn(BaseModel):
-    """Create/update an opening. Only store_name is really required."""
+    """Create/update an opening. Only store_name is really required.
+
+    The cover-sheet fields below mirror the workbook's "Restaurant Information"
+    block. They're free text on purpose — the workbook carries entries like
+    "16 weeks" and "Week of 11/10" next to real dates.
+    """
     store_name:       Optional[str] = "Newk's Eatery"
     city:             Optional[str] = None
     state:            Optional[str] = None
     target_open:      Optional[str] = None   # 'YYYY-MM-DD'
     franchisee_name:  Optional[str] = None
     franchisee_email: Optional[str] = None
+    restaurant_number: Optional[str] = None
+    address:          Optional[str] = None   # street line; city/state stay separate
+    phone:            Optional[str] = None
+    ground_breaking:  Optional[str] = None
+    build_time:       Optional[str] = None
+    turn_over:        Optional[str] = None
+    hiring_date:      Optional[str] = None
+    training_week:    Optional[str] = None
 
 
 class TaskUpdateIn(BaseModel):
@@ -22351,7 +22364,9 @@ async def onboarding_update(
     if not onboarding_db.get_opening_by_id(opening_id):
         raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
     try:
-        ok = onboarding_db.update_opening(opening_id, body.dict())
+        # exclude_unset: a partial save (just the cover sheet, say) must not
+        # blank out the fields that form didn't send.
+        ok = onboarding_db.update_opening(opening_id, body.dict(exclude_unset=True))
         return {"id": opening_id, "success": ok}
     except Exception as exc:
         logger.error("onboarding.update failed: %s", exc, exc_info=True)

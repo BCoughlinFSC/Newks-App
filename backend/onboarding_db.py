@@ -332,6 +332,18 @@ def initialize_schema() -> None:
                 target_open    TEXT,                   -- 'YYYY-MM-DD' or NULL
                 franchisee_name  TEXT,
                 franchisee_email TEXT,
+                -- Cover-sheet ("Restaurant Information") detail, filled in by
+                -- the Newk's team as the build progresses. Free text, not dates
+                -- typed by SQLite: the workbook holds things like "16 weeks"
+                -- and "Week of 11/10" alongside real dates.
+                restaurant_number TEXT,
+                address           TEXT,
+                phone             TEXT,
+                ground_breaking   TEXT,
+                build_time        TEXT,
+                turn_over         TEXT,
+                hiring_date       TEXT,
+                training_week     TEXT,
                 status         TEXT NOT NULL DEFAULT 'active',  -- active | archived
                 created_by     TEXT,
                 created_at     TEXT NOT NULL DEFAULT (datetime('now')),
@@ -387,6 +399,35 @@ def initialize_schema() -> None:
             """
         )
         conn.commit()
+        _migrate_columns(conn)
+
+
+# Columns added after the first release. ALTER TABLE ADD COLUMN is the only
+# migration this table needs — every one of them is nullable free text.
+_OPENING_ADDED_COLUMNS = [
+    ("restaurant_number", "TEXT"),
+    ("address", "TEXT"),
+    ("phone", "TEXT"),
+    ("ground_breaking", "TEXT"),
+    ("build_time", "TEXT"),
+    ("turn_over", "TEXT"),
+    ("hiring_date", "TEXT"),
+    ("training_week", "TEXT"),
+]
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    """Bring an existing openings table up to the current column set."""
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(openings)")}
+    added = []
+    for col, decl in _OPENING_ADDED_COLUMNS:
+        if col in have:
+            continue
+        conn.execute(f"ALTER TABLE openings ADD COLUMN {col} {decl}")
+        added.append(col)
+    if added:
+        conn.commit()
+        logger.info("onboarding_db: added openings columns %s", ", ".join(added))
 
 
 # ─── template helpers ────────────────────────────────────────────────────────
@@ -496,34 +537,49 @@ def _reference_view(for_franchisee: bool) -> Dict[str, Any]:
     ref["contacts"] = {
         k: v for k, v in contacts.items() if not _INTERNAL_CONTACT_GROUPS.search(k)
     }
+    # The workbook's cover-sheet footnote tells the reader that shaded cells are
+    # theirs to fill in. In the app the cover sheet is Newk's-maintained and
+    # read-only for the franchisee, so keep the MIT warning and drop that half.
+    info = ref.get("nro_info")
+    if isinstance(info, dict) and info.get("note"):
+        note = info["note"].split("|")[0].strip(" \u2502\t")
+        ref["nro_info"] = {**info, "note": note}
     return ref
 
 
 # ─── openings CRUD ───────────────────────────────────────────────────────────
+
+# Every editable column on an opening, in the order the create/update forms
+# present them. store_name is handled separately (it has a default).
+OPENING_FIELDS = [
+    "city", "state", "target_open", "franchisee_name", "franchisee_email",
+    "restaurant_number", "address", "phone", "ground_breaking", "build_time",
+    "turn_over", "hiring_date", "training_week",
+]
+
+
+def _clean(data: Dict[str, Any], field: str) -> Optional[str]:
+    """Trim an incoming value; empty string means 'clear it' (NULL)."""
+    v = data.get(field)
+    return (str(v).strip() or None) if v is not None else None
+
 
 def create_opening(data: Dict[str, Any], created_by: str) -> Dict[str, Any]:
     """Create an opening (with a fresh magic-link token). Tasks are seeded
     lazily — an opening with no status rows simply shows everything not-done —
     so there's nothing to insert here. Returns the new opening row."""
     token = secrets.token_urlsafe(32)
+    cols = ["token", "store_name"] + OPENING_FIELDS + ["created_by"]
+    vals = [token, (data.get("store_name") or "Newk's Eatery").strip()]
+    vals += [_clean(data, f) for f in OPENING_FIELDS]
+    vals.append(created_by)
     with get_connection() as conn:
         cur = conn.execute(
-            """
-            INSERT INTO openings
-              (token, store_name, city, state, target_open,
-               franchisee_name, franchisee_email, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            f"""
+            INSERT INTO openings ({", ".join(cols)}, created_at, updated_at)
+            VALUES ({", ".join("?" * len(cols))}, datetime('now'), datetime('now'))
             """,
-            (
-                token,
-                (data.get("store_name") or "Newk's Eatery").strip(),
-                (data.get("city") or "").strip() or None,
-                (data.get("state") or "").strip() or None,
-                (data.get("target_open") or "").strip() or None,
-                (data.get("franchisee_name") or "").strip() or None,
-                (data.get("franchisee_email") or "").strip() or None,
-                created_by,
-            ),
+            tuple(vals),
         )
         conn.commit()
         return get_opening_by_id(int(cur.lastrowid))
@@ -603,25 +659,27 @@ def get_opening_by_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 def update_opening(opening_id: int, data: Dict[str, Any]) -> bool:
-    """Update the opening's descriptive fields (internal only)."""
+    """Update the opening's descriptive fields (internal only).
+
+    Only keys actually present in `data` are written, so a partial save (say,
+    just the cover sheet) can't blank out fields the form didn't include.
+    """
+    sets, vals = [], []
+    if "store_name" in data:
+        sets.append("store_name = ?")
+        vals.append((data.get("store_name") or "Newk's Eatery").strip())
+    for f in OPENING_FIELDS:
+        if f in data:
+            sets.append(f"{f} = ?")
+            vals.append(_clean(data, f))
+    if not sets:
+        return False
+    vals.append(opening_id)
     with get_connection() as conn:
         cur = conn.execute(
-            """
-            UPDATE openings
-               SET store_name = ?, city = ?, state = ?, target_open = ?,
-                   franchisee_name = ?, franchisee_email = ?,
-                   updated_at = datetime('now')
-             WHERE id = ?
-            """,
-            (
-                (data.get("store_name") or "Newk's Eatery").strip(),
-                (data.get("city") or "").strip() or None,
-                (data.get("state") or "").strip() or None,
-                (data.get("target_open") or "").strip() or None,
-                (data.get("franchisee_name") or "").strip() or None,
-                (data.get("franchisee_email") or "").strip() or None,
-                opening_id,
-            ),
+            f"UPDATE openings SET {', '.join(sets)}, updated_at = datetime('now') "
+            "WHERE id = ?",
+            tuple(vals),
         )
         conn.commit()
         return cur.rowcount > 0

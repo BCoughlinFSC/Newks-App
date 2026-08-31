@@ -74,6 +74,17 @@
   .check-row{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:#374151;margin-bottom:.5rem;}
   .hint{font-size:.78rem;color:#9CA3AF;margin:.2rem 0 0;}
 
+  /* editable cover sheet (NRO Info tab) */
+  .nro-in{width:100%;padding:.4rem .55rem;border:1px solid #D8DEE7;border-radius:5px;
+          font-family:inherit;font-size:.85rem;color:#1F2937;background:#fff;}
+  .nro-in:focus{outline:none;border-color:#D9272C;box-shadow:0 0 0 2px rgba(217,39,44,.12);}
+  .nro-in:placeholder-shown{background:#FDF6E3;}   /* empty = still to fill in */
+  .nro-addr{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 62px;gap:.4rem;}
+  @media (max-width:640px){.nro-addr{grid-template-columns:minmax(0,1fr);}}
+  .nro-save{display:flex;align-items:center;justify-content:flex-end;gap:.9rem;
+            padding:.7rem 14px 1rem;flex-wrap:wrap;}
+  .nro-hint{font-size:.75rem;color:#9CA3AF;margin-right:auto;}
+
   /* detail */
   .backlink{background:none;border:0;color:#D9272C;font-weight:600;font-size:.9rem;cursor:pointer;padding:0;margin-bottom:1rem;}
   .backlink:hover{text-decoration:underline;}
@@ -443,24 +454,78 @@
       return tabs;
     }
 
+    // The workbook's cover sheet, row for row. Each label maps to a column on
+    // the opening so the Newk's team can actually fill it in here — previously
+    // only three of the ten rows were derived, and none were editable.
+    // `date:true` renders a date picker, but only when the stored value is
+    // blank or already ISO: the workbook also carries entries like "16 weeks"
+    // and "Week of 11/10", and a date input would silently drop those.
+    const NRO_FIELD_MAP={
+      'Restaurant #':        {key:'restaurant_number', ph:'e.g. 1201'},
+      'Restaurant Name':     {key:'store_name',        ph:"Newk's Eatery"},
+      'Address':             {key:'address',           composite:'loc', ph:'Street address'},
+      'Telephone Number':    {key:'phone',             ph:'(000) 000-0000'},
+      'Ground Breaking':     {key:'ground_breaking',   date:true},
+      'Build Time':          {key:'build_time',        ph:'e.g. 16 weeks'},
+      'Turn Over':           {key:'turn_over',         date:true},
+      'Projected Open Date': {key:'target_open',       date:true},
+      'Hiring Date':         {key:'hiring_date',       date:true},
+      'Training Week':       {key:'training_week',     ph:'e.g. Week of Nov 10'},
+    };
+    const isIso=v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v||''));
+
+    function nroFieldCell(label,def){
+      const o=CURRENT, v=o[def.key]||'';
+      const type=(def.date&&(!v||isIso(v)))?'date':'text';
+      const inp=`<input class="nro-in" data-nkey="${esc(def.key)}" type="${type}"
+          value="${esc(v)}" placeholder="${esc(def.ph||'')}" />`;
+      if(def.composite!=='loc') return inp;
+      // Address is one workbook row but three fields here: the portfolio list
+      // and both page headers read city/state, so those stay separate columns.
+      return `<div class="nro-addr">${inp}
+        <input class="nro-in" data-nkey="city"  type="text" value="${esc(o.city||'')}"  placeholder="City" />
+        <input class="nro-in" data-nkey="state" type="text" value="${esc(o.state||'')}" placeholder="ST" maxlength="2" />
+      </div>`;
+    }
+
     function renderNroInfo(info){
       const o=CURRENT;
-      const loc=[o.city,o.state].filter(Boolean).join(', ');
-      const vals={'Restaurant Name':o.store_name||'','Address':loc,
-                  'Projected Open Date':o.target_open?fmt(o.target_open):''};
-      const rows=(info.fields||[]).map(f=>`<tr>
+      const rows=(info.fields||[]).map(f=>{
+        const def=NRO_FIELD_MAP[f];
+        return `<tr>
           <td style="width:210px;font-weight:600;background:#EAF1FB;">${esc(f)}</td>
-          <td class="${vals[f]?'':'wb-date empty'}" style="text-align:left;">${esc(vals[f]||'')}</td>
-        </tr>`).join('');
+          <td style="text-align:left;">${def?nroFieldCell(f,def):''}</td>
+        </tr>`;}).join('');
       const contacts=(info.contacts||[]).map(c=>`<tr>
           <td><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></td>
           <td style="font-weight:600;">${esc(c.dept)}</td>
           <td>${esc(c.rep)}</td></tr>`).join('');
       return `<p style="color:#4A4F57;margin:0 0 14px;">The workbook&rsquo;s cover sheet &mdash; this opening&rsquo;s
-          restaurant details and the Support Center contact for each area.</p>
+          restaurant details and the Support Center contact for each area.
+          Everything here is editable; the franchisee sees it read-only on their hub.</p>
         <section class="sheet">
           <div class="sheet-h"><h3>Restaurant Information</h3></div>
           <div class="wbwrap"><table class="wb wb-plain"><tbody>${rows}</tbody></table></div>
+          <div class="nro-save">
+            <span class="nro-hint" id="nroHint">Blank rows show as &ldquo;to be confirmed&rdquo; on the franchisee hub.</span>
+            <button class="btn-primary" id="nroSaveBtn" onclick="saveNroInfo()">Save details</button>
+          </div>
+        </section>
+        <section class="sheet">
+          <div class="sheet-h"><h3>Franchisee &amp; Invite</h3></div>
+          <div class="wbwrap"><table class="wb wb-plain"><tbody>
+            <tr><td style="width:210px;font-weight:600;background:#EAF1FB;">Franchisee / Owner</td>
+              <td style="text-align:left;"><input class="nro-in" data-nkey="franchisee_name" type="text"
+                value="${esc(o.franchisee_name||'')}" placeholder="e.g. Russell Restaurant Group, LLC" /></td></tr>
+            <tr><td style="width:210px;font-weight:600;background:#EAF1FB;">Franchisee Email</td>
+              <td style="text-align:left;"><input class="nro-in" data-nkey="franchisee_email" type="email"
+                value="${esc(o.franchisee_email||'')}" placeholder="owner@example.com" /></td></tr>
+          </tbody></table></div>
+          <div class="nro-save">
+            <span class="nro-hint">Save an email address here and the &ldquo;Resend invite email&rdquo;
+              button at the top of this page starts working.</span>
+            <button class="btn-primary" onclick="saveNroInfo()">Save details</button>
+          </div>
         </section>
         <section class="sheet">
           <div class="sheet-h"><h3>Support Center Contacts</h3></div>
@@ -469,6 +534,27 @@
             <tbody>${contacts}</tbody></table></div>
         </section>
         ${info.note?`<p style="font-size:12px;color:var(--muted);font-style:italic;">${esc(info.note)}</p>`:''}`;
+    }
+
+    // Collect every cover-sheet input on the tab and PUT them in one go. Only
+    // these keys are sent, so the partial-update route leaves the rest alone.
+    async function saveNroInfo(){
+      const body={};
+      document.querySelectorAll('#d-tabbody .nro-in').forEach(i=>{body[i.dataset.nkey]=i.value.trim();});
+      if(!body.store_name) body.store_name="Newk's Eatery";
+      if(body.state) body.state=body.state.toUpperCase();
+      const id=CURRENT.id;   // openDetail() below replaces CURRENT
+      const btn=document.getElementById('nroSaveBtn');
+      if(btn){btn.disabled=true;btn.textContent='Saving…';}
+      try{
+        const res=await api(`/api/onboarding/openings/${id}`,
+          {method:'PUT',body:JSON.stringify(body)});
+        if(!res.ok){toast('Could not save ('+res.status+')',true);return;}
+        toast('Restaurant details saved ✓');
+        await loadPortfolio();   // name / date / location feed the portfolio row
+        await openDetail(id);    // re-render hero + countdown from what was saved
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+      finally{const b=document.getElementById('nroSaveBtn'); if(b){b.disabled=false;b.textContent='Save details';}}
     }
 
     function renderDetail(){

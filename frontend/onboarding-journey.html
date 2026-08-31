@@ -172,14 +172,37 @@ function renderActiveSheet(){
 
 // The workbook's cover sheet: restaurant details (live, from this opening) plus
 // the Support Center directory.
+// Values for the cover sheet's ten rows. Every one is now a real column on the
+// opening, maintained by the Newk's team on the internal dashboard; the
+// franchisee sees whatever has been filled in so far, read-only.
+function nroInfoValues(o){
+  const street=o.address||'';
+  const loc=[o.city,o.state].filter(Boolean).join(', ');
+  const dt=v=>v?(/^\d{4}-\d{2}-\d{2}$/.test(v)?fmt(v):v):'';
+  return {
+    'Restaurant #':        o.restaurant_number||'',
+    'Restaurant Name':     o.store_name||'',
+    'Address':             [street,loc].filter(Boolean).join(street&&loc?', ':''),
+    'Telephone Number':    o.phone||'',
+    'Ground Breaking':     dt(o.ground_breaking),
+    'Build Time':          o.build_time||'',
+    'Turn Over':           dt(o.turn_over),
+    'Projected Open Date': dt(o.target_open),
+    'Hiring Date':         dt(o.hiring_date),
+    'Training Week':       o.training_week||'',
+  };
+}
+
 function renderNroInfo(info){
   const o=DATA;
-  const loc=[o.city,o.state].filter(Boolean).join(', ');
-  const vals={'Restaurant Name':o.store_name||'','Address':loc,
-              'Projected Open Date':o.target_open?fmt(o.target_open):''};
+  const vals=nroInfoValues(o);
+  // A blank row is a detail the Support Center hasn't set yet — say so, rather
+  // than leaving a shaded empty cell that reads as "your turn to fill this in".
+  // No shading either: the whole sheet is read-only here.
   const rows=(info.fields||[]).map(f=>`<tr>
       <td style="width:210px;font-weight:600;background:#EAF1FB;">${esc(f)}</td>
-      <td class="${vals[f]?'':'wb-date empty'}" style="text-align:left;">${esc(vals[f]||'')}</td>
+      <td style="text-align:left;">${vals[f]?esc(vals[f])
+        :'<span style="color:#9A9188;font-style:italic;">To be confirmed</span>'}</td>
     </tr>`).join('');
   const contacts=(info.contacts||[]).map(c=>`<tr>
       <td><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></td>
