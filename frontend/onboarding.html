@@ -398,17 +398,36 @@
       document.querySelectorAll('#responsesPanel [data-inboxdel]').forEach(b=>b.onclick=()=>discardResponse(b.dataset.inboxdel));
     }
 
+    // Read a File as base64, without the data: URL prefix.
+    function fileToBase64(file){
+      return new Promise((resolve,reject)=>{
+        const fr=new FileReader();
+        fr.onerror=()=>reject(new Error('Could not read the file off your disk.'));
+        fr.onload=()=>{const s=String(fr.result||'');resolve(s.slice(s.indexOf(',')+1));};
+        fr.readAsDataURL(file);
+      });
+    }
+
+    // Sent as base64 in a JSON body, NOT as a multipart upload: Cloudways' edge
+    // proxy never delivers multipart/form-data file POSTs to the app — it holds
+    // the connection ~300s then 504s, at any file size. Same trick as
+    // /api/uploads/menu-board-b64. The timeout below is belt-and-braces so this
+    // can never sit on "Reading…" indefinitely again.
+    const UPLOAD_TIMEOUT_MS=60000;
+
     async function uploadResponses(){
       const inp=document.getElementById('rspFile'), msg=document.getElementById('rspMsg');
       if(!inp.files||!inp.files[0]){msg.className='status-msg error';msg.textContent='Choose a Forms export first.';return;}
-      const fd=new FormData(); fd.append('file',inp.files[0]);
+      const file=inp.files[0];
       const btn=document.getElementById('rspUpBtn'); btn.disabled=true; btn.textContent='Reading…';
-      msg.className='status-msg info'; msg.textContent='Reading the export…';
+      msg.className='status-msg info'; msg.textContent=`Reading ${file.name}…`;
+      const ctl=new AbortController();
+      const timer=setTimeout(()=>ctl.abort(),UPLOAD_TIMEOUT_MS);
       try{
-        // FormData sets its own multipart boundary — don't send our JSON header.
-        const t=localStorage.getItem('auth_token');
-        const res=await fetch('/api/onboarding/form-responses/upload',
-          {method:'POST',headers:t?{'Authorization':'Bearer '+t}:{},body:fd});
+        const content_b64=await fileToBase64(file);
+        const res=await api('/api/onboarding/form-responses/import',
+          {method:'POST',signal:ctl.signal,
+           body:JSON.stringify({filename:file.name,content_b64})});
         const d=await res.json().catch(()=>({}));
         // The endpoint's own detail already explains the problem ("Could not
         // read that file: ...", "No responses found. ..."), so show it as-is.
@@ -421,8 +440,14 @@
           ${(d.warnings||[]).map(w=>`<br><em>${esc(w)}</em>`).join('')}`;
         inp.value='';
         await loadPortfolio();
-      }catch(e){ msg.className='status-msg error'; msg.textContent='Error: '+e.message; }
-      finally{ btn.disabled=false; btn.textContent='Upload'; }
+      }catch(e){
+        if(e.message==='forbidden'||e.message==='unauthorized') return;
+        msg.className='status-msg error';
+        msg.textContent=(e.name==='AbortError')
+          ? `Gave up after ${UPLOAD_TIMEOUT_MS/1000}s — the request never came back. Nothing was imported; try again.`
+          : 'Error: '+e.message;
+      }
+      finally{ clearTimeout(timer); btn.disabled=false; btn.textContent='Upload'; }
     }
 
     async function assignResponse(id,openingId){

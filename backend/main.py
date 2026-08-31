@@ -22316,6 +22316,21 @@ class AppointmentIn(BaseModel):
     status:  Optional[str] = None   # scheduled | done | cancelled
 
 
+class FormImportIn(BaseModel):
+    """A Forms export sent as base64 in a JSON body.
+
+    NOT multipart on purpose. Cloudways' edge proxy eats multipart/form-data
+    file POSTs — the request never reaches uvicorn, the connection is held ~300s
+    and then 504s, at any body size (a gzipped 0.17MB body still stalled).
+    Small JSON POSTs pass through fine, so the browser base64-encodes the file
+    and sends it as JSON. See the /upload route for the multipart variant, which
+    still works from the box itself (curl to 127.0.0.1:8000).
+    """
+    filename: Optional[str] = None
+    form_name: Optional[str] = None
+    content_b64: str
+
+
 class FormAttachIn(BaseModel):
     """File a form response against an opening (null returns it to the inbox)."""
     opening_id: Optional[int] = None
@@ -22521,23 +22536,21 @@ async def onboarding_appointment_delete(
 # each response is parsed into question/answer pairs, matched to an opening by
 # its "Restaurant Site ID" and read vertically instead of sideways.
 
-@app.post("/api/onboarding/form-responses/upload")
-async def onboarding_form_upload(
-    file: UploadFile = File(..., description="Microsoft Forms .xlsx export"),
-    form_name: Optional[str] = None,
-    current_user: User = Depends(get_current_admin_user),
-):
-    raw = await file.read()
+def _ingest_form_export(raw: bytes, filename: str, form_name: Optional[str],
+                        actor: str) -> Dict[str, Any]:
+    """Parse a Forms export, match each response to an opening, store them.
+    Shared by the JSON and multipart entry points."""
     if not raw:
         raise HTTPException(status_code=400, detail="That file came through empty.")
     if len(raw) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File is over 10MB — is that a Forms export?")
+        raise HTTPException(status_code=400,
+                            detail="File is over 10MB — is that a Forms export?")
     label = (form_name or "").strip() or re.sub(
-        r"\.xlsx?$", "", os.path.basename(file.filename or "Form responses"), flags=re.I)
+        r"\.xlsx?$", "", os.path.basename(filename or "Form responses"), flags=re.I)
     try:
         responses, warnings = onboarding_forms.parse_export(raw, label)
     except Exception as exc:
-        logger.error("onboarding.form_upload parse failed: %s", exc, exc_info=True)
+        logger.error("onboarding.form ingest parse failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=400, detail=f"Could not read that file: {exc}")
     if not responses:
         raise HTTPException(
@@ -22553,7 +22566,7 @@ async def onboarding_form_upload(
         res = onboarding_db.upsert_form_submission(
             rec, onboarding_forms.answers_json(rec), opening_id,
             (f"matched on {how}" if opening_id else f"not matched — {how}"),
-            uploaded_by=current_user.name)
+            uploaded_by=actor)
         added += res["created"]
         updated += (not res["created"])
         matched += bool(opening_id)
@@ -22566,6 +22579,37 @@ async def onboarding_form_upload(
             "updated": updated, "matched": matched,
             "unmatched": len(responses) - matched,
             "warnings": warnings, "results": results}
+
+
+@app.post("/api/onboarding/form-responses/import")
+async def onboarding_form_import(
+    body: FormImportIn, current_user: User = Depends(get_current_admin_user),
+):
+    """Import a Forms export sent as base64 JSON — the path the browser uses.
+
+    Deliberately not multipart: Cloudways' edge proxy never delivers
+    multipart/form-data file POSTs to the app (see FormImportIn).
+    """
+    import base64 as _b64      # local, matching /api/uploads/menu-board-b64
+
+    try:
+        raw = _b64.b64decode(body.content_b64 or "")
+    except Exception:
+        raise HTTPException(status_code=400, detail="The file data didn't decode.")
+    return _ingest_form_export(raw, body.filename or "", body.form_name,
+                              current_user.name)
+
+
+@app.post("/api/onboarding/form-responses/upload")
+async def onboarding_form_upload(
+    file: UploadFile = File(..., description="Microsoft Forms .xlsx export"),
+    form_name: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Multipart variant. Works from the box itself (curl to 127.0.0.1:8000);
+    through the public edge it will hang — use /import from a browser."""
+    return _ingest_form_export(await file.read(), file.filename or "",
+                               form_name, current_user.name)
 
 
 @app.get("/api/onboarding/form-responses")
