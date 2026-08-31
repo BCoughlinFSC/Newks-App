@@ -513,6 +513,35 @@ def initialize_schema() -> None:
             -- "weeks before open" is relative, so a correction applies to every
             -- opening at once. Seeded values live in IT_TASK_WEEKS; a row here
             -- means a human has since set it in the app.
+            -- One submitted response to a Microsoft Form, parsed into
+            -- question/answer pairs (see onboarding_forms.py). opening_id is
+            -- nullable: a response we can't confidently match waits in the
+            -- inbox rather than being filed against the wrong restaurant.
+            CREATE TABLE IF NOT EXISTS form_submissions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                opening_id      INTEGER REFERENCES openings(id) ON DELETE SET NULL,
+                form_name       TEXT NOT NULL,
+                response_id     TEXT NOT NULL,   -- Forms' own Id column
+                started_at      TEXT,
+                submitted_at    TEXT,
+                submitter       TEXT,
+                submitter_email TEXT,
+                site_id         TEXT,            -- "Restaurant Site ID (4 digits)"
+                location_name   TEXT,
+                franchise_group TEXT,
+                answers         TEXT NOT NULL,   -- JSON [{q, a}, ...], in form order
+                match_note      TEXT,            -- how it was matched, or why not
+                uploaded_by     TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            -- Re-uploading the same export updates in place instead of
+            -- duplicating: the pair (form, response id) is the response.
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_form_submission
+                ON form_submissions(form_name, response_id);
+            CREATE INDEX IF NOT EXISTS idx_form_sub_opening
+                ON form_submissions(opening_id);
+
             -- Scheduled appointments for an opening: internet install, POS
             -- install, training week, alarm walk-through, and so on. Distinct
             -- from tasks — a task is "has this been done", an appointment is
@@ -738,6 +767,124 @@ def _reference_view(for_franchisee: bool) -> Dict[str, Any]:
         note = info["note"].split("|")[0].strip(" \u2502\t")
         ref["nro_info"] = {**info, "note": note}
     return ref
+
+
+# ─── form responses ──────────────────────────────────────────────────────────
+# Parsed Microsoft Forms responses attached to an opening. Parsing lives in
+# onboarding_forms.py; this is just storage + the inbox of unmatched ones.
+
+def _sub_row(r: sqlite3.Row) -> Dict[str, Any]:
+    d = dict(r)
+    try:
+        d["answers"] = _json.loads(d.get("answers") or "[]")
+    except ValueError:
+        d["answers"] = []
+    return d
+
+
+def upsert_form_submission(rec: Dict[str, Any], answers_json: str,
+                           opening_id: Optional[int], match_note: str,
+                           uploaded_by: str) -> Dict[str, Any]:
+    """Insert or update one response. Returns {id, created}.
+
+    An update deliberately does NOT overwrite opening_id when the response has
+    already been filed by hand — re-uploading an export must not undo someone's
+    assignment. It does refresh the answers, which is the point of re-uploading.
+    """
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id, opening_id FROM form_submissions "
+            "WHERE form_name = ? AND response_id = ?",
+            (rec.get("form_name") or "", rec.get("response_id") or ""),
+        ).fetchone()
+        if existing:
+            keep = existing["opening_id"] if existing["opening_id"] is not None else opening_id
+            conn.execute(
+                """
+                UPDATE form_submissions
+                   SET opening_id = ?, started_at = ?, submitted_at = ?,
+                       submitter = ?, submitter_email = ?, site_id = ?,
+                       location_name = ?, franchise_group = ?, answers = ?,
+                       match_note = ?, updated_at = datetime('now')
+                 WHERE id = ?
+                """,
+                (keep, rec.get("started_at"), rec.get("submitted_at"),
+                 rec.get("submitter"), rec.get("submitter_email"), rec.get("site_id"),
+                 rec.get("location_name"), rec.get("franchise_group"), answers_json,
+                 match_note, existing["id"]),
+            )
+            conn.commit()
+            return {"id": int(existing["id"]), "created": False}
+        cur = conn.execute(
+            """
+            INSERT INTO form_submissions
+              (opening_id, form_name, response_id, started_at, submitted_at,
+               submitter, submitter_email, site_id, location_name,
+               franchise_group, answers, match_note, uploaded_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (opening_id, rec.get("form_name") or "", rec.get("response_id") or "",
+             rec.get("started_at"), rec.get("submitted_at"), rec.get("submitter"),
+             rec.get("submitter_email"), rec.get("site_id"), rec.get("location_name"),
+             rec.get("franchise_group"), answers_json, match_note, uploaded_by),
+        )
+        conn.commit()
+        return {"id": int(cur.lastrowid), "created": True}
+
+
+def list_form_submissions(opening_id: Optional[int] = None,
+                          unmatched: bool = False) -> List[Dict[str, Any]]:
+    """Responses for one opening, or (unmatched=True) the ones still unfiled."""
+    where, args = "", []
+    if unmatched:
+        where = "WHERE opening_id IS NULL"
+    elif opening_id is not None:
+        where, args = "WHERE opening_id = ?", [opening_id]
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM form_submissions {where} "
+            "ORDER BY COALESCE(submitted_at,'') DESC, id DESC",
+            tuple(args),
+        ).fetchall()
+    return [_sub_row(r) for r in rows]
+
+
+def get_form_submission(submission_id: int) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM form_submissions WHERE id = ?",
+                           (submission_id,)).fetchone()
+    return _sub_row(row) if row else None
+
+
+def attach_form_submission(submission_id: int,
+                           opening_id: Optional[int]) -> bool:
+    """File a response against an opening (or None to send it back to the inbox)."""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE form_submissions SET opening_id = ?, match_note = ?, "
+            "updated_at = datetime('now') WHERE id = ?",
+            (opening_id, "assigned by hand" if opening_id else "returned to inbox",
+             submission_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_form_submission(submission_id: int) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM form_submissions WHERE id = ?", (submission_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def openings_for_matching() -> List[Dict[str, Any]]:
+    """Minimal opening rows for onboarding_forms.match_opening()."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, store_name, city, state, restaurant_number FROM openings "
+            "WHERE status = 'active'"
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ─── appointments ────────────────────────────────────────────────────────────
@@ -970,6 +1117,10 @@ def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection,
     by_task: Dict[str, List[Dict[str, Any]]] = {}
     for q in qrows:
         by_task.setdefault(q["task_key"], []).append(dict(q))
+    subs = conn.execute(
+        "SELECT * FROM form_submissions WHERE opening_id = ? "
+        "ORDER BY COALESCE(submitted_at,'') DESC, id DESC", (o["id"],),
+    ).fetchall()
     appts = conn.execute(
         "SELECT * FROM appointments WHERE opening_id = ? "
         "ORDER BY on_date, COALESCE(at_time,''), id", (o["id"],),
@@ -987,6 +1138,7 @@ def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection,
     d["steps"] = STEP_TITLES
     d["open_questions"] = sum(1 for q in qrows if q["status"] == "open")
     d["appointments"] = [dict(a) for a in appts]
+    d["form_responses"] = [_sub_row(r) for r in subs]
     d["appointment_kinds"] = APPOINTMENT_KINDS
     return d
 

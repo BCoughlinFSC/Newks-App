@@ -95,6 +95,26 @@
   .latebadge{display:inline-block;margin-left:6px;font-size:.68rem;font-weight:700;
              color:#B3261E;background:#FDECEC;padding:.05rem .45rem;border-radius:999px;}
 
+  /* Form responses */
+  .resp-card{margin-bottom:1.1rem;}
+  .resp-meta{padding:.55rem 14px;font-size:.8rem;color:#6B7280;border-bottom:1px solid #EEF2F7;background:#FBFAF7;}
+  .resp-how{font-size:.72rem;color:#9CA3AF;font-style:italic;margin-top:.15rem;}
+  /* The theme paints every `th` as a dark column header (.nro table.wb th) —
+     right for a header row, but these are row labels, 25 of them stacked. */
+  .nro table.wb.resp-table th[scope=row]{width:38%;text-align:left;font-weight:600;
+    color:#41506B;background:#F5F8FC;vertical-align:top;font-size:.8rem;
+    line-height:1.4;padding:.5rem .7rem;text-transform:none;letter-spacing:0;
+    position:static;}
+  .nro table.wb.resp-table td{vertical-align:top;font-size:.85rem;color:#1F2937;line-height:1.45;padding:.5rem .7rem;}
+  .resp-actions{display:flex;gap:.6rem;align-items:center;padding:.7rem 14px 1rem;flex-wrap:wrap;}
+  .resp-actions .btn-link.danger{margin-left:auto;}
+  .rsp-site{display:inline-block;font-size:.7rem;font-weight:700;color:#41506B;
+            background:#EEF2F7;padding:.05rem .45rem;border-radius:999px;margin-left:.3rem;}
+  .rsp-assign{display:flex;gap:.5rem;align-items:center;}
+  .rsp-assign select{padding:.3rem .4rem;border:1px solid #D8DEE7;border-radius:5px;
+                     font-size:.8rem;font-family:inherit;max-width:230px;}
+  #rspFile{font-size:.85rem;font-family:inherit;}
+
   /* Calendar (appointments) */
   .appt-when{white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:600;color:#1F2937;}
   .appt-time{font-size:11px;font-weight:400;color:#6B7280;}
@@ -208,6 +228,7 @@
           <button class="btn-primary" onclick="openCreate()">+ New Opening / Invite</button>
         </div>
         <div class="plist" id="plist"><div class="empty">Loading…</div></div>
+        <div id="responsesPanel"></div>
         <div id="alertsPanel"></div>
         <div id="activityPanel"></div>
       </div>
@@ -320,11 +341,111 @@
       }catch(e){ if(e.message!=='forbidden'&&e.message!=='unauthorized') toast('Load error: '+e.message,true); }
       loadQuestions();
       loadAlerts();
+      loadResponseInbox();
       loadActivity();
     }
 
     // ── Question inbox ───────────────────────────────────────────────────────
     let QUESTIONS=[];
+    // ── Form responses: upload + inbox ────────────────────────────────────────
+    // Responses that carry a recognisable restaurant number file themselves
+    // against the opening. The rest wait here to be assigned by hand rather
+    // than being guessed onto the wrong restaurant.
+    let INBOX=[];
+    async function loadResponseInbox(){
+      try{
+        const res=await api('/api/onboarding/form-responses?unmatched=1');
+        if(!res.ok) return;
+        INBOX=await res.json();
+        renderResponsesPanel();
+      }catch(e){ /* optional panel — never block the portfolio */ }
+    }
+
+    function renderResponsesPanel(){
+      const opts=OPENINGS.map(o=>{
+        const loc=[o.city,o.state].filter(Boolean).join(', ');
+        return `<option value="${o.id}">${esc(o.store_name)}${loc?' — '+esc(loc):''}</option>`;
+      }).join('');
+      const rows=INBOX.map(sub=>`<div class="al-row">
+          <div><strong>${esc(sub.location_name||sub.form_name||'Response')}</strong>
+            ${sub.site_id?`<span class="rsp-site">#${esc(sub.site_id)}</span>`:''}
+            <div class="al-sub">${esc(sub.form_name||'')}${
+              sub.submitted_at?` · submitted ${esc(fmt(sub.submitted_at))}`:''}${
+              sub.submitter_email?` · ${esc(sub.submitter_email)}`:''}
+              ${sub.match_note?`<br><em>${esc(sub.match_note)}</em>`:''}</div></div>
+          <div class="rsp-assign">
+            <select data-assign="${sub.id}"><option value="">Assign to…</option>${opts}</select>
+            <button class="btn-link danger" data-inboxdel="${sub.id}">Discard</button>
+          </div></div>`).join('');
+      document.getElementById('responsesPanel').innerHTML=`
+        <div class="card" style="margin-top:1.25rem;">
+          <h2>Form responses</h2>
+          <p class="hint" style="margin:0 0 .9rem;">Upload a Microsoft Forms export (.xlsx) —
+            the Franchise Restaurant Information Form, Systems Questionnaire, any of them.
+            Each response is turned into a readable question-per-row sheet and attached to the
+            opening whose restaurant number it carries. Re-uploading the same export updates
+            in place rather than duplicating.</p>
+          <div class="al-ctl">
+            <input type="file" id="rspFile" accept=".xlsx,.xls" />
+            <button class="btn-primary" id="rspUpBtn" onclick="uploadResponses()">Upload</button>
+          </div>
+          <div id="rspMsg" class="status-msg"></div>
+          ${INBOX.length?`<div class="al-summary"><strong>${INBOX.length}</strong>
+              response${INBOX.length===1?'':'s'} couldn't be matched to an opening — assign below.</div>
+            <div class="al-list">${rows}</div>`:''}
+        </div>`;
+      document.querySelectorAll('#responsesPanel [data-assign]').forEach(sel=>sel.onchange=()=>assignResponse(sel.dataset.assign,sel.value));
+      document.querySelectorAll('#responsesPanel [data-inboxdel]').forEach(b=>b.onclick=()=>discardResponse(b.dataset.inboxdel));
+    }
+
+    async function uploadResponses(){
+      const inp=document.getElementById('rspFile'), msg=document.getElementById('rspMsg');
+      if(!inp.files||!inp.files[0]){msg.className='status-msg error';msg.textContent='Choose a Forms export first.';return;}
+      const fd=new FormData(); fd.append('file',inp.files[0]);
+      const btn=document.getElementById('rspUpBtn'); btn.disabled=true; btn.textContent='Reading…';
+      msg.className='status-msg info'; msg.textContent='Reading the export…';
+      try{
+        // FormData sets its own multipart boundary — don't send our JSON header.
+        const t=localStorage.getItem('auth_token');
+        const res=await fetch('/api/onboarding/form-responses/upload',
+          {method:'POST',headers:t?{'Authorization':'Bearer '+t}:{},body:fd});
+        const d=await res.json().catch(()=>({}));
+        // The endpoint's own detail already explains the problem ("Could not
+        // read that file: ...", "No responses found. ..."), so show it as-is.
+        if(!res.ok){msg.className='status-msg error';
+          msg.textContent=d.detail||`Upload failed (${res.status})`;return;}
+        msg.className='status-msg info';
+        msg.innerHTML=`<strong>${d.responses}</strong> response${d.responses===1?'':'s'} read from
+          &ldquo;${esc(d.form_name)}&rdquo; — ${d.added} new, ${d.updated} updated,
+          <strong>${d.matched}</strong> attached automatically${d.unmatched?`, ${d.unmatched} waiting to be assigned`:''}.
+          ${(d.warnings||[]).map(w=>`<br><em>${esc(w)}</em>`).join('')}`;
+        inp.value='';
+        await loadPortfolio();
+      }catch(e){ msg.className='status-msg error'; msg.textContent='Error: '+e.message; }
+      finally{ btn.disabled=false; btn.textContent='Upload'; }
+    }
+
+    async function assignResponse(id,openingId){
+      if(!openingId) return;
+      try{
+        const res=await api('/api/onboarding/form-responses/'+id,
+          {method:'PUT',body:JSON.stringify({opening_id:Number(openingId)})});
+        if(!res.ok){toast('Could not assign ('+res.status+')',true);return;}
+        toast('Response filed ✓');
+        await loadResponseInbox();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
+    async function discardResponse(id){
+      if(!confirm('Discard this response? It can be brought back by re-uploading the export.')) return;
+      try{
+        const res=await api('/api/onboarding/form-responses/'+id,{method:'DELETE'});
+        if(!res.ok){toast('Could not discard ('+res.status+')',true);return;}
+        toast('Response discarded');
+        await loadResponseInbox();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
     // ── Alerts panel ──────────────────────────────────────────────────────────
     // The weeks-out alerts run themselves (Monday digest, Thursday escalation);
     // this panel is so you can see what they'll say, who they go to, and send
@@ -589,6 +710,8 @@
       const extra=[];
       extra.push({id:'calendar',label:'Calendar',kind:'ref',
                   count:(CURRENT.appointments||[]).length});
+      extra.push({id:'responses',label:'Form Responses',kind:'ref',
+                  count:(CURRENT.form_responses||[]).length});
       if(ref.contacts&&Object.keys(ref.contacts).length) extra.push({id:'contacts',label:'Vendor Contacts',kind:'ref'});
       if((ref.forms||[]).length) extra.push({id:'forms',label:'Forms',kind:'ref'});
       if((ref.systems||[]).length) extra.push({id:'systems',label:'Systems',kind:'ref'});
@@ -600,6 +723,87 @@
       });
       if(extra.length){ tabs.push({id:'__div',divider:true}); extra.forEach(t=>tabs.push(t)); }
       return tabs;
+    }
+
+    // ── Form responses ────────────────────────────────────────────────────────
+    // A Forms export is one row per response and one column per question — 35
+    // columns wide for the Restaurant Information Form, which is why they're
+    // unreadable in Excel. Same answers, turned on their side: one row per
+    // question, in the order the form asks them.
+    function answerHtml(a){
+      // Answers routinely pack a name and an email into one cell
+      // ("Melody Matulewic melody@example.com"), so make the address clickable.
+      return linkifyInfo(a).replace(/\n/g,'<br>');
+    }
+
+    function responseCard(sub){
+      const rows=(sub.answers||[]).map(a=>`<tr>
+          <th scope="row">${esc(a.q)}</th>
+          <td>${answerHtml(a.a)}</td>
+        </tr>`).join('');
+      const meta=[
+        sub.site_id?`Restaurant #${esc(sub.site_id)}`:'',
+        sub.franchise_group?esc(sub.franchise_group):'',
+        sub.submitted_at?`submitted ${esc(fmt(sub.submitted_at))}`:'',
+        sub.submitter_email?`<a href="mailto:${esc(sub.submitter_email)}">${esc(sub.submitter_email)}</a>`:'',
+      ].filter(Boolean).join(' &middot; ');
+      return `<section class="sheet resp-card">
+        <div class="sheet-h">
+          <h3>${esc(sub.form_name||'Form response')}${sub.location_name?` — ${esc(sub.location_name)}`:''}</h3>
+          <span class="cnt">${(sub.answers||[]).length} answers</span>
+        </div>
+        <div class="resp-meta">${meta}${sub.match_note?`<div class="resp-how">${esc(sub.match_note)}</div>`:''}</div>
+        <div class="wbwrap"><table class="wb wb-plain resp-table"><tbody>${rows}</tbody></table></div>
+        <div class="resp-actions">
+          <button class="btn-ghost" data-cover="${sub.id}">Fill cover sheet from this</button>
+          <button class="btn-link" data-detach="${sub.id}">Move to inbox</button>
+          <button class="btn-link danger" data-respdel="${sub.id}">Remove</button>
+        </div>
+      </section>`;
+    }
+
+    function renderResponses(){
+      const subs=CURRENT.form_responses||[];
+      if(!subs.length) return `<div class="empty">No form responses filed against this
+          opening yet. Upload a Microsoft Forms export from the portfolio page
+          (&ldquo;Form responses&rdquo;) — anything carrying this restaurant&rsquo;s number
+          attaches itself.</div>`;
+      return `<p style="color:#4A4F57;margin:0 0 14px;">What the franchisee actually submitted,
+          one question per row instead of 35 columns across. ${subs.length} response${
+          subs.length===1?'':'s'} on file.</p>${subs.map(responseCard).join('')}`;
+    }
+
+    async function applyCoverSheet(id){
+      if(!confirm('Fill this opening\'s cover sheet from the response? Fields you have already filled in are left alone.')) return;
+      try{
+        const res=await api(`/api/onboarding/form-responses/${id}/apply-cover-sheet`,{method:'POST'});
+        const d=await res.json().catch(()=>({}));
+        if(!res.ok){toast('Could not apply: '+(d.detail||res.status),true);return;}
+        const n=Object.keys(d.applied||{}).length, k=Object.keys(d.skipped_because_already_set||{}).length;
+        toast(n?`Filled ${n} field${n===1?'':'s'}${k?`, left ${k} already set`:''} ✓`
+               :'Nothing to fill — the cover sheet already has these');
+        await reloadDetailKeepTab();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
+    async function detachResponse(id){
+      try{
+        const res=await api('/api/onboarding/form-responses/'+id,
+          {method:'PUT',body:JSON.stringify({opening_id:null})});
+        if(!res.ok){toast('Could not move ('+res.status+')',true);return;}
+        toast('Moved back to the inbox');
+        await reloadDetailKeepTab(); await loadResponseInbox();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
+    async function deleteResponse(id){
+      if(!confirm('Remove this response for good?')) return;
+      try{
+        const res=await api('/api/onboarding/form-responses/'+id,{method:'DELETE'});
+        if(!res.ok){toast('Could not remove ('+res.status+')',true);return;}
+        toast('Response removed');
+        await reloadDetailKeepTab();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
     }
 
     // ── Calendar ──────────────────────────────────────────────────────────────
@@ -889,6 +1093,7 @@
       else if(detailTab==='systems') h=renderSystems(ref.systems||[]);
       else if(detailTab==='contacts') h=renderContacts(ref.contacts||{});
       else if(detailTab==='calendar') h=renderCalendar();
+      else if(detailTab==='responses') h=renderResponses();
       else if(detailTab==='forms') h=renderForms(ref.forms||[]);
       else if(detailTab==='call45') h=renderCall45(ref.call45||{sections:[]});
       else if(detailTab==='itquick') h=renderItQuick(ref.itquick||[]);
@@ -903,6 +1108,9 @@
       document.querySelectorAll('#d-tabbody .wk-in').forEach(i=>i.onchange=()=>saveTaskWeeks(i));
       document.querySelectorAll('#d-tabbody [data-astatus]').forEach(sel=>sel.onchange=()=>setAppointmentStatus(sel.dataset.astatus,sel.value));
       document.querySelectorAll('#d-tabbody [data-adel]').forEach(b=>b.onclick=()=>removeAppointment(b.dataset.adel));
+      document.querySelectorAll('#d-tabbody [data-cover]').forEach(b=>b.onclick=()=>applyCoverSheet(b.dataset.cover));
+      document.querySelectorAll('#d-tabbody [data-detach]').forEach(b=>b.onclick=()=>detachResponse(b.dataset.detach));
+      document.querySelectorAll('#d-tabbody [data-respdel]').forEach(b=>b.onclick=()=>deleteResponse(b.dataset.respdel));
       document.querySelectorAll('#d-tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
       document.querySelectorAll('#d-tabbody [data-send]').forEach(b=>b.onclick=()=>answerQuestion(b.dataset.send,b));
     }

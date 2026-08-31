@@ -52,6 +52,7 @@ import punchh_db
 import projects_db
 import onboarding_db
 import onboarding_alerts
+import onboarding_forms
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -22315,6 +22316,11 @@ class AppointmentIn(BaseModel):
     status:  Optional[str] = None   # scheduled | done | cancelled
 
 
+class FormAttachIn(BaseModel):
+    """File a form response against an opening (null returns it to the inbox)."""
+    opening_id: Optional[int] = None
+
+
 class AlertSettingsIn(BaseModel):
     """Where the weeks-out alerts go, and whether they run at all."""
     enabled: Optional[bool] = None
@@ -22507,6 +22513,123 @@ async def onboarding_appointment_delete(
     if not onboarding_db.delete_appointment(appointment_id):
         raise HTTPException(status_code=404, detail=f"Appointment {appointment_id} not found")
     return {"id": appointment_id, "success": True}
+
+
+# ---- form responses ---------------------------------------------------------
+# The Forms exports come back one row per response and one column per question
+# (35 columns wide for the Restaurant Information Form). Upload the .xlsx and
+# each response is parsed into question/answer pairs, matched to an opening by
+# its "Restaurant Site ID" and read vertically instead of sideways.
+
+@app.post("/api/onboarding/form-responses/upload")
+async def onboarding_form_upload(
+    file: UploadFile = File(..., description="Microsoft Forms .xlsx export"),
+    form_name: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+):
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="That file came through empty.")
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File is over 10MB — is that a Forms export?")
+    label = (form_name or "").strip() or re.sub(
+        r"\.xlsx?$", "", os.path.basename(file.filename or "Form responses"), flags=re.I)
+    try:
+        responses, warnings = onboarding_forms.parse_export(raw, label)
+    except Exception as exc:
+        logger.error("onboarding.form_upload parse failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Could not read that file: {exc}")
+    if not responses:
+        raise HTTPException(
+            status_code=400,
+            detail="No responses found. " + (" ".join(warnings) or
+                   "Expected a Microsoft Forms export: header row, one row per response."))
+
+    openings = onboarding_db.openings_for_matching()
+    added = updated = matched = 0
+    results = []
+    for rec in responses:
+        opening_id, how = onboarding_forms.match_opening(rec, openings)
+        res = onboarding_db.upsert_form_submission(
+            rec, onboarding_forms.answers_json(rec), opening_id,
+            (f"matched on {how}" if opening_id else f"not matched — {how}"),
+            uploaded_by=current_user.name)
+        added += res["created"]
+        updated += (not res["created"])
+        matched += bool(opening_id)
+        results.append({"id": res["id"], "response_id": rec["response_id"],
+                        "location_name": rec.get("location_name"),
+                        "site_id": rec.get("site_id"),
+                        "opening_id": opening_id, "how": how,
+                        "answers": len(rec["answers"])})
+    return {"form_name": label, "responses": len(responses), "added": added,
+            "updated": updated, "matched": matched,
+            "unmatched": len(responses) - matched,
+            "warnings": warnings, "results": results}
+
+
+@app.get("/api/onboarding/form-responses")
+async def onboarding_form_list(
+    opening_id: Optional[int] = None, unmatched: bool = False,
+    _user: User = Depends(get_current_admin_user),
+):
+    return onboarding_db.list_form_submissions(opening_id=opening_id, unmatched=unmatched)
+
+
+@app.put("/api/onboarding/form-responses/{submission_id}")
+async def onboarding_form_attach(
+    submission_id: int, body: FormAttachIn,
+    _user: User = Depends(get_current_admin_user),
+):
+    if not onboarding_db.get_form_submission(submission_id):
+        raise HTTPException(status_code=404, detail=f"Response {submission_id} not found")
+    if body.opening_id is not None and not onboarding_db.get_opening_by_id(body.opening_id):
+        raise HTTPException(status_code=404, detail=f"Opening {body.opening_id} not found")
+    return {"id": submission_id,
+            "success": onboarding_db.attach_form_submission(submission_id, body.opening_id)}
+
+
+@app.post("/api/onboarding/form-responses/{submission_id}/apply-cover-sheet")
+async def onboarding_form_apply_cover_sheet(
+    submission_id: int, overwrite: bool = False,
+    _user: User = Depends(get_current_admin_user),
+):
+    """Fill the opening's cover sheet from this response.
+
+    Only blank fields are filled unless overwrite=true — a form submitted months
+    ago must not quietly replace something a person has since corrected.
+    """
+    sub = onboarding_db.get_form_submission(submission_id)
+    if not sub:
+        raise HTTPException(status_code=404, detail=f"Response {submission_id} not found")
+    if not sub.get("opening_id"):
+        raise HTTPException(status_code=400,
+                            detail="File this response against an opening first.")
+    opening = onboarding_db.get_opening_by_id(sub["opening_id"])
+    if not opening:
+        raise HTTPException(status_code=404, detail="That opening no longer exists.")
+
+    proposed = onboarding_forms.cover_sheet_values(sub)
+    applied, skipped = {}, {}
+    for col, val in proposed.items():
+        current = (opening.get(col) or "").strip()
+        if current and not overwrite:
+            skipped[col] = current
+        elif current != val:
+            applied[col] = val
+    if applied:
+        onboarding_db.update_opening(sub["opening_id"], applied)
+    return {"opening_id": sub["opening_id"], "applied": applied,
+            "skipped_because_already_set": skipped}
+
+
+@app.delete("/api/onboarding/form-responses/{submission_id}")
+async def onboarding_form_delete(
+    submission_id: int, _user: User = Depends(get_current_admin_user)
+):
+    if not onboarding_db.delete_form_submission(submission_id):
+        raise HTTPException(status_code=404, detail=f"Response {submission_id} not found")
+    return {"id": submission_id, "success": True}
 
 
 # ---- weeks-out alerts -------------------------------------------------------
