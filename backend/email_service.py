@@ -683,6 +683,186 @@ def send_question_answered_email(to_email: str, franchisee_name: str,
     return False
 
 
+# An opening that is already close to its date can have a hundred untouched
+# tasks behind it, and nobody reads a hundred-row email. Show the most urgent
+# and say how many more there are; the dashboard has the full list.
+SCHED_ROWS_MAX = 15
+
+
+def _sched_rows_html(tasks, *, late: bool) -> str:
+    """One table of tasks with their due dates. Late rows are called out in red
+    with how many days they have slipped."""
+    from datetime import date as _d
+    today = _d.today()
+    extra = max(0, len(tasks) - SCHED_ROWS_MAX)
+    rows = []
+    for t in tasks[:SCHED_ROWS_MAX]:
+        due = t.get("due_date") or ""
+        note = ""
+        if late and due:
+            try:
+                note = f" &middot; {(today - _d.fromisoformat(due)).days} days late"
+            except ValueError:
+                note = ""
+        owner = "You" if t.get("owner") == "franchisee" else "Newk's"
+        dept = _esc(t.get("dept") or "")
+        rows.append(
+            f'<tr>'
+            f'<td style="padding:7px 10px 7px 0;border-bottom:1px solid #F0EAE0;'
+            f'font-size:12px;color:{"#B3261E" if late else "#6B7280"};white-space:nowrap;'
+            f'font-variant-numeric:tabular-nums;">{_esc(due)}{note}</td>'
+            f'<td style="padding:7px 0;border-bottom:1px solid #F0EAE0;font-size:13px;'
+            f'color:#1F2937;">{_esc(t.get("title"))}'
+            f'<span style="color:#9CA3AF;font-size:11px;"> &mdash; {owner}'
+            f'{" &middot; " + dept if dept else ""}</span></td>'
+            f'</tr>'
+        )
+    if extra:
+        rows.append(
+            f'<tr><td colspan="2" style="padding:7px 0;font-size:12px;color:#9CA3AF;'
+            f'font-style:italic;">&hellip; and {extra} more &mdash; see the dashboard'
+            f'</td></tr>')
+    return ('<table style="width:100%;border-collapse:collapse;margin:0 0 1.2rem;">'
+            + "".join(rows) + "</table>")
+
+
+def _appt_rows_html(appointments) -> str:
+    rows = []
+    for a in appointments:
+        when = _esc(a.get("on_date") or "")
+        if a.get("at_time"):
+            when += " " + _esc(a["at_time"])
+        bits = [x for x in [a.get("vendor"), a.get("notes")] if x]
+        rows.append(
+            f'<tr>'
+            f'<td style="padding:7px 10px 7px 0;border-bottom:1px solid #F0EAE0;'
+            f'font-size:12px;color:#6B7280;white-space:nowrap;'
+            f'font-variant-numeric:tabular-nums;">{when}</td>'
+            f'<td style="padding:7px 0;border-bottom:1px solid #F0EAE0;font-size:13px;'
+            f'color:#1F2937;">{_esc(a.get("title"))}'
+            + (f'<span style="color:#9CA3AF;font-size:11px;"> &mdash; '
+               f'{_esc(" · ".join(bits))}</span>' if bits else "")
+            + '</td></tr>'
+        )
+    return ('<table style="width:100%;border-collapse:collapse;margin:0 0 1.2rem;">'
+            + "".join(rows) + "</table>")
+
+
+def send_onboarding_schedule_email(to, *, opening, buckets, appointments,
+                                   kind: str, audience: str,
+                                   dashboard_url: str) -> bool:
+    """Weeks-out alert for one opening.
+
+    `kind` is "weekly" (the digest) or "overdue" (the mid-week escalation);
+    `audience` is "internal" (everything) or "franchisee" (their tasks only, and
+    addressed to them). Built by onboarding_alerts, which decides who gets what.
+    """
+    if not SMTP_HOST:
+        logger.error("SMTP not configured - cannot send NRO schedule alert")
+        return False
+    to = [e for e in (to if isinstance(to, (list, tuple)) else [to]) if e]
+    if not to:
+        return False
+
+    overdue = buckets.get("overdue") or []
+    upcoming = buckets.get("upcoming") or []
+    appointments = appointments or []
+    if not (overdue or upcoming or appointments):
+        return False
+
+    place = ", ".join([p for p in [opening.get("city"), opening.get("state")] if p])
+    label = (opening.get("store_name") or "Newk's Eatery") + (f" — {place}" if place else "")
+    target = opening.get("target_open") or ""
+    fyou = audience == "franchisee"
+
+    if kind == "overdue":
+        subject = f"[NRO] {len(overdue)} task{'s' if len(overdue) != 1 else ''} past due — {label}"
+        heading = "Tasks past their date"
+        bar = "#8a1f1f"
+    else:
+        subject = f"[NRO Weekly] {label}"
+        if overdue:
+            subject += f" — {len(overdue)} overdue"
+        heading = "Your opening this week" if fyou else "Opening schedule"
+        bar = "#9E1B32"
+
+    countdown = ""
+    if target:
+        from datetime import date as _d
+        try:
+            days = (_d.fromisoformat(target[:10]) - _d.today()).days
+            countdown = (f"{days} days to open" if days >= 0
+                         else f"opened {abs(days)} days ago")
+        except ValueError:
+            pass
+
+    who = "you own" if fyou else ""
+    body = [
+        f'<p style="margin:0 0 1.2rem;color:#374151;font-size:14px;">'
+        f'<strong>{_esc(label)}</strong>'
+        + (f'<br><span style="color:#6B7280;font-size:12.5px;">Target open '
+           f'{_esc(target)}{" &middot; " + _esc(countdown) if countdown else ""}</span>'
+           if target else "")
+        + '</p>'
+    ]
+
+    if overdue:
+        body.append(
+            f'<p style="margin:0 0 .5rem;font-size:12px;text-transform:uppercase;'
+            f'letter-spacing:1px;color:#B3261E;font-weight:700;">Past due'
+            f'{" (" + who + ")" if who else ""} &middot; {len(overdue)}</p>')
+        body.append(_sched_rows_html(overdue, late=True))
+
+    if upcoming:
+        body.append(
+            f'<p style="margin:0 0 .5rem;font-size:12px;text-transform:uppercase;'
+            f'letter-spacing:1px;color:#6B7280;font-weight:700;">Due in the next '
+            f'two weeks{" (" + who + ")" if who else ""} &middot; {len(upcoming)}</p>')
+        body.append(_sched_rows_html(upcoming, late=False))
+
+    if appointments:
+        body.append(
+            '<p style="margin:0 0 .5rem;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:1px;color:#6B7280;font-weight:700;">Scheduled '
+            f'appointments &middot; {len(appointments)}</p>')
+        body.append(_appt_rows_html(appointments))
+
+    body.append(
+        f'<p style="margin:1.5rem 0 0;"><a href="{_esc(dashboard_url)}" '
+        f'style="background:#9E1B32;color:#fff;text-decoration:none;padding:.7rem 1.4rem;'
+        f'border-radius:6px;font-size:14px;display:inline-block;">'
+        f'{"Open your hub" if fyou else "Open the dashboard"}</a></p>')
+    if fyou:
+        body.append('<p style="margin:1.2rem 0 0;color:#9CA3AF;font-size:11.5px;">'
+                    'Tick items off in your hub as you complete them — progress saves '
+                    'automatically and the Newk\'s team sees it straight away.</p>')
+
+    # Plain-text alternative, same content in reading order.
+    plain = [label, f"Target open {target} {countdown}".strip(), ""]
+    for title, items, mark in (("PAST DUE", overdue, "!"), ("DUE IN THE NEXT TWO WEEKS", upcoming, "-")):
+        if items:
+            plain.append(f"{title} ({len(items)})")
+            plain += [f"  {mark} {i.get('due_date') or ''}  {i.get('title')}"
+                      for i in items[:SCHED_ROWS_MAX]]
+            if len(items) > SCHED_ROWS_MAX:
+                plain.append(f"  ... and {len(items) - SCHED_ROWS_MAX} more")
+            plain.append("")
+    if appointments:
+        plain.append("SCHEDULED APPOINTMENTS")
+        plain += [f"  - {a.get('on_date')} {a.get('at_time') or ''}  {a.get('title')}"
+                  for a in appointments]
+        plain.append("")
+    plain.append(dashboard_url)
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = FROM_HEADER
+    msg["To"] = ", ".join(to)
+    msg.attach(MIMEText("\n".join(plain), "plain"))
+    msg.attach(MIMEText(_shell(heading, "".join(body), bar=bar), "html"))
+    return _send(msg, to)
+
+
 def send_onboarding_digest_email(digests, dashboard_url: str,
                                  recipients=None) -> bool:
     """End-of-day completion summary across every opening that moved today.

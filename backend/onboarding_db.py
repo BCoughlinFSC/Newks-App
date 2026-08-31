@@ -25,6 +25,7 @@ import re
 import secrets
 import sqlite3
 from contextlib import contextmanager
+from datetime import date as _date, timedelta as _timedelta
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -512,6 +513,38 @@ def initialize_schema() -> None:
             -- "weeks before open" is relative, so a correction applies to every
             -- opening at once. Seeded values live in IT_TASK_WEEKS; a row here
             -- means a human has since set it in the app.
+            -- Scheduled appointments for an opening: internet install, POS
+            -- install, training week, alarm walk-through, and so on. Distinct
+            -- from tasks — a task is "has this been done", an appointment is
+            -- "someone is turning up at this time". Dates are the real thing
+            -- here (not weeks-out), because a vendor books a day.
+            CREATE TABLE IF NOT EXISTS appointments (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                opening_id  INTEGER NOT NULL REFERENCES openings(id) ON DELETE CASCADE,
+                title       TEXT NOT NULL,
+                kind        TEXT,      -- internet | pos | training | ... (see APPOINTMENT_KINDS)
+                on_date     TEXT NOT NULL,   -- 'YYYY-MM-DD'
+                at_time     TEXT,            -- 'HH:MM' or free text ("AM", "8-12")
+                vendor      TEXT,
+                contact     TEXT,
+                notes       TEXT,
+                status      TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled|done|cancelled
+                created_by  TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_appt_opening ON appointments(opening_id, on_date);
+
+            -- Small app-owned key/value bag: currently just the alert
+            -- recipients and on/off switch, so they can be changed from the
+            -- dashboard instead of editing .env and restarting.
+            CREATE TABLE IF NOT EXISTS settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE TABLE IF NOT EXISTS task_timing (
                 task_key   TEXT PRIMARY KEY,
                 weeks      REAL,
@@ -707,6 +740,157 @@ def _reference_view(for_franchisee: bool) -> Dict[str, Any]:
     return ref
 
 
+# ─── appointments ────────────────────────────────────────────────────────────
+# The install/training calendar for an opening. Newk's staff maintain these; the
+# franchisee sees them on their hub, and the weekly digest lists the ones falling
+# in its window.
+
+# Suggested categories, which drive the colour chip in the UI. Free text is
+# accepted — this is a hint list, not a constraint.
+APPOINTMENT_KINDS = [
+    {"id": "internet", "label": "Internet / ISP install"},
+    {"id": "pos", "label": "POS install (Toast)"},
+    {"id": "network", "label": "Network / FSC equipment"},
+    {"id": "voice", "label": "Voice / phone install"},
+    {"id": "cctv", "label": "CCTV / cameras"},
+    {"id": "alarm", "label": "Alarm install"},
+    {"id": "training", "label": "Training"},
+    {"id": "delivery", "label": "Equipment delivery"},
+    {"id": "inspection", "label": "Inspection / walk-through"},
+    {"id": "other", "label": "Other"},
+]
+_APPT_FIELDS = ["title", "kind", "on_date", "at_time", "vendor", "contact",
+                "notes", "status"]
+
+
+def list_appointments(opening_id: int) -> List[Dict[str, Any]]:
+    """An opening's appointments, soonest first."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM appointments WHERE opening_id = ? "
+            "ORDER BY on_date, COALESCE(at_time,''), id",
+            (opening_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_appointment(opening_id: int, data: Dict[str, Any],
+                       created_by: str) -> Optional[Dict[str, Any]]:
+    """Add an appointment. Title and date are required; everything else optional."""
+    title = (data.get("title") or "").strip()
+    on_date = (data.get("on_date") or "").strip()
+    if not title or not on_date:
+        return None
+    vals = [_clean(data, f) for f in _APPT_FIELDS]
+    vals[0], vals[2] = title, on_date                       # title, on_date
+    vals[7] = vals[7] or "scheduled"                        # status
+    with get_connection() as conn:
+        cur = conn.execute(
+            f"""
+            INSERT INTO appointments (opening_id, {", ".join(_APPT_FIELDS)},
+                                      created_by, created_at, updated_at)
+            VALUES (?, {", ".join("?" * len(_APPT_FIELDS))}, ?,
+                    datetime('now'), datetime('now'))
+            """,
+            tuple([opening_id] + vals + [created_by]),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM appointments WHERE id = ?",
+                           (cur.lastrowid,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_appointment(appointment_id: int, data: Dict[str, Any]) -> bool:
+    """Update only the fields present in `data`."""
+    sets, vals = [], []
+    for f in _APPT_FIELDS:
+        if f in data:
+            v = _clean(data, f)
+            if f in ("title", "on_date") and not v:
+                continue                    # never blank a required field
+            sets.append(f"{f} = ?")
+            vals.append(v)
+    if not sets:
+        return False
+    vals.append(appointment_id)
+    with get_connection() as conn:
+        cur = conn.execute(
+            f"UPDATE appointments SET {', '.join(sets)}, updated_at = datetime('now') "
+            "WHERE id = ?",
+            tuple(vals),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_appointment(appointment_id: int) -> bool:
+    """Appointments are small and get cancelled for real — a hard delete is
+    right here, unlike openings which are archived."""
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM appointments WHERE id = ?", (appointment_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def appointment_opening_id(appointment_id: int) -> Optional[int]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT opening_id FROM appointments WHERE id = ?",
+                           (appointment_id,)).fetchone()
+    return int(row["opening_id"]) if row else None
+
+
+# ─── settings ────────────────────────────────────────────────────────────────
+
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    try:
+        with get_connection() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row and row["value"] is not None else default
+    except Exception as exc:
+        logger.warning("get_setting(%s) failed: %s", key, exc)
+        return default
+
+
+def set_setting(key: str, value: Optional[str], updated_by: str = "") -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (key, value, updated_by, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE
+               SET value = excluded.value, updated_by = excluded.updated_by,
+                   updated_at = datetime('now')
+            """,
+            (key, value, updated_by),
+        )
+        conn.commit()
+
+
+# ─── due dates ───────────────────────────────────────────────────────────────
+# "Weeks Out" is relative to the target open date, so the calendar date a task
+# is actually due only exists once an opening has a target. Stamped onto every
+# task in the payload so the pages and the alert emails agree on the date.
+
+def due_date_for(target_open: Optional[str], weeks: Optional[float]) -> Optional[str]:
+    """'YYYY-MM-DD' the task is due, or None if either input is missing."""
+    if not target_open or weeks is None:
+        return None
+    try:
+        target = _date.fromisoformat(str(target_open)[:10])
+    except ValueError:
+        return None
+    return (target - _timedelta(weeks=float(weeks))).isoformat()
+
+
+def _stamp_due_dates(tasks: List[Dict[str, Any]], target_open: Optional[str]) -> None:
+    """Add `due_date` (and `overdue`, for anything past due and unticked)."""
+    today = _date.today().isoformat()
+    for t in tasks:
+        due = due_date_for(target_open, t.get("weeks"))
+        t["due_date"] = due
+        t["overdue"] = bool(due and not t.get("done") and due < today)
+
+
 # ─── openings CRUD ───────────────────────────────────────────────────────────
 
 # Every editable column on an opening, in the order the create/update forms
@@ -759,12 +943,15 @@ def list_openings(include_archived: bool = False) -> List[Dict[str, Any]]:
     for s in status:
         by_opening.setdefault(s["opening_id"], []).append(s)
     out = []
+    overrides = task_weeks_overrides()      # one read for the whole list
     for o in rows:
-        tasks = _assemble_tasks(by_opening.get(o["id"], []))
+        tasks = _assemble_tasks(by_opening.get(o["id"], []), weeks_overrides=overrides)
+        _stamp_due_dates(tasks, o["target_open"])
         d = dict(o)
         d.pop("token", None)  # never leak the magic-link token to the list view
         d["progress"] = _progress(tasks)
         d["open_questions"] = qcounts.get(o["id"], 0)
+        d["overdue_count"] = sum(1 for t in tasks if t["overdue"])
         out.append(d)
     # Sort: openings with a target date first (soonest first), undated last.
     out.sort(key=lambda x: (x["target_open"] is None, x["target_open"] or ""))
@@ -783,7 +970,12 @@ def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection,
     by_task: Dict[str, List[Dict[str, Any]]] = {}
     for q in qrows:
         by_task.setdefault(q["task_key"], []).append(dict(q))
+    appts = conn.execute(
+        "SELECT * FROM appointments WHERE opening_id = ? "
+        "ORDER BY on_date, COALESCE(at_time,''), id", (o["id"],),
+    ).fetchall()
     tasks = _assemble_tasks(status, by_task)
+    _stamp_due_dates(tasks, o["target_open"])
     track_views = _build_track_views(tasks, for_franchisee)
     # Progress is computed over exactly what this audience can see.
     visible = [t for grp in track_views for g in grp["groups"] for t in g["tasks"]]
@@ -794,6 +986,8 @@ def _hydrate(o: sqlite3.Row, conn: sqlite3.Connection,
     d["progress"] = _progress(visible if for_franchisee else tasks)
     d["steps"] = STEP_TITLES
     d["open_questions"] = sum(1 for q in qrows if q["status"] == "open")
+    d["appointments"] = [dict(a) for a in appts]
+    d["appointment_kinds"] = APPOINTMENT_KINDS
     return d
 
 

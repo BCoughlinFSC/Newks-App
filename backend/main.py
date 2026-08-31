@@ -51,6 +51,7 @@ import crunchtime_db
 import punchh_db
 import projects_db
 import onboarding_db
+import onboarding_alerts
 from olo_client import (
     list_order_batches,
     download_batch_zip,
@@ -7648,6 +7649,36 @@ async def nro_onboarding_digest_job():
 # owners are still at their desks rather than overnight with the batch jobs.
 _scheduler.add_job(nro_onboarding_digest_job, CronTrigger(hour=17, minute=0),
                    id="nro_onboarding_digest", replace_existing=True)
+
+
+async def nro_weeks_out_digest_job():
+    """Monday-morning weeks-out digest, one email per active opening."""
+    try:
+        stats = onboarding_alerts.run_weekly_digest(APP_BASE_URL)
+        logger.info("NRO weeks-out weekly digest: %s", stats)
+    except Exception as exc:
+        logger.error("NRO weeks-out weekly digest failed: %s", exc, exc_info=True)
+
+
+async def nro_overdue_escalation_job():
+    """Thursday nudge — only fires for openings that actually have overdue tasks."""
+    try:
+        stats = onboarding_alerts.run_overdue_escalation(APP_BASE_URL)
+        logger.info("NRO overdue escalation: %s", stats)
+    except Exception as exc:
+        logger.error("NRO overdue escalation failed: %s", exc, exc_info=True)
+
+
+# Pinned to America/Chicago like the report subscriptions: the box runs UTC, and
+# "Monday 7am" has to mean 7am in Ridgeland, not 7am UTC.
+_scheduler.add_job(nro_weeks_out_digest_job,
+                   CronTrigger(day_of_week="mon", hour=7, minute=0,
+                               timezone="America/Chicago"),
+                   id="nro_weeks_out_digest", replace_existing=True)
+_scheduler.add_job(nro_overdue_escalation_job,
+                   CronTrigger(day_of_week="thu", hour=7, minute=0,
+                               timezone="America/Chicago"),
+                   id="nro_overdue_escalation", replace_existing=True)
 
 
 @app.on_event("startup")
@@ -22272,6 +22303,24 @@ class TaskUpdateIn(BaseModel):
     note: Optional[str] = None
 
 
+class AppointmentIn(BaseModel):
+    """An install/training appointment for an opening. Title and date required."""
+    title:   Optional[str] = None
+    kind:    Optional[str] = None
+    on_date: Optional[str] = None   # 'YYYY-MM-DD'
+    at_time: Optional[str] = None   # 'HH:MM' or free text
+    vendor:  Optional[str] = None
+    contact: Optional[str] = None
+    notes:   Optional[str] = None
+    status:  Optional[str] = None   # scheduled | done | cancelled
+
+
+class AlertSettingsIn(BaseModel):
+    """Where the weeks-out alerts go, and whether they run at all."""
+    enabled: Optional[bool] = None
+    email:   Optional[str] = None   # comma-separated; blank falls back to NRO_NOTIFY_TO
+
+
 class TaskTimingIn(BaseModel):
     """Weeks-out for a task in the *template* — applies to every opening.
     null clears the override and falls back to the seeded value."""
@@ -22413,6 +22462,98 @@ async def onboarding_set_task_timing(
     if not ok:
         raise HTTPException(status_code=404, detail=f"Unknown task '{task_key}'")
     return {"task_key": task_key, "weeks": body.weeks, "success": True}
+
+
+# ---- appointments (install / training calendar) ------------------------------
+
+@app.get("/api/onboarding/openings/{opening_id}/appointments")
+async def onboarding_appointments(
+    opening_id: int, _user: User = Depends(get_current_admin_user)
+):
+    return onboarding_db.list_appointments(opening_id)
+
+
+@app.post("/api/onboarding/openings/{opening_id}/appointments")
+async def onboarding_appointment_create(
+    opening_id: int, body: AppointmentIn,
+    current_user: User = Depends(get_current_admin_user),
+):
+    if not onboarding_db.get_opening_by_id(opening_id):
+        raise HTTPException(status_code=404, detail=f"Opening {opening_id} not found")
+    appt = onboarding_db.create_appointment(
+        opening_id, body.dict(exclude_unset=True), created_by=current_user.name)
+    if not appt:
+        raise HTTPException(status_code=400,
+                            detail="An appointment needs at least a title and a date.")
+    return appt
+
+
+@app.put("/api/onboarding/appointments/{appointment_id}")
+async def onboarding_appointment_update(
+    appointment_id: int, body: AppointmentIn,
+    _user: User = Depends(get_current_admin_user),
+):
+    if onboarding_db.appointment_opening_id(appointment_id) is None:
+        raise HTTPException(status_code=404, detail=f"Appointment {appointment_id} not found")
+    return {"id": appointment_id,
+            "success": onboarding_db.update_appointment(
+                appointment_id, body.dict(exclude_unset=True))}
+
+
+@app.delete("/api/onboarding/appointments/{appointment_id}")
+async def onboarding_appointment_delete(
+    appointment_id: int, _user: User = Depends(get_current_admin_user)
+):
+    if not onboarding_db.delete_appointment(appointment_id):
+        raise HTTPException(status_code=404, detail=f"Appointment {appointment_id} not found")
+    return {"id": appointment_id, "success": True}
+
+
+# ---- weeks-out alerts -------------------------------------------------------
+
+@app.get("/api/onboarding/alerts")
+async def onboarding_alerts_preview(_user: User = Depends(get_current_admin_user)):
+    """What the next digest would say, plus where it would go. Read-only."""
+    try:
+        return {
+            "enabled": onboarding_alerts.alerts_enabled(),
+            "internal_recipients": onboarding_alerts.internal_recipients(),
+            "lookahead_days": onboarding_alerts.LOOKAHEAD_DAYS,
+            "openings": onboarding_alerts.preview(),
+        }
+    except Exception as exc:
+        logger.error("onboarding.alerts preview failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {exc}")
+
+
+@app.put("/api/onboarding/alerts")
+async def onboarding_alerts_settings(
+    body: AlertSettingsIn, current_user: User = Depends(get_current_admin_user)
+):
+    if body.enabled is not None:
+        onboarding_db.set_setting(onboarding_alerts.SETTING_ENABLED,
+                                  "1" if body.enabled else "0", current_user.name)
+    if body.email is not None:
+        onboarding_db.set_setting(onboarding_alerts.SETTING_EMAIL,
+                                  body.email.strip() or None, current_user.name)
+    return {"enabled": onboarding_alerts.alerts_enabled(),
+            "internal_recipients": onboarding_alerts.internal_recipients()}
+
+
+@app.post("/api/onboarding/alerts/run")
+async def onboarding_alerts_run(
+    kind: str = "weekly", _user: User = Depends(get_current_admin_user)
+):
+    """Send the digest (or the overdue escalation) now — the "test it" button."""
+    if kind not in ("weekly", "overdue"):
+        raise HTTPException(status_code=400, detail="kind must be 'weekly' or 'overdue'")
+    try:
+        run = (onboarding_alerts.run_weekly_digest if kind == "weekly"
+               else onboarding_alerts.run_overdue_escalation)
+        return run(APP_BASE_URL)
+    except Exception as exc:
+        logger.error("onboarding.alerts run failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {exc}")
 
 
 @app.post("/api/onboarding/openings/{opening_id}/resend-invite")

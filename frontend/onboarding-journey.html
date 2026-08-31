@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="onboarding-theme.css">
+<!-- ?v= bumped whenever onboarding-theme.css changes: the hub is franchisee-facing
+     and they will not know to hard-refresh a stale stylesheet. -->
+<link rel="stylesheet" href="onboarding-theme.css?v=20260831">
 <style>
   *{box-sizing:border-box;}
   body{margin:0;background:#FAF6EF;}
@@ -27,6 +29,20 @@
   .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#1F2328;color:#fff;padding:.6rem 1.1rem;border-radius:8px;font-size:.85rem;box-shadow:0 8px 30px rgba(0,0,0,.25);opacity:0;transition:.25s;pointer-events:none;z-index:80;}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
   .toast.err{background:#8a1f1f;}
+  .appt-when{white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:600;color:#1F2937;}
+  .appt-time{font-size:11px;font-weight:400;color:#6B7280;}
+  .appt-title{font-weight:600;color:#1F2937;}
+  .appt-notes{font-size:11.5px;color:#6B7280;margin-top:2px;}
+  .appt-kind{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:11px;
+             background:#EEF2F7;color:#41506B;white-space:nowrap;}
+  .appt-kind.k-pos,.appt-kind.k-network{background:#E7F0FB;color:#1F4E85;}
+  .appt-kind.k-internet,.appt-kind.k-voice{background:#E8F5EC;color:#256137;}
+  .appt-kind.k-training{background:#FDF0DC;color:#8A5A12;}
+  .appt-kind.k-alarm,.appt-kind.k-cctv{background:#FDECEC;color:#9B2C2C;}
+  .appt-done{color:#256137;font-weight:700;font-size:12px;}
+  .appt-sched{color:#41506B;font-weight:700;font-size:12px;}
+  .appt-cx{color:#9CA3AF;font-size:12px;}
+  tr.appt-cancelled{opacity:.55;} tr.appt-cancelled .appt-title{text-decoration:line-through;}
   .loadwrap{max-width:1120px;margin:60px auto;text-align:center;color:#8A8F98;font-family:'Inter',sans-serif;}
 </style>
 </head>
@@ -91,6 +107,13 @@ function toast(m,e){const el=document.getElementById('toast');el.textContent=m;e
   clearTimeout(el._t);el._t=setTimeout(()=>el.className='toast'+(e?' err':''),2200);}
 function fmt(iso){if(!iso)return '—';const p=String(iso).split(/[T ]/)[0].split('-');if(p.length<3)return iso;
   return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]+' '+(+p[2])+', '+p[0];}
+function fmtShort(iso){
+  if(!iso) return '';
+  const p=String(iso).split('-'); if(p.length<3) return iso;
+  const m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1];
+  const y=(new Date().getFullYear()===+p[0])?'':" '"+p[0].slice(2);
+  return m+' '+(+p[2])+y;
+}
 function daysUntil(iso){if(!iso)return null;const t=new Date(iso+'T00:00:00');const n=new Date();n.setHours(0,0,0,0);return Math.round((t-n)/864e5);}
 function linkifyEmail(t){return esc(t).replace(/([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/g,'<a href="mailto:$1">$1</a>');}
 
@@ -134,6 +157,8 @@ function sheetTabs(){
   Object.values(byLabel).forEach(t=>tabs.push(t));
 
   const extra=[];
+  if((DATA.appointments||[]).length) extra.push({id:'calendar',label:'Calendar',kind:'ref',
+                                                 count:(DATA.appointments||[]).length});
   if(ref.contacts&&Object.keys(ref.contacts).length) extra.push({id:'contacts',label:'Vendor Contacts',kind:'ref'});
   if((ref.forms||[]).length) extra.push({id:'forms',label:'Forms',kind:'ref'});
   if((ref.itquick||[]).length) extra.push({id:'itquick',label:'IT Reference',kind:'ref'});
@@ -163,11 +188,48 @@ function renderActiveSheet(){
     const tv=(DATA.track_views||[]).find(x=>x.track===def.track);
     return tv?renderTrack(tv):'<div class="empty">Nothing here.</div>';
   }
+  if(def.id==='calendar') return renderCalendar();
   if(def.id==='contacts') return renderContacts(ref.contacts||{});
   if(def.id==='forms')    return renderForms(ref.forms||[]);
   if(def.id==='itquick')  return renderItQuick(ref.itquick||[]);
   if(def.id==='call45')   return renderCall45(ref.call45||{sections:[]});
   return '<div class="empty">Nothing here.</div>';
+}
+
+// Read-only view of the appointments the Newk's team has scheduled — installs,
+// training, inspections. Maintained on the internal dashboard.
+function renderCalendar(){
+  const appts=DATA.appointments||[];
+  const kinds=DATA.appointment_kinds||[];
+  const label=k=>(kinds.find(x=>x.id===k)||{}).label||k||'Other';
+  const today=new Date().toISOString().slice(0,10);
+  if(!appts.length) return `<div class="empty">Nothing scheduled yet. Appointments the
+      Newk's team books for your opening — internet and POS installs, training,
+      inspections — will appear here.</div>`;
+  const rows=appts.map(a=>{
+    const past=a.on_date&&a.on_date<today;
+    return `<tr class="${a.status==='cancelled'?'appt-cancelled':''}">
+      <td class="appt-when">${esc(fmt(a.on_date))}${a.at_time?`<div class="appt-time">${esc(a.at_time)}</div>`:''}</td>
+      <td><span class="appt-kind k-${esc(a.kind||'other')}">${esc(label(a.kind))}</span></td>
+      <td><div class="appt-title">${esc(a.title)}</div>
+        ${a.notes?`<div class="appt-notes">${esc(a.notes)}</div>`:''}</td>
+      <td>${esc(a.vendor||'')}</td>
+      <td>${linkifyInfo(a.contact||'')}</td>
+      <td>${a.status==='done'?'<span class="appt-done">Done</span>'
+            :a.status==='cancelled'?'<span class="appt-cx">Cancelled</span>'
+            :past?'<span class="appt-cx">Was scheduled</span>':'<span class="appt-sched">Scheduled</span>'}</td>
+    </tr>`;}).join('');
+  return `<p style="color:#4A4F57;margin:0 0 14px;">Appointments scheduled for your opening.
+      The Newk's team keeps these up to date — if something needs moving, ask on the
+      related checklist item.</p>
+    <section class="sheet">
+      <div class="sheet-h"><h3>Appointments</h3><span class="cnt">${appts.length} total</span></div>
+      <div class="wbwrap"><table class="wb wb-plain">
+        <colgroup><col style="width:104px;"><col style="width:150px;"><col style="width:32%;"><col style="width:14%;"><col style="width:16%;"><col style="width:110px;"></colgroup>
+        <thead><tr><th>Date</th><th>Type</th><th>Appointment</th><th>Vendor</th><th>Contact</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </section>`;
 }
 
 // The workbook's cover sheet: restaurant details (live, from this opening) plus
@@ -302,9 +364,10 @@ function wbRow(t){
   const locked=t.locked;
   const q=(t.questions||[]);
   const openQ=q.filter(x=>x.status==='open').length;
-  return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
-    <td><span class="wb-wk ${wkClass(t.weeks)}">${esc(wkText(t.weeks))}</span>${
-      t.lead&&t.weeks_source!=='workbook'?`<div class="wk-lead">${esc(t.lead)}</div>`:''}</td>
+  return `<tr class="${t.done?'done':''}${t.overdue?' late':''}" data-row="${esc(t.key)}">
+    <td><span class="wb-wk ${wkClass(t.weeks)}" title="${t.lead?'Sheet said: '+esc(t.lead)+'. ':''}Weeks before opening">${esc(wkText(t.weeks))}</span>${
+      t.due_date?`<div class="wk-due${t.overdue?' late':''}" title="${t.overdue?'Past due — ':''}Due ${esc(fmt(t.due_date))}">${esc(fmtShort(t.due_date))}</div>`:''}${
+      t.weeks==null&&t.lead?`<div class="wk-lead">${esc(t.lead)}</div>`:''}</td>
     <td class="wb-c"><input type="checkbox" data-key="${esc(t.key)}" ${t.done?'checked':''} ${locked?'disabled':''}
         title="${locked?"Handled by the Newk's team":'Mark complete'}" aria-label="Complete: ${esc(t.title)}">
       ${t.done&&t.done_at?`<div class="wb-doneat">${esc(fmt(t.done_at))}</div>`:''}</td>

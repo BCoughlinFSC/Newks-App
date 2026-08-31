@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="onboarding-theme.css">
+<!-- ?v= bumped whenever onboarding-theme.css changes: the hub is franchisee-facing
+     and they will not know to hard-refresh a stale stylesheet. -->
+<link rel="stylesheet" href="onboarding-theme.css?v=20260831">
 <style>
   *{box-sizing:border-box;}
   body{font-family:'Inter',system-ui,-apple-system,sans-serif;margin:0;background:#F8FAFC;color:#2c2c2c;min-height:100vh;}
@@ -74,6 +76,47 @@
   .check-row{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:#374151;margin-bottom:.5rem;}
   .hint{font-size:.78rem;color:#9CA3AF;margin:.2rem 0 0;}
 
+  /* Alerts panel */
+  .al-ctl{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:.9rem;}
+  .al-ctl input#alEmail{flex:1;min-width:240px;padding:.5rem .7rem;border:1px solid #D1D5DB;
+                        border-radius:6px;font-size:.85rem;font-family:inherit;}
+  .al-toggle{display:flex;align-items:center;gap:.4rem;font-size:.85rem;font-weight:600;color:#374151;white-space:nowrap;}
+  .al-summary{font-size:.85rem;color:#4B5563;padding:.6rem .75rem;background:#F8F5F0;
+              border:1px solid #EAE3D8;border-radius:8px;margin-bottom:.7rem;}
+  .al-list{border:1px solid #EEF2F7;border-radius:8px;overflow:hidden;}
+  .al-row{display:flex;justify-content:space-between;gap:1rem;align-items:center;
+          padding:.6rem .8rem;border-top:1px solid #EEF2F7;font-size:.86rem;flex-wrap:wrap;}
+  .al-row:first-child{border-top:none;}
+  .al-sub{font-size:.75rem;color:#9CA3AF;margin-top:.15rem;}
+  .al-nums{display:flex;gap:.45rem;flex-wrap:wrap;}
+  .al-nums span{font-size:.72rem;font-weight:700;padding:.12rem .5rem;border-radius:999px;white-space:nowrap;}
+  .al-late{color:#B3261E;background:#FDECEC;} .al-ok{color:#3F7A52;background:#EAF4EC;}
+  .al-soon{color:#8A6A1F;background:#FDF3E0;} .al-appt{color:#41506B;background:#EEF2F7;}
+  .latebadge{display:inline-block;margin-left:6px;font-size:.68rem;font-weight:700;
+             color:#B3261E;background:#FDECEC;padding:.05rem .45rem;border-radius:999px;}
+
+  /* Calendar (appointments) */
+  .appt-when{white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:600;color:#1F2937;}
+  .appt-time{font-size:11px;font-weight:400;color:#6B7280;}
+  .appt-title{font-weight:600;color:#1F2937;}
+  .appt-notes{font-size:11.5px;color:#6B7280;margin-top:2px;}
+  .appt-kind{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:11px;
+             background:#EEF2F7;color:#41506B;white-space:nowrap;}
+  .appt-kind.k-pos,.appt-kind.k-network{background:#E7F0FB;color:#1F4E85;}
+  .appt-kind.k-internet,.appt-kind.k-voice{background:#E8F5EC;color:#256137;}
+  .appt-kind.k-training{background:#FDF0DC;color:#8A5A12;}
+  .appt-kind.k-alarm,.appt-kind.k-cctv{background:#FDECEC;color:#9B2C2C;}
+  .appt-status{padding:.25rem .3rem;border:1px solid #D8DEE7;border-radius:5px;font-size:.78rem;font-family:inherit;}
+  tr.appt-cancelled{opacity:.5;} tr.appt-cancelled .appt-title{text-decoration:line-through;}
+  tr.appt-past .appt-when{color:#B3261E;}
+  .appt-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem;padding:1rem 14px 1.2rem;}
+  .appt-form .form-group{margin-bottom:0;}
+  .appt-form .form-group.wide{grid-column:span 2;}
+  .appt-form select{padding:.55rem .75rem;border:1px solid #D1D5DB;border-radius:6px;font-size:.9rem;font-family:inherit;}
+  .appt-form-actions{grid-column:1/-1;display:flex;justify-content:flex-end;}
+  @media (max-width:760px){.appt-form{grid-template-columns:minmax(0,1fr);}
+                           .appt-form .form-group.wide{grid-column:span 1;}}
+
   /* editable Weeks Out cell — staff only; the franchisee hub renders a pill */
   .wk-edit{display:flex;flex-direction:column;gap:2px;align-items:flex-start;}
   .wk-in{width:52px;padding:.25rem .3rem;border:1px solid #D8DEE7;border-radius:5px;
@@ -86,6 +129,7 @@
   .wk-in.soon{background:#FDF3E0;border-color:#EAD3A6;color:#8A6A1F;}
   /* A seeded estimate, until someone saves over it. */
   .wk-edit.est .wk-in{border-color:#D9272C;border-style:dashed;}
+  .wk-edit .wk-due{display:block;}
   .wk-flag{font-size:8.5px;text-transform:uppercase;letter-spacing:.4px;font-weight:700;
            color:#B3261E;background:#FDECEC;border-radius:3px;padding:1px 4px;}
 
@@ -164,6 +208,7 @@
           <button class="btn-primary" onclick="openCreate()">+ New Opening / Invite</button>
         </div>
         <div class="plist" id="plist"><div class="empty">Loading…</div></div>
+        <div id="alertsPanel"></div>
         <div id="activityPanel"></div>
       </div>
 
@@ -248,6 +293,14 @@
       clearTimeout(el._t);el._t=setTimeout(()=>el.className='toast'+(e?' err':''),2200);}
     function fmt(iso){if(!iso)return '—';const p=String(iso).split(/[T ]/)[0].split('-');if(p.length<3)return iso;
       return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]+' '+(+p[2])+', '+p[0];}
+    // "Nov 17" — the weeks column is 78px wide, so no year unless it differs.
+    function fmtShort(iso){
+      if(!iso) return '';
+      const p=String(iso).split('-'); if(p.length<3) return iso;
+      const m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1];
+      const y=(new Date().getFullYear()===+p[0])?'':" '"+p[0].slice(2);
+      return m+' '+(+p[2])+y;
+    }
     function daysUntil(iso){if(!iso)return null;const t=new Date(iso+'T00:00:00');const n=new Date();n.setHours(0,0,0,0);return Math.round((t-n)/864e5);}
     function barColor(p){return p>=80?'#3F7A52':p>=45?'#B07D1E':'#D9272C';}
 
@@ -266,11 +319,92 @@
         renderPortfolio();
       }catch(e){ if(e.message!=='forbidden'&&e.message!=='unauthorized') toast('Load error: '+e.message,true); }
       loadQuestions();
+      loadAlerts();
       loadActivity();
     }
 
     // ── Question inbox ───────────────────────────────────────────────────────
     let QUESTIONS=[];
+    // ── Alerts panel ──────────────────────────────────────────────────────────
+    // The weeks-out alerts run themselves (Monday digest, Thursday escalation);
+    // this panel is so you can see what they'll say, who they go to, and send
+    // one now rather than waiting until Monday to find out it works.
+    let ALERTS=null;
+    async function loadAlerts(){
+      try{
+        const res=await api('/api/onboarding/alerts');
+        if(!res.ok) return;
+        ALERTS=await res.json();
+        renderAlerts();
+      }catch(e){ /* panel is optional — never block the portfolio */ }
+    }
+
+    function renderAlerts(){
+      if(!ALERTS) return;
+      const a=ALERTS, ops=a.openings||[];
+      const late=ops.reduce((n,o)=>n+o.overdue,0);
+      const soon=ops.reduce((n,o)=>n+o.upcoming,0);
+      const noEmail=ops.filter(o=>!o.franchisee_email).length;
+      const rows=ops.map(o=>{
+        const loc=[o.city,o.state].filter(Boolean).join(', ');
+        return `<div class="al-row">
+          <div><strong>${esc(o.store_name)}</strong> <span style="color:#9CA3AF;">${esc(loc)}</span>
+            <div class="al-sub">Target open ${esc(fmt(o.target_open))}${
+              o.franchisee_email?` · franchisee ${esc(o.franchisee_email)}`
+                                :' · <span style="color:#B3261E;">no franchisee email on file</span>'}</div></div>
+          <div class="al-nums">
+            <span class="${o.overdue?'al-late':'al-ok'}">${o.overdue} late</span>
+            <span class="al-soon">${o.upcoming} due soon</span>
+            ${o.appointments?`<span class="al-appt">${o.appointments} appt</span>`:''}
+          </div></div>`;
+      }).join('')||'<div class="al-row"><div style="color:#9CA3AF;">No openings with a target open date yet — alerts need one to work out due dates.</div></div>';
+      document.getElementById('alertsPanel').innerHTML=`
+        <div class="card" style="margin-top:1.25rem;">
+          <h2>Weeks-out alerts</h2>
+          <p class="hint" style="margin:0 0 .9rem;">Weekly digest every Monday 7am Central; an
+            overdue nudge Thursday 7am if anything has slipped. The franchisee gets only their
+            own tasks; the address below gets everything.
+            ${noEmail?`<strong style="color:#B3261E;">${noEmail} opening${noEmail>1?'s have':' has'} no franchisee email — those get internal-only.</strong>`:''}</p>
+          <div class="al-ctl">
+            <label class="al-toggle"><input type="checkbox" id="alEnabled" ${a.enabled?'checked':''}
+              onchange="saveAlertSettings()"> Alerts on</label>
+            <input id="alEmail" placeholder="internal address(es), comma-separated"
+              value="${esc((a.internal_recipients||[]).join(', '))}" />
+            <button class="btn-ghost" onclick="saveAlertSettings()">Save</button>
+            <button class="btn-ghost" onclick="runAlerts('weekly')">Send digest now</button>
+            <button class="btn-ghost" onclick="runAlerts('overdue')">Send overdue now</button>
+          </div>
+          <div class="al-summary"><strong>${late}</strong> past due &middot;
+            <strong>${soon}</strong> due in the next ${a.lookahead_days} days
+            across ${ops.length} opening${ops.length===1?'':'s'}</div>
+          <div class="al-list">${rows}</div>
+        </div>`;
+    }
+
+    async function saveAlertSettings(){
+      const body={enabled:document.getElementById('alEnabled').checked,
+                  email:document.getElementById('alEmail').value.trim()};
+      try{
+        const res=await api('/api/onboarding/alerts',{method:'PUT',body:JSON.stringify(body)});
+        if(!res.ok){toast('Could not save alert settings ('+res.status+')',true);return;}
+        toast('Alert settings saved ✓');
+        await loadAlerts();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
+    async function runAlerts(kind){
+      const what=kind==='weekly'?'weekly digest':'overdue escalation';
+      if(!confirm(`Send the ${what} now? This emails the internal address and every franchisee with tasks in scope.`)) return;
+      toast('Sending…');
+      try{
+        const res=await api('/api/onboarding/alerts/run?kind='+kind,{method:'POST'});
+        const d=await res.json().catch(()=>({}));
+        if(!res.ok){toast('Could not send: '+(d.detail||res.status),true);return;}
+        if(d.skipped) toast('Alerts are switched off — nothing sent',true);
+        else toast(`Sent: ${d.openings||0} opening(s), ${d.internal||0} internal, ${d.franchisee||0} franchisee`);
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
     async function loadQuestions(){
       try{
         const res=await api('/api/onboarding/questions?status=open');
@@ -361,12 +495,12 @@
       const n=OPENINGS.length;
       const avg=n?Math.round(OPENINGS.reduce((a,o)=>a+o.progress.pct,0)/n):0;
       const atRisk=OPENINGS.filter(o=>{const d=daysUntil(o.target_open);return d!==null&&d>=0&&d<60&&o.progress.pct<70;}).length;
-      const totalOpen=OPENINGS.reduce((a,o)=>a+o.progress.required_open,0);
+      const totalOverdue=OPENINGS.reduce((a,o)=>a+(o.overdue_count||0),0);
       document.getElementById('stats').innerHTML=`
         <div class="stat"><div class="n">${n}</div><div class="l">Active openings</div></div>
         <div class="stat"><div class="n">${avg}%</div><div class="l">Avg required complete</div></div>
         <div class="stat"><div class="n ${atRisk?'alert':''}">${atRisk}</div><div class="l">At risk (&lt;60d, &lt;70%)</div></div>
-        <div class="stat"><div class="n ${totalOpen>25?'warn':''}">${totalOpen}</div><div class="l">Open required tasks</div></div>`;
+        <div class="stat"><div class="n ${totalOverdue?'alert':''}">${totalOverdue}</div><div class="l">Past their weeks-out date</div></div>`;
 
       const list=document.getElementById('plist');
       if(!n){list.innerHTML='<div class="empty">No openings yet. Click <strong>+ New Opening / Invite</strong> to add your first one.</div>';return;}
@@ -379,7 +513,7 @@
           <div class="p-store">${esc(o.store_name)} <span class="loc">${esc(loc)}</span></div>
           <div class="p-open"><b>${esc(fmt(o.target_open))}</b><span>${cd}${d>=0?' to open':''}</span></div>
           <div class="pbar-wrap"><div class="pbar"><i style="width:${p}%;background:${barColor(p)}"></i></div><b>${p}%</b></div>
-          <div class="p-block ${bc}">${b===0?'✓ Clear':b+' open'}${o.open_questions?` <span class="qbadge" style="margin-left:6px;">${o.open_questions} Q</span>`:''}</div>
+          <div class="p-block ${bc}">${b===0?'✓ Clear':b+' open'}${o.open_questions?` <span class="qbadge" style="margin-left:6px;">${o.open_questions} Q</span>`:''}${o.overdue_count?` <span class="latebadge" title="${o.overdue_count} tasks past their weeks-out date">${o.overdue_count} late</span>`:''}</div>
           <div class="p-arrow">›</div></div>`;
       }).join('');
       list.innerHTML=`<div class="p-row head"><div>Restaurant</div><div>Opening</div><div>Required progress</div><div>Open</div><div></div></div>${rows}`;
@@ -453,6 +587,8 @@
       Object.values(byLabel).forEach(t=>tabs.push(t));   // any sheet added later
 
       const extra=[];
+      extra.push({id:'calendar',label:'Calendar',kind:'ref',
+                  count:(CURRENT.appointments||[]).length});
       if(ref.contacts&&Object.keys(ref.contacts).length) extra.push({id:'contacts',label:'Vendor Contacts',kind:'ref'});
       if((ref.forms||[]).length) extra.push({id:'forms',label:'Forms',kind:'ref'});
       if((ref.systems||[]).length) extra.push({id:'systems',label:'Systems',kind:'ref'});
@@ -464,6 +600,121 @@
       });
       if(extra.length){ tabs.push({id:'__div',divider:true}); extra.forEach(t=>tabs.push(t)); }
       return tabs;
+    }
+
+    // ── Calendar ──────────────────────────────────────────────────────────────
+    // Tasks answer "has this been done"; appointments answer "who is turning up,
+    // and when". Real dates, not weeks-out, because a vendor books a day. Staff
+    // maintain these; the franchisee sees them read-only on their hub, and the
+    // weekly digest lists the ones inside its window.
+    function apptKindLabel(k){
+      const kinds=CURRENT.appointment_kinds||[];
+      return (kinds.find(x=>x.id===k)||{}).label || k || '';
+    }
+
+    function apptRow(a){
+      const past=a.on_date && a.on_date < new Date().toISOString().slice(0,10);
+      return `<tr class="${a.status==='cancelled'?'appt-cancelled':''}${past&&a.status==='scheduled'?' appt-past':''}">
+        <td class="appt-when">${esc(fmt(a.on_date))}${a.at_time?`<div class="appt-time">${esc(a.at_time)}</div>`:''}</td>
+        <td><span class="appt-kind k-${esc(a.kind||'other')}">${esc(apptKindLabel(a.kind)||'Other')}</span></td>
+        <td><div class="appt-title">${esc(a.title)}</div>
+          ${a.notes?`<div class="appt-notes">${esc(a.notes)}</div>`:''}</td>
+        <td>${esc(a.vendor||'')}</td>
+        <td>${linkifyInfo(a.contact||'')}</td>
+        <td><select class="appt-status" data-astatus="${a.id}">
+          ${['scheduled','done','cancelled'].map(v=>`<option value="${v}"${a.status===v?' selected':''}>${v[0].toUpperCase()+v.slice(1)}</option>`).join('')}
+        </select></td>
+        <td style="text-align:right;"><button class="btn-link danger" style="white-space:nowrap;" data-adel="${a.id}">Remove</button></td>
+      </tr>`;
+    }
+
+    function renderCalendar(){
+      const appts=CURRENT.appointments||[];
+      const kinds=CURRENT.appointment_kinds||[];
+      const today=new Date().toISOString().slice(0,10);
+      const upcoming=appts.filter(a=>a.status==='scheduled'&&(a.on_date||'')>=today);
+      const rows=appts.length?appts.map(apptRow).join('')
+        :`<tr><td colspan="7" style="padding:22px;text-align:center;color:#9CA3AF;">
+            Nothing scheduled yet — add the internet and POS installs, training week,
+            inspections, and anything else with a date.</td></tr>`;
+      return `<p style="color:#4A4F57;margin:0 0 14px;">Scheduled appointments for this opening —
+          installs, training, inspections. The franchisee sees these on their hub, and anything
+          falling in the next two weeks is listed in the weekly digest email.
+          ${upcoming.length?`<strong>${upcoming.length} still to come.</strong>`:''}</p>
+        <section class="sheet">
+          <div class="sheet-h"><h3>Appointments</h3><span class="cnt">${appts.length} total</span></div>
+          <div class="wbwrap"><table class="wb wb-plain">
+            <colgroup><col style="width:104px;"><col style="width:150px;"><col style="width:30%;"><col style="width:14%;"><col style="width:16%;"><col style="width:108px;"><col style="width:96px;"></colgroup>
+            <thead><tr><th>Date</th><th>Type</th><th>Appointment</th><th>Vendor</th><th>Contact</th><th>Status</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>
+        </section>
+        <section class="sheet">
+          <div class="sheet-h"><h3>Add an appointment</h3></div>
+          <div class="appt-form">
+            <div class="form-group"><label for="aDate">Date *</label><input id="aDate" type="date" /></div>
+            <div class="form-group"><label for="aTime">Time</label><input id="aTime" placeholder="e.g. 08:00 or AM" /></div>
+            <div class="form-group"><label for="aKind">Type</label><select id="aKind">
+              ${kinds.map(k=>`<option value="${esc(k.id)}">${esc(k.label)}</option>`).join('')}
+            </select></div>
+            <div class="form-group wide"><label for="aTitle">Appointment *</label><input id="aTitle" placeholder="e.g. Toast POS install — day 1" /></div>
+            <div class="form-group"><label for="aVendor">Vendor</label><input id="aVendor" placeholder="e.g. Toast" /></div>
+            <div class="form-group"><label for="aContact">Contact</label><input id="aContact" placeholder="name / phone / email" /></div>
+            <div class="form-group wide"><label for="aNotes">Notes</label><input id="aNotes" placeholder="anything the team should know" /></div>
+            <div class="appt-form-actions">
+              <button class="btn-primary" id="aAddBtn" onclick="addAppointment()">Add appointment</button>
+            </div>
+          </div>
+        </section>`;
+    }
+
+    async function addAppointment(){
+      const body={
+        title:document.getElementById('aTitle').value.trim(),
+        on_date:document.getElementById('aDate').value,
+        at_time:document.getElementById('aTime').value.trim(),
+        kind:document.getElementById('aKind').value,
+        vendor:document.getElementById('aVendor').value.trim(),
+        contact:document.getElementById('aContact').value.trim(),
+        notes:document.getElementById('aNotes').value.trim(),
+      };
+      if(!body.title||!body.on_date){toast('An appointment needs a date and a name',true);return;}
+      const btn=document.getElementById('aAddBtn');btn.disabled=true;
+      try{
+        const res=await api(`/api/onboarding/openings/${CURRENT.id}/appointments`,
+          {method:'POST',body:JSON.stringify(body)});
+        if(!res.ok){const d=await res.json().catch(()=>({}));toast('Could not add: '+(d.detail||res.status),true);return;}
+        toast('Appointment added ✓');
+        await reloadDetailKeepTab();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+      finally{const b=document.getElementById('aAddBtn'); if(b) b.disabled=false;}
+    }
+
+    async function setAppointmentStatus(id,value){
+      try{
+        const res=await api('/api/onboarding/appointments/'+id,
+          {method:'PUT',body:JSON.stringify({status:value})});
+        if(!res.ok){toast('Could not update ('+res.status+')',true);return;}
+        toast('Appointment updated ✓');
+        await reloadDetailKeepTab();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
+    async function removeAppointment(id){
+      if(!confirm('Remove this appointment?')) return;
+      try{
+        const res=await api('/api/onboarding/appointments/'+id,{method:'DELETE'});
+        if(!res.ok){toast('Could not remove ('+res.status+')',true);return;}
+        toast('Appointment removed');
+        await reloadDetailKeepTab();
+      }catch(e){ if(e.message!=='forbidden') toast('Error: '+e.message,true); }
+    }
+
+    // openDetail() resets to the first tab; keep the reader where they were.
+    async function reloadDetailKeepTab(){
+      const keep=detailTab, id=CURRENT.id;
+      await openDetail(id);
+      detailTab=keep; renderDetailTab();
     }
 
     // The workbook's cover sheet, row for row. Each label maps to a column on
@@ -637,6 +888,7 @@
       }
       else if(detailTab==='systems') h=renderSystems(ref.systems||[]);
       else if(detailTab==='contacts') h=renderContacts(ref.contacts||{});
+      else if(detailTab==='calendar') h=renderCalendar();
       else if(detailTab==='forms') h=renderForms(ref.forms||[]);
       else if(detailTab==='call45') h=renderCall45(ref.call45||{sections:[]});
       else if(detailTab==='itquick') h=renderItQuick(ref.itquick||[]);
@@ -649,6 +901,8 @@
       // anything on a sheet silently did nothing.
       document.querySelectorAll('#d-tabbody .wb-c input').forEach(cb=>cb.onchange=()=>setTask(cb.dataset.key,cb));
       document.querySelectorAll('#d-tabbody .wk-in').forEach(i=>i.onchange=()=>saveTaskWeeks(i));
+      document.querySelectorAll('#d-tabbody [data-astatus]').forEach(sel=>sel.onchange=()=>setAppointmentStatus(sel.dataset.astatus,sel.value));
+      document.querySelectorAll('#d-tabbody [data-adel]').forEach(b=>b.onclick=()=>removeAppointment(b.dataset.adel));
       document.querySelectorAll('#d-tabbody .phase-h').forEach(hh=>hh.onclick=()=>hh.closest('.phase').classList.toggle('collapsed'));
       document.querySelectorAll('#d-tabbody [data-send]').forEach(b=>b.onclick=()=>answerQuestion(b.dataset.send,b));
     }
@@ -695,12 +949,17 @@
     function weeksCell(t){
       const est=t.weeks_source==='est';
       const v=t.weeks==null?'':String(t.weeks);
+      // The workbook's original wording goes in the tooltip rather than the
+      // cell: it runs to "180 Days from Opening", which triples the row height
+      // in a 78px column. It only shows inline when there is no number at all.
+      const lead=t.lead?`Sheet said: ${t.lead}. `:'';
       return `<div class="wk-edit${est?' est':''}">
         <input class="wk-in ${wkClass(t.weeks)}" type="number" step="1" min="-52" max="104"
           data-wkey="${esc(t.key)}" value="${esc(v)}" placeholder="—"
-          title="${est?'Estimated — please review. ':''}Weeks before opening. Applies to every opening." />
+          title="${esc(lead)}${est?'Estimated — please review. ':''}Weeks before opening. Applies to every opening." />
         ${est?`<span class="wk-flag" title="Estimated from sequence — please review">review</span>`:''}
-        ${t.lead&&t.weeks_source!=='workbook'?`<span class="wk-lead" title="Original Timing / Lead Time from the workbook">${esc(t.lead)}</span>`:''}
+        ${t.due_date?`<span class="wk-due${t.overdue?' late':''}" title="${t.overdue?'Past due — ':''}Due ${esc(fmt(t.due_date))} (target open minus ${esc(String(t.weeks))} weeks)">${esc(fmtShort(t.due_date))}</span>`:''}
+        ${t.weeks==null&&t.lead?`<span class="wk-lead">${esc(t.lead)}</span>`:''}
       </div>`;
     }
 
@@ -713,7 +972,7 @@
     }
 
     function wbRow(t){
-      return `<tr class="${t.done?'done':''}" data-row="${esc(t.key)}">
+      return `<tr class="${t.done?'done':''}${t.overdue?' late':''}" data-row="${esc(t.key)}">
         <td>${weeksCell(t)}</td>
         ${doneCell(t)}
         <td>
