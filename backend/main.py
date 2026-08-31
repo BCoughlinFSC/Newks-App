@@ -6248,6 +6248,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_html(request: Request, call_next):
+    """Make browsers revalidate our HTML pages on every load.
+
+    Every page in this app carries its JavaScript inline, so a cached .html is
+    a cached *application*: after a deploy the browser keeps running yesterday's
+    code and the only clue is behaviour that makes no sense. That bit us on the
+    NRO form upload — the fix was already deployed and the page was still
+    running the previous build.
+
+    `no-cache` is not `no-store`: the browser still caches and still gets a
+    cheap 304 when nothing changed, it just has to ask first. Scoped to HTML —
+    CSS/JS/images keep caching normally.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path.endswith(".html") or path.endswith("/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
 # ------------------
 # APScheduler — nightly orders cache job
 # ------------------

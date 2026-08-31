@@ -413,21 +413,28 @@
     // the connection ~300s then 504s, at any file size. Same trick as
     // /api/uploads/menu-board-b64. The timeout below is belt-and-braces so this
     // can never sit on "Reading…" indefinitely again.
-    const UPLOAD_TIMEOUT_MS=60000;
+    const UPLOAD_TIMEOUT_MS=45000;
 
     async function uploadResponses(){
       const inp=document.getElementById('rspFile'), msg=document.getElementById('rspMsg');
       if(!inp.files||!inp.files[0]){msg.className='status-msg error';msg.textContent='Choose a Forms export first.';return;}
       const file=inp.files[0];
-      const btn=document.getElementById('rspUpBtn'); btn.disabled=true; btn.textContent='Reading…';
-      msg.className='status-msg info'; msg.textContent=`Reading ${file.name}…`;
+      const btn=document.getElementById('rspUpBtn'); btn.disabled=true; btn.textContent='Working…';
+      // Name each stage, so a stall says WHERE it stalled rather than just
+      // sitting there. (A stuck "Reading the export…" with no filename is the
+      // pre-2026-08-31 build still cached in the tab — reload the page.)
+      const stage=t=>{msg.className='status-msg info';msg.textContent=t;};
+      const kb=Math.max(1,Math.round(file.size/1024));
+      stage(`1/3 Reading ${file.name} (${kb} KB) off your disk…`);
       const ctl=new AbortController();
       const timer=setTimeout(()=>ctl.abort(),UPLOAD_TIMEOUT_MS);
       try{
         const content_b64=await fileToBase64(file);
+        stage(`2/3 Sending ${Math.round(content_b64.length/1024)} KB to the server…`);
         const res=await api('/api/onboarding/form-responses/import',
           {method:'POST',signal:ctl.signal,
            body:JSON.stringify({filename:file.name,content_b64})});
+        stage('3/3 Filing the responses…');
         const d=await res.json().catch(()=>({}));
         // The endpoint's own detail already explains the problem ("Could not
         // read that file: ...", "No responses found. ..."), so show it as-is.
@@ -442,9 +449,12 @@
         await loadPortfolio();
       }catch(e){
         if(e.message==='forbidden'||e.message==='unauthorized') return;
+        // Report the stage it died at — that's the difference between "the file
+        // wouldn't read" and "the request never reached the server".
+        const at=msg.textContent;
         msg.className='status-msg error';
         msg.textContent=(e.name==='AbortError')
-          ? `Gave up after ${UPLOAD_TIMEOUT_MS/1000}s — the request never came back. Nothing was imported; try again.`
+          ? `Gave up after ${UPLOAD_TIMEOUT_MS/1000}s at “${at}”. Nothing was imported.`
           : 'Error: '+e.message;
       }
       finally{ clearTimeout(timer); btn.disabled=false; btn.textContent='Upload'; }
