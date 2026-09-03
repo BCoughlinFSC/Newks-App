@@ -47,6 +47,7 @@
     { key: 'integrations',     label: 'Integrations / Re-run',        href: '/integrations.html' },
     { key: 'subscriptions',    label: 'Report Subscriptions',         href: '/subscriptions.html' },
     { key: 'onboarding',       label: 'NRO Onboarding',               href: '/onboarding.html' },
+    { key: 'toast-tools',      label: 'ToastWeb Bulk Edit Tools',     href: '/toast-tools.html' },
   ];
 
   // ─── Detect active page ─────────────────────────
@@ -69,6 +70,7 @@
     if (path.endsWith('/projects.html'))              return 'projects';
     if (path.endsWith('/onboarding.html'))            return 'onboarding';
     if (path.endsWith('/subscriptions.html'))         return 'subscriptions';
+    if (path.endsWith('/toast-tools.html'))           return 'toast-tools';
     return '';
   }
 

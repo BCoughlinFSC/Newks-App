@@ -1,0 +1,158 @@
+# Toast location-group membership, pasted from the ToastWeb group pages 2026-08-28.
+# Canonical form: "== <group name>", then "STORE: <line>" / "GROUP: <name> | <desc>".
+# The parser also accepts a RAW ToastWeb paste (header + "Edit info" + 4-line records),
+# so future pastes can be dropped into this folder verbatim without reformatting.
+
+== 1.1 - Tier 7 - Dine In
+STORE: Magee, MS - 1194 - Newk's Magee, MS
+
+== 1.2 - Tier 8 - Dine In
+STORE: D'Iberville, MS - 1026 - Newk's D'Iberville, MS
+STORE: Gulfport, MS - 1036 - Newk's Gulfport, MS
+STORE: Hattiesburg, MS - 1005 - Newk's Hattiesburg, MS
+STORE: Longview, TX - 1024 - Newk's Longview, TX
+STORE: Lufkin, TX - 1119 - Newk's Lufkin, TX
+STORE: Nacogdoches, TX - 1057 - Newk's Nacogdoches, TX
+STORE: Spanish Fort, AL - 1097 - Newk's Spanish Fort, AL
+
+== 1.3 - Tier 9 - Dine In
+STORE: Benton, AR - 1184 - Newk's Benton, AR
+STORE: Brandon, MS - 1018 - Newk's Brandon, MS
+STORE: Byram, MS - 1039 - Newk's Byram, MS
+STORE: Conway, AR - 1175 - Newk's Conway, AR
+STORE: Cullman, AL - 1183 - Newk's Cullman, AL
+STORE: Fort Smith, AR - 1189 - Newk's Fort Smith, AR
+STORE: Hot Springs, AR - 1042 - Newk's Hot Springs, AR
+STORE: Jonesboro, AR - 1127 - Newk's Jonesboro, AR
+STORE: Knoxville, TN - 1053 - Newk's Knoxville, TN
+STORE: Little Rock, AR (S. University) - 1069 - Newk's Little Rock, AR (S. University)
+STORE: Lubbock, TX - 1188 - Newk's Lubbock, TX
+STORE: Mandeville, LA - 1195 - Newk's Mandeville, LA
+STORE: Meridian, MS - 1134 - Newk's Meridian, MS
+STORE: Monroe, LA - 1035 - Newk's Monroe, LA
+STORE: Ruston, LA - 1079 - Newk's Ruston, LA
+STORE: Tahlequah, OK - 1178 - Newk's Tahlequah, OK
+STORE: West Monroe, LA - 1076 - Newk's West Monroe, LA
+
+== 2.1 - Tier 10 - Dine In
+STORE: Baton Rouge, LA - 1087 - Newk's Baton Rouge, LA
+STORE: Birmingham, AL - 1008 - Newk's Birmingham, AL (Downtown)
+STORE: Chattanooga, TN - 1176 - Newk's Chattanooga, TN
+STORE: Clinton, MS - 1009 - Newk's Clinton, MS
+STORE: College Station, TX - 1031 - Newk's College Station, TX
+STORE: Cypress, TX - 1007 - Newk's Cypress, TX
+STORE: Flowood, MS - 1003 - Newk's Flowood, MS
+STORE: Forth Worth, TX (Champions) - 1166 - Newk's Forth Worth, TX (Champions)
+STORE: Frisco, TX - 1148 - Newk's Frisco, TX
+STORE: Hoover, AL - 1072 - Newk's Hoover, AL
+STORE: Houston, TX (Bunker Hill) - 1085 - Newk's Houston, TX (Bunker Hill)
+STORE: Jackson, MS - 1011 - Newk's Jackson, MS
+STORE: Mobile, AL (McGowin Park) - 1099 - Newk's Mobile, AL (McGowin Park)
+STORE: Mobile, AL (Westgate) - 1104 - Newk's Mobile, AL (Westgate)
+STORE: Murfreesboro, TN (Avenues) - 1019 - Newk's Murfreesboro, TN (Avenues)
+STORE: Murfreesboro, TN - 1118 - Newk's Murfreesboro, TN (Northgate)
+STORE: Oxford, MS - 1016 - Newk's Oxford, MS (Galleria)
+STORE: Oxford, MS - 1001 - Newk's Oxford, MS (University)
+STORE: Pascagoula, MS - 1197 - Newk's Pascagoula, MS
+STORE: Ridgeland, MS - 1040 - Newk's Ridgeland, MS (Township)
+STORE: Ridgeland, MS - 1014 - Newk's Ridgeland, MS (Lake Harbour)
+STORE: Rockwall, Tx (Virtual Kitchen) - 5002 - Newk's Rockwall, TX (Virtual Kitchen)
+STORE: Summerville, SC - 1061 - Newk's Summerville, SC
+STORE: Tyler, TX - 1015 - Newk's Tyler, TX
+STORE: Vestavia Hills, AL - 1044 - Newk's Vestavia Hills, AL
+STORE: Vicksburg, MS - 1060 - Newk's Vicksburg, MS
+STORE: Waco, TX - 1033 - Newk's Waco, TX
+STORE: West Plano, TX - 1054 - Newk's West Plano, TX
+STORE: Wichita, KS - 1199 - Newk's Wichita, KS
+
+== 2.2 - Tier 11 - Dine In
+STORE: Athens, GA - 1182 - Newk's Athens, GA (Epps Bridge)
+STORE: Athens, GA - 1187 - Newk's Athens, GA (Baxter)
+STORE: Austin, TX - 1027 - Newk's Austin, TX (Arboretum)
+STORE: Bossier City, LA - 1048 - Newk's Bossier City, LA
+STORE: Collierville, TN - 1006 - Newk's Collierville, TN
+STORE: Fayetteville, AR - 1073 - Newk's Fayetteville, AR
+STORE: Memphis, TN - 1032 - Newk's Memphis, TN
+STORE: Rogers, AR - 1120 - Newk's Rogers, AR
+STORE: Shreveport, LA - 1021 - Newk's Shreveport, LA
+STORE: Southaven, MS - 1002 - Newk's Southaven, MS
+
+== 2.3 - Tier 12 - Dine In
+GROUP: Boro Foods - Custom Price | Sides and Kids Meals
+STORE: Atlanta, GA (Perimeter Mall) - 1088 - Newk's Atlanta, GA (Perimeter Mall)
+STORE: Atlanta, GA - 1043 - Newk's Atlanta, GA (Brookhaven)
+STORE: Canton, GA - 1129 - Newk's Canton, GA
+STORE: Franklin, TN (Cool Springs) - 1034 - Newk's Franklin, TN (Cool Springs)
+STORE: Jacksonville, FL (Avenues) - 1051 - Newk's Jacksonville, FL (Avenues)
+STORE: Jacksonville, FL (Butler Point) - 1130 - Newk's Jacksonville, FL (Butler Point)
+STORE: Jacksonville, FL (Parkway) - 1056 - Newk's Jacksonville, FL (Parkway)
+STORE: Kennesaw, GA - 1090 - Newk's Kennesaw, GA
+STORE: Newnan, GA - 1046 - Newk's Newnan, GA
+STORE: Panama City, FL - 1023 - Newk's Panama City, FL
+STORE: Peachtree City, GA - 1172 - Newk's Peachtree City, GA
+STORE: Pensacola, FL - 1075 - Newk's Pensacola, FL (Cordova Mall)
+STORE: San Angelo, TX - 1180 - Newk's San Angelo, TX
+STORE: Smyrna, GA - 1139 - Newk's Smyrna, GA
+STORE: Statesboro, GA - 1196 - Newk's Statesboro, GA
+STORE: Tallahassee, FL - 1037 - Newk's Tallahassee, FL
+STORE: Texarkana, TX - 1179 - Newk's Texarkana, TX
+
+== 2.4 - Tier 13 - Dine In
+STORE: Albany, GA - 1154 - Newk's Albany, GA
+
+== 2.5 - Tier 14 - Dine In
+STORE: Columbus, GA - 1157 - Newk's Columbus, GA
+STORE: Dothan, AL - 1131 - Newk's Dothan, AL
+STORE: Montgomery, AL - 1062 - Newk's Montgomery, AL
+STORE: Norcross, GA - 1094 - Newk's Norcross, GA
+STORE: Opelika, AL - 1068 - Newk's Opelika, AL
+STORE: Tucker, GA - 1147 - Newk's Tucker, GA
+
+== 2.6 - Tier 15 - Dine In
+STORE: Fort Collins, CO - 1190 - Newk's Fort Collins, CO
+
+== 2.8 - Tier 17 - Dine In
+STORE: Athens, GA - 1198 - Newk's Athens, GA (UGA)
+STORE: Gainesville, FL - z.Closed.1144 - Newk's Gainesville, FL
+STORE: Huntsville, AL (Whitesburg) - 1029 - Newk's Huntsville, AL (Whitesburg)
+STORE: Huntsville, AL - 1017 - Newk's Huntsville, AL
+STORE: Tuscaloosa, AL - 1004 - Newk's Tuscaloosa, AL
+
+== 2.9 - Tier 18 - Dine In
+STORE: Lone Tree, CO - 1133 - Newk's Lone Tree, CO
+STORE: Waugh Chapel, MD - 1063 - Newk's Waugh Chapel, MD
+
+== Tier 10 - Dine In - Company Only
+STORE: Baton Rouge, LA - 1087 - Newk's Baton Rouge, LA
+STORE: Chattanooga, TN - 1176 - Newk's Chattanooga, TN
+STORE: Clinton, MS - 1009 - Newk's Clinton, MS
+STORE: Flowood, MS - 1003 - Newk's Flowood, MS
+STORE: Jackson, MS - 1011 - Newk's Jackson, MS
+STORE: Mobile, AL (McGowin Park) - 1099 - Newk's Mobile, AL (McGowin Park)
+STORE: Mobile, AL (Westgate) - 1104 - Newk's Mobile, AL (Westgate)
+STORE: Murfreesboro, TN (Avenues) - 1019 - Newk's Murfreesboro, TN (Avenues)
+STORE: Murfreesboro, TN - 1118 - Newk's Murfreesboro, TN (Northgate)
+STORE: Oxford, MS - 1016 - Newk's Oxford, MS (Galleria)
+STORE: Oxford, MS - 1001 - Newk's Oxford, MS (University)
+STORE: Pascagoula, MS - 1197 - Newk's Pascagoula, MS
+STORE: Ridgeland, MS - 1040 - Newk's Ridgeland, MS (Township)
+STORE: Ridgeland, MS - 1014 - Newk's Ridgeland, MS (Lake Harbour)
+STORE: Rockwall, Tx (Virtual Kitchen) - 5002 - Newk's Rockwall, TX (Virtual Kitchen)
+STORE: Summerville, SC - 1061 - Newk's Summerville, SC
+STORE: Tyler, TX - 1015 - Newk's Tyler, TX
+STORE: Vicksburg, MS - 1060 - Newk's Vicksburg, MS
+STORE: West Plano, TX - 1054 - Newk's West Plano, TX
+
+== Tier 12 - Dine In - Company Only
+STORE: Franklin, TN (Cool Springs) - 1034 - Newk's Franklin, TN (Cool Springs)
+STORE: Jacksonville, FL (Avenues) - 1051 - Newk's Jacksonville, FL (Avenues)
+STORE: Jacksonville, FL (Butler Point) - 1130 - Newk's Jacksonville, FL (Butler Point)
+STORE: Jacksonville, FL (Parkway) - 1056 - Newk's Jacksonville, FL (Parkway)
+STORE: Panama City, FL - 1023 - Newk's Panama City, FL
+STORE: Pensacola, FL - 1075 - Newk's Pensacola, FL (Cordova Mall)
+STORE: Tallahassee, FL - 1037 - Newk's Tallahassee, FL
+
+== Tier 8 - Dine In - Company Only
+STORE: Longview, TX - 1024 - Newk's Longview, TX
+STORE: Lufkin, TX - 1119 - Newk's Lufkin, TX
+STORE: Nacogdoches, TX - 1057 - Newk's Nacogdoches, TX

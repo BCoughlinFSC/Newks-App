@@ -1,0 +1,33 @@
+{
+  "id": "pick3-company-only",
+  "name": "Pick 3 — Company Only tiers",
+  "description": "Revert plain Dine In tiers to 12.99, then add or correct the three Company Only rows.",
+  "guidance": "Items Database, search \"pick 3 entree\" with Show Modifiers on. Open an item, click AUDIT, then FIX. Safe to re-run: an item that is already correct reports nothing to do.",
+  "neverTouch": ["Catering", "Box Salad", "Box Sandwich", "To Go", "Custom ", "*System"],
+  "rules": [
+    {
+      "type": "setPrice",
+      "match": "^\\s*(?:[\\d.]+\\s*-\\s*)?Tier\\s*\\d+\\s*-\\s*Dine In\\s*$",
+      "price": 12.99,
+      "label": "plain Tier N - Dine In -> 12.99"
+    },
+    {
+      "type": "ensureRow",
+      "rowLabel": "Tier 8 - Dine In - Company Only",
+      "locationId": "1100000019181590750",
+      "price": 13.49
+    },
+    {
+      "type": "ensureRow",
+      "rowLabel": "Tier 10 - Dine In - Company Only",
+      "locationId": "1100000019182217600",
+      "price": 13.99
+    },
+    {
+      "type": "ensureRow",
+      "rowLabel": "Tier 12 - Dine In - Company Only",
+      "locationId": "1100000019182223700",
+      "price": 14.49
+    }
+  ]
+}

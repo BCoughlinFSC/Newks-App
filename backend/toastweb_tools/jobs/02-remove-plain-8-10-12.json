@@ -1,0 +1,14 @@
+{
+  "id": "remove-plain-8-10-12",
+  "name": "Remove plain Tier 8 / 10 / 12 (Dine In)",
+  "description": "Deletes the plain Tier 8, 10 and 12 Dine In price rows. Company Only groups are left alone.",
+  "guidance": "This is the phase-1 job, already run across the 69 pick-3 items in Aug 2026. Kept as the template for future tier removals: copy this file, change the tier numbers in the match pattern, rebuild.",
+  "neverTouch": ["Company Only", "Catering", "Box Salad", "Box Sandwich", "To Go", "Custom ", "*System"],
+  "rules": [
+    {
+      "type": "removeRow",
+      "match": "^\\s*(?:[\\d.]+\\s*-\\s*)?Tier\\s*(?:8|10|12)\\s*-\\s*Dine In\\s*$",
+      "label": "plain Tier 8/10/12 - Dine In"
+    }
+  ]
+}
