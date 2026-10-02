@@ -21391,6 +21391,28 @@ async def contacts_report_technical_physical_sheet(
     return _report_csv_response(report, "store_technical_physical_info.csv")
 
 
+@app.get("/api/contacts/report/phone-list-by-state")
+async def contacts_report_phone_list_by_state(
+    format: str = "json",
+    _user: User = Depends(get_current_user),
+):
+    """Restaurant Phone List by State — open stores grouped by state with
+    address, phone, fax and operator. Replaces the SSRS TechSupport report.
+
+    ?format=json (default) → {columns, rows} for the on-screen table.
+    ?format=csv            → downloadable CSV.
+    """
+    try:
+        report = contacts_db.get_phone_list_by_state_report()
+    except Exception as exc:
+        logger.error("contacts.phone_list_by_state_report failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
+    if (format or "").lower() != "csv":
+        return report
+    return _report_csv_response(report, "restaurant_phone_list_by_state.csv")
+
+
 # ─── Toast Device Details (live API call) ─────────────────────────────────────
 #
 # Pulls the real device list from Toast's prerelease Device Details API.

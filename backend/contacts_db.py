@@ -24,6 +24,7 @@ import logging
 import os
 import sqlite3
 from contextlib import contextmanager
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -2093,6 +2094,106 @@ def get_technical_physical_report() -> Dict[str, Any]:
 
     return {
         "columns": [{"key": k, "label": lbl} for k, lbl in TECH_PHYS_REPORT_COLUMNS],
+        "rows":    rows,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Restaurant Phone List by State report
+#
+# In-app rebuild of the legacy SSRS "/TechSupport/Restaurant Phone list by
+# State" (emailed monthly to supportcenter + itdepartment until the 2026-09-02
+# subscription retirement). Same 7 columns, open stores only, grouped by full
+# state name. Operator = Company name, matching the SSRS output.
+# ──────────────────────────────────────────────────────────────────────────────
+
+PHONE_LIST_REPORT_COLUMNS = [
+    ("state",      "State"),
+    ("store_name", "Store Name"),
+    ("store_id",   "Store ID"),
+    ("address",    "Address"),
+    ("phone",      "Phone"),
+    ("fax",        "Fax"),
+    ("operator",   "Operator"),
+]
+
+US_STATE_NAMES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "DC": "District of Columbia", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii",
+    "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+
+def _format_phone(v: Any) -> Optional[str]:
+    """10-digit numbers -> ###-###-####; anything else passes through trimmed.
+    Blank / all-punctuation values (SSRS rendered empties as '   -   -    ')
+    come back as None."""
+    if v in (None, ""):
+        return None
+    s = str(v).strip()
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return None
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    return s
+
+
+def _store_is_open(s: Dict[str, Any]) -> bool:
+    """Same rule as the Stores list isActive(): no close date in the past and
+    no closed/retired status. Pre-open stores count as open."""
+    close = _report_date(s.get("StoreCloseDate"))
+    if close and close <= date.today().isoformat():
+        return False
+    status = str(s.get("StoreStatus") or "").lower()
+    return not ("closed" in status or "retire" in status)
+
+
+def get_phone_list_by_state_report() -> Dict[str, Any]:
+    """Build the Restaurant Phone List by State dataset (open stores only).
+
+    Returns {"columns": [{key,label}...], "rows": [...]}, sorted by state name
+    then store name. Each row also carries state_code for client filtering."""
+    company_by = _load_lookup_full_by_pk("company")
+
+    rows: List[Dict[str, Any]] = []
+    for s in list_stores():
+        if not _store_is_open(s):
+            continue
+        code = str(s.get("StoreState") or "").strip().upper()
+        street = [str(p).strip() for p in (s.get("StoreAdd1"), s.get("StoreAdd2"), s.get("StoreAdd3"))
+                  if p not in (None, "") and str(p).strip()]
+        tail = " ".join(str(p).strip() for p in (s.get("StoreCity"), code, s.get("StoreZip"))
+                        if p not in (None, "") and str(p).strip())
+        address = " ".join(street + ([tail] if tail else [])) or None
+
+        rows.append({
+            "state":      US_STATE_NAMES.get(code, code or None),
+            "state_code": code or None,
+            "store_name": s.get("StoreName"),
+            "store_id":   s.get("StoreID"),
+            "address":    address,
+            "phone":      _format_phone(s.get("StorePhone")),
+            "fax":        _format_phone(s.get("StoreFax")),
+            "operator":   _pick(company_by.get(s.get("StoreCompany")), "CompanyName"),
+        })
+
+    rows.sort(key=lambda r: ((r["state"] or "~").lower(), str(r["store_name"] or "").lower()))
+
+    return {
+        "columns": [{"key": k, "label": lbl} for k, lbl in PHONE_LIST_REPORT_COLUMNS],
         "rows":    rows,
     }
 
