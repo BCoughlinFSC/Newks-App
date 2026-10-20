@@ -226,9 +226,8 @@
         <div class="p-toolbar">
           <h2>Active Openings</h2>
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-            <a class="btn-ghost" style="text-decoration:none;" href="/downloads/180-day-checklist-blank.xlsx"
-               download="180 Day Checklist - Newks Blank Template.xlsx"
-               title="A blank copy of the 180 Day Checklist workbook, ready to fill in for a new opening">⬇ Blank 180 Day Checklist (Excel)</a>
+            <button class="btn-ghost" id="blankChkBtn" onclick="downloadBlankChecklist()"
+               title="A blank copy of the 180 Day Checklist workbook, ready to fill in for a new opening">⬇ Blank 180 Day Checklist (Excel)</button>
             <button class="btn-primary" onclick="openCreate()">+ New Opening / Invite</button>
           </div>
         </div>
@@ -335,6 +334,24 @@
       if(res.status===401){location.href='/index.html';throw new Error('unauthorized');}
       if(res.status===403){document.getElementById('plist').innerHTML='<div class="empty">This page is for Newk\'s admin staff. Ask an administrator for access.</div>';throw new Error('forbidden');}
       return res;
+    }
+
+    // Fetched as base64 JSON, not a plain link: the Cloudways front end puts a
+    // newline ahead of every response body, and that one byte corrupts an .xlsx.
+    async function downloadBlankChecklist(){
+      const btn=document.getElementById('blankChkBtn'); btn.disabled=true;
+      try{
+        const res=await api('/api/onboarding/blank-checklist');
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        const j=await res.json();
+        const bin=atob(j.data); const bytes=new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+        const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+        const a=document.createElement('a'); a.href=url; a.download=j.filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }catch(e){ if(e.message!=='unauthorized') toast('Could not download the checklist: '+e.message,true); }
+      finally{ btn.disabled=false; }
     }
 
     async function loadPortfolio(){

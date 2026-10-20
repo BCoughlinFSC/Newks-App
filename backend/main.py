@@ -22420,6 +22420,28 @@ async def onboarding_catalog(_user: User = Depends(get_current_user)):
     return onboarding_db.catalog()
 
 
+_BLANK_CHECKLIST_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data", "onboarding", "180-day-checklist-blank.xlsx"
+)
+
+
+@app.get("/api/onboarding/blank-checklist")
+async def onboarding_blank_checklist(_user: User = Depends(get_current_user)):
+    """The blank 180 Day Checklist workbook, as base64 JSON.
+
+    Not a file response: the Cloudways front end prepends a newline to every
+    response body, which CSS/JS shrug off but which makes an .xlsx unopenable
+    ("file format or extension is not valid"). A JSON body survives it.
+    """
+    import base64 as _b64
+    try:
+        with open(_BLANK_CHECKLIST_PATH, "rb") as fh:
+            data = _b64.b64encode(fh.read()).decode("ascii")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Blank checklist workbook is missing on the server")
+    return {"filename": "180 Day Checklist - Newks Blank Template.xlsx", "data": data}
+
+
 @app.get("/api/onboarding/openings")
 async def onboarding_list(
     include_archived: bool = False, _user: User = Depends(get_current_admin_user)
