@@ -50,6 +50,14 @@
     .warnbox { background:#FFFBEB; border:1px solid #FDE68A; color:#92400E; padding:.6rem .9rem; border-radius:8px; font-size:.82rem; margin-top:.75rem; }
     ol.steps { margin:.5rem 0 0 1.1rem; padding:0; font-size:.84rem; color:#374151; }
     ol.steps li { margin-bottom:.3rem; }
+    ol.steps.manual li { margin-bottom:.5rem; }
+    .setup-strip { background:#F8FAFC; border:1px solid #E5E7EB; border-left:3px solid #C41E3A; border-radius:8px; padding:.75rem .9rem; }
+    .setup-strip .title { font-weight:700; font-size:.88rem; }
+    details.manual { margin-top:1rem; border-top:1px solid #eee; padding-top:.75rem; }
+    details.manual > summary { cursor:pointer; font-weight:600; font-size:.86rem; color:#C41E3A; list-style:revert; }
+    details.manual > summary:hover { text-decoration:underline; }
+    details.manual a { color:#2563EB; }
+    .field { background:#F3F4F6; border:1px solid #E5E7EB; border-radius:4px; padding:.05rem .3rem; font-family:ui-monospace,Consolas,monospace; font-size:.82em; }
   </style>
 </head>
 <body>
@@ -68,30 +76,76 @@
           on your PC rather than here. It gets its card list from this page and reports back to it.</p>
         <div class="row">
           <button class="btn" id="btnBot" onclick="downloadBot()">Download the reload bot</button>
-          <span class="muted" style="font-size:.8rem;">~50&nbsp;KB zip, already pointed at this app</span>
+          <span class="muted" style="font-size:.8rem;">small zip, already pointed at this app</span>
         </div>
         <ol class="steps">
           <li>Unzip it, then run <strong>setup.ps1</strong> once (it needs Python on the machine).</li>
           <li>Each month, run <strong>Run Meal Card Reload.ps1</strong> and log into Paytronix when it asks.</li>
           <li>Take the dry run when it offers &mdash; it reads every balance and loads nothing.</li>
         </ol>
+
+        <details class="manual">
+          <summary>What the bot does to each card &mdash; follow this to do one by hand</summary>
+          <p class="sub" style="margin:.75rem 0 0 0;">Exactly the sequence the bot runs, written out so
+            the reload can still happen if the bot breaks, or if someone has to cover it who has never
+            used it. Work from the card list below &mdash; it has every card number and target.</p>
+          <ol class="steps manual">
+            <li>Log into
+              <a href="https://www.pxsweb.com/accountlookup/accountlookup" target="_blank" rel="noopener">Paytronix
+              Account Lookup</a>.</li>
+            <li>Type the <strong>card number</strong> into the Card Number box and press
+              <strong>Find Account</strong>. You land on the CSR Main Menu.</li>
+            <li>Click <strong>Adjust Wallet</strong>.</li>
+            <li>Choose the <strong>Stored Value</strong> wallet, then <strong>Next</strong>.</li>
+            <li>Read <strong>Current Balance</strong> on the Input Amount page. What you add is
+              <strong>target &minus; current balance</strong>. If that comes out zero or less, the card
+              is already at or above target &mdash; leave it alone and move to the next one.</li>
+            <li>Fill the form in:
+              <span class="field">Store</span> = <strong>1003 - Flowood MS</strong>,
+              <span class="field">Operation</span> = <strong>Add</strong>,
+              <span class="field">Amount</span> = the difference you just worked out,
+              <span class="field">Comments</span> = the <strong>cardholder's name</strong>.
+              Then <strong>Next</strong>.</li>
+            <li>Check the preview page, then click <strong>Adjust One Wallet</strong>.</li>
+            <li>The Results page confirms it went through.</li>
+          </ol>
+          <div class="warnbox" style="margin-top:.75rem;">
+            <strong>The amount is the difference, not the target.</strong> A card sitting at $112.40
+            against a $160.00 target gets <strong>$47.60</strong> added &mdash; not $160.00. This is the
+            one step that goes wrong by hand.
+          </div>
+          <p class="sub" style="margin:.75rem 0 0 0;">Cards you load by hand will not tick themselves
+            off below. You do not need to do anything about that: the next time the bot runs it reads
+            the balance, finds the card already at target, and marks it skipped.</p>
+        </details>
       </div>
 
       <div class="card">
-        <h2>2. This period</h2>
-        <p class="sub">Who is loaded and who is still outstanding. The bot skips anyone already ticked,
-          so re-running after a failure only picks up what is left.</p>
-        <div class="row" style="margin-bottom:.75rem;">
+        <h2>2. The card list</h2>
+        <p class="sub">Every meal card, what it should be topped up to, and which periods have already
+          been loaded &mdash; one row per card, one tick column per period. This replaces the Gift Card
+          spreadsheet: it is what the bot asks for when it runs, and what it ticks off as it goes.
+          Anyone already ticked gets skipped, so re-running after a failure only picks up what is left.</p>
+
+        <div class="setup-strip">
+          <div class="title">Setting this up for the first time</div>
+          <div class="muted" style="font-size:.82rem;margin-top:.15rem;">
+            Load the cards in from the <em>Gift Card / Meal Card Numbers</em> spreadsheet. It reads the
+            sheet named for the year picked below, and shows you what it found before writing anything.
+            You only do this once a year, when a new sheet starts.
+          </div>
+          <div class="row" style="margin-top:.5rem;">
+            <input type="file" id="rosterFile" accept=".xlsx" />
+            <button class="btn secondary" id="btnRoster" onclick="importRoster(true)">Import the card list</button>
+          </div>
+          <div id="rosterImportOut"></div>
+        </div>
+
+        <div class="row" style="margin:1rem 0 .75rem 0;">
           <label>Year <select id="yearSel" onchange="loadRoster()"></select></label>
           <label>Period <select id="periodSel" onchange="renderRoster()"></select></label>
           <span id="periodSummary" class="muted" style="font-size:.82rem;"></span>
         </div>
-        <div class="row" style="margin-bottom:.75rem;">
-          <input type="file" id="rosterFile" accept=".xlsx" />
-          <button class="btn secondary" id="btnRoster" onclick="importRoster(true)">Import roster from the spreadsheet</button>
-          <span class="muted" style="font-size:.8rem;">reads the sheet named for the year selected above</span>
-        </div>
-        <div id="rosterImportOut"></div>
         <div id="rosterWrap"><p class="muted">Loading…</p></div>
       </div>
 
@@ -217,7 +271,9 @@
 
       if(!cards.length){
         document.getElementById('rosterWrap').innerHTML =
-          '<p class="muted">No cards yet. Seed them with <code>seed_mealcards.py</code>.</p>';
+          `<p class="muted">No cards loaded for ${ROSTER.year} yet &mdash; use
+           <strong>Import the card list</strong> above and they will appear here,
+           one row per card.</p>`;
         document.getElementById('periodSummary').textContent = '';
         return;
       }
@@ -232,7 +288,8 @@
       const todo = cards.length - done - skipped;
 
       document.getElementById('periodSummary').innerHTML =
-        `${cards.length} active cards &middot; <strong>${todo}</strong> still to load` +
+        `${cards.length} active cards &middot; in period ${String(period).padStart(2,'0')}, ` +
+        `<strong>${todo}</strong> still to load` +
         (errored ? ` &middot; <span class="badge error">${errored} errored</span>` : '');
 
       const head = ['Name','Card','Target', ...Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'))];
@@ -258,8 +315,10 @@
         `<table><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>
          <tbody>${rows}</tbody></table>
          <p class="muted" style="font-size:.76rem;margin:.5rem 0 0 0;">
-           ✓ loaded &middot; – skipped (already at target) &middot; ! errored. The highlighted
-           column is the period selected above.</p>`;
+           Columns 01&ndash;12 are the periods: ✓ loaded &middot; – skipped, already at target
+           &middot; ! errored, and it will be tried again. The highlighted column is the period
+           picked above; changing that dropdown only moves the highlight and the count beside it,
+           it does not change any data.</p>`;
     }
 
     function renderMapping(){
