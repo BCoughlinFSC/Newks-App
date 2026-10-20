@@ -159,23 +159,31 @@
 
       <div class="card">
         <h2>3. Payroll report</h2>
-        <p class="sub">Upload the Paytronix <em>Stored Value Sales and Added Value Detail Report</em>
-          (.xls or .csv). You get back the named report and the payroll adjustment sheet.</p>
+        <p class="sub">Once the reload is done, upload the Paytronix <em>Stored Value Sales and Added
+          Value Detail Report</em> (.xls or .csv). You get back that report with the names filled in,
+          and the payroll adjustment sheet to hand over &mdash; the same two files as the old SSRS
+          report. This is the monthly job; do it after every reload.</p>
         <div class="row">
           <input type="file" id="reportFile" accept=".xls,.xlsx,.csv" />
           <button class="btn" id="btnReport" onclick="buildReport()">Build the reports</button>
         </div>
         <div id="reportOut"></div>
-      </div>
 
-      <div class="card">
-        <h2>4. Employee mapping</h2>
-        <p class="sub" id="mapSub">Card number to employee ID, the join the payroll report needs.</p>
-        <div class="row">
-          <input type="file" id="mapFile" accept=".csv" />
-          <button class="btn secondary" id="btnMap" onclick="importMapping()">Import MealCardsToAllPay.csv</button>
+        <div class="setup-strip" style="margin-top:1.25rem;">
+          <div class="title">Setting this up for the first time</div>
+          <div class="muted" style="font-size:.82rem;margin-top:.15rem;">
+            The payroll sheet totals the dollars <em>per employee</em>, so it has to know whose card is
+            whose. That join comes from <span class="field">MealCardsToAllPay.csv</span>, exported out
+            of SQL Server. Import it once and it keeps working every month &mdash; it only needs
+            redoing when someone joins, leaves, or is issued a new card.
+            <br><strong>Currently using:</strong> <span id="mapSub">&mdash;</span>
+          </div>
+          <div class="row" style="margin-top:.5rem;">
+            <input type="file" id="mapFile" accept=".csv" />
+            <button class="btn secondary" id="btnMap" onclick="importMapping()">Import MealCardsToAllPay.csv</button>
+          </div>
+          <div id="mapWarn"></div>
         </div>
-        <div id="mapWarn"></div>
       </div>
 
       <div class="card">
@@ -336,9 +344,7 @@
 
     function renderMapping(){
       const m = (ROSTER && ROSTER.mapping) || {};
-      document.getElementById('mapSub').innerHTML =
-        'Card number to employee ID, the join the payroll report needs.<br>' +
-        '<strong>Current source:</strong> ' + esc(m.description || 'unknown');
+      document.getElementById('mapSub').textContent = m.description || 'unknown';
       document.getElementById('mapWarn').innerHTML = m.authoritative ? '' :
         `<div class="warnbox">No authoritative mapping imported yet, so payroll rows are matched
          by <em>name</em> &mdash; anyone not matched is listed as unmapped instead of being dropped.
