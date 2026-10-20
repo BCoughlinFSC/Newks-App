@@ -23260,6 +23260,30 @@ async def mealcard_import_employee_map(
     return {"success": True, "cards": count, "mapping": mealcard_db.mapping_summary()}
 
 
+@app.get("/api/mealcard/roster-export")
+async def mealcard_export_roster(
+    year: Optional[int] = None, include_inactive: bool = False,
+    _user: User = Depends(get_current_admin_user),
+):
+    """The card list as a workbook - names, card numbers, targets, period ticks.
+
+    base64 again: the live site's leading newline corrupts a streamed xlsx.
+    """
+    import base64 as _b64
+
+    year = year or datetime.now().year
+    try:
+        xlsx = mealcard_db.roster_xlsx(year, include_inactive=include_inactive)
+    except Exception as exc:
+        logger.error("mealcard.roster_export failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Could not build the sheet: {exc}")
+
+    return {
+        "filename": f"Meal Card List_{year}.xlsx",
+        "data": _b64.b64encode(xlsx).decode("ascii"),
+    }
+
+
 @app.post("/api/mealcard/roster-import")
 async def mealcard_import_roster(
     body: MealCardRosterIn, _user: User = Depends(get_current_admin_user),

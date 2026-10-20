@@ -149,6 +149,8 @@
           <label>Year <select id="yearSel" onchange="loadRoster()"></select></label>
           <label>Period <select id="periodSel" onchange="renderRoster()"></select></label>
           <span id="periodSummary" class="muted" style="font-size:.82rem;"></span>
+          <button class="btn secondary" id="btnRosterDl" onclick="downloadRoster()"
+                  style="margin-left:auto;">Download the card list</button>
         </div>
         <div id="rosterWrap"><p class="muted">Loading…</p></div>
       </div>
@@ -273,6 +275,8 @@
       const period = Number(document.getElementById('periodSel').value);
       const cards = ROSTER.cards || [];
 
+      document.getElementById('btnRosterDl').disabled = !cards.length;
+
       if(!cards.length){
         document.getElementById('rosterWrap').innerHTML =
           `<p class="muted">No cards loaded for ${ROSTER.year} yet &mdash; use
@@ -319,7 +323,10 @@
         `<table><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>
          <tbody>${rows}</tbody></table>
          <p class="muted" style="font-size:.76rem;margin:.5rem 0 0 0;">
-           Columns 01&ndash;12 are the periods: ✓ loaded &middot; – skipped, already at target
+           <strong>Target</strong> is ${money(ROSTER.default_target)} for everyone unless an amount
+           was written into the name on the spreadsheet, the way
+           <em>(Board Meeting $600.00)</em> is &mdash; those come across as that card's own target.
+           <br>Columns 01&ndash;12 are the periods: ✓ loaded &middot; – skipped, already at target
            &middot; ! errored, and it will be tried again. The highlighted column is the period
            picked above; changing that dropdown only moves the highlight and the count beside it,
            it does not change any data.</p>`;
@@ -335,6 +342,26 @@
          by <em>name</em> &mdash; anyone not matched is listed as unmapped instead of being dropped.
          To fix it, run <code>Export_MealCardsToAllPay_MAPPING.sql</code> in SSMS, save the grid as
          <code>MealCardsToAllPay.csv</code> with headers, and import it here.</div>`;
+    }
+
+    // -- Roster download -----------------------------------------------------
+    async function downloadRoster(){
+      const btn = document.getElementById('btnRosterDl');
+      const year = document.getElementById('yearSel').value;
+      btn.disabled = true; btn.textContent = 'Building…';
+      clearStatus();
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/roster-export?year='+year,
+                                 { headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        const r = await resp.json();
+        saveBase64(r.data, r.filename, XLSX_MIME);
+        showStatus('Downloaded ' + r.filename, 'ok');
+      } catch(e){
+        showStatus('Could not build the sheet: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Download the card list';
+      }
     }
 
     // -- Roster import -------------------------------------------------------

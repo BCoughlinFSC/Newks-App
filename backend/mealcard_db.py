@@ -22,7 +22,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 MEALCARD_DB_PATH = os.getenv(
     "MEALCARD_DB_PATH",
@@ -231,6 +233,63 @@ def parse_roster(source, sheet: str) -> List[Dict]:
     if not rows:
         raise RosterError(f"No cards found on sheet {sheet!r}.")
     return rows
+
+
+STATUS_WORDS = {"done": "Loaded", "skipped": "Skipped (at target)", "error": "Error"}
+
+
+def roster_xlsx(year: int, include_inactive: bool = False,
+                db_path: str = MEALCARD_DB_PATH) -> bytes:
+    """The card list as a workbook: who, which card, what it tops up to.
+
+    Card Number is written as text. It is a 14-digit number, and Excel renders
+    a long number in General format as 3.53E+13 - which is what the roster
+    spreadsheet this replaces does.
+    """
+    cards = list_cards(active_only=not include_inactive, db_path=db_path)
+    grid = year_grid(year, db_path=db_path)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"Meal Cards {year}"
+
+    header = ["Name", "Card Number", "Target Amount", "Active"]
+    header += [f"Period {p:02d}" for p in range(1, 13)]
+    ws.append(header)
+
+    for card in cards:
+        periods = grid.get(card["card_number"], {})
+        ws.append([
+            card["name"],
+            card["card_number"],
+            target_for(card),
+            "Yes" if card["active"] else "No",
+            *[STATUS_WORDS.get(periods.get(p), "") for p in range(1, 13)],
+        ])
+
+    head_fill = PatternFill("solid", fgColor="C41E3A")
+    head_font = Font(bold=True, color="FFFFFF")
+    for col in range(1, len(header) + 1):
+        cell = ws.cell(1, col)
+        cell.fill, cell.font = head_fill, head_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrapText=True)
+
+    for row in range(2, ws.max_row + 1):
+        ws.cell(row, 2).number_format = "@"              # keep every digit
+        ws.cell(row, 3).number_format = '"$"#,##0.00'
+        ws.cell(row, 4).alignment = Alignment(horizontal="center")
+        for col in range(5, len(header) + 1):
+            ws.cell(row, col).alignment = Alignment(horizontal="center")
+
+    for col, width in enumerate([34, 20, 15, 9] + [13] * 12, start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.row_dimensions[1].height = 30
+    ws.freeze_panes = "C2"                               # name and card stay put
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(header))}{ws.max_row}"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def import_roster(rows: List[Dict], year: int, source: str = "",
