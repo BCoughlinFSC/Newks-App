@@ -23162,6 +23162,10 @@ async def mealcard_finish_run(
 ):
     if not mealcard_db.get_run(run_id):
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    if body.status not in ("finished", "dry-run", "abandoned"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be finished, dry-run or abandoned (got {body.status!r})")
     mealcard_db.finish_run(run_id, completed=body.completed, skipped=body.skipped,
                            errors=body.errors, log=body.log, status=body.status)
     return {"success": True, "run": mealcard_db.get_run(run_id)}

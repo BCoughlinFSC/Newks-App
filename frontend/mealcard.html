@@ -30,6 +30,7 @@
     .badge.error { background:#FEE2E2; color:#991B1B; }
     .badge.running { background:#DBEAFE; color:#1E40AF; }
     .badge.finished { background:#DCFCE7; color:#166534; }
+    .badge.dry-run { background:#EDE9FE; color:#5B21B6; }
     .badge.todo { background:#FEF9C3; color:#854D0E; }
     table { width:100%; border-collapse:collapse; font-size:.82rem; }
     th, td { padding:.35rem .5rem; border-bottom:1px solid #eee; text-align:left; white-space:nowrap; }
@@ -80,8 +81,11 @@
         </div>
         <ol class="steps">
           <li>Unzip it, then run <strong>setup.ps1</strong> once (it needs Python on the machine).</li>
-          <li>Each month, run <strong>Run Meal Card Reload.ps1</strong> and log into Paytronix when it asks.</li>
-          <li>Take the dry run when it offers &mdash; it reads every balance and loads nothing.</li>
+          <li>To check it works, run <strong>TEST RUN - adds no money.ps1</strong>. It reads every
+            balance and works out the amounts, but never fills in the Paytronix form and never ticks
+            a card off. Safe to run any time, including before a reload is due.</li>
+          <li>For the real thing, run <strong>Run Meal Card Reload.ps1</strong> and log into Paytronix
+            when it asks. <strong>That one does add money.</strong></li>
         </ol>
 
         <details class="manual">
@@ -497,7 +501,9 @@
             <td>${esc(fmtTime(r.started_at))}</td>
             <td>${esc(r.requested_by||'')}</td>
             <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
-            <td class="num">${r.completed}</td>
+            <td class="num">${r.status === 'dry-run'
+              ? '<span class="muted" title="a test run loads nothing by design">&mdash;</span>'
+              : r.completed}</td>
             <td class="num">${r.skipped}</td>
             <td class="num">${r.errors ? '<strong style="color:#B91C1C;">'+r.errors+'</strong>' : 0}</td>
             <td><span class="logbtn" onclick="showLog(${r.id})">log</span></td>

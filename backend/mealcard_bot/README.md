@@ -15,9 +15,26 @@ That creates a private Python environment here and installs two packages. It
 needs Python on the machine - if it is missing, the script tells you where to
 get it. Nothing else is installed and nothing is changed outside this folder.
 
+## Try it first — this one cannot spend anything
+
+Right-click **TEST RUN - adds no money.ps1** and choose **Run with PowerShell**.
+
+It does everything the real run does except add money: signs into the app, pulls
+the card list, looks each card up in Paytronix, reads its balance and works out
+what it would add. The adjustment form is never filled in or submitted, and no
+card is ticked off. There is no prompt in it that turns it into a real run.
+
+It offers to check only the first few cards, which is enough to prove your setup
+works without sitting through the whole list.
+
+Use this to check everything is working before the real reload is due. The test
+does show up on the Meal Cards page, labelled as a dry run, so whoever owns the
+process can see your setup is good.
+
 ## Every month
 
 Right-click **Run Meal Card Reload.ps1** and choose **Run with PowerShell**.
+**This one does add money.**
 
 It will:
 

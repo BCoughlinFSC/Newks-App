@@ -112,7 +112,7 @@ class AppClient:
     having run it.
     """
 
-    def __init__(self, base_url: str, token: str):
+    def __init__(self, base_url: str, token: str, dry_run: bool = False):
         self.base_url = base_url.rstrip("/")
         self.client = httpx.Client(
             base_url=self.base_url,
@@ -120,15 +120,20 @@ class AppClient:
             timeout=60.0,
         )
         self.run_id = None
+        # A test run must not tick anything off. The caller already skips these
+        # calls; the client refuses them too, so one missed branch cannot mark a
+        # card loaded when no money moved.
+        self.dry_run = dry_run
 
     @classmethod
-    def sign_in(cls, base_url: str, email: str, password: str) -> "AppClient":
+    def sign_in(cls, base_url: str, email: str, password: str,
+                dry_run: bool = False) -> "AppClient":
         r = httpx.post(f"{base_url.rstrip('/')}/api/auth/login",
                        json={"email": email, "password": password}, timeout=60.0)
         if r.status_code == 401:
             raise SystemExit("That email and password were not accepted by the app.")
         r.raise_for_status()
-        return cls(base_url, r.json()["access_token"])
+        return cls(base_url, r.json()["access_token"], dry_run=dry_run)
 
     def worklist(self, year=None, period=None, include_done=False) -> dict:
         params = {"include_done": str(include_done).lower()}
@@ -149,7 +154,7 @@ class AppClient:
     def record_card(self, card_number, status, amount=None, balance_before=None, detail=""):
         """Post one card's outcome. Never fatal: a reload that happened must not
         be lost to a network blip, so this warns and carries on."""
-        if self.run_id is None:
+        if self.run_id is None or self.dry_run:
             return
         try:
             r = self.client.post(
@@ -169,7 +174,11 @@ class AppClient:
             self.client.post(
                 f"/api/mealcard/runs/{self.run_id}/finish",
                 json={"completed": completed, "skipped": skipped, "errors": errors,
-                      "log": log[-200000:]},   # keep the tail if a run got chatty
+                      "log": log[-200000:],   # keep the tail if a run got chatty
+                      # A test run is still worth a row - it is how you see from
+                      # the app that someone's setup works - but it must never
+                      # read as a month that got loaded.
+                      "status": "dry-run" if self.dry_run else "finished"},
             )
         except Exception as e:
             print(f"  WARNING - could not close out the run in the app ({e.__class__.__name__}).")
@@ -201,7 +210,7 @@ def connect_to_app(base_dir: Path, args) -> AppClient:
         password = getpass.getpass(f"App password for {email}: ")
 
     print(f"Signing in to {base_url} as {email}")
-    return AppClient.sign_in(base_url, email, password)
+    return AppClient.sign_in(base_url, email, password, dry_run=args.dry_run)
 
 
 # -- Chrome connection --------------------------------------------------------
@@ -479,7 +488,13 @@ def main():
     print(f"Default target: ${work['default_target']:.2f}")
     print(f"Attempts per card: {CARD_ATTEMPTS}")
     if args.dry_run:
-        print("DRY RUN: balances will be read, nothing will be loaded")
+        print()
+        print("=" * 60)
+        print("  TEST RUN - NO MONEY WILL BE ADDED TO ANY CARD.")
+        print("  Each balance is read and the amount worked out, then thrown")
+        print("  away. The Paytronix form is never filled in or submitted,")
+        print("  and nothing is ticked off in the app.")
+        print("=" * 60)
     print("-" * 60)
 
     if not cards:
@@ -496,10 +511,10 @@ def main():
     print(f"{total} card(s) to process")
     print()
 
-    if not args.dry_run:
-        app.start_run(year, period)
-        print(f"App run #{app.run_id} started")
-        print()
+    app.start_run(year, period)
+    print(f"App run #{app.run_id} started"
+          + (" — it will show on the Meal Cards page as a dry run" if args.dry_run else ""))
+    print()
 
     completed = 0
     skipped = 0
@@ -593,8 +608,9 @@ def main():
 
         print("-" * 60)
         if args.dry_run:
-            print(f"DRY RUN SUMMARY: {skipped} already at target, {errors} errors, "
-                  f"{total - skipped - errors} would be loaded")
+            print(f"TEST RUN SUMMARY: {skipped} already at target, {errors} errors, "
+                  f"{total - skipped - errors} would have been loaded")
+            print("No money was added. Nothing was ticked off in the app.")
         else:
             print(f"SUMMARY: {completed} completed, {skipped} skipped, {errors} errors")
         if retried:
@@ -609,9 +625,8 @@ def main():
             print("already ticked in the app and will be skipped automatically.")
         print(f"Log saved to: {log_file}")
 
-    if not args.dry_run:
-        app.finish_run(completed, skipped, errors, logger.text())
-        print("Run closed out in the app.")
+    app.finish_run(completed, skipped, errors, logger.text())
+    print("Run closed out in the app.")
 
     logger.close()
     sys.stdout = logger.terminal
