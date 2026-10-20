@@ -16,6 +16,8 @@ spreadsheet that has to be open on one person's machine.
 See main.py /api/mealcard/* and backend/mealcard_bot/.
 """
 import io
+import json
+import logging
 import os
 import re
 import sqlite3
@@ -32,6 +34,16 @@ MEALCARD_DB_PATH = os.getenv(
 )
 
 DEFAULT_TARGET = 160.00
+
+# The card list the app ships with, so a new deployment works straight away
+# instead of starting empty and waiting for someone to upload a spreadsheet.
+SEED_PATH = os.getenv(
+    "MEALCARD_SEED_PATH",
+    os.path.join(os.path.dirname(__file__), "data", "mealcard_seed.json"),
+)
+
+logger = logging.getLogger(__name__)
+_seed_checked = False
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS mealcard_cards (
@@ -106,9 +118,24 @@ def get_connection(db_path: str = MEALCARD_DB_PATH) -> sqlite3.Connection:
 
 
 def initialize_db(db_path: str = MEALCARD_DB_PATH) -> None:
+    global _seed_checked
     with get_connection(db_path) as conn:
         conn.executescript(_SCHEMA)
         conn.commit()
+
+    # First touch in this process: fill empty tables from the data the app
+    # ships with, so a fresh deployment is usable without importing anything.
+    if not _seed_checked:
+        _seed_checked = True
+        try:
+            result = load_seed(db_path)
+            if result.get("seeded"):
+                logger.info("mealcard: seeded %s cards, %s ticks, %s employee names "
+                            "from the shipped data",
+                            result.get("cards"), result.get("ticks"), result.get("names"))
+        except Exception as exc:          # never block the app over seed data
+            logger.warning("mealcard: could not load the shipped card data (%s: %s)",
+                           exc.__class__.__name__, exc)
 
 
 def clean_card(v) -> str:
@@ -233,6 +260,57 @@ def parse_roster(source, sheet: str) -> List[Dict]:
     if not rows:
         raise RosterError(f"No cards found on sheet {sheet!r}.")
     return rows
+
+
+def load_seed(db_path: str = MEALCARD_DB_PATH, path: str = SEED_PATH) -> Dict:
+    """Fill empty tables from the card data the app ships with.
+
+    Only empty ones. A database someone has since edited must never be
+    overwritten by whatever the repo happens to ship, so this fills a blank
+    install and then stays out of the way for good. Deleting the seed file
+    changes nothing for an app that has already run.
+    """
+    if not os.path.exists(path):
+        return {"seeded": False, "reason": "no seed file shipped"}
+
+    with open(path, encoding="utf-8") as fh:
+        seed = json.load(fh)
+
+    with get_connection(db_path) as conn:
+        have_cards = conn.execute("SELECT COUNT(*) FROM mealcard_cards").fetchone()[0]
+        have_names = conn.execute(
+            "SELECT COUNT(*) FROM mealcard_employee_map_by_name").fetchone()[0]
+        have_map = conn.execute("SELECT COUNT(*) FROM mealcard_employee_map").fetchone()[0]
+
+    cards = ticks = names = 0
+    year = int(seed.get("year") or datetime.now().year)
+
+    if not have_cards:
+        rows = [{
+            "card_number": clean_card(c["card_number"]),
+            "name": c["name"],
+            # The file stores null for "use the default"; import_roster takes a
+            # real number and puts the null back.
+            "target_amount": (c["target_amount"] if c.get("target_amount") is not None
+                              else DEFAULT_TARGET),
+            "sort_order": c.get("sort_order", 0),
+            "periods": c.get("periods", []),
+        } for c in seed.get("cards", [])]
+        if rows:
+            written = import_roster(rows, year, source="the list shipped with the app",
+                                    db_path=db_path)
+            cards, ticks = written["cards"], written["ticks"]
+
+    # Only when there is no mapping of either kind: once a real export has been
+    # imported, the shipped name-matched fallback has nothing to add.
+    if not have_names and not have_map and seed.get("employee_names"):
+        names = upsert_employee_names(
+            seed["employee_names"],
+            source=seed.get("employee_names_source", "shipped with the app"),
+            db_path=db_path)
+
+    return {"seeded": bool(cards or names), "cards": cards, "ticks": ticks,
+            "names": names, "year": year}
 
 
 STATUS_WORDS = {"done": "Loaded", "skipped": "Skipped (at target)", "error": "Error"}

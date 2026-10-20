@@ -103,3 +103,8 @@ response.txt
 # the retired SQL Server OLO.dbo.OLOVendors ETL as the source of this data.
 !backend/data/contacts/olo_vendor_seed.json
 
+# Exception: the meal card list (cards, targets, who they belong to), loaded
+# into empty tables by mealcard_db.load_seed so a fresh deployment of the Meal
+# Cards page works without anyone importing a spreadsheet first.
+!backend/data/mealcard_seed.json
+

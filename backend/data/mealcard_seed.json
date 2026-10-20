@@ -1,0 +1,581 @@
+{
+  "_comment": "Baked-in meal card data so the app works the moment it is deployed, with nothing to import by hand. Loaded once, only into empty tables - it never overwrites what is already in the database, so edits made in the app win. Regenerate from the roster spreadsheet when the card list changes, or just use the Import buttons on the Meal Cards page.",
+  "generated": "2026-10-20",
+  "year": 2026,
+  "default_target": 160.0,
+  "cards": [
+    {
+      "card_number": "35303000174738",
+      "name": "Klara Smith",
+      "target_amount": null,
+      "sort_order": 2,
+      "periods": [
+        1,
+        2,
+        3,
+        5,
+        7
+      ]
+    },
+    {
+      "card_number": "35303000175190",
+      "name": "Emily Moore",
+      "target_amount": null,
+      "sort_order": 3,
+      "periods": [
+        1,
+        2,
+        3,
+        5,
+        6,
+        7,
+        8,
+        10
+      ]
+    },
+    {
+      "card_number": "35303000603202",
+      "name": "Gene Pearson",
+      "target_amount": null,
+      "sort_order": 4,
+      "periods": [
+        1,
+        2,
+        3,
+        5,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "35303000649586",
+      "name": "Beth Thrasher",
+      "target_amount": null,
+      "sort_order": 5,
+      "periods": [
+        1,
+        2,
+        3,
+        6,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "35303000649750",
+      "name": "Matt Wilson",
+      "target_amount": null,
+      "sort_order": 6,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "35303000732351",
+      "name": "Marc Hostetler",
+      "target_amount": null,
+      "sort_order": 7,
+      "periods": [
+        1,
+        2,
+        3,
+        5
+      ]
+    },
+    {
+      "card_number": "35303000735243",
+      "name": "Veronica Adul'Ali",
+      "target_amount": null,
+      "sort_order": 8,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "35303000735302",
+      "name": "Frank Paci",
+      "target_amount": null,
+      "sort_order": 9,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "35303000735353",
+      "name": "Tiffany Croxton",
+      "target_amount": null,
+      "sort_order": 10,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "35303000735448",
+      "name": "Kim Aylesworth",
+      "target_amount": null,
+      "sort_order": 11,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "35303000735689",
+      "name": "Heather Chase",
+      "target_amount": null,
+      "sort_order": 12,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "35303000773592",
+      "name": "Liz Pearson",
+      "target_amount": null,
+      "sort_order": 13,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "card_number": "35303000773739",
+      "name": "Ferro Ferro",
+      "target_amount": null,
+      "sort_order": 14,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "35303000790131",
+      "name": "Amy McIntosh",
+      "target_amount": null,
+      "sort_order": 15,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "35303000827614",
+      "name": "Sean Gaughan",
+      "target_amount": null,
+      "sort_order": 16,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "35303000865602",
+      "name": "Nathan Neinast",
+      "target_amount": null,
+      "sort_order": 17,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "35303000945319",
+      "name": "Reanne Burnett",
+      "target_amount": null,
+      "sort_order": 18,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        8,
+        9
+      ]
+    },
+    {
+      "card_number": "45563000000789",
+      "name": "Mike Jones",
+      "target_amount": null,
+      "sort_order": 19,
+      "periods": [
+        1,
+        2,
+        3,
+        5,
+        6,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000000843",
+      "name": "Adam Karveller",
+      "target_amount": null,
+      "sort_order": 20,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "45563000000844",
+      "name": "Nick Nastasi",
+      "target_amount": null,
+      "sort_order": 21,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    {
+      "card_number": "45563000000877",
+      "name": "Madison Newcomb",
+      "target_amount": null,
+      "sort_order": 22,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    {
+      "card_number": "45563000000880",
+      "name": "Cynthia Baxter (Board Meeting $600.00)",
+      "target_amount": 600.0,
+      "sort_order": 23,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000000894",
+      "name": "Jon Williams",
+      "target_amount": null,
+      "sort_order": 24,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000000899",
+      "name": "Chris Cheek",
+      "target_amount": null,
+      "sort_order": 25,
+      "periods": [
+        1,
+        2,
+        3,
+        5,
+        6,
+        8
+      ]
+    },
+    {
+      "card_number": "45563000000919",
+      "name": "Chris Newcomb",
+      "target_amount": null,
+      "sort_order": 26,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000000934",
+      "name": "Tonya Bell",
+      "target_amount": null,
+      "sort_order": 27,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000000936",
+      "name": "Matthew Hayward",
+      "target_amount": null,
+      "sort_order": 28,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000000938",
+      "name": "Trey Fuller",
+      "target_amount": null,
+      "sort_order": 29,
+      "periods": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "card_number": "45563000000966",
+      "name": "Madison Newcomb (office card $300.00)",
+      "target_amount": 300.0,
+      "sort_order": 30,
+      "periods": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "card_number": "45563000000975",
+      "name": "Nadia Watson",
+      "target_amount": null,
+      "sort_order": 31,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000001005",
+      "name": "Cynthia Baxter (Personal)",
+      "target_amount": null,
+      "sort_order": 32,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000001016",
+      "name": "Jessica Drahem",
+      "target_amount": null,
+      "sort_order": 33,
+      "periods": [
+        1,
+        2,
+        3,
+        5,
+        7,
+        9,
+        10
+      ]
+    },
+    {
+      "card_number": "45563000001030",
+      "name": "Matilyn Skinner",
+      "target_amount": null,
+      "sort_order": 34,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "card_number": "45563000001046",
+      "name": "Tracey King",
+      "target_amount": null,
+      "sort_order": 35,
+      "periods": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        8,
+        9,
+        10
+      ]
+    }
+  ],
+  "employee_names": [
+    {
+      "name": "Amy McIntosh",
+      "employee_id": "8005",
+      "entity": "90219"
+    },
+    {
+      "name": "Chris Newcomb",
+      "employee_id": "5034",
+      "entity": "90219"
+    },
+    {
+      "name": "Cynthia Baxter (Personal)",
+      "employee_id": "5000",
+      "entity": "90219"
+    },
+    {
+      "name": "Gene Pearson",
+      "employee_id": "1935",
+      "entity": "90218"
+    },
+    {
+      "name": "Heather Chase",
+      "employee_id": "8289",
+      "entity": "90219"
+    },
+    {
+      "name": "Jon Williams",
+      "employee_id": "5026",
+      "entity": "90219"
+    },
+    {
+      "name": "Madison Newcomb",
+      "employee_id": "8024",
+      "entity": "90219"
+    },
+    {
+      "name": "Matt Wilson",
+      "employee_id": "1203",
+      "entity": "90219"
+    },
+    {
+      "name": "Matthew Hayward",
+      "employee_id": "8300",
+      "entity": "90219"
+    },
+    {
+      "name": "Nadia Watson",
+      "employee_id": "8307",
+      "entity": "90219"
+    },
+    {
+      "name": "Nick Nastasi",
+      "employee_id": "5028",
+      "entity": "90219"
+    },
+    {
+      "name": "Reanne Burnett",
+      "employee_id": "8309",
+      "entity": "90219"
+    },
+    {
+      "name": "Sean Gaughan",
+      "employee_id": "9100541",
+      "entity": "90218"
+    },
+    {
+      "name": "Tonya Bell",
+      "employee_id": "5035",
+      "entity": "90219"
+    },
+    {
+      "name": "Tracey King",
+      "employee_id": "5041",
+      "entity": "90219"
+    }
+  ],
+  "employee_names_source": "2 payroll export(s): Monthly MealCard Adjustments for Payroll_2026-09-01.xlsx, Monthly MealCard Adjustments for Payroll_2026-10-01.xlsx"
+}
