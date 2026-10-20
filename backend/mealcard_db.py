@@ -561,15 +561,23 @@ def mapping_summary(db_path: str = MEALCARD_DB_PATH) -> Dict:
     """
     by_card, by_name, desc = employee_map(db_path)
     cards = list_cards(active_only=True, db_path=db_path)
-    covered = 0
+    covered = off_payroll = 0
+    unknown = []
     for card in cards:
         info = by_card.get(card["card_number"]) or by_name.get(card["name"]) or {}
-        # AllPayID 0 means deliberately not on payroll, so it is not coverage.
-        if (info.get("employee_id") or "") not in ("", "0"):
+        emp_id = info.get("employee_id") or ""
+        if emp_id == "0":
+            # Deliberately off payroll - a corporate expense, not a missing id.
+            off_payroll += 1
+        elif emp_id:
             covered += 1
+        else:
+            unknown.append(card["name"])
     return {"by_card": len(by_card), "by_name": len(by_name),
             "description": desc, "authoritative": bool(by_card),
-            "covers": covered, "of": len(cards)}
+            "covers": covered, "of": len(cards),
+            "off_payroll": off_payroll,
+            "unknown": unknown, "unknown_count": len(unknown)}
 
 
 # -- Runs ---------------------------------------------------------------------

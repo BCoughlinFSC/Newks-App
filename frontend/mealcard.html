@@ -350,18 +350,22 @@
       const m = (ROSTER && ROSTER.mapping) || {};
       document.getElementById('mapSub').textContent = m.description || 'unknown';
 
-      const gap = (m.of || 0) - (m.covers || 0);
+      const unknown = m.unknown_count || 0;
       document.getElementById('mapCoverage').innerHTML = m.of == null ? '' :
-        `It covers <strong>${m.covers} of ${m.of}</strong> cards.` + (gap ? ` The other
-         ${gap} come through on an &ldquo;Unmapped&rdquo; tab with their amounts, rather than
-         being dropped.` : '');
+        `It has an employee ID for <strong>${m.covers} of ${m.of}</strong> cards` +
+        (m.off_payroll ? `, and ${m.off_payroll} more are marked as never belonging on the
+          payroll report` : '') + '.' +
+        (unknown ? ` ${unknown} still ${unknown === 1 ? 'has' : 'have'} neither, so
+          ${unknown === 1 ? 'it lands' : 'they land'} on an &ldquo;Unmapped&rdquo; tab with the
+          amount rather than being dropped.` : ' Everyone is accounted for.');
 
-      document.getElementById('mapWarn').innerHTML = (m.authoritative && !gap) ? '' :
-        `<div class="warnbox">To cover everyone, the card-to-employee list has to come out of
-         SQL Server, where it is the only place it exists. Run
-         <code>Export_MealCardsToAllPay_MAPPING.sql</code> in SSMS against SQL-PROD, save the grid
-         as <code>MealCardsToAllPay.csv</code> <strong>with column headers</strong>, and import it
-         above. Everything else on this page works without it.</div>`;
+      document.getElementById('mapWarn').innerHTML = !unknown ? '' :
+        `<div class="warnbox">Still needs an employee ID:
+         <strong>${(m.unknown || []).map(esc).join(', ')}</strong>.
+         Ask payroll or HR for those, or import a
+         <code>MealCardsToAllPay.csv</code> export if one can still be produced &mdash; either way
+         send them over and they can ship with the app. Everything else here works without
+         them.</div>`;
     }
 
     // -- Roster download -----------------------------------------------------

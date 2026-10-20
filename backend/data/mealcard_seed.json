@@ -502,6 +502,11 @@
   ],
   "employee_names": [
     {
+      "name": "Adam Karveller",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
       "name": "Amy McIntosh",
       "employee_id": "8005",
       "entity": "90219"
@@ -522,6 +527,11 @@
       "entity": "90219"
     },
     {
+      "name": "Cynthia Baxter (Board Meeting $600.00)",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
       "name": "Cynthia Baxter (Personal)",
       "employee_id": "5000",
       "entity": "90219"
@@ -530,6 +540,11 @@
       "name": "Emily Moore",
       "employee_id": "8027",
       "entity": "90219"
+    },
+    {
+      "name": "Frank Paci",
+      "employee_id": "0",
+      "entity": ""
     },
     {
       "name": "Gene Pearson",
@@ -552,6 +567,11 @@
       "entity": "90219"
     },
     {
+      "name": "Klara Smith",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
       "name": "Liz Pearson",
       "employee_id": "1962",
       "entity": "90219"
@@ -560,6 +580,11 @@
       "name": "Madison Newcomb",
       "employee_id": "8024",
       "entity": "90219"
+    },
+    {
+      "name": "Madison Newcomb (office card $300.00)",
+      "employee_id": "0",
+      "entity": ""
     },
     {
       "name": "Marc Hostetler",

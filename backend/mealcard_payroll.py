@@ -229,7 +229,8 @@ def build_payroll_rows(header, rows, card_names, by_card, by_name):
         # The proc excludes AllPayID = 0 (cards deliberately not on payroll).
         if not info or not emp_id or emp_id == "0":
             unmapped.append([card, name, round(amount, 2),
-                             "AllPayID = 0" if info else "no employee ID found"])
+                             "never on the payroll report (AllPayID 0)" if info
+                             else "no employee ID found"])
             continue
 
         key = (emp_id, info.get("entity", ""), info.get("name") or name)
