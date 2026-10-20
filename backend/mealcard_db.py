@@ -15,11 +15,14 @@ spreadsheet that has to be open on one person's machine.
 
 See main.py /api/mealcard/* and backend/mealcard_bot/.
 """
+import io
 import os
 import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
+
+from openpyxl import load_workbook
 
 MEALCARD_DB_PATH = os.getenv(
     "MEALCARD_DB_PATH",
@@ -172,6 +175,92 @@ def card_names(db_path: str = MEALCARD_DB_PATH) -> Dict[str, str]:
 def target_for(card: Dict) -> float:
     t = card.get("target_amount")
     return float(t) if t is not None else DEFAULT_TARGET
+
+
+# -- Importing the roster workbook -------------------------------------------
+# Column A is the name, column B the card number, and each period gets its own
+# column from C on - so period N lives in column 2 + N.
+FIRST_PERIOD_COL = 3
+
+
+class RosterError(ValueError):
+    """The workbook is not the gift card roster we expect."""
+
+
+def parse_roster(source, sheet: str) -> List[Dict]:
+    """Read the gift card workbook. `source` is a path or the file's bytes.
+
+    Parsing is kept separate from writing so a caller can show what an import
+    would do before it does it - this overwrites names and targets, so it is
+    worth looking at first.
+    """
+    wb = load_workbook(
+        io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source,
+        data_only=True,
+    )
+    try:
+        if sheet not in wb.sheetnames:
+            raise RosterError(
+                f"That workbook has no {sheet!r} sheet. It has: {', '.join(wb.sheetnames)}")
+        ws = wb[sheet]
+
+        first, second = ws.cell(1, 1).value, ws.cell(1, 2).value
+        if str(first or "").strip().lower() != "name" or "card" not in str(second or "").lower():
+            raise RosterError(
+                "That sheet does not look like the roster - the first two columns should "
+                f"be Name and Card Number, but they are {first!r} and {second!r}.")
+
+        rows = []
+        for r in range(2, ws.max_row + 1):
+            name_cell, card_cell = ws.cell(r, 1).value, ws.cell(r, 2).value
+            if not name_cell or not card_cell:
+                continue
+            name = str(name_cell).strip()
+            rows.append({
+                "card_number": clean_card(card_cell),
+                "name": name,
+                "target_amount": parse_target_amount(name),
+                "sort_order": r,
+                # Only TRUE counts as loaded; blank and FALSE both mean "not yet".
+                "periods": [p for p in range(1, 13)
+                            if ws.cell(r, FIRST_PERIOD_COL + p - 1).value is True],
+            })
+    finally:
+        wb.close()
+
+    if not rows:
+        raise RosterError(f"No cards found on sheet {sheet!r}.")
+    return rows
+
+
+def import_roster(rows: List[Dict], year: int, source: str = "",
+                  db_path: str = MEALCARD_DB_PATH) -> Dict:
+    """Write parsed roster rows in. Cards upsert, ticks upsert per period.
+
+    A card that has disappeared from the sheet is left alone rather than
+    deleted - retiring someone is a deliberate act, not a side effect of
+    re-importing. Deactivate them on the page instead.
+    """
+    initialize_db(db_path)
+    cards = ticks = 0
+    for row in rows:
+        upsert_card(
+            card_number=row["card_number"],
+            name=row["name"],
+            # Only store a target when the name carried an exception; the rest
+            # stay NULL so changing the default moves them all.
+            target_amount=(row["target_amount"]
+                           if row["target_amount"] != DEFAULT_TARGET else None),
+            sort_order=row["sort_order"],
+            db_path=db_path,
+        )
+        cards += 1
+        for period in row["periods"]:
+            record_period(row["card_number"], year, period, "done",
+                          detail=f"imported from {source}" if source else "imported",
+                          db_path=db_path)
+            ticks += 1
+    return {"cards": cards, "ticks": ticks, "year": year}
 
 
 # -- Period completion --------------------------------------------------------

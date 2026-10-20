@@ -23039,6 +23039,13 @@ class MealCardFileIn(BaseModel):
     content_b64: str
 
 
+class MealCardRosterIn(MealCardFileIn):
+    """The gift card workbook, plus which sheet and year it covers."""
+    sheet: Optional[str] = None
+    year: Optional[int] = None
+    dry_run: bool = False
+
+
 def _mealcard_period(year: Optional[int], period: Optional[int]) -> Tuple[int, int]:
     """Default to this calendar month, which is how periods have lined up."""
     now = datetime.now()
@@ -23247,6 +23254,57 @@ async def mealcard_import_employee_map(
     count = mealcard_db.replace_employee_map(
         rows, source=body.filename or "MealCardsToAllPay.csv")
     return {"success": True, "cards": count, "mapping": mealcard_db.mapping_summary()}
+
+
+@app.post("/api/mealcard/roster-import")
+async def mealcard_import_roster(
+    body: MealCardRosterIn, _user: User = Depends(get_current_admin_user),
+):
+    """Import the gift card workbook - the card roster and its period ticks.
+
+    This is the one-time move off the spreadsheet, and the same parse the
+    seed_mealcards.py CLI runs. dry_run reports what would happen without
+    writing, which the page shows for confirmation first: an import overwrites
+    names and targets.
+    """
+    import base64 as _b64
+
+    try:
+        raw = _b64.b64decode(body.content_b64 or "")
+    except Exception:
+        raise HTTPException(status_code=400, detail="The file data didn't decode.")
+    if not raw:
+        raise HTTPException(status_code=400, detail="That file came through empty.")
+
+    year = body.year or datetime.now().year
+    sheet = body.sheet or str(year)
+
+    try:
+        rows = mealcard_db.parse_roster(raw, sheet)
+    except mealcard_db.RosterError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as exc:
+        logger.error("mealcard.roster_import failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read that workbook ({exc.__class__.__name__}). "
+                   "It should be the Gift Card / Meal Card Numbers .xlsx.")
+
+    known = {c["card_number"] for c in mealcard_db.list_cards(active_only=False)}
+    preview = {
+        "year": year,
+        "sheet": sheet,
+        "cards": len(rows),
+        "new_cards": sum(1 for r in rows if r["card_number"] not in known),
+        "ticks": sum(len(r["periods"]) for r in rows),
+        "exceptions": [{"name": r["name"], "target_amount": r["target_amount"]}
+                       for r in rows if r["target_amount"] != mealcard_db.DEFAULT_TARGET],
+    }
+    if body.dry_run:
+        return {"dry_run": True, **preview}
+
+    result = mealcard_db.import_roster(rows, year, source=body.filename or "upload")
+    return {"dry_run": False, **preview, **result}
 
 
 @app.get("/api/mealcard/bot-package")

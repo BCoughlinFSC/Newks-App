@@ -86,6 +86,12 @@
           <label>Period <select id="periodSel" onchange="renderRoster()"></select></label>
           <span id="periodSummary" class="muted" style="font-size:.82rem;"></span>
         </div>
+        <div class="row" style="margin-bottom:.75rem;">
+          <input type="file" id="rosterFile" accept=".xlsx" />
+          <button class="btn secondary" id="btnRoster" onclick="importRoster(true)">Import roster from the spreadsheet</button>
+          <span class="muted" style="font-size:.8rem;">reads the sheet named for the year selected above</span>
+        </div>
+        <div id="rosterImportOut"></div>
         <div id="rosterWrap"><p class="muted">Loading…</p></div>
       </div>
 
@@ -266,6 +272,55 @@
          by <em>name</em> &mdash; anyone not matched is listed as unmapped instead of being dropped.
          To fix it, run <code>Export_MealCardsToAllPay_MAPPING.sql</code> in SSMS, save the grid as
          <code>MealCardsToAllPay.csv</code> with headers, and import it here.</div>`;
+    }
+
+    // -- Roster import -------------------------------------------------------
+    // Two passes: the first is a dry run the server costs nothing to do, so the
+    // confirmation says what will actually change rather than asking blind.
+    async function importRoster(preview){
+      const input = document.getElementById('rosterFile');
+      const file = input.files && input.files[0];
+      const btn = document.getElementById('btnRoster');
+      const out = document.getElementById('rosterImportOut');
+      clearStatus();
+      if(!file){ showStatus('Pick the Gift Card / Meal Card Numbers spreadsheet first.', 'error'); return; }
+
+      const year = Number(document.getElementById('yearSel').value);
+      btn.disabled = true; btn.textContent = preview ? 'Checking…' : 'Importing…';
+      try {
+        const content_b64 = await readAsBase64(file);
+        const resp = await fetch(API_BASE+'/api/mealcard/roster-import', {
+          method: 'POST', headers: jsonHeaders(),
+          body: JSON.stringify({ filename: file.name, content_b64, year,
+                                 sheet: String(year), dry_run: preview }),
+        });
+        if(!resp.ok) throw await apiError(resp);
+        const r = await resp.json();
+
+        if (r.dry_run) {
+          const exc = r.exceptions.length
+            ? '<br>Custom targets: ' + r.exceptions.map(e =>
+                esc(e.name) + ' ' + money(e.target_amount)).join(', ') + '.'
+            : '';
+          out.innerHTML = `<div class="warnbox">
+            Sheet <strong>${esc(r.sheet)}</strong> holds <strong>${r.cards}</strong> cards
+            (${r.new_cards} not here yet) and ${r.ticks} period ticks for ${r.year}.${exc}
+            <br>Importing overwrites the name and target of any card already here.
+            <div class="row" style="margin-top:.5rem;">
+              <button class="btn" onclick="importRoster(false)">Import these ${r.cards} cards</button>
+              <button class="btn secondary" onclick="document.getElementById('rosterImportOut').innerHTML='';">Cancel</button>
+            </div></div>`;
+        } else {
+          out.innerHTML = '';
+          input.value = '';
+          showStatus(`Imported ${r.cards} cards and ${r.ticks} period ticks for ${r.year}.`, 'ok');
+          await loadRoster();
+        }
+      } catch(e){
+        showStatus('Could not import the roster: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Import roster from the spreadsheet';
+      }
     }
 
     // -- 3. Payroll report ---------------------------------------------------

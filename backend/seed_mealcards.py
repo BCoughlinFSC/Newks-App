@@ -44,53 +44,25 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mealcard_db  # noqa: E402
 
-# Column A is the name, column B the card number, and each period gets its own
-# column from C on - so period N lives in column 2 + N.
-FIRST_PERIOD_COL = 3
-
-
 def seed_roster(path: str, sheet: str, year: int, dry_run: bool) -> int:
-    wb = load_workbook(path, data_only=True)
-    if sheet not in wb.sheetnames:
-        raise SystemExit(f"Sheet {sheet!r} not in {path} (has: {', '.join(wb.sheetnames)})")
-    ws = wb[sheet]
+    """Parse and import the roster. The Meal Cards page does the same thing
+    through mealcard_db.parse_roster / import_roster, so the two routes cannot
+    drift apart."""
+    try:
+        rows = mealcard_db.parse_roster(path, sheet)
+    except mealcard_db.RosterError as e:
+        raise SystemExit(str(e))
 
-    cards = ticks = 0
-    for r in range(2, ws.max_row + 1):
-        name_cell, card_cell = ws.cell(r, 1).value, ws.cell(r, 2).value
-        if not name_cell or not card_cell:
-            continue
-        name = str(name_cell).strip()
-        card_number = mealcard_db.clean_card(card_cell)
-        target = mealcard_db.parse_target_amount(name)
+    for row in rows:
+        logger.info("card %-16s %-34s target $%.2f",
+                    row["card_number"], row["name"][:34], row["target_amount"])
 
-        logger.info("card %-16s %-34s target $%.2f", card_number, name[:34], target)
-        if not dry_run:
-            mealcard_db.upsert_card(
-                card_number=card_number,
-                name=name,
-                # Only store a target when the name carried an exception; the
-                # rest stay NULL so changing the default moves them all.
-                target_amount=target if target != mealcard_db.DEFAULT_TARGET else None,
-                sort_order=r,
-            )
-        cards += 1
-
-        for period in range(1, 13):
-            value = ws.cell(r, FIRST_PERIOD_COL + period - 1).value
-            if value is not True:   # blank or FALSE means "not loaded"
-                continue
-            if not dry_run:
-                mealcard_db.record_period(
-                    card_number, year, period, "done",
-                    detail=f"seeded from {os.path.basename(path)}",
-                )
-            ticks += 1
-
-    wb.close()
-    logger.info("roster: %d cards, %d period ticks%s", cards, ticks,
+    ticks = sum(len(r["periods"]) for r in rows)
+    if not dry_run:
+        mealcard_db.import_roster(rows, year, source=os.path.basename(path))
+    logger.info("roster: %d cards, %d period ticks%s", len(rows), ticks,
                 " (dry run)" if dry_run else "")
-    return cards
+    return len(rows)
 
 
 def seed_mapping(path: str, dry_run: bool) -> int:
