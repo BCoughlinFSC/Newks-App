@@ -51,6 +51,28 @@
     { key: 'mealcard',         label: 'Meal Cards',                   href: '/mealcard.html' },
   ];
 
+  // ─── Which links the sidebar actually shows ─────
+  // Narrowed 2026-10-20 to the handful of things people still come here for.
+  // This HIDES, it does not remove: every other page is still deployed and
+  // still works from a bookmark or a direct URL, and nothing server-side
+  // changed. Reports whose home really has moved were deleted from the lists
+  // above instead, so a hidden link here means "not front and centre", not
+  // "gone".
+  //
+  // To put the full sidebar back, set this to null. To show one more thing,
+  // add its key from REPORT_GROUPS or ADMIN_LINKS above.
+  const VISIBLE_KEYS = [
+    'subscriptions',   // Report Subscriptions
+    'onboarding',      // NRO Onboarding
+    'mealcard',        // Meal Cards
+    'contacts',        // Contacts (forms.nfc.local)
+    'admin',           // Admin Panel
+  ];
+
+  function isVisible(key) {
+    return !VISIBLE_KEYS || VISIBLE_KEYS.includes(key);
+  }
+
   // ─── Detect active page ─────────────────────────
   function getActivePage() {
     const path = window.location.pathname.replace(/\/$/, '');
@@ -72,6 +94,8 @@
     if (path.endsWith('/onboarding.html'))            return 'onboarding';
     if (path.endsWith('/subscriptions.html'))         return 'subscriptions';
     if (path.endsWith('/toast-tools.html'))           return 'toast-tools';
+    if (path.endsWith('/mealcard.html'))              return 'mealcard';
+    if (path.startsWith('/contacts'))                 return 'contacts';
     return '';
   }
 
@@ -109,7 +133,8 @@
     // Reports section — render each group with its own section label.
     // Skip groups whose visible links are all filtered out by permissions.
     let reportsHtml = REPORT_GROUPS.map(group => {
-      const visibleLinks = group.links.filter(link => userCanAccess(link.key));
+      const visibleLinks = group.links.filter(
+        link => userCanAccess(link.key) && isVisible(link.key));
       if (visibleLinks.length === 0) return '';
 
       const linksHtml = visibleLinks.map(link => {
@@ -129,7 +154,7 @@
     // Projects board — shared team ticket board. Visible to every logged-in
     // user (not permission-gated), like the Guide link.
     const projectsActive = activePage === 'projects' ? ' active' : '';
-    const projectsHtml = user
+    const projectsHtml = (user && isVisible('projects'))
       ? `<div class="snav-section-label" style="margin-top:0.5rem;">Team</div>
          <a href="/projects.html" class="snav-link${projectsActive}" data-key="projects">Projects</a>`
       : '';
@@ -137,19 +162,25 @@
     // Admin section
     let adminHtml = '';
     if (isAdmin) {
-      const adminLinks = ADMIN_LINKS.map(link => {
+      const adminLinks = ADMIN_LINKS.filter(link => isVisible(link.key)).map(link => {
         const active = link.key === activePage ? ' active' : '';
         const actionAttr = link.action ? ` data-action="${link.action}"` : '';
         return `<a href="${link.href}" class="snav-link${active}" data-key="${link.key}"${actionAttr}>${esc(link.label)}</a>`;
       }).join('');
 
       const adminPanelActive = activePage === 'admin' ? ' active' : '';
+      const adminPanelHtml = isVisible('admin')
+        ? `<a href="/admin.html" class="snav-link${adminPanelActive}" data-key="admin">Admin Panel</a>`
+        : '';
 
-      adminHtml = `
-        <div class="snav-section-label" style="margin-top: 0.5rem;">Admin & Data</div>
-        ${adminLinks}
-        <a href="/admin.html" class="snav-link${adminPanelActive}" data-key="admin">Admin Panel</a>
-      `;
+      // Only draw the heading if something sits under it.
+      if (adminLinks || adminPanelHtml) {
+        adminHtml = `
+          <div class="snav-section-label" style="margin-top: 0.5rem;">Admin & Data</div>
+          ${adminLinks}
+          ${adminPanelHtml}
+        `;
+      }
     }
 
     // User profile section
@@ -175,8 +206,7 @@
     return `
       <div class="snav-card" style="flex:none;">
         <h3 style="margin:0 0 0.75rem;color:#C41E3A;font-size:0.95rem;font-weight:700;">Navigation</h3>
-        <div class="snav-section-label">Reports</div>
-        ${reportsHtml}
+        ${reportsHtml ? `<div class="snav-section-label">Reports</div>${reportsHtml}` : ''}
         <div style="margin-top:0.5rem;">
           ${guideHtml}
         </div>
