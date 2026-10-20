@@ -13,3 +13,4 @@ pyodbc
 apscheduler
 azure-storage-blob
 psycopg[binary]
+xlrd

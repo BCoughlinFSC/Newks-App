@@ -48,6 +48,7 @@
     { key: 'subscriptions',    label: 'Report Subscriptions',         href: '/subscriptions.html' },
     { key: 'onboarding',       label: 'NRO Onboarding',               href: '/onboarding.html' },
     { key: 'toast-tools',      label: 'ToastWeb Bulk Edit Tools',     href: '/toast-tools.html' },
+    { key: 'mealcard',         label: 'Meal Cards',                   href: '/mealcard.html' },
   ];
 
   // ─── Detect active page ─────────────────────────

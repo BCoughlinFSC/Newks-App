@@ -22981,6 +22981,310 @@ async def onboarding_send_digest(_user: User = Depends(get_current_admin_user)):
     return {"success": True}
 
 
+# ------------------------------------------------------------------
+# Meal Card Reload
+# ------------------------------------------------------------------
+# The monthly Paytronix meal card reload. Two halves:
+#
+#   * The reload bot drives pxsweb.com in a Chrome the operator is already
+#     logged into, so it cannot run here — it runs on their PC, downloads from
+#     /api/mealcard/bot-package, asks /worklist what to load and posts each
+#     card's outcome back. These tables are the record, not a spreadsheet.
+#   * The payroll step is pure data work, so it does run here: upload the
+#     Paytronix detail report, get back the two workbooks payroll needs.
+#
+# See backend/mealcard_db.py, backend/mealcard_payroll.py, backend/mealcard_bot/.
+import mealcard_db
+import mealcard_payroll
+
+MEALCARD_BOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mealcard_bot")
+
+
+class MealCardIn(BaseModel):
+    card_number: str
+    name: str
+    target_amount: Optional[float] = None
+    active: bool = True
+    notes: str = ""
+
+
+class MealCardRunStart(BaseModel):
+    year: Optional[int] = None
+    period: Optional[int] = None
+
+
+class MealCardResultIn(BaseModel):
+    card_number: str
+    status: str                       # done | skipped | error
+    amount: Optional[float] = None
+    balance_before: Optional[float] = None
+    detail: str = ""
+
+
+class MealCardRunFinish(BaseModel):
+    completed: int = 0
+    skipped: int = 0
+    errors: int = 0
+    log: str = ""
+    status: str = "finished"
+
+
+class MealCardFileIn(BaseModel):
+    """A file sent as base64 in a JSON body.
+
+    Not multipart: Cloudways' edge proxy never delivers multipart file POSTs to
+    the app (same reason as /api/onboarding/form-responses/import).
+    """
+    filename: str = ""
+    content_b64: str
+
+
+def _mealcard_period(year: Optional[int], period: Optional[int]) -> Tuple[int, int]:
+    """Default to this calendar month, which is how periods have lined up."""
+    now = datetime.now()
+    return (year or now.year), (period or now.month)
+
+
+@app.get("/api/mealcard/roster")
+async def mealcard_roster(
+    year: Optional[int] = None, include_inactive: bool = False,
+    _user: User = Depends(get_current_admin_user),
+):
+    """The card roster plus a year of period ticks — what the old xlsx held."""
+    year = year or datetime.now().year
+    cards = mealcard_db.list_cards(active_only=not include_inactive)
+    grid = mealcard_db.year_grid(year)
+    return {
+        "year": year,
+        "default_target": mealcard_db.DEFAULT_TARGET,
+        "cards": [
+            {**card,
+             "effective_target": mealcard_db.target_for(card),
+             "periods": grid.get(card["card_number"], {})}
+            for card in cards
+        ],
+        "mapping": mealcard_db.mapping_summary(),
+    }
+
+
+@app.post("/api/mealcard/cards")
+async def mealcard_upsert_card(
+    body: MealCardIn, _user: User = Depends(get_current_admin_user),
+):
+    card_number = mealcard_db.clean_card(body.card_number)
+    if not card_number:
+        raise HTTPException(status_code=400, detail="A card number is required.")
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="A name is required.")
+    existing = {c["card_number"]: c for c in mealcard_db.list_cards(active_only=False)}
+    mealcard_db.upsert_card(
+        card_number=card_number,
+        name=body.name,
+        target_amount=body.target_amount,
+        active=body.active,
+        sort_order=existing.get(card_number, {}).get("sort_order") or (len(existing) + 1),
+        notes=body.notes,
+    )
+    return {"success": True, "card_number": card_number}
+
+
+@app.delete("/api/mealcard/periods/{card_number}/{year}/{period}")
+async def mealcard_clear_period(
+    card_number: str, year: int, period: int,
+    _user: User = Depends(get_current_admin_user),
+):
+    """Un-tick one card so the next run picks it up again."""
+    return {"success": mealcard_db.clear_period(card_number, year, period)}
+
+
+@app.get("/api/mealcard/worklist")
+async def mealcard_worklist(
+    year: Optional[int] = None, period: Optional[int] = None,
+    include_done: bool = False, current_user: User = Depends(get_current_user),
+):
+    """What the bot should load this period.
+
+    Cards already ticked are left out unless include_done — that is what stops a
+    second run in the same month from loading everyone twice.
+    """
+    year, period = _mealcard_period(year, period)
+    cards = mealcard_db.worklist(year, period, include_done=include_done)
+    return {
+        "year": year, "period": period,
+        "default_target": mealcard_db.DEFAULT_TARGET,
+        "count": len(cards),
+        "cards": cards,
+        "requested_by": current_user.name,
+    }
+
+
+@app.post("/api/mealcard/runs")
+async def mealcard_start_run(
+    body: MealCardRunStart, current_user: User = Depends(get_current_user),
+):
+    year, period = _mealcard_period(body.year, body.period)
+    run_id = mealcard_db.start_run(year, period, requested_by=current_user.name)
+    return {"run_id": run_id, "year": year, "period": period}
+
+
+@app.post("/api/mealcard/runs/{run_id}/card")
+async def mealcard_record_card(
+    run_id: int, body: MealCardResultIn, _user: User = Depends(get_current_user),
+):
+    """One card's outcome, posted by the bot as it goes."""
+    run = mealcard_db.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    if body.status not in ("done", "skipped", "error"):
+        raise HTTPException(status_code=400,
+                            detail=f"status must be done, skipped or error (got {body.status!r})")
+    mealcard_db.record_period(
+        card_number=body.card_number, year=run["year"], period=run["period"],
+        status=body.status, amount=body.amount, balance_before=body.balance_before,
+        detail=body.detail, run_id=run_id,
+    )
+    mealcard_db.append_run_log(
+        run_id, f"{body.card_number} {body.status}"
+                f"{' — ' + body.detail if body.detail else ''}")
+    return {"success": True}
+
+
+@app.post("/api/mealcard/runs/{run_id}/finish")
+async def mealcard_finish_run(
+    run_id: int, body: MealCardRunFinish, _user: User = Depends(get_current_user),
+):
+    if not mealcard_db.get_run(run_id):
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    mealcard_db.finish_run(run_id, completed=body.completed, skipped=body.skipped,
+                           errors=body.errors, log=body.log, status=body.status)
+    return {"success": True, "run": mealcard_db.get_run(run_id)}
+
+
+@app.get("/api/mealcard/runs")
+async def mealcard_list_runs(limit: int = 25, _user: User = Depends(get_current_admin_user)):
+    return {"runs": mealcard_db.list_runs(limit=limit)}
+
+
+@app.get("/api/mealcard/runs/{run_id}")
+async def mealcard_get_run(run_id: int, _user: User = Depends(get_current_admin_user)):
+    run = mealcard_db.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    return run
+
+
+@app.post("/api/mealcard/payroll-report")
+async def mealcard_payroll_report(
+    body: MealCardFileIn, _user: User = Depends(get_current_admin_user),
+):
+    """Paytronix detail report in, the two payroll workbooks out.
+
+    Both workbooks come back as base64 — the live site prepends a newline to
+    every response, which corrupts a streamed xlsx (see the blank-checklist
+    route for the same dance).
+    """
+    import base64 as _b64
+
+    try:
+        raw = _b64.b64decode(body.content_b64 or "")
+    except Exception:
+        raise HTTPException(status_code=400, detail="The file data didn't decode.")
+    if not raw:
+        raise HTTPException(status_code=400, detail="That file came through empty.")
+
+    by_card, by_name, mapping_source = mealcard_db.employee_map()
+    try:
+        built = mealcard_payroll.build_reports(
+            raw, body.filename, mealcard_db.card_names(),
+            by_card, by_name, mapping_source,
+        )
+    except mealcard_payroll.ReportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as exc:
+        logger.error("mealcard.payroll_report failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Report build failed: {exc}")
+
+    return {
+        "stats": built["stats"],
+        "unmapped": built["unmapped"],
+        "files": [
+            {"filename": built["names_filename"],
+             "data": _b64.b64encode(built["names_xlsx"]).decode("ascii")},
+            {"filename": built["payroll_filename"],
+             "data": _b64.b64encode(built["payroll_xlsx"]).decode("ascii")},
+        ],
+    }
+
+
+@app.post("/api/mealcard/employee-map")
+async def mealcard_import_employee_map(
+    body: MealCardFileIn, _user: User = Depends(get_current_admin_user),
+):
+    """Import MealCardsToAllPay.csv — the authoritative card -> employee map."""
+    import base64 as _b64
+
+    try:
+        raw = _b64.b64decode(body.content_b64 or "")
+    except Exception:
+        raise HTTPException(status_code=400, detail="The file data didn't decode.")
+
+    rows = []
+    for raw_row in csv.DictReader(io.StringIO(raw.decode("utf-8-sig", errors="replace"))):
+        key = {k.strip().lower(): (v or "").strip() for k, v in raw_row.items() if k}
+        card = mealcard_db.clean_card(key.get("cardnumber", ""))
+        if not card:
+            continue
+        rows.append({"card_number": card,
+                     "employee_id": key.get("employeeid") or key.get("allpayid", ""),
+                     "entity": key.get("entity", ""),
+                     "name": key.get("name", "")})
+    if not rows:
+        raise HTTPException(
+            status_code=400,
+            detail="No CardNumber rows in that CSV. Save the grid from "
+                   "Export_MealCardsToAllPay_MAPPING.sql with column headers.")
+
+    count = mealcard_db.replace_employee_map(
+        rows, source=body.filename or "MealCardsToAllPay.csv")
+    return {"success": True, "cards": count, "mapping": mealcard_db.mapping_summary()}
+
+
+@app.get("/api/mealcard/bot-package")
+async def mealcard_bot_package(current_user: User = Depends(get_current_user)):
+    """The reload bot, zipped, with this app's URL already filled in.
+
+    base64 again — a streamed zip hits the same leading-newline corruption as
+    xlsx. The bundle is ~50KB, so this is cheap.
+    """
+    import base64 as _b64
+    import zipfile
+
+    if not os.path.isdir(MEALCARD_BOT_DIR):
+        raise HTTPException(status_code=500,
+                            detail="The bot bundle is missing from this deployment.")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(MEALCARD_BOT_DIR):
+            for name in sorted(files):
+                if name.endswith(".pyc") or "__pycache__" in root:
+                    continue
+                full = os.path.join(root, name)
+                rel = os.path.relpath(full, MEALCARD_BOT_DIR)
+                zf.write(full, os.path.join("MealCardReloadBot", rel))
+        # Written here rather than kept in the repo so the download already
+        # points at whichever host served it.
+        zf.writestr(
+            os.path.join("MealCardReloadBot", "config.json"),
+            json.dumps({"app_url": APP_BASE_URL, "email": current_user.email}, indent=2),
+        )
+
+    return {
+        "filename": "MealCardReloadBot.zip",
+        "data": _b64.b64encode(buf.getvalue()).decode("ascii"),
+    }
+
+
 if os.path.isdir(kiosk_path):
     app.mount("/kiosk", StaticFiles(directory=kiosk_path, html=True), name="kiosk")
 

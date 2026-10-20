@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Meal Cards – Newk's Reporting Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui,-apple-system,sans-serif; margin:0; background:#F8FAFC; color:#2c2c2c; min-height:100vh; }
+    .header { background:#C41E3A; padding:1.5rem 2rem; border-bottom:3px solid #A01A2E; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+    .header-content { display:flex; justify-content:space-between; align-items:center; }
+    .header h1 { margin:0; color:#fff; font-size:1.5rem; font-weight:700; }
+    .header p { margin:.25rem 0 0 0; color:rgba(255,255,255,.85); font-size:.85rem; }
+    .home-btn { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.3); padding:.4rem .8rem; border-radius:6px; font-size:.85rem; text-decoration:none; }
+    .container { display:grid; grid-template-columns:280px 1fr; gap:1.5rem; padding:1.5rem 2rem; max-width:1800px; margin:0 auto; }
+    @media (max-width:900px){ .container{ grid-template-columns:1fr; } }
+    .card { background:#fff; border-radius:12px; padding:1.5rem; border:1px solid #e8e0d5; box-shadow:0 2px 8px rgba(0,0,0,.08); margin-bottom:1rem; }
+    .card h2 { margin:0 0 .35rem 0; color:#C41E3A; font-size:1.1rem; font-weight:700; }
+    .card .sub { margin:0 0 1rem 0; font-size:.82rem; color:#6B7280; }
+    .btn { background:#C41E3A; color:#fff; border:none; padding:.5rem 1.1rem; border-radius:6px; font-weight:600; cursor:pointer; font-size:.85rem; font-family:inherit; }
+    .btn:hover:not(:disabled){ background:#A01A2E; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn.secondary { background:#fff; color:#C41E3A; border:1px solid #C41E3A; }
+    .btn.secondary:hover:not(:disabled){ background:#FEF2F2; }
+    .row { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
+    select, input[type=file] { padding:.35rem .5rem; border:1px solid #D1D5DB; border-radius:6px; font-size:.82rem; font-family:inherit; background:#fff; }
+    .badge { display:inline-block; padding:.1rem .5rem; border-radius:99px; font-size:.72rem; font-weight:700; }
+    .badge.done { background:#DCFCE7; color:#166534; }
+    .badge.skipped { background:#E5E7EB; color:#374151; }
+    .badge.error { background:#FEE2E2; color:#991B1B; }
+    .badge.running { background:#DBEAFE; color:#1E40AF; }
+    .badge.finished { background:#DCFCE7; color:#166534; }
+    .badge.todo { background:#FEF9C3; color:#854D0E; }
+    table { width:100%; border-collapse:collapse; font-size:.82rem; }
+    th, td { padding:.35rem .5rem; border-bottom:1px solid #eee; text-align:left; white-space:nowrap; }
+    th { color:#6B7280; font-weight:600; }
+    td.tick { text-align:center; font-size:.9rem; }
+    td.num { text-align:right; font-variant-numeric:tabular-nums; }
+    .muted { color:#6B7280; }
+    .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:.75rem; margin:.75rem 0; }
+    .stat { background:#F8FAFC; border:1px solid #E5E7EB; border-radius:8px; padding:.6rem .75rem; }
+    .stat .label { font-size:.7rem; color:#6B7280; text-transform:uppercase; letter-spacing:.03em; }
+    .stat .value { font-size:1.05rem; font-weight:700; margin-top:.15rem; }
+    pre.log { white-space:pre-wrap; background:#0B1020; color:#D1D5DB; padding:.75rem; border-radius:8px; font-size:.75rem; max-height:320px; overflow:auto; margin:.4rem 0 0 0; }
+    .logbtn { color:#2563EB; cursor:pointer; text-decoration:underline; font-size:.78rem; }
+    .status-msg { padding:.6rem .9rem; border-radius:8px; margin-bottom:1rem; font-size:.85rem; display:none; }
+    .status-msg.error { background:#FEF2F2; border:1px solid #FCA5A5; color:#B91C1C; display:block; }
+    .status-msg.info { background:#F0F9FF; border:1px solid #BAE6FD; color:#0369A1; display:block; }
+    .status-msg.ok { background:#F0FDF4; border:1px solid #86EFAC; color:#166534; display:block; }
+    .warnbox { background:#FFFBEB; border:1px solid #FDE68A; color:#92400E; padding:.6rem .9rem; border-radius:8px; font-size:.82rem; margin-top:.75rem; }
+    ol.steps { margin:.5rem 0 0 1.1rem; padding:0; font-size:.84rem; color:#374151; }
+    ol.steps li { margin-bottom:.3rem; }
+  </style>
+</head>
+<body>
+  <div class="header"><div class="header-content">
+    <div><h1>Meal Cards</h1><p>Monthly Paytronix reload and the payroll adjustment report</p></div>
+    <a href="/" class="home-btn">Home</a>
+  </div></div>
+  <div class="container">
+    <div id="shared-sidebar"></div>
+    <div>
+      <div id="statusMsg" class="status-msg"></div>
+
+      <div class="card">
+        <h2>1. The reload bot</h2>
+        <p class="sub">The bot drives Paytronix in a Chrome window you are logged into, so it runs
+          on your PC rather than here. It gets its card list from this page and reports back to it.</p>
+        <div class="row">
+          <button class="btn" id="btnBot" onclick="downloadBot()">Download the reload bot</button>
+          <span class="muted" style="font-size:.8rem;">~50&nbsp;KB zip, already pointed at this app</span>
+        </div>
+        <ol class="steps">
+          <li>Unzip it, then run <strong>setup.ps1</strong> once (it needs Python on the machine).</li>
+          <li>Each month, run <strong>Run Meal Card Reload.ps1</strong> and log into Paytronix when it asks.</li>
+          <li>Take the dry run when it offers &mdash; it reads every balance and loads nothing.</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <h2>2. This period</h2>
+        <p class="sub">Who is loaded and who is still outstanding. The bot skips anyone already ticked,
+          so re-running after a failure only picks up what is left.</p>
+        <div class="row" style="margin-bottom:.75rem;">
+          <label>Year <select id="yearSel" onchange="loadRoster()"></select></label>
+          <label>Period <select id="periodSel" onchange="renderRoster()"></select></label>
+          <span id="periodSummary" class="muted" style="font-size:.82rem;"></span>
+        </div>
+        <div id="rosterWrap"><p class="muted">Loading…</p></div>
+      </div>
+
+      <div class="card">
+        <h2>3. Payroll report</h2>
+        <p class="sub">Upload the Paytronix <em>Stored Value Sales and Added Value Detail Report</em>
+          (.xls or .csv). You get back the named report and the payroll adjustment sheet.</p>
+        <div class="row">
+          <input type="file" id="reportFile" accept=".xls,.xlsx,.csv" />
+          <button class="btn" id="btnReport" onclick="buildReport()">Build the reports</button>
+        </div>
+        <div id="reportOut"></div>
+      </div>
+
+      <div class="card">
+        <h2>4. Employee mapping</h2>
+        <p class="sub" id="mapSub">Card number to employee ID, the join the payroll report needs.</p>
+        <div class="row">
+          <input type="file" id="mapFile" accept=".csv" />
+          <button class="btn secondary" id="btnMap" onclick="importMapping()">Import MealCardsToAllPay.csv</button>
+        </div>
+        <div id="mapWarn"></div>
+      </div>
+
+      <div class="card">
+        <h2>Recent runs</h2>
+        <div id="runsWrap"><p class="muted">Loading…</p></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="shared-nav.js"></script>
+  <script>
+    const API_BASE = '';
+    const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    function getAuthHeaders(){ const t=localStorage.getItem('auth_token'); return t?{'Authorization':'Bearer '+t}:{}; }
+    function jsonHeaders(){ return Object.assign({'Content-Type':'application/json'}, getAuthHeaders()); }
+    function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+    function showStatus(m,t){ const e=document.getElementById('statusMsg'); e.className='status-msg '+t; e.textContent=m; }
+    function clearStatus(){ document.getElementById('statusMsg').className='status-msg'; }
+    function fmtTime(iso){ if(!iso) return ''; return String(iso).replace('T',' ').replace(/(\+\d\d:\d\d|Z)$/,''); }
+    function money(n){ return n==null ? '' : '$'+Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+    // Every file this app hands out goes as base64 JSON: the live site prepends a
+    // newline to each response, which corrupts a streamed xlsx or zip.
+    function saveBase64(data, filename, mime){
+      const chars = atob(data);
+      const arr = new Uint8Array(chars.length);
+      for (let i=0;i<chars.length;i++) arr[i] = chars.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([arr], {type: mime}));
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function readAsBase64(file){
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1] || '');
+        r.onerror = () => reject(new Error('Could not read that file.'));
+        r.readAsDataURL(file);
+      });
+    }
+
+    async function apiError(resp){
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      return new Error(err.detail || resp.statusText);
+    }
+
+    // -- 1. Bot download -----------------------------------------------------
+    async function downloadBot(){
+      const btn = document.getElementById('btnBot');
+      btn.disabled = true; btn.textContent = 'Preparing…';
+      clearStatus();
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/bot-package', { headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        const result = await resp.json();
+        saveBase64(result.data, result.filename, 'application/zip');
+        showStatus('Downloaded ' + result.filename + '. Unzip it, then run setup.ps1 once.', 'ok');
+      } catch(e){
+        showStatus('Could not download the bot: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Download the reload bot';
+      }
+    }
+
+    // -- 2. Roster -----------------------------------------------------------
+    let ROSTER = null;
+
+    function initSelectors(){
+      const now = new Date();
+      const yearSel = document.getElementById('yearSel');
+      for (let y = now.getFullYear(); y >= now.getFullYear()-3; y--){
+        yearSel.add(new Option(y, y));
+      }
+      const periodSel = document.getElementById('periodSel');
+      for (let p = 1; p <= 12; p++){
+        periodSel.add(new Option(String(p).padStart(2,'0'), p));
+      }
+      periodSel.value = now.getMonth() + 1;
+    }
+
+    async function loadRoster(){
+      const year = document.getElementById('yearSel').value;
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/roster?year='+year, { headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        ROSTER = await resp.json();
+        renderRoster();
+        renderMapping();
+      } catch(e){
+        document.getElementById('rosterWrap').innerHTML =
+          '<p class="muted">Could not load the roster: '+esc(e.message)+'</p>';
+      }
+    }
+
+    function renderRoster(){
+      if(!ROSTER) return;
+      const period = Number(document.getElementById('periodSel').value);
+      const cards = ROSTER.cards || [];
+
+      if(!cards.length){
+        document.getElementById('rosterWrap').innerHTML =
+          '<p class="muted">No cards yet. Seed them with <code>seed_mealcards.py</code>.</p>';
+        document.getElementById('periodSummary').textContent = '';
+        return;
+      }
+
+      let done = 0, skipped = 0, errored = 0;
+      cards.forEach(c => {
+        const s = c.periods[period];
+        if (s === 'done') done++;
+        else if (s === 'skipped') skipped++;
+        else if (s === 'error') errored++;
+      });
+      const todo = cards.length - done - skipped;
+
+      document.getElementById('periodSummary').innerHTML =
+        `${cards.length} active cards &middot; <strong>${todo}</strong> still to load` +
+        (errored ? ` &middot; <span class="badge error">${errored} errored</span>` : '');
+
+      const head = ['Name','Card','Target', ...Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'))];
+      const rows = cards.map(c => {
+        const cells = Array.from({length:12}, (_,i) => {
+          const s = c.periods[i+1];
+          const mark = s === 'done' ? '✓' : s === 'skipped' ? '–' : s === 'error' ? '!' : '';
+          const title = s ? `period ${i+1}: ${s}` : '';
+          const colour = s === 'error' ? 'color:#B91C1C;font-weight:700;'
+                       : s === 'done' ? 'color:#166534;font-weight:700;' : 'color:#9CA3AF;';
+          const hl = (i+1) === period ? 'background:#FEF9C3;' : '';
+          return `<td class="tick" style="${colour}${hl}" title="${esc(title)}">${mark}</td>`;
+        }).join('');
+        return `<tr>
+          <td>${esc(c.name)}</td>
+          <td class="muted">${esc(c.card_number)}</td>
+          <td class="num">${money(c.effective_target)}</td>
+          ${cells}
+        </tr>`;
+      }).join('');
+
+      document.getElementById('rosterWrap').innerHTML =
+        `<table><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>
+         <tbody>${rows}</tbody></table>
+         <p class="muted" style="font-size:.76rem;margin:.5rem 0 0 0;">
+           ✓ loaded &middot; – skipped (already at target) &middot; ! errored. The highlighted
+           column is the period selected above.</p>`;
+    }
+
+    function renderMapping(){
+      const m = (ROSTER && ROSTER.mapping) || {};
+      document.getElementById('mapSub').innerHTML =
+        'Card number to employee ID, the join the payroll report needs.<br>' +
+        '<strong>Current source:</strong> ' + esc(m.description || 'unknown');
+      document.getElementById('mapWarn').innerHTML = m.authoritative ? '' :
+        `<div class="warnbox">No authoritative mapping imported yet, so payroll rows are matched
+         by <em>name</em> &mdash; anyone not matched is listed as unmapped instead of being dropped.
+         To fix it, run <code>Export_MealCardsToAllPay_MAPPING.sql</code> in SSMS, save the grid as
+         <code>MealCardsToAllPay.csv</code> with headers, and import it here.</div>`;
+    }
+
+    // -- 3. Payroll report ---------------------------------------------------
+    async function buildReport(){
+      const input = document.getElementById('reportFile');
+      const file = input.files && input.files[0];
+      const btn = document.getElementById('btnReport');
+      const out = document.getElementById('reportOut');
+      clearStatus();
+      if(!file){ showStatus('Pick the Paytronix report file first.', 'error'); return; }
+
+      btn.disabled = true; btn.textContent = 'Building…'; out.innerHTML = '';
+      try {
+        const content_b64 = await readAsBase64(file);
+        const resp = await fetch(API_BASE+'/api/mealcard/payroll-report', {
+          method: 'POST', headers: jsonHeaders(),
+          body: JSON.stringify({ filename: file.name, content_b64 }),
+        });
+        if(!resp.ok) throw await apiError(resp);
+        const result = await resp.json();
+        renderReport(result);
+      } catch(e){
+        showStatus('Could not build the reports: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Build the reports';
+      }
+    }
+
+    function renderReport(result){
+      const s = result.stats;
+      const files = result.files.map((f,i) =>
+        `<button class="btn ${i?'secondary':''}" onclick="saveBase64(REPORT_FILES[${i}].data, REPORT_FILES[${i}].filename, XLSX_MIME)">
+           Download ${esc(f.filename)}</button>`).join(' ');
+      window.REPORT_FILES = result.files;
+
+      const unmapped = result.unmapped || [];
+      const unmappedHtml = unmapped.length ? `
+        <div class="warnbox">
+          <strong>${unmapped.length} card(s) are not on the payroll sheet</strong>
+          (${money(unmapped.reduce((t,u)=>t+u.amount,0))} unaccounted). They are also on an
+          "Unmapped" tab in the workbook.
+          <table style="margin-top:.5rem;">
+            <thead><tr><th>Card</th><th>Name</th><th>Amount</th><th>Reason</th></tr></thead>
+            <tbody>${unmapped.map(u=>`<tr>
+              <td>${esc(u.card_number)}</td><td>${esc(u.name)}</td>
+              <td class="num">${money(u.amount)}</td><td>${esc(u.reason)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : '';
+
+      const noNames = (s.cards_without_names || []).length ? `
+        <div class="warnbox">No name on file for card(s):
+          ${s.cards_without_names.map(esc).join(', ')}. Add them to the roster so they
+          carry a name next month.</div>` : '';
+
+      document.getElementById('reportOut').innerHTML = `
+        <div class="stat-grid">
+          <div class="stat"><div class="label">Rows</div><div class="value">${s.rows}</div></div>
+          <div class="stat"><div class="label">Total added</div><div class="value">${money(s.total_added)}</div></div>
+          <div class="stat"><div class="label">Employees</div><div class="value">${s.employees}</div></div>
+          <div class="stat"><div class="label">Payroll total</div><div class="value">${money(s.payroll_total)}</div></div>
+        </div>
+        <p class="muted" style="font-size:.8rem;margin:.25rem 0 .75rem 0;">
+          ${s.date_from ? esc(s.date_from)+' to '+esc(s.date_to)+' &middot; ' : ''}
+          mapping: ${esc(s.mapping_source)}</p>
+        <div class="row">${files}</div>
+        ${noNames}${unmappedHtml}`;
+    }
+
+    // -- 4. Employee mapping import ------------------------------------------
+    async function importMapping(){
+      const input = document.getElementById('mapFile');
+      const file = input.files && input.files[0];
+      const btn = document.getElementById('btnMap');
+      clearStatus();
+      if(!file){ showStatus('Pick MealCardsToAllPay.csv first.', 'error'); return; }
+
+      btn.disabled = true; btn.textContent = 'Importing…';
+      try {
+        const content_b64 = await readAsBase64(file);
+        const resp = await fetch(API_BASE+'/api/mealcard/employee-map', {
+          method: 'POST', headers: jsonHeaders(),
+          body: JSON.stringify({ filename: file.name, content_b64 }),
+        });
+        if(!resp.ok) throw await apiError(resp);
+        const result = await resp.json();
+        showStatus(`Imported ${result.cards} cards. ${result.mapping.description}`, 'ok');
+        await loadRoster();
+      } catch(e){
+        showStatus('Could not import the mapping: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Import MealCardsToAllPay.csv';
+      }
+    }
+
+    // -- Runs ----------------------------------------------------------------
+    async function loadRuns(){
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/runs?limit=15', { headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        const runs = (await resp.json()).runs || [];
+        if(!runs.length){
+          document.getElementById('runsWrap').innerHTML =
+            '<p class="muted">No runs yet. They appear here once someone runs the bot.</p>';
+          return;
+        }
+        document.getElementById('runsWrap').innerHTML = `
+          <table><thead><tr>
+            <th>Run</th><th>Period</th><th>Started</th><th>By</th><th>Status</th>
+            <th>Loaded</th><th>Skipped</th><th>Errors</th><th></th>
+          </tr></thead><tbody>
+          ${runs.map(r=>`<tr>
+            <td>#${r.id}</td>
+            <td>${String(r.period).padStart(2,'0')}/${r.year}</td>
+            <td>${esc(fmtTime(r.started_at))}</td>
+            <td>${esc(r.requested_by||'')}</td>
+            <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+            <td class="num">${r.completed}</td>
+            <td class="num">${r.skipped}</td>
+            <td class="num">${r.errors ? '<strong style="color:#B91C1C;">'+r.errors+'</strong>' : 0}</td>
+            <td><span class="logbtn" onclick="showLog(${r.id})">log</span></td>
+          </tr><tr id="logrow-${r.id}" style="display:none;"><td colspan="9"><pre class="log" id="log-${r.id}">Loading…</pre></td></tr>`).join('')}
+          </tbody></table>`;
+      } catch(e){
+        document.getElementById('runsWrap').innerHTML =
+          '<p class="muted">Could not load runs: '+esc(e.message)+'</p>';
+      }
+    }
+
+    async function showLog(runId){
+      const row = document.getElementById('logrow-'+runId);
+      if(row.style.display !== 'none'){ row.style.display='none'; return; }
+      row.style.display = '';
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/runs/'+runId, { headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        const run = await resp.json();
+        document.getElementById('log-'+runId).textContent = run.log || '(no log recorded)';
+      } catch(e){
+        document.getElementById('log-'+runId).textContent = 'Could not load the log: '+e.message;
+      }
+    }
+
+    initSelectors();
+    loadRoster();
+    loadRuns();
+  </script>
+</body>
+</html>
