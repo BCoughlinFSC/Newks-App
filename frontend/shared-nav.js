@@ -62,6 +62,7 @@
   // To put the full sidebar back, set this to null. To show one more thing,
   // add its key from REPORT_GROUPS or ADMIN_LINKS above.
   const VISIBLE_KEYS = [
+    'spirit-night',    // Spirit Night
     'subscriptions',   // Report Subscriptions
     'onboarding',      // NRO Onboarding
     'mealcard',        // Meal Cards
