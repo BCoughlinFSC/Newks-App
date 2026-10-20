@@ -553,9 +553,23 @@ def employee_map(db_path: str = MEALCARD_DB_PATH) -> Tuple[Dict, Dict, str]:
 
 
 def mapping_summary(db_path: str = MEALCARD_DB_PATH) -> Dict:
+    """How the mapping stands, including how much of the roster it actually covers.
+
+    The count is the useful number: a mapping can exist and still miss most
+    people, and what that costs is names landing on the Unmapped tab at payroll
+    time rather than on the sheet.
+    """
     by_card, by_name, desc = employee_map(db_path)
+    cards = list_cards(active_only=True, db_path=db_path)
+    covered = 0
+    for card in cards:
+        info = by_card.get(card["card_number"]) or by_name.get(card["name"]) or {}
+        # AllPayID 0 means deliberately not on payroll, so it is not coverage.
+        if (info.get("employee_id") or "") not in ("", "0"):
+            covered += 1
     return {"by_card": len(by_card), "by_name": len(by_name),
-            "description": desc, "authoritative": bool(by_card)}
+            "description": desc, "authoritative": bool(by_card),
+            "covers": covered, "of": len(cards)}
 
 
 # -- Runs ---------------------------------------------------------------------

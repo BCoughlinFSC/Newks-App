@@ -172,12 +172,10 @@
         <div id="reportOut"></div>
 
         <div class="setup-strip" style="margin-top:1.25rem;">
-          <div class="title">Setting this up for the first time</div>
+          <div class="title">Matching cards to employees</div>
           <div class="muted" style="font-size:.82rem;margin-top:.15rem;">
-            The payroll sheet totals the dollars <em>per employee</em>, so it has to know whose card is
-            whose. That join comes from <span class="field">MealCardsToAllPay.csv</span>, exported out
-            of SQL Server. Import it once and it keeps working every month &mdash; it only needs
-            redoing when someone joins, leaves, or is issued a new card.
+            The payroll sheet totals the dollars <em>per employee</em>, so it has to know whose card
+            is whose. <span id="mapCoverage"></span>
             <br><strong>Currently using:</strong> <span id="mapSub">&mdash;</span>
           </div>
           <div class="row" style="margin-top:.5rem;">
@@ -351,11 +349,19 @@
     function renderMapping(){
       const m = (ROSTER && ROSTER.mapping) || {};
       document.getElementById('mapSub').textContent = m.description || 'unknown';
-      document.getElementById('mapWarn').innerHTML = m.authoritative ? '' :
-        `<div class="warnbox">No authoritative mapping imported yet, so payroll rows are matched
-         by <em>name</em> &mdash; anyone not matched is listed as unmapped instead of being dropped.
-         To fix it, run <code>Export_MealCardsToAllPay_MAPPING.sql</code> in SSMS, save the grid as
-         <code>MealCardsToAllPay.csv</code> with headers, and import it here.</div>`;
+
+      const gap = (m.of || 0) - (m.covers || 0);
+      document.getElementById('mapCoverage').innerHTML = m.of == null ? '' :
+        `It covers <strong>${m.covers} of ${m.of}</strong> cards.` + (gap ? ` The other
+         ${gap} come through on an &ldquo;Unmapped&rdquo; tab with their amounts, rather than
+         being dropped.` : '');
+
+      document.getElementById('mapWarn').innerHTML = (m.authoritative && !gap) ? '' :
+        `<div class="warnbox">To cover everyone, the card-to-employee list has to come out of
+         SQL Server, where it is the only place it exists. Run
+         <code>Export_MealCardsToAllPay_MAPPING.sql</code> in SSMS against SQL-PROD, save the grid
+         as <code>MealCardsToAllPay.csv</code> <strong>with column headers</strong>, and import it
+         above. Everything else on this page works without it.</div>`;
     }
 
     // -- Roster download -----------------------------------------------------
