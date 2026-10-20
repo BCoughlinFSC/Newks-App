@@ -331,7 +331,7 @@
   <header class="header">
     <div class="header-content">
       <div class="header-left">
-        <a class="home-btn" href="/legacy.html">&larr; Back to Reports</a>
+        <a class="home-btn" href="/">Home</a>
         <div>
           <h1>Admin Dashboard</h1>
           <p>Newk's Reporting Platform</p>
@@ -1082,7 +1082,38 @@ ORDER BY DateOfBusiness</pre>
     // ──────────────────────────────────────────────────────
     // Tab Navigation
     // ──────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────
+    // Which tabs this panel offers
+    // ──────────────────────────────────────────────────────
+    // Narrowed 2026-10-20 to Users. The other panels are untouched and still
+    // work — they are hidden, not deleted, and their markup stays in the page
+    // because a great deal of init code looks elements up inside them by id.
+    // Add a tab id back to show it again, or set this to null for all of them.
+    const VISIBLE_TABS = ['users'];
+
+    function tabIsVisible(tabId) {
+      return !VISIBLE_TABS || VISIBLE_TABS.includes(tabId);
+    }
+
+    function applyVisibleTabs() {
+      if (!VISIBLE_TABS) return;
+      document.querySelectorAll('.admin-tab').forEach(btn => {
+        if (!tabIsVisible(btn.dataset.tab)) btn.style.display = 'none';
+      });
+      // A single tab is not a choice, so do not draw a tab bar for it.
+      const bar = document.getElementById('adminTabs');
+      const shown = [...document.querySelectorAll('.admin-tab')]
+        .filter(b => b.style.display !== 'none');
+      if (bar && shown.length <= 1) bar.style.display = 'none';
+    }
+
     function switchTab(tabId) {
+      // A hidden tab can still be asked for — by a stale localStorage value
+      // from before this was narrowed, or by a hand-edited URL. Fall back to
+      // the first one actually on offer.
+      if (!tabIsVisible(tabId)) {
+        tabId = (VISIBLE_TABS && VISIBLE_TABS[0]) || 'users';
+      }
       // Update tab buttons
       document.querySelectorAll('.admin-tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tabId);
@@ -3195,6 +3226,7 @@ ORDER BY DateOfBusiness</pre>
       document.querySelectorAll('.admin-tab').forEach(btn => {
         btn.addEventListener('click', () => switchTab(btn.dataset.tab));
       });
+      applyVisibleTabs();
 
       // Wire up event listeners
       document.getElementById('authForm').addEventListener('submit', handleAuth);
