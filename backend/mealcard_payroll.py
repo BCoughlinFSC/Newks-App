@@ -20,7 +20,6 @@ import io
 from datetime import datetime
 from typing import Dict, List, Tuple
 
-import xlrd
 from openpyxl import Workbook, load_workbook
 
 REPORT_TITLE = "Monthly MealCard Adjustments for Payroll"
@@ -73,6 +72,18 @@ def read_report(raw: bytes, filename: str = "") -> Tuple[List[str], List[list]]:
 
 
 def _read_xls(raw: bytes):
+    # Imported here, not at module scope: main.py imports this module at
+    # startup, and a missing xlrd would take the whole app down rather than
+    # just this one file format. Exporting as .csv needs no extra package.
+    try:
+        import xlrd
+    except ImportError:
+        raise ReportError(
+            "Reading the old .xls format needs the xlrd package, which is not "
+            "installed on this server (pip install xlrd). In the meantime, export "
+            "the report from Paytronix as .csv and upload that instead."
+        )
+
     book = xlrd.open_workbook(file_contents=raw)
     sh = book.sheet_by_index(0)
     header = [str(sh.cell_value(0, c)).strip() for c in range(sh.ncols)]
