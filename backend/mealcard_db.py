@@ -217,49 +217,133 @@ class RosterError(ValueError):
     """The workbook is not the gift card roster we expect."""
 
 
+# A period column reads "Period 01 Meal Card " on the original spreadsheet and
+# "Period 01" on the one this app exports. Both say the number the same way.
+PERIOD_HEADER_RE = re.compile(r"^period\s*0*(\d{1,2})\b", re.I)
+
+# What a tick can look like. The original sheet stores booleans; this app's
+# export writes the words, and a round trip has to survive either.
+TICK_WORDS = {
+    "loaded": "done", "done": "done", "true": "done", "yes": "done", "x": "done",
+    "skipped (at target)": "skipped", "skipped": "skipped",
+    "error": "error",
+}
+
+
+def _pick_sheet(wb, wanted: str):
+    """Find the roster tab, forgiving the name where there is no ambiguity.
+
+    The original workbook names its tabs by year ("2026"); the export this app
+    produces names its one "Meal Cards 2026". Someone editing the download and
+    sending it back should not have to rename a tab to get it accepted.
+    """
+    if wanted in wb.sheetnames:
+        return wb[wanted]
+    loose = [n for n in wb.sheetnames if wanted and wanted.lower() in n.lower()]
+    if len(loose) == 1:
+        return wb[loose[0]]
+    if len(wb.sheetnames) == 1:
+        return wb[wb.sheetnames[0]]
+    raise RosterError(
+        f"That workbook has no {wanted!r} sheet. It has: {', '.join(wb.sheetnames)}")
+
+
+def _header_columns(ws) -> Dict[str, int]:
+    out = {}
+    for c in range(1, ws.max_column + 1):
+        label = str(ws.cell(1, c).value or "").strip()
+        if label:
+            out.setdefault(label.lower(), c)
+    return out
+
+
 def parse_roster(source, sheet: str) -> List[Dict]:
-    """Read the gift card workbook. `source` is a path or the file's bytes.
+    """Read a roster workbook. `source` is a path or the file's bytes.
+
+    Reads by column heading rather than by position, so it takes both the
+    original gift card spreadsheet (Name, Card Number, then a column per
+    period) and the sheet this app exports, which adds Target Amount and
+    Active in between. That means the download can be edited and sent back,
+    which is how most changes will actually be made.
 
     Parsing is kept separate from writing so a caller can show what an import
-    would do before it does it - this overwrites names and targets, so it is
-    worth looking at first.
+    would do before it does it.
     """
     wb = load_workbook(
         io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source,
         data_only=True,
     )
     try:
-        if sheet not in wb.sheetnames:
-            raise RosterError(
-                f"That workbook has no {sheet!r} sheet. It has: {', '.join(wb.sheetnames)}")
-        ws = wb[sheet]
+        ws = _pick_sheet(wb, sheet)
+        headers = _header_columns(ws)
 
-        first, second = ws.cell(1, 1).value, ws.cell(1, 2).value
-        if str(first or "").strip().lower() != "name" or "card" not in str(second or "").lower():
+        name_col = headers.get("name")
+        card_col = next((c for label, c in headers.items()
+                         if "card number" in label or label == "number"
+                         or label == "card"), None)
+        if not name_col or not card_col:
+            found = [str(ws.cell(1, c).value or "") for c in range(1, ws.max_column + 1)]
             raise RosterError(
-                "That sheet does not look like the roster - the first two columns should "
-                f"be Name and Card Number, but they are {first!r} and {second!r}.")
+                "That sheet does not look like a card list - it needs a Name column and a "
+                f"Card Number column. Its headings are: {', '.join(h for h in found if h)}")
+
+        target_col = headers.get("target amount") or headers.get("target")
+        active_col = headers.get("active")
+        period_cols = {}
+        for label, c in headers.items():
+            m = PERIOD_HEADER_RE.match(label)
+            if m and 1 <= int(m.group(1)) <= 13:
+                period_cols.setdefault(int(m.group(1)), c)
 
         rows = []
         for r in range(2, ws.max_row + 1):
-            name_cell, card_cell = ws.cell(r, 1).value, ws.cell(r, 2).value
+            name_cell, card_cell = ws.cell(r, name_col).value, ws.cell(r, card_col).value
             if not name_cell or not card_cell:
                 continue
             name = str(name_cell).strip()
+
+            # An explicit Target Amount column wins; otherwise fall back to the
+            # amount written into the name, which is how the original sheet
+            # carried its exceptions.
+            target = parse_target_amount(name)
+            if target_col:
+                raw = ws.cell(r, target_col).value
+                if isinstance(raw, (int, float)):
+                    target = float(raw)
+                elif raw not in (None, ""):
+                    try:
+                        target = float(str(raw).replace("$", "").replace(",", "").strip())
+                    except ValueError:
+                        pass
+
+            active = True
+            if active_col:
+                active = str(ws.cell(r, active_col).value or "yes").strip().lower() \
+                    not in ("no", "false", "0", "inactive")
+
+            periods = {}
+            for period, col in period_cols.items():
+                value = ws.cell(r, col).value
+                if value is True:
+                    periods[period] = "done"
+                elif isinstance(value, str) and value.strip():
+                    status = TICK_WORDS.get(value.strip().lower())
+                    if status:
+                        periods[period] = status
+
             rows.append({
                 "card_number": clean_card(card_cell),
                 "name": name,
-                "target_amount": parse_target_amount(name),
+                "target_amount": target,
+                "active": active,
                 "sort_order": r,
-                # Only TRUE counts as loaded; blank and FALSE both mean "not yet".
-                "periods": [p for p in range(1, 13)
-                            if ws.cell(r, FIRST_PERIOD_COL + p - 1).value is True],
+                "periods": periods,
             })
     finally:
         wb.close()
 
     if not rows:
-        raise RosterError(f"No cards found on sheet {sheet!r}.")
+        raise RosterError(f"No cards found on sheet {ws.title!r}.")
     return rows
 
 
@@ -403,16 +487,22 @@ def import_roster(rows: List[Dict], year: int, source: str = "",
         upsert_card(
             card_number=row["card_number"],
             name=row["name"],
-            # Only store a target when the name carried an exception; the rest
+            # Only store a target when it differs from the default; the rest
             # stay NULL so changing the default moves them all.
             target_amount=(row["target_amount"]
                            if row["target_amount"] != DEFAULT_TARGET else None),
+            active=row.get("active", True),
             sort_order=row["sort_order"],
             db_path=db_path,
         )
         cards += 1
-        for period in row["periods"]:
-            record_period(row["card_number"], year, period, "done",
+        # A list of period numbers (the shipped seed) or {period: status} (a
+        # parsed workbook, which can say skipped and errored too).
+        periods = row.get("periods") or {}
+        if not isinstance(periods, dict):
+            periods = {p: "done" for p in periods}
+        for period, status in periods.items():
+            record_period(row["card_number"], year, int(period), status or "done",
                           detail=f"imported from {source}" if source else "imported",
                           db_path=db_path)
             ticks += 1

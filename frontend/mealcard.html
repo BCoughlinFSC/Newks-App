@@ -23,7 +23,8 @@
     .btn.secondary { background:#fff; color:#C41E3A; border:1px solid #C41E3A; }
     .btn.secondary:hover:not(:disabled){ background:#FEF2F2; }
     .row { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
-    select, input[type=file] { padding:.35rem .5rem; border:1px solid #D1D5DB; border-radius:6px; font-size:.82rem; font-family:inherit; background:#fff; }
+    select, input[type=file], input[type=text], input[type=number] { padding:.35rem .5rem; border:1px solid #D1D5DB; border-radius:6px; font-size:.82rem; font-family:inherit; background:#fff; }
+    input[type=text]:focus, input[type=number]:focus { outline:2px solid #C41E3A33; border-color:#C41E3A; }
     .badge { display:inline-block; padding:.1rem .5rem; border-radius:99px; font-size:.72rem; font-weight:700; }
     .badge.done { background:#DCFCE7; color:#166534; }
     .badge.skipped { background:#E5E7EB; color:#374151; }
@@ -169,6 +170,15 @@
                   style="margin-left:auto;">Download the card list</button>
         </div>
         <div id="rosterWrap"><p class="muted">Loading…</p></div>
+
+        <div class="row" style="margin-top:.9rem;padding-top:.75rem;border-top:1px solid #eee;">
+          <strong style="font-size:.84rem;">Add someone</strong>
+          <input type="text" id="newCardName" placeholder="Name" style="min-width:190px;" />
+          <input type="text" id="newCardNumber" placeholder="Card number" style="min-width:165px;" />
+          <input type="number" id="newCardTarget" placeholder="Target" step="0.01" style="width:105px;" />
+          <button class="btn secondary" id="btnAddCard" onclick="addCard()">Add</button>
+          <span class="muted" style="font-size:.8rem;">leave the target blank for the usual amount</span>
+        </div>
       </div>
 
       <div class="card">
@@ -386,6 +396,47 @@
          <code>MealCardsToAllPay.csv</code> export if one can still be produced &mdash; either way
          send them over and they can ship with the app. Everything else here works without
          them.</div>`;
+    }
+
+    // -- Add one person ------------------------------------------------------
+    // For a single new starter. A bigger change is easier as a spreadsheet:
+    // download the list, edit it, upload it back.
+    async function addCard(){
+      const nameEl = document.getElementById('newCardName');
+      const numEl = document.getElementById('newCardNumber');
+      const targetEl = document.getElementById('newCardTarget');
+      const btn = document.getElementById('btnAddCard');
+      const name = nameEl.value.trim();
+      const number = numEl.value.trim().replace(/\s+/g, '');
+      clearStatus();
+
+      if(!name || !number){
+        showStatus('A name and a card number are both needed.', 'error'); return;
+      }
+      if(!/^\d{10,}$/.test(number)){
+        showStatus('That card number does not look right — it should be the long number '
+                   + 'off the card, digits only.', 'error');
+        return;
+      }
+
+      btn.disabled = true; btn.textContent = 'Adding…';
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/cards', {
+          method: 'POST', headers: jsonHeaders(),
+          body: JSON.stringify({
+            card_number: number, name, active: true,
+            target_amount: targetEl.value.trim() === '' ? null : Number(targetEl.value),
+          }),
+        });
+        if(!resp.ok) throw await apiError(resp);
+        nameEl.value = numEl.value = targetEl.value = '';
+        showStatus(`Added ${name}. They are in the bot's next run.`, 'ok');
+        await loadRoster();
+      } catch(e){
+        showStatus('Could not add the card: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Add';
+      }
     }
 
     // -- Roster download -----------------------------------------------------
