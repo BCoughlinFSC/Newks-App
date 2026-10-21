@@ -6,18 +6,32 @@ did in the reporting app.
 You downloaded this from the app's **Meal Cards** page. It is already pointed at
 the right app and your email address (see `config.json`).
 
+## Use the .cmd files, not the .ps1 files
+
+Windows refuses to run a PowerShell script that arrived from the internet, so
+double-clicking a `.ps1` here looks like it does nothing at all. The numbered
+`.cmd` files are the way in. They run the matching `.ps1` for that one launch
+only and change no setting on the machine.
+
 ## First time on this PC
 
-1. Unzip this folder somewhere you can find it again (your Desktop is fine).
-2. Right-click **setup.ps1** and choose **Run with PowerShell**.
+1. **Unzip this folder first** - right-click the download, Extract All, and put
+   it somewhere you can find again (your Desktop is fine). Running from inside
+   the zip will not work.
+2. **Double-click `1 - SETUP - run me first.cmd`.**
 
-That creates a private Python environment here and installs two packages. It
-needs Python on the machine - if it is missing, the script tells you where to
-get it. Nothing else is installed and nothing is changed outside this folder.
+That creates a private Python environment in this folder and installs two
+packages. Python has to be on the machine: if it is not, setup offers to
+install it for you, and if your PC blocks that it tells you where to get it.
+(If you install it by hand, tick **Add python.exe to PATH** on the installer's
+first screen - that is the box people miss.)
+
+Nothing is installed outside this folder except Python itself, and nothing else
+on the machine is changed.
 
 ## Try it first — this one cannot spend anything
 
-Right-click **TEST RUN - adds no money.ps1** and choose **Run with PowerShell**.
+**Double-click `2 - TEST RUN - adds no money.cmd`.**
 
 It does everything the real run does except add money: signs into the app, pulls
 the card list, looks each card up in Paytronix, reads its balance and works out
@@ -33,7 +47,7 @@ process can see your setup is good.
 
 ## Every month
 
-Right-click **Run Meal Card Reload.ps1** and choose **Run with PowerShell**.
+**Double-click `3 - RUN THE RELOAD - adds money.cmd`.**
 **This one does add money.**
 
 It will:

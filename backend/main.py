@@ -23227,6 +23227,22 @@ async def mealcard_payroll_report(
     }
 
 
+@app.get("/api/mealcard/employee-map-export")
+async def mealcard_export_employee_map(_user: User = Depends(get_current_admin_user)):
+    """The current mapping as a CSV, in the shape the import expects back.
+
+    Doubles as the template: the rows we already know are filled in, the ones
+    we do not have blank EmployeeID cells waiting.
+    """
+    import base64 as _b64
+
+    csv_bytes = mealcard_db.employee_map_csv()
+    return {
+        "filename": "MealCardsToAllPay.csv",
+        "data": _b64.b64encode(csv_bytes).decode("ascii"),
+    }
+
+
 @app.post("/api/mealcard/employee-map")
 async def mealcard_import_employee_map(
     body: MealCardFileIn, _user: User = Depends(get_current_admin_user),

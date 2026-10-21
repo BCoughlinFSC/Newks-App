@@ -15,6 +15,7 @@ spreadsheet that has to be open on one person's machine.
 
 See main.py /api/mealcard/* and backend/mealcard_bot/.
 """
+import csv
 import io
 import json
 import logging
@@ -550,6 +551,37 @@ def employee_map(db_path: str = MEALCARD_DB_PATH) -> Tuple[Dict, Dict, str]:
                              f"{name_src['source'] if name_src else 'payroll exports'} "
                              "- FALLBACK, name-matched")
     return {}, {}, "NONE - no mapping imported yet"
+
+
+MAPPING_COLUMNS = ["CardNumber", "EmployeeID", "Entity", "Name"]
+
+
+def employee_map_csv(db_path: str = MEALCARD_DB_PATH) -> bytes:
+    """The current mapping, in the same shape MealCardsToAllPay.csv arrives in.
+
+    One row per active card, including the ones with no employee ID yet, so the
+    download doubles as the template for fixing it: open it, fill the blanks in
+    the EmployeeID column, upload it back. That means nobody has to know the
+    format, and nobody has to reproduce the rows that are already right.
+    """
+    by_card, by_name, _ = employee_map(db_path)
+
+    buf = io.StringIO(newline="")
+    writer = csv.DictWriter(buf, fieldnames=MAPPING_COLUMNS, lineterminator="\r\n")
+    writer.writeheader()
+    for card in list_cards(active_only=True, db_path=db_path):
+        info = by_card.get(card["card_number"]) or by_name.get(card["name"]) or {}
+        writer.writerow({
+            "CardNumber": card["card_number"],
+            "EmployeeID": info.get("employee_id", ""),
+            "Entity": info.get("entity", ""),
+            # Prefer the payroll spelling where we have one; fall back to the
+            # roster so a blank row still says who it is for.
+            "Name": info.get("name") or card["name"],
+        })
+    # utf-8-sig: Excel reads a bare utf-8 CSV as the system codepage and
+    # mangles any name with an accent or apostrophe in it.
+    return buf.getvalue().encode("utf-8-sig")
 
 
 def mapping_summary(db_path: str = MEALCARD_DB_PATH) -> Dict:

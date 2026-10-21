@@ -80,13 +80,25 @@
           <span class="muted" style="font-size:.8rem;">small zip, already pointed at this app</span>
         </div>
         <ol class="steps">
-          <li>Unzip it, then run <strong>setup.ps1</strong> once (it needs Python on the machine).</li>
-          <li>To check it works, run <strong>TEST RUN - adds no money.ps1</strong>. It reads every
-            balance and works out the amounts, but never fills in the Paytronix form and never ticks
-            a card off. Safe to run any time, including before a reload is due.</li>
-          <li>For the real thing, run <strong>Run Meal Card Reload.ps1</strong> and log into Paytronix
+          <li><strong>Unzip it first.</strong> Right-click the downloaded file &rarr; <em>Extract
+            All</em>. Opening the zip and running from inside it will not work.</li>
+          <li><strong>Double-click</strong> <span class="field">1 - SETUP - run me first.cmd</span>.
+            Python has to be on the machine; if it is not, this offers to install it, and tells you
+            where to get it if your PC blocks that. Once per machine, ever.</li>
+          <li><strong>Double-click</strong> <span class="field">2 - TEST RUN - adds no money.cmd</span>
+            to check it all works. It reads every balance and works out the amounts, but never fills
+            in the Paytronix form and never ticks a card off. Safe to run any time, including before
+            a reload is due.</li>
+          <li>Each month, <strong>double-click</strong>
+            <span class="field">3 - RUN THE RELOAD - adds money.cmd</span> and log into Paytronix
             when it asks. <strong>That one does add money.</strong></li>
         </ol>
+        <p class="sub" style="margin-top:.6rem;">
+          Use the <span class="field">.cmd</span> files, not the <span class="field">.ps1</span>
+          ones beside them. Windows refuses to run a PowerShell script that arrived from the
+          internet, so double-clicking the .ps1 appears to do nothing at all. The .cmd is the way
+          in, and it changes no setting on the machine.
+        </p>
 
         <details class="manual">
           <summary>What the bot does to each card &mdash; follow this to do one by hand</summary>
@@ -178,9 +190,17 @@
             is whose. <span id="mapCoverage"></span>
             <br><strong>Currently using:</strong> <span id="mapSub">&mdash;</span>
           </div>
+          <div class="muted" style="font-size:.82rem;margin-top:.5rem;">
+            To change it, download what it has now, fill in or correct the
+            <span class="field">EmployeeID</span> column in Excel, and upload the same file back.
+            Every card is listed, so the blanks show you exactly what is missing and you never
+            have to work out the format.
+          </div>
           <div class="row" style="margin-top:.5rem;">
+            <button class="btn secondary" id="btnMapDl" onclick="downloadMapping()">Download the current list</button>
+            <span class="muted" style="font-size:.8rem;">&rarr; fill in the blanks &rarr;</span>
             <input type="file" id="mapFile" accept=".csv" />
-            <button class="btn secondary" id="btnMap" onclick="importMapping()">Import MealCardsToAllPay.csv</button>
+            <button class="btn secondary" id="btnMap" onclick="importMapping()">Upload it back</button>
           </div>
           <div id="mapWarn"></div>
         </div>
@@ -502,6 +522,26 @@
           mapping: ${esc(s.mapping_source)}</p>
         <div class="row">${files}</div>
         ${noNames}${unmappedHtml}`;
+    }
+
+    // -- Employee mapping: download, fill in, upload back ---------------------
+    async function downloadMapping(){
+      const btn = document.getElementById('btnMapDl');
+      btn.disabled = true; btn.textContent = 'Building…';
+      clearStatus();
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/employee-map-export',
+                                 { headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        const r = await resp.json();
+        saveBase64(r.data, r.filename, 'text/csv');
+        showStatus('Downloaded ' + r.filename + '. Fill in the blank EmployeeID cells, '
+                   + 'then upload it back.', 'ok');
+      } catch(e){
+        showStatus('Could not build the list: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Download the current list';
+      }
     }
 
     // -- 4. Employee mapping import ------------------------------------------

@@ -11,16 +11,54 @@ Write-Host "==================================================" -ForegroundColor
 Write-Host ""
 
 # 1. Find Python
-$python = $null
-foreach ($candidate in @("python", "python3", "py")) {
-    $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($cmd) { $python = $cmd.Source; break }
+function Find-Python {
+    foreach ($candidate in @("python", "python3", "py")) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if (-not $cmd) { continue }
+        # Windows ships a fake "python" that only opens the Microsoft Store.
+        # It answers Get-Command but is not an interpreter, so make it prove it.
+        $version = & $cmd.Source --version 2>&1
+        if ($LASTEXITCODE -eq 0 -and "$version" -match "Python 3") {
+            return $cmd.Source
+        }
+    }
+    return $null
 }
+
+$python = Find-Python
+
 if (-not $python) {
-    Write-Host "ERROR: Python is not installed (or not on your PATH)." -ForegroundColor Red
+    Write-Host "Python is not installed on this PC (or is not on your PATH)." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "Install it from https://www.python.org/downloads/ and tick" -ForegroundColor Yellow
-    Write-Host "'Add python.exe to PATH' on the first screen, then run this again." -ForegroundColor Yellow
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "It can be installed for you now. This installs Python and nothing" -ForegroundColor Gray
+        Write-Host "else, and changes no other setting on the machine." -ForegroundColor Gray
+        Write-Host ""
+        $go = Read-Host "Install Python now? (y/N)"
+        if ($go -match '^[Yy]') {
+            Write-Host ""
+            Write-Host "Installing Python - this takes a couple of minutes..." -ForegroundColor Yellow
+            & winget install --id Python.Python.3.12 --source winget `
+                --accept-package-agreements --accept-source-agreements
+            # winget adds Python to the PATH of NEW shells, not this one, so
+            # pull the updated PATH in rather than asking for a restart.
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") +
+                        ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+            $python = Find-Python
+        }
+    }
+}
+
+if (-not $python) {
+    Write-Host ""
+    Write-Host "Python is still not available, so setup cannot continue." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Install it from https://www.python.org/downloads/ - and on the FIRST" -ForegroundColor Yellow
+    Write-Host "screen of the installer, tick 'Add python.exe to PATH'. That tick box" -ForegroundColor Yellow
+    Write-Host "is the one people miss; without it this script cannot find Python." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Then run this setup again." -ForegroundColor Yellow
     Read-Host "Press Enter to close"
     exit 1
 }
