@@ -35,6 +35,10 @@
     .badge.live { background:#F3F4F6; color:#374151; }
     .badge.stalled { background:#FEF3C7; color:#92400E; }
     .rowbtn { color:#B91C1C; cursor:pointer; text-decoration:underline; font-size:.76rem; }
+    input.empid { width:86px; padding:.12rem .3rem; font-size:.78rem; text-align:right;
+                  font-variant-numeric:tabular-nums; transition:border-color .2s; }
+    input.empid::placeholder { color:#9CA3AF; }
+    input.empid.zero { color:#6B7280; font-style:italic; }
     .rowbtn.restore { color:#2563EB; }
     .badge.todo { background:#FEF9C3; color:#854D0E; }
     table { width:100%; border-collapse:collapse; font-size:.82rem; }
@@ -359,7 +363,7 @@
         `<strong>${todo}</strong> still to load` +
         (errored ? ` &middot; <span class="badge error">${errored} errored</span>` : '');
 
-      const head = ['Name','Card','Target',
+      const head = ['Name','Card','Target','Employee ID',
                     ...Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')), ''];
       const rows = cards.map(c => {
         const retired = !c.active;
@@ -381,6 +385,13 @@
           <td>${esc(c.name)}${retired ? ' <span class="muted">(retired)</span>' : ''}</td>
           <td class="muted">${esc(c.card_number)}</td>
           <td class="num">${money(c.effective_target)}</td>
+          <td><input type="text" class="empid${c.employee_id === '0' ? ' zero' : ''}"
+                     value="${esc(c.employee_id || '')}" data-saved="${esc(c.employee_id || '')}"
+                     placeholder="&mdash;" inputmode="numeric"
+                     title="${c.employee_id === '0'
+                             ? 'never on the payroll report'
+                             : 'payroll employee ID — 0 means never on the payroll report'}"
+                     onchange="saveEmployeeId('${c.card_number}', this)" /></td>
           ${cells}
           <td>${action}</td>
         </tr>`;
@@ -390,7 +401,11 @@
         `<table><thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>
          <tbody>${rows}</tbody></table>
          <p class="muted" style="font-size:.76rem;margin:.5rem 0 0 0;">
-           <strong>Target</strong> is ${money(ROSTER.default_target)} for everyone unless an amount
+           <strong>Employee ID</strong> is what the payroll sheet groups by &mdash; type one
+           straight into the column to fill a gap, <strong>0</strong> for someone who never
+           belongs on that report, or clear it to leave it unknown. Section 3 still has the
+           download-and-upload route for changing a lot of them at once.
+           <br><strong>Target</strong> is ${money(ROSTER.default_target)} for everyone unless an amount
            was written into the name on the spreadsheet, the way
            <em>(Board Meeting $600.00)</em> is &mdash; those come across as that card's own target.
            <br>Columns 01&ndash;12 are the periods: ✓ loaded &middot; – skipped, already at target
@@ -423,6 +438,39 @@
          <code>MealCardsToAllPay.csv</code> export if one can still be produced &mdash; either way
          send them over and they can ship with the app. Everything else here works without
          them.</div>`;
+    }
+
+    // -- Employee ID, one card at a time -------------------------------------
+    async function saveEmployeeId(cardNumber, input){
+      const value = input.value.trim();
+      const previous = input.dataset.saved || '';
+      if (value === previous) return;
+
+      clearStatus();
+      input.disabled = true;
+      try {
+        const resp = await fetch(
+          API_BASE+'/api/mealcard/cards/'+encodeURIComponent(cardNumber)+'/employee', {
+            method: 'PUT', headers: jsonHeaders(),
+            body: JSON.stringify({ employee_id: value }),
+          });
+        if(!resp.ok) throw await apiError(resp);
+        const r = await resp.json();
+
+        input.dataset.saved = r.employee_id || '';
+        input.value = r.employee_id || '';
+        input.classList.toggle('zero', r.employee_id === '0');
+        input.style.borderColor = '#86EFAC';
+        setTimeout(() => { input.style.borderColor = ''; }, 1200);
+
+        // Keep the coverage line beside the payroll step honest as you type.
+        if (ROSTER) { ROSTER.mapping = r.mapping; renderMapping(); }
+      } catch(e){
+        input.value = previous;     // put back what was there, do not guess
+        showStatus('Could not save that employee ID: ' + e.message, 'error');
+      } finally {
+        input.disabled = false;
+      }
     }
 
     // -- Retire / restore one person -----------------------------------------

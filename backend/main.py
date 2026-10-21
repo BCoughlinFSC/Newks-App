@@ -23070,12 +23070,21 @@ async def mealcard_roster(
     year = year or datetime.now().year
     cards = mealcard_db.list_cards(active_only=not include_inactive)
     grid = mealcard_db.year_grid(year)
+    by_card, by_name, _ = mealcard_db.employee_map()
+
+    def employee(card):
+        # Same precedence the payroll report uses, so what the page shows is
+        # what the report will actually do with this card.
+        return by_card.get(card["card_number"]) or by_name.get(card["name"]) or {}
+
     return {
         "year": year,
         "default_target": mealcard_db.DEFAULT_TARGET,
         "cards": [
             {**card,
              "effective_target": mealcard_db.target_for(card),
+             "employee_id": employee(card).get("employee_id", ""),
+             "entity": employee(card).get("entity", ""),
              "periods": grid.get(card["card_number"], {})}
             for card in cards
         ],
@@ -23118,6 +23127,37 @@ async def mealcard_retire_card(
         raise HTTPException(status_code=404, detail=f"No card {card_number}")
     return {"success": True, "card_number": mealcard_db.clean_card(card_number),
             "active": False}
+
+
+class MealCardEmployeeIn(BaseModel):
+    employee_id: str = ""
+    entity: str = ""
+
+
+@app.put("/api/mealcard/cards/{card_number}/employee")
+async def mealcard_set_employee(
+    card_number: str, body: MealCardEmployeeIn,
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Set one card's employee ID from the card list.
+
+    For the handful nobody has an ID for yet. A whole-list change is still the
+    CSV download and upload; this is for fixing one row where you noticed it.
+    """
+    emp = (body.employee_id or "").strip()
+    if emp and not emp.isdigit():
+        raise HTTPException(
+            status_code=400,
+            detail=f"An employee ID should be digits (got {emp!r}). Use 0 for someone who "
+                   "never belongs on the payroll report, or clear it to leave it unknown.")
+
+    result = mealcard_db.set_employee_for_card(
+        card_number, emp, entity=body.entity or "",
+        source=f"set on the Meal Cards page by {current_user.name}",
+    )
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail=f"No card {card_number}")
+    return {"success": True, **result, "mapping": mealcard_db.mapping_summary()}
 
 
 @app.post("/api/mealcard/cards/{card_number}/restore")

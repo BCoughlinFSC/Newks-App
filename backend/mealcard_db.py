@@ -669,9 +669,11 @@ def employee_map(db_path: str = MEALCARD_DB_PATH) -> Tuple[Dict, Dict, str]:
             "SELECT source FROM mealcard_employee_map_by_name LIMIT 1").fetchone()
 
     if by_card:
-        desc = f"{card_src['source'] if card_src else 'card map'} ({len(by_card)} cards) - authoritative"
+        # Describe it rather than grading it: once IDs can be set one at a time,
+        # "authoritative" would be claimed by a single hand-typed row.
+        desc = f"{len(by_card)} from {card_src['source'] if card_src else 'the card mapping'}"
         if by_name:
-            desc += f", plus {len(by_name)} name-matched fallback entries"
+            desc += f", {len(by_name)} name-matched from earlier payroll exports"
         return by_card, by_name, desc
     if by_name:
         return {}, by_name, (f"{len(by_name)} names from "
@@ -681,6 +683,51 @@ def employee_map(db_path: str = MEALCARD_DB_PATH) -> Tuple[Dict, Dict, str]:
 
 
 MAPPING_COLUMNS = ["CardNumber", "EmployeeID", "Entity", "Name"]
+
+
+def set_employee_for_card(card_number: str, employee_id: str, entity: str = "",
+                          source: str = "set on the Meal Cards page",
+                          db_path: str = MEALCARD_DB_PATH) -> Dict:
+    """Give one card an employee ID, without disturbing the other 33.
+
+    An empty id clears it, from the name-matched fallback as well as the card
+    map - otherwise clearing a card would just fall back to the older guess and
+    look like nothing happened. "0" is kept, not cleared: that is the deliberate
+    "never on the payroll report" marker, not a blank.
+    """
+    initialize_db(db_path)
+    card_number = clean_card(card_number)
+    stamped = _now()
+
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT name FROM mealcard_cards WHERE card_number = ?",
+                           (card_number,)).fetchone()
+        if not row:
+            return {"found": False}
+        name = row["name"]
+
+        employee_id = str(employee_id or "").strip()
+        if employee_id == "":
+            conn.execute("DELETE FROM mealcard_employee_map WHERE card_number = ?",
+                         (card_number,))
+            conn.execute("DELETE FROM mealcard_employee_map_by_name WHERE name = ?", (name,))
+        else:
+            conn.execute(
+                """INSERT INTO mealcard_employee_map
+                       (card_number, employee_id, entity, name, source, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(card_number) DO UPDATE SET
+                       employee_id = excluded.employee_id,
+                       entity = excluded.entity,
+                       name = excluded.name,
+                       source = excluded.source,
+                       updated_at = excluded.updated_at""",
+                (card_number, employee_id, entity.strip(), name, source, stamped),
+            )
+        conn.commit()
+
+    return {"found": True, "card_number": card_number, "name": name,
+            "employee_id": employee_id, "entity": entity.strip()}
 
 
 def employee_map_csv(db_path: str = MEALCARD_DB_PATH) -> bytes:
