@@ -23044,6 +23044,9 @@ class MealCardRosterIn(MealCardFileIn):
     sheet: Optional[str] = None
     year: Optional[int] = None
     dry_run: bool = False
+    # Mark cards the sheet no longer lists as inactive — someone who has left.
+    # The dry run names them first, so this is never a surprise.
+    deactivate_missing: bool = False
 
 
 def _mealcard_period(year: Optional[int], period: Optional[int]) -> Tuple[int, int]:
@@ -23335,6 +23338,7 @@ async def mealcard_import_roster(
                    "It should be the Gift Card / Meal Card Numbers .xlsx.")
 
     known = {c["card_number"] for c in mealcard_db.list_cards(active_only=False)}
+    missing = mealcard_db.cards_missing_from(rows)
     preview = {
         "year": year,
         "sheet": sheet,
@@ -23343,11 +23347,17 @@ async def mealcard_import_roster(
         "ticks": sum(len(r["periods"]) for r in rows),
         "exceptions": [{"name": r["name"], "target_amount": r["target_amount"]}
                        for r in rows if r["target_amount"] != mealcard_db.DEFAULT_TARGET],
+        # Cards the app holds that this sheet does not — normally leavers.
+        "missing": [{"name": c["name"], "card_number": c["card_number"]} for c in missing],
+        "missing_count": len(missing),
     }
     if body.dry_run:
         return {"dry_run": True, **preview}
 
-    result = mealcard_db.import_roster(rows, year, source=body.filename or "upload")
+    result = mealcard_db.import_roster(
+        rows, year, source=body.filename or "upload",
+        deactivate_missing=body.deactivate_missing,
+    )
     return {"dry_run": False, **preview, **result}
 
 

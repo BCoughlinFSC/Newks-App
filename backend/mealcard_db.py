@@ -298,6 +298,8 @@ def load_seed(db_path: str = MEALCARD_DB_PATH, path: str = SEED_PATH) -> Dict:
             "periods": c.get("periods", []),
         } for c in seed.get("cards", [])]
         if rows:
+            # No deactivation on a seed: the tables were empty, so there is
+            # nothing it could possibly be retiring.
             written = import_roster(rows, year, source="the list shipped with the app",
                                     db_path=db_path)
             cards, ticks = written["cards"], written["ticks"]
@@ -371,15 +373,31 @@ def roster_xlsx(year: int, include_inactive: bool = False,
     return buf.getvalue()
 
 
+def cards_missing_from(rows: List[Dict], db_path: str = MEALCARD_DB_PATH) -> List[Dict]:
+    """Active cards the app holds that this sheet does not mention.
+
+    Almost always someone who has left: they were deleted from the spreadsheet,
+    and the import is how that is meant to reach the app.
+    """
+    incoming = {clean_card(r["card_number"]) for r in rows}
+    return [c for c in list_cards(active_only=True, db_path=db_path)
+            if c["card_number"] not in incoming]
+
+
 def import_roster(rows: List[Dict], year: int, source: str = "",
+                  deactivate_missing: bool = False,
                   db_path: str = MEALCARD_DB_PATH) -> Dict:
     """Write parsed roster rows in. Cards upsert, ticks upsert per period.
 
-    A card that has disappeared from the sheet is left alone rather than
-    deleted - retiring someone is a deliberate act, not a side effect of
-    re-importing. Deactivate them on the page instead.
+    With deactivate_missing, a card the sheet no longer lists is marked
+    inactive: it drops out of the roster and the bot's worklist, but keeps its
+    row and its period history, so last year's record still reads correctly and
+    the decision is reversible. Nothing is ever deleted, and the caller is
+    expected to have shown the names first - see the dry run in
+    /api/mealcard/roster-import.
     """
     initialize_db(db_path)
+    missing = cards_missing_from(rows, db_path) if deactivate_missing else []
     cards = ticks = 0
     for row in rows:
         upsert_card(
@@ -398,7 +416,15 @@ def import_roster(rows: List[Dict], year: int, source: str = "",
                           detail=f"imported from {source}" if source else "imported",
                           db_path=db_path)
             ticks += 1
-    return {"cards": cards, "ticks": ticks, "year": year}
+
+    for card in missing:
+        upsert_card(card_number=card["card_number"], name=card["name"],
+                    target_amount=card["target_amount"], active=False,
+                    sort_order=card["sort_order"], notes=card.get("notes") or "",
+                    db_path=db_path)
+
+    return {"cards": cards, "ticks": ticks, "year": year,
+            "deactivated": [c["name"] for c in missing]}
 
 
 # -- Period completion --------------------------------------------------------

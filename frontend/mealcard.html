@@ -151,8 +151,8 @@
             reissued, or a new year's tab starts. The file is
             <span class="field">Gift Card _ Meal Card Numbers - Support Center 2026.xlsx</span>
             (not a <span class="field">.backup_</span> copy). It reads the tab named for the year
-            picked below, shows what it found, and writes nothing until you confirm. Anything you
-            have changed here by hand is kept.
+            picked below, shows what it found, and writes nothing until you confirm. If someone has
+            been taken off the sheet because they left, it names them and offers to retire them.
           </div>
           <div class="row" style="margin-top:.5rem;">
             <input type="file" id="rosterFile" accept=".xlsx" />
@@ -423,10 +423,13 @@
       btn.disabled = true; btn.textContent = preview ? 'Checking…' : 'Importing…';
       try {
         const content_b64 = await readAsBase64(file);
+        // Only meaningful on the real run, and only if the preview offered it.
+        const cb = document.getElementById('deactivateMissing');
         const resp = await fetch(API_BASE+'/api/mealcard/roster-import', {
           method: 'POST', headers: jsonHeaders(),
           body: JSON.stringify({ filename: file.name, content_b64, year,
-                                 sheet: String(year), dry_run: preview }),
+                                 sheet: String(year), dry_run: preview,
+                                 deactivate_missing: !!(cb && cb.checked) }),
         });
         if(!resp.ok) throw await apiError(resp);
         const r = await resp.json();
@@ -436,18 +439,37 @@
             ? '<br>Custom targets: ' + r.exceptions.map(e =>
                 esc(e.name) + ' ' + money(e.target_amount)).join(', ') + '.'
             : '';
+          const missing = r.missing || [];
+          const missingHtml = missing.length ? `
+            <div style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid #FDE68A;">
+              <label style="display:flex;gap:.45rem;align-items:flex-start;cursor:pointer;">
+                <input type="checkbox" id="deactivateMissing" checked style="margin-top:.25rem;" />
+                <span><strong>${missing.length} card${missing.length === 1 ? '' : 's'} here
+                  ${missing.length === 1 ? 'is' : 'are'} not on this sheet</strong> &mdash;
+                  ${missing.map(m => esc(m.name)).join(', ')}.
+                  Leave this ticked to retire ${missing.length === 1 ? 'it' : 'them'}: off the
+                  list and out of the bot's worklist, but the period history stays and importing
+                  a sheet that has ${missing.length === 1 ? 'it' : 'them'} again brings
+                  ${missing.length === 1 ? 'it' : 'them'} back. Untick to leave
+                  ${missing.length === 1 ? 'it' : 'them'} alone.</span>
+              </label>
+            </div>` : '';
+
           out.innerHTML = `<div class="warnbox">
             Sheet <strong>${esc(r.sheet)}</strong> holds <strong>${r.cards}</strong> cards
             (${r.new_cards} not here yet) and ${r.ticks} period ticks for ${r.year}.${exc}
             <br>Importing overwrites the name and target of any card already here.
-            <div class="row" style="margin-top:.5rem;">
+            ${missingHtml}
+            <div class="row" style="margin-top:.6rem;">
               <button class="btn" onclick="importRoster(false)">Import these ${r.cards} cards</button>
               <button class="btn secondary" onclick="document.getElementById('rosterImportOut').innerHTML='';">Cancel</button>
             </div></div>`;
         } else {
           out.innerHTML = '';
           input.value = '';
-          showStatus(`Imported ${r.cards} cards and ${r.ticks} period ticks for ${r.year}.`, 'ok');
+          const retired = (r.deactivated || []).length;
+          showStatus(`Imported ${r.cards} cards and ${r.ticks} period ticks for ${r.year}.`
+                     + (retired ? ` Retired ${retired}: ${r.deactivated.join(', ')}.` : ''), 'ok');
           await loadRoster();
         }
       } catch(e){
