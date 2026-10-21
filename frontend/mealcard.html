@@ -31,7 +31,11 @@
     .badge.error { background:#FEE2E2; color:#991B1B; }
     .badge.running { background:#DBEAFE; color:#1E40AF; }
     .badge.finished { background:#DCFCE7; color:#166534; }
-    .badge.dry-run { background:#EDE9FE; color:#5B21B6; }
+    .badge.dry-run, .badge.test { background:#EDE9FE; color:#5B21B6; }
+    .badge.live { background:#F3F4F6; color:#374151; }
+    .badge.stalled { background:#FEF3C7; color:#92400E; }
+    .rowbtn { color:#B91C1C; cursor:pointer; text-decoration:underline; font-size:.76rem; }
+    .rowbtn.restore { color:#2563EB; }
     .badge.todo { background:#FEF9C3; color:#854D0E; }
     table { width:100%; border-collapse:collapse; font-size:.82rem; }
     th, td { padding:.35rem .5rem; border-bottom:1px solid #eee; text-align:left; white-space:nowrap; }
@@ -166,6 +170,9 @@
           <label>Year <select id="yearSel" onchange="loadRoster()"></select></label>
           <label>Period <select id="periodSel" onchange="renderRoster()"></select></label>
           <span id="periodSummary" class="muted" style="font-size:.82rem;"></span>
+          <label class="muted" style="font-size:.82rem;cursor:pointer;">
+            <input type="checkbox" id="showRetired" onchange="loadRoster()" /> show retired
+          </label>
           <button class="btn secondary" id="btnRosterDl" onclick="downloadRoster()"
                   style="margin-left:auto;">Download the card list</button>
         </div>
@@ -307,8 +314,11 @@
 
     async function loadRoster(){
       const year = document.getElementById('yearSel').value;
+      const showRetired = document.getElementById('showRetired');
+      const inc = (showRetired && showRetired.checked) ? '&include_inactive=true' : '';
       try {
-        const resp = await fetch(API_BASE+'/api/mealcard/roster?year='+year, { headers: getAuthHeaders() });
+        const resp = await fetch(API_BASE+'/api/mealcard/roster?year='+year+inc,
+                                 { headers: getAuthHeaders() });
         if(!resp.ok) throw await apiError(resp);
         ROSTER = await resp.json();
         renderRoster();
@@ -349,8 +359,10 @@
         `<strong>${todo}</strong> still to load` +
         (errored ? ` &middot; <span class="badge error">${errored} errored</span>` : '');
 
-      const head = ['Name','Card','Target', ...Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'))];
+      const head = ['Name','Card','Target',
+                    ...Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')), ''];
       const rows = cards.map(c => {
+        const retired = !c.active;
         const cells = Array.from({length:12}, (_,i) => {
           const s = c.periods[i+1];
           const mark = s === 'done' ? '✓' : s === 'skipped' ? '–' : s === 'error' ? '!' : '';
@@ -360,11 +372,17 @@
           const hl = (i+1) === period ? 'background:#FEF9C3;' : '';
           return `<td class="tick" style="${colour}${hl}" title="${esc(title)}">${mark}</td>`;
         }).join('');
-        return `<tr>
-          <td>${esc(c.name)}</td>
+        const action = retired
+          ? `<span class="rowbtn restore" onclick="setCardActive('${c.card_number}', true)"
+                   title="put them back on the list">restore</span>`
+          : `<span class="rowbtn" onclick="setCardActive('${c.card_number}', false)"
+                   title="take them off the list and out of the bot's worklist">retire</span>`;
+        return `<tr${retired ? ' style="opacity:.5;" title="retired"' : ''}>
+          <td>${esc(c.name)}${retired ? ' <span class="muted">(retired)</span>' : ''}</td>
           <td class="muted">${esc(c.card_number)}</td>
           <td class="num">${money(c.effective_target)}</td>
           ${cells}
+          <td>${action}</td>
         </tr>`;
       }).join('');
 
@@ -405,6 +423,32 @@
          <code>MealCardsToAllPay.csv</code> export if one can still be produced &mdash; either way
          send them over and they can ship with the app. Everything else here works without
          them.</div>`;
+    }
+
+    // -- Retire / restore one person -----------------------------------------
+    async function setCardActive(cardNumber, active){
+      const card = ((ROSTER && ROSTER.cards) || []).find(c => c.card_number === cardNumber);
+      const who = (card && card.name) || cardNumber;
+      if (!active && !window.confirm(
+            `Retire ${who}?\n\n`
+            + `They come off the card list and out of the bot's worklist, so they will not be `
+            + `reloaded again.\n\nTheir period history is kept, and you can put them back with `
+            + `"show retired".`)) {
+        return;
+      }
+      clearStatus();
+      try {
+        const url = API_BASE + '/api/mealcard/cards/' + encodeURIComponent(cardNumber)
+                  + (active ? '/restore' : '');
+        const resp = await fetch(url, { method: active ? 'POST' : 'DELETE',
+                                        headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        showStatus(active ? `${who} is back on the list.`
+                          : `${who} retired — still in the history, not in the next run.`, 'ok');
+        await loadRoster();
+      } catch(e){
+        showStatus('Could not update that card: ' + e.message, 'error');
+      }
     }
 
     // -- Add one person ------------------------------------------------------
@@ -659,6 +703,21 @@
     }
 
     // -- Runs ----------------------------------------------------------------
+    // Nothing closes out a run whose machine slept or dropped off the network,
+    // so a row can sit at "running" indefinitely. Say so rather than letting it
+    // read as still working.
+    const STALE_AFTER_MS = 2 * 60 * 60 * 1000;
+
+    function runState(r){
+      if (r.status !== 'running') return { cls: esc(r.status), label: esc(r.status) };
+      const started = Date.parse(r.started_at);   // ISO with offset; do not reformat
+      if (!isNaN(started) && (Date.now() - started) > STALE_AFTER_MS) {
+        return { cls: 'stalled', label: 'stalled',
+                 hint: 'left running for hours — the machine probably slept or lost its connection' };
+      }
+      return { cls: 'running', label: 'running', hint: 'the bot is working through the cards' };
+    }
+
     async function loadRuns(){
       try {
         const resp = await fetch(API_BASE+'/api/mealcard/runs?limit=15', { headers: getAuthHeaders() });
@@ -671,23 +730,37 @@
         }
         document.getElementById('runsWrap').innerHTML = `
           <table><thead><tr>
-            <th>Run</th><th>Period</th><th>Started</th><th>By</th><th>Status</th>
+            <th>Run</th><th>Period</th><th>Started</th><th>By</th><th>Mode</th><th>Status</th>
             <th>Loaded</th><th>Skipped</th><th>Errors</th><th></th>
           </tr></thead><tbody>
-          ${runs.map(r=>`<tr>
+          ${runs.map(r=>{
+            const test = r.mode === 'test';
+            const st = runState(r);
+            return `<tr>
             <td>#${r.id}</td>
             <td>${String(r.period).padStart(2,'0')}/${r.year}</td>
             <td>${esc(fmtTime(r.started_at))}</td>
             <td>${esc(r.requested_by||'')}</td>
-            <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
-            <td class="num">${r.status === 'dry-run'
+            <td><span class="badge ${test ? 'test' : 'live'}"
+                     title="${test ? 'a test run: reads balances, adds nothing'
+                                   : 'the real thing: this one adds money'}"
+                >${test ? 'test' : 'live'}</span></td>
+            <td><span class="badge ${st.cls}" title="${esc(st.hint||'')}">${st.label}</span></td>
+            <td class="num">${test
               ? '<span class="muted" title="a test run loads nothing by design">&mdash;</span>'
               : r.completed}</td>
             <td class="num">${r.skipped}</td>
             <td class="num">${r.errors ? '<strong style="color:#B91C1C;">'+r.errors+'</strong>' : 0}</td>
             <td><span class="logbtn" onclick="showLog(${r.id})">log</span></td>
-          </tr><tr id="logrow-${r.id}" style="display:none;"><td colspan="9"><pre class="log" id="log-${r.id}">Loading…</pre></td></tr>`).join('')}
-          </tbody></table>`;
+          </tr><tr id="logrow-${r.id}" style="display:none;"><td colspan="10"><pre class="log" id="log-${r.id}">Loading…</pre></td></tr>`;
+          }).join('')}
+          </tbody></table>
+          <p class="muted" style="font-size:.76rem;margin:.5rem 0 0 0;">
+            <strong>test</strong> reads balances and adds nothing; <strong>live</strong> adds money.
+            A run shows as <strong>running</strong> while the bot is working and fills in as it goes
+            &mdash; refresh to follow along. <strong>Stalled</strong> means it was left running for
+            hours: almost always a laptop that slept or lost wifi part-way, in which case the cards
+            it did finish are already ticked and re-running picks up the rest.</p>`;
       } catch(e){
         document.getElementById('runsWrap').innerHTML =
           '<p class="muted">Could not load runs: '+esc(e.message)+'</p>';

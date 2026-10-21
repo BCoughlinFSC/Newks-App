@@ -92,6 +92,9 @@ CREATE TABLE IF NOT EXISTS mealcard_runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     year         INTEGER NOT NULL,
     period       INTEGER NOT NULL,
+    -- Set when the run STARTS, not when it ends: while a run is in flight,
+    -- "is this spending money?" is the question people actually have.
+    mode         TEXT    NOT NULL DEFAULT 'live',     -- live | test
     status       TEXT    NOT NULL DEFAULT 'running',  -- running | finished | abandoned
     started_at   TEXT    NOT NULL,
     finished_at  TEXT,
@@ -122,6 +125,14 @@ def initialize_db(db_path: str = MEALCARD_DB_PATH) -> None:
     global _seed_checked
     with get_connection(db_path) as conn:
         conn.executescript(_SCHEMA)
+        try:
+            conn.execute("ALTER TABLE mealcard_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'live'")
+        except sqlite3.OperationalError:
+            pass    # already there
+        # Runs from before `mode` existed recorded a test by setting the status
+        # to dry-run at the end. Move those across so one idea lives in one column.
+        conn.execute("UPDATE mealcard_runs SET mode = 'test', status = 'finished' "
+                     "WHERE status = 'dry-run'")
         conn.commit()
 
     # First touch in this process: fill empty tables from the data the app
@@ -729,14 +740,14 @@ def mapping_summary(db_path: str = MEALCARD_DB_PATH) -> Dict:
 
 
 # -- Runs ---------------------------------------------------------------------
-def start_run(year: int, period: int, requested_by: str = "",
+def start_run(year: int, period: int, requested_by: str = "", dry_run: bool = False,
               db_path: str = MEALCARD_DB_PATH) -> int:
     initialize_db(db_path)
     with get_connection(db_path) as conn:
         cur = conn.execute(
-            """INSERT INTO mealcard_runs (year, period, status, started_at, requested_by)
-               VALUES (?, ?, 'running', ?, ?)""",
-            (year, period, _now(), requested_by),
+            """INSERT INTO mealcard_runs (year, period, mode, status, started_at, requested_by)
+               VALUES (?, ?, ?, 'running', ?, ?)""",
+            (year, period, "test" if dry_run else "live", _now(), requested_by),
         )
         conn.commit()
         return cur.lastrowid
@@ -746,7 +757,16 @@ def finish_run(run_id: int, completed: int = 0, skipped: int = 0, errors: int = 
                log: str = "", status: str = "finished",
                db_path: str = MEALCARD_DB_PATH) -> None:
     initialize_db(db_path)
+    # An older copy of the bot reports a test by finishing with status
+    # "dry-run" and says nothing at start. Fold that back into the mode column
+    # so one idea has one spelling, and so a test from an old bot is still
+    # labelled a test rather than passing for a live run.
+    was_dry = status == "dry-run"
+    if was_dry:
+        status = "finished"
     with get_connection(db_path) as conn:
+        if was_dry:
+            conn.execute("UPDATE mealcard_runs SET mode = 'test' WHERE id = ?", (run_id,))
         conn.execute(
             """UPDATE mealcard_runs
                   SET status = ?, finished_at = ?, completed = ?, skipped = ?,
@@ -779,12 +799,26 @@ def list_runs(limit: int = 25, db_path: str = MEALCARD_DB_PATH) -> List[Dict]:
     initialize_db(db_path)
     with get_connection(db_path) as conn:
         rows = conn.execute(
-            """SELECT id, year, period, status, started_at, finished_at, requested_by,
+            """SELECT id, year, period, mode, status, started_at, finished_at, requested_by,
                       completed, skipped, errors
                  FROM mealcard_runs ORDER BY id DESC LIMIT ?""",
             (limit,),
         )
         return [dict(r) for r in rows]
+
+
+def set_card_active(card_number: str, active: bool,
+                    db_path: str = MEALCARD_DB_PATH) -> bool:
+    """Retire a card, or bring one back. Never deletes: the period history is
+    the record of what was loaded and has to survive someone leaving."""
+    initialize_db(db_path)
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE mealcard_cards SET active = ?, updated_at = ? WHERE card_number = ?",
+            (1 if active else 0, _now(), clean_card(card_number)),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # -- The worklist the bot asks for -------------------------------------------

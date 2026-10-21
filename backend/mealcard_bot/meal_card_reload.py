@@ -146,10 +146,27 @@ class AppClient:
         return r.json()
 
     def start_run(self, year: int, period: int) -> int:
-        r = self.client.post("/api/mealcard/runs", json={"year": year, "period": period})
+        # Declare the mode up front: while the run is in flight, "is this
+        # spending money?" is the question anyone watching the app will have.
+        r = self.client.post("/api/mealcard/runs",
+                             json={"year": year, "period": period,
+                                   "dry_run": self.dry_run})
         r.raise_for_status()
         self.run_id = r.json()["run_id"]
         return self.run_id
+
+    def log_line(self, text: str):
+        """Progress for the app's run log.
+
+        A test run posts no card results by design, so without this its log
+        would stay empty for the whole run and read as stuck.
+        """
+        if self.run_id is None:
+            return
+        try:
+            self.client.post(f"/api/mealcard/runs/{self.run_id}/log", json={"text": text})
+        except Exception:
+            pass    # the local log file is the real record; never fail over this
 
     def record_card(self, card_number, status, amount=None, balance_before=None, detail=""):
         """Post one card's outcome. Never fatal: a reload that happened must not
@@ -570,11 +587,14 @@ def main():
                         print(f"  {detail}")
                         print("  SKIPPED - balance already at or above target")
                         skipped += 1
-                        if not args.dry_run:
+                        if args.dry_run:
+                            app.log_line(f"{name} - {detail} (already at target)")
+                        else:
                             app.record_card(card["card_number"], "skipped",
                                             balance_before=balance, detail=detail)
                     elif outcome == "dry-run":
                         print(f"  {detail}")
+                        app.log_line(f"{name} - {detail}")
                     else:
                         print(f"  {detail}")
                         if outcome == "unverified":
@@ -599,7 +619,9 @@ def main():
                         print(f"  ERROR after {CARD_ATTEMPTS} attempts: {msg}")
                         errors += 1
                         failed_cards.append((idx, name, msg))
-                        if not args.dry_run:
+                        if args.dry_run:
+                            app.log_line(f"{name} - ERROR: {msg}")
+                        else:
                             app.record_card(card["card_number"], "error", detail=msg)
                         if not reset_to_lookup(page):
                             print("  Could not recover - you may need to restart")

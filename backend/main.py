@@ -23011,6 +23011,12 @@ class MealCardIn(BaseModel):
 class MealCardRunStart(BaseModel):
     year: Optional[int] = None
     period: Optional[int] = None
+    # Declared up front so a run in flight says whether it is spending money.
+    dry_run: bool = False
+
+
+class MealCardLogIn(BaseModel):
+    text: str
 
 
 class MealCardResultIn(BaseModel):
@@ -23098,6 +23104,33 @@ async def mealcard_upsert_card(
     return {"success": True, "card_number": card_number}
 
 
+@app.delete("/api/mealcard/cards/{card_number}")
+async def mealcard_retire_card(
+    card_number: str, _user: User = Depends(get_current_admin_user),
+):
+    """Retire a card: off the list and out of the bot's worklist.
+
+    Not a delete. The card keeps its row and its period history, so what was
+    loaded before the person left still reads correctly and the payroll report
+    can still put a name to it. Reversible from the same page.
+    """
+    if not mealcard_db.set_card_active(card_number, False):
+        raise HTTPException(status_code=404, detail=f"No card {card_number}")
+    return {"success": True, "card_number": mealcard_db.clean_card(card_number),
+            "active": False}
+
+
+@app.post("/api/mealcard/cards/{card_number}/restore")
+async def mealcard_restore_card(
+    card_number: str, _user: User = Depends(get_current_admin_user),
+):
+    """Put a retired card back on the list."""
+    if not mealcard_db.set_card_active(card_number, True):
+        raise HTTPException(status_code=404, detail=f"No card {card_number}")
+    return {"success": True, "card_number": mealcard_db.clean_card(card_number),
+            "active": True}
+
+
 @app.delete("/api/mealcard/periods/{card_number}/{year}/{period}")
 async def mealcard_clear_period(
     card_number: str, year: int, period: int,
@@ -23133,8 +23166,25 @@ async def mealcard_start_run(
     body: MealCardRunStart, current_user: User = Depends(get_current_user),
 ):
     year, period = _mealcard_period(body.year, body.period)
-    run_id = mealcard_db.start_run(year, period, requested_by=current_user.name)
-    return {"run_id": run_id, "year": year, "period": period}
+    run_id = mealcard_db.start_run(year, period, requested_by=current_user.name,
+                                   dry_run=body.dry_run)
+    return {"run_id": run_id, "year": year, "period": period,
+            "mode": "test" if body.dry_run else "live"}
+
+
+@app.post("/api/mealcard/runs/{run_id}/log")
+async def mealcard_log_line(
+    run_id: int, body: MealCardLogIn, _user: User = Depends(get_current_user),
+):
+    """A progress line for the run log.
+
+    A test run never records card results - that is the point of it - so
+    without this its log would stay empty for the whole run and look stuck.
+    """
+    if not mealcard_db.get_run(run_id):
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    mealcard_db.append_run_log(run_id, body.text)
+    return {"success": True}
 
 
 @app.post("/api/mealcard/runs/{run_id}/card")
