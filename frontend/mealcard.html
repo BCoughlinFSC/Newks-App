@@ -184,11 +184,12 @@
       <div class="card">
         <h2>3. Payroll report</h2>
         <p class="sub">Once the reload is done, upload the Paytronix <em>Stored Value Sales and Added
-          Value Detail Report</em> (.xls or .csv). You get back that report with the names filled in,
-          and the payroll adjustment sheet to hand over &mdash; the same two files as the old SSRS
-          report. This is the monthly job; do it after every reload.</p>
+          Value Detail Report</em>. <strong>Export it as CSV</strong> &mdash; pick CSV on the
+          Paytronix export screen rather than Excel. You get back that report with the names filled
+          in, and the payroll adjustment sheet to hand over &mdash; the same two files as the old
+          SSRS report. This is the monthly job; do it after every reload.</p>
         <div class="row">
-          <input type="file" id="reportFile" accept=".xls,.xlsx,.csv" />
+          <input type="file" id="reportFile" accept=".csv" />
           <button class="btn" id="btnReport" onclick="buildReport()">Build the reports</button>
         </div>
         <div id="reportOut"></div>

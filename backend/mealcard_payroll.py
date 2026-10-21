@@ -79,9 +79,9 @@ def _read_xls(raw: bytes):
         import xlrd
     except ImportError:
         raise ReportError(
-            "Reading the old .xls format needs the xlrd package, which is not "
-            "installed on this server (pip install xlrd). In the meantime, export "
-            "the report from Paytronix as .csv and upload that instead."
+            "That is an .xls file. Go back to Paytronix and export the report as "
+            "CSV instead, then upload that. (The server can read .xls too if the "
+            "xlrd package is installed, but it is not, and CSV needs nothing.)"
         )
 
     book = xlrd.open_workbook(file_contents=raw)
