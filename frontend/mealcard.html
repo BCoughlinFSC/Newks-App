@@ -231,7 +231,15 @@
     function getAuthHeaders(){ const t=localStorage.getItem('auth_token'); return t?{'Authorization':'Bearer '+t}:{}; }
     function jsonHeaders(){ return Object.assign({'Content-Type':'application/json'}, getAuthHeaders()); }
     function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
-    function showStatus(m,t){ const e=document.getElementById('statusMsg'); e.className='status-msg '+t; e.textContent=m; }
+    // The banner sits at the top of the page, so by the time you are working in
+    // section 3 a message appears above the fold and reads as nothing happening.
+    // Bring it to you.
+    function showStatus(m,t){
+      const e=document.getElementById('statusMsg');
+      e.className='status-msg '+t;
+      e.textContent=m;
+      try { e.scrollIntoView({ behavior:'smooth', block:'center' }); } catch { e.scrollIntoView(); }
+    }
     function clearStatus(){ document.getElementById('statusMsg').className='status-msg'; }
     function fmtTime(iso){ if(!iso) return ''; return String(iso).replace('T',' ').replace(/(\+\d\d:\d\d|Z)$/,''); }
     function money(n){ return n==null ? '' : '$'+Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -550,6 +558,12 @@
         const result = await resp.json();
         renderReport(result);
       } catch(e){
+        // Also put it right under the button. A banner at the top of the page
+        // is easy to miss from down here, and "it did nothing" is the worst
+        // thing a failure can look like.
+        console.error('mealcard payroll report failed:', e);
+        out.innerHTML = `<div class="warnbox" style="background:#FEF2F2;border-color:#FCA5A5;
+          color:#B91C1C;"><strong>That did not work.</strong><br>${esc(e.message)}</div>`;
         showStatus('Could not build the reports: ' + e.message, 'error');
       } finally {
         btn.disabled = false; btn.textContent = 'Build the reports';
