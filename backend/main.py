@@ -23264,6 +23264,23 @@ async def mealcard_finish_run(
     return {"success": True, "run": mealcard_db.get_run(run_id)}
 
 
+@app.post("/api/mealcard/runs/{run_id}/abandon")
+async def mealcard_abandon_run(
+    run_id: int, _user: User = Depends(get_current_admin_user),
+):
+    """Close out a run that stopped reporting back.
+
+    For the laptop that slept mid-run. It records that nobody knows how the run
+    ended rather than claiming it finished, and leaves the card ticks alone -
+    whatever was loaded before it went quiet really was loaded.
+    """
+    if not mealcard_db.get_run(run_id):
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    if not mealcard_db.abandon_run(run_id):
+        raise HTTPException(status_code=400, detail="That run has already finished.")
+    return {"success": True, "run": mealcard_db.get_run(run_id)}
+
+
 @app.get("/api/mealcard/runs")
 async def mealcard_list_runs(limit: int = 25, _user: User = Depends(get_current_admin_user)):
     return {"runs": mealcard_db.list_runs(limit=limit)}

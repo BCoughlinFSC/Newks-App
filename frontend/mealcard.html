@@ -34,6 +34,8 @@
     .badge.dry-run, .badge.test { background:#EDE9FE; color:#5B21B6; }
     .badge.live { background:#F3F4F6; color:#374151; }
     .badge.stalled { background:#FEF3C7; color:#92400E; }
+    .badge.abandoned { background:#E5E7EB; color:#4B5563; }
+    .badge.unknown { background:#F3F4F6; color:#6B7280; font-style:italic; }
     .rowbtn { color:#B91C1C; cursor:pointer; text-decoration:underline; font-size:.76rem; }
     input.empid { width:86px; padding:.12rem .3rem; font-size:.78rem; text-align:right;
                   font-variant-numeric:tabular-nums; transition:border-color .2s; }
@@ -766,6 +768,41 @@
       return { cls: 'running', label: 'running', hint: 'the bot is working through the cards' };
     }
 
+    // A run that went quiet without recording anything tells us nothing about
+    // what it was. Bots downloaded before 21 Oct only declared test-or-live when
+    // they FINISHED, so one that never finished has no mode on record — and
+    // defaulting that to "live" says money moved when nothing was even attempted.
+    function runMode(r){
+      if (r.mode === 'test') {
+        return { label:'test', cls:'test', hint:'a test run: reads balances, adds nothing' };
+      }
+      const recordedNothing = !r.completed && !r.skipped && !r.errors;
+      const overAndOut = r.status === 'abandoned' || runState(r).cls === 'stalled';
+      if (recordedNothing && overAndOut) {
+        return { label:'unknown', cls:'unknown',
+                 hint:'this run never reported anything back, so there is no record of whether '
+                    + 'it was a test. Older copies of the bot only said so at the end.' };
+      }
+      return { label:'live', cls:'live', hint:'the real thing: this one adds money' };
+    }
+
+    async function abandonRun(runId){
+      if (!window.confirm('Mark run #' + runId + ' as abandoned?\n\n'
+          + 'Use this for a run that stopped reporting — a laptop that slept or lost wifi.\n\n'
+          + 'Any cards it did finish stay ticked; this only stops the row claiming to be '
+          + 'still running.')) return;
+      clearStatus();
+      try {
+        const resp = await fetch(API_BASE+'/api/mealcard/runs/'+runId+'/abandon',
+                                 { method:'POST', headers: getAuthHeaders() });
+        if(!resp.ok) throw await apiError(resp);
+        showStatus('Run #'+runId+' marked abandoned.', 'ok');
+        await loadRuns();
+      } catch(e){
+        showStatus('Could not update that run: ' + e.message, 'error');
+      }
+    }
+
     async function loadRuns(){
       try {
         const resp = await fetch(API_BASE+'/api/mealcard/runs?limit=15', { headers: getAuthHeaders() });
@@ -782,24 +819,26 @@
             <th>Loaded</th><th>Skipped</th><th>Errors</th><th></th>
           </tr></thead><tbody>
           ${runs.map(r=>{
-            const test = r.mode === 'test';
             const st = runState(r);
+            const md = runMode(r);
+            const test = r.mode === 'test';
             return `<tr>
             <td>#${r.id}</td>
             <td>${String(r.period).padStart(2,'0')}/${r.year}</td>
             <td>${esc(fmtTime(r.started_at))}</td>
             <td>${esc(r.requested_by||'')}</td>
-            <td><span class="badge ${test ? 'test' : 'live'}"
-                     title="${test ? 'a test run: reads balances, adds nothing'
-                                   : 'the real thing: this one adds money'}"
-                >${test ? 'test' : 'live'}</span></td>
+            <td><span class="badge ${md.cls}" title="${esc(md.hint)}">${md.label}</span></td>
             <td><span class="badge ${st.cls}" title="${esc(st.hint||'')}">${st.label}</span></td>
             <td class="num">${test
               ? '<span class="muted" title="a test run loads nothing by design">&mdash;</span>'
               : r.completed}</td>
             <td class="num">${r.skipped}</td>
             <td class="num">${r.errors ? '<strong style="color:#B91C1C;">'+r.errors+'</strong>' : 0}</td>
-            <td><span class="logbtn" onclick="showLog(${r.id})">log</span></td>
+            <td><span class="logbtn" onclick="showLog(${r.id})">log</span>${
+              r.status === 'running'
+                ? ` <span class="rowbtn" onclick="abandonRun(${r.id})"
+                          title="close out a run that stopped reporting">dismiss</span>`
+                : ''}</td>
           </tr><tr id="logrow-${r.id}" style="display:none;"><td colspan="10"><pre class="log" id="log-${r.id}">Loading…</pre></td></tr>`;
           }).join('')}
           </tbody></table>
@@ -808,7 +847,11 @@
             A run shows as <strong>running</strong> while the bot is working and fills in as it goes
             &mdash; refresh to follow along. <strong>Stalled</strong> means it was left running for
             hours: almost always a laptop that slept or lost wifi part-way, in which case the cards
-            it did finish are already ticked and re-running picks up the rest.</p>`;
+            it did finish are already ticked and re-running picks up the rest &mdash;
+            <strong>dismiss</strong> closes the row out without pretending to know how it ended.
+            A mode of <strong>unknown</strong> means the run went quiet before recording anything,
+            so there is nothing on file saying whether it was a test; copies of the bot downloaded
+            before 21 October only declared that when they finished.</p>`;
       } catch(e){
         document.getElementById('runsWrap').innerHTML =
           '<p class="muted">Could not load runs: '+esc(e.message)+'</p>';

@@ -824,6 +824,23 @@ def finish_run(run_id: int, completed: int = 0, skipped: int = 0, errors: int = 
         conn.commit()
 
 
+def abandon_run(run_id: int, db_path: str = MEALCARD_DB_PATH) -> bool:
+    """Close out a run that stopped reporting, without inventing an outcome.
+
+    Keeps whatever counts it managed to record. Only touches a run still marked
+    running, so this can never overwrite a finished one.
+    """
+    initialize_db(db_path)
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE mealcard_runs SET status = 'abandoned', finished_at = ? "
+            "WHERE id = ? AND status = 'running'",
+            (_now(), run_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
 def append_run_log(run_id: int, text: str, db_path: str = MEALCARD_DB_PATH) -> None:
     """Append a line to a running job's log, so the page can show progress."""
     initialize_db(db_path)
