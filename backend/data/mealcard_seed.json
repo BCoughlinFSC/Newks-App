@@ -2,7 +2,7 @@
   "_comment": "Baked-in meal card data so the app works the moment it is deployed, with nothing to import by hand. Loaded once, only into empty tables - it never overwrites what is already in the database, so edits made in the app win. Regenerate from the roster spreadsheet when the card list changes, or just use the Import buttons on the Meal Cards page.",
   "generated": "2026-10-20",
   "year": 2026,
-  "default_target": 160.0,
+  "default_target": 160,
   "cards": [
     {
       "card_number": "35303000174738",
@@ -118,17 +118,6 @@
       "name": "Tiffany Croxton",
       "target_amount": null,
       "sort_order": 10,
-      "periods": [
-        1,
-        2,
-        3
-      ]
-    },
-    {
-      "card_number": "35303000735448",
-      "name": "Kim Aylesworth",
-      "target_amount": null,
-      "sort_order": 11,
       "periods": [
         1,
         2,
@@ -256,34 +245,6 @@
       ]
     },
     {
-      "card_number": "45563000000843",
-      "name": "Adam Karveller",
-      "target_amount": null,
-      "sort_order": 20,
-      "periods": [
-        1,
-        2,
-        3
-      ]
-    },
-    {
-      "card_number": "45563000000844",
-      "name": "Nick Nastasi",
-      "target_amount": null,
-      "sort_order": 21,
-      "periods": [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-        9
-      ]
-    },
-    {
       "card_number": "45563000000877",
       "name": "Madison Newcomb",
       "target_amount": null,
@@ -302,7 +263,7 @@
     {
       "card_number": "45563000000880",
       "name": "Cynthia Baxter (Board Meeting $600.00)",
-      "target_amount": 600.0,
+      "target_amount": 600,
       "sort_order": 23,
       "periods": [
         1,
@@ -409,7 +370,7 @@
     {
       "card_number": "45563000000966",
       "name": "Madison Newcomb (office card $300.00)",
-      "target_amount": 300.0,
+      "target_amount": 300,
       "sort_order": 30,
       "periods": [
         1,
