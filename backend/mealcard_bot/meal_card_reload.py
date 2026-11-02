@@ -50,6 +50,14 @@ LOOKUP_URL = "https://www.pxsweb.com/accountlookup/accountlookup"
 # or third attempt usually goes through.
 CARD_ATTEMPTS = 3
 
+# Retired from monthly Paytronix reloads on 2026-11-02.
+# Keep the server and standalone bot exclusions in sync.
+RELOAD_EXCLUDE_CARD_NUMBERS = frozenset({
+    "45563000000843",  # Adam Karveller (ending 0843)
+    "35303000735448",  # Kim Aylesworth (ending 5448)
+    "45563000000844",  # Nick Nastasi (ending 0844)
+})
+
 CONFIG_FILE = "config.json"
 
 # Third-party widgets to block. Killing wootric-sdk.js at the network layer is
@@ -499,11 +507,16 @@ def main():
     work = app.worklist(year=args.year, period=args.period, include_done=args.include_done)
     year, period = work["year"], work["period"]
     cards = work["cards"]
+    # Defense in depth: filter cards if the app still returns an older roster.
+    excluded_from_run = [c for c in cards if str(c.get("card_number", "")) in RELOAD_EXCLUDE_CARD_NUMBERS]
+    cards = [c for c in cards if str(c.get("card_number", "")) not in RELOAD_EXCLUDE_CARD_NUMBERS]
 
     print(f"Meal Card Reload Bot - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Period: {period} ({year})")
     print(f"Default target: ${work['default_target']:.2f}")
     print(f"Attempts per card: {CARD_ATTEMPTS}")
+    if excluded_from_run:
+        print("Excluded from reload: " + ", ".join(c.get("name", "unknown") for c in excluded_from_run))
     if args.dry_run:
         print()
         print("=" * 60)
