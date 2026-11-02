@@ -2,6 +2,8 @@
 # Opens Chrome in debug mode to Paytronix, waits for you to log in,
 # then runs the reload bot against the card list in the reporting app.
 
+param([switch]$ReportOnly)
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
@@ -53,6 +55,19 @@ Write-Host "  STEP 2: Make sure you land on the Account Lookup page." -Foregroun
 Write-Host ""
 Read-Host "When you are logged in and ready, press Enter"
 
+if ($ReportOnly) {
+    Write-Host "REPORT ONLY: no wallet adjustments or completion checkboxes will be changed." -ForegroundColor Cyan
+    Write-Host "Paytronix reports can lag by up to 45 minutes after a load." -ForegroundColor Yellow
+    $reportDay = Read-Host "Load date (YYYY-MM-DD, Enter for today)"
+    $reportArgs = @('--report-only')
+    if ($reportDay) { $reportArgs += @('--report-from', $reportDay, '--report-to', $reportDay) }
+    & $venvPython (Join-Path $ScriptDir "meal_card_reload.py") @reportArgs
+    $reportExit = $LASTEXITCODE
+    Write-Host "Reports and the original CSV are saved under this folder's reports directory." -ForegroundColor Cyan
+    Read-Host "Press Enter to close this window"
+    exit $reportExit
+}
+
 # 4. Offer a dry run first - reads every balance, loads nothing
 Write-Host ""
 Write-Host "A dry run reads each card's balance and shows what WOULD be loaded," -ForegroundColor Gray
@@ -75,8 +90,11 @@ if ($dry -match '^[Yy]') {
 
 Write-Host "Running the reload bot..." -ForegroundColor Yellow
 & $venvPython (Join-Path $ScriptDir "meal_card_reload.py")
+$runExit = $LASTEXITCODE
 
 Write-Host ""
 Write-Host "Finished. A timestamped log was saved in this folder," -ForegroundColor Cyan
 Write-Host "and the run is recorded on the Meal Cards page in the app." -ForegroundColor Cyan
+Write-Host "Payroll files are saved under reports. If export failed, use REPORT ONLY later." -ForegroundColor Cyan
 Read-Host "Press Enter to close this window"
+exit $runExit

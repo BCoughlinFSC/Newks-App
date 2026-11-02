@@ -36,6 +36,7 @@ from pathlib import Path
 
 import httpx
 from playwright.sync_api import sync_playwright
+from meal_card_reports import report_date, run_reports
 
 # -- Config ------------------------------------------------------------------
 CHROME_DEBUG_PORT = 9222
@@ -490,7 +491,34 @@ def parse_args():
     p.add_argument("--max-cards", type=int, help="Stop after this many cards (for testing)")
     p.add_argument("--app-url", help="Reporting app URL (overrides config.json)")
     p.add_argument("--email", help="Your app email (overrides config.json)")
-    return p.parse_args()
+    p.add_argument("--report-only", action="store_true",
+                   help="Export and build reports only; never visit or adjust card wallets")
+    p.add_argument("--skip-report", action="store_true",
+                   help="Skip the automatic report after a live reload")
+    p.add_argument("--report-from", type=report_date, help="Report start date YYYY-MM-DD (default: today)")
+    p.add_argument("--report-to", type=report_date, help="Report end date YYYY-MM-DD (default: start date)")
+    args = p.parse_args()
+    if args.report_only and (args.dry_run or args.skip_report or args.max_cards or args.include_done):
+        p.error("--report-only cannot be combined with reload/test options")
+    start = args.report_from or datetime.now().date()
+    end = args.report_to or start
+    if end < start:
+        p.error("--report-to must be on or after --report-from")
+    args.report_from, args.report_to = start, end
+    return args
+
+
+def report_job(app, args, base_dir, timestamp, expected=None):
+    """Separate read-only stage. A report failure must never retry card loads."""
+    start = args.report_from or datetime.now().date()
+    end = args.report_to or start
+    # Include already-ticked cards when generating payroll, not just pending work.
+    roster = app.worklist(year=args.year, period=args.period, include_done=True)["cards"]
+    with sync_playwright() as playwright:
+        browser = connect_to_chrome(playwright)
+        # Do not call block_widgets here: Access Evo hosts the merchant frame.
+        return run_reports(browser.contexts[0], app, roster, RELOAD_EXCLUDE_CARD_NUMBERS,
+                           base_dir / "reports" / timestamp, start, end, expected)
 
 
 def main():
@@ -504,6 +532,14 @@ def main():
     sys.stderr = logger
 
     app = connect_to_app(base_dir, args)
+    if args.report_only:
+        try:
+            report_job(app, args, base_dir, timestamp)
+        finally:
+            logger.close()
+            sys.stdout = logger.terminal
+            sys.stderr = logger.terminal
+        return
     work = app.worklist(year=args.year, period=args.period, include_done=args.include_done)
     year, period = work["year"], work["period"]
     cards = work["cards"]
@@ -529,9 +565,11 @@ def main():
 
     if not cards:
         print(f"Nothing to do - every active card is already ticked for period {period}.")
-        print("Re-run with --include-done to load them anyway.")
+        if not args.dry_run and not args.skip_report:
+            report_job(app, args, base_dir, timestamp)
         logger.close()
         sys.stdout = logger.terminal
+        sys.stderr = logger.terminal
         return
 
     if args.max_cards:
@@ -551,6 +589,7 @@ def main():
     errors = 0
     retried = 0
     failed_cards = []
+    report_expected = {}
 
     with sync_playwright() as p:
         browser = connect_to_chrome(p)
@@ -614,6 +653,7 @@ def main():
                             print("  WARNING - could not verify results page")
                         print("  COMPLETED")
                         completed += 1
+                        report_expected[card["card_number"]] = amount
                         app.record_card(card["card_number"], "done", amount=amount,
                                         balance_before=balance, detail=detail)
 
@@ -663,8 +703,22 @@ def main():
     app.finish_run(completed, skipped, errors, logger.text())
     print("Run closed out in the app.")
 
+    report_failed = False
+    if not args.dry_run and not args.skip_report:
+        try:
+            report_job(app, args, base_dir, timestamp, report_expected)
+            if errors:
+                print("ATTENTION: Reload errors occurred; these reports cover only transactions actually exported by Paytronix.")
+        except Exception as exc:
+            report_failed = True
+            print(f"REPORT FAILED: {exc}")
+            print("Card reloads are already finished. Use REPORT ONLY to retry; do not reload again.")
+
     logger.close()
     sys.stdout = logger.terminal
+    sys.stderr = logger.terminal
+    if report_failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
