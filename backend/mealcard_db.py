@@ -36,6 +36,14 @@ MEALCARD_DB_PATH = os.getenv(
 
 DEFAULT_TARGET = 160.00
 
+# Retired from monthly Paytronix reloads on 2026-11-02.
+# Keep the server and standalone bot exclusions in sync.
+RELOAD_EXCLUDE_CARD_NUMBERS = frozenset({
+    "45563000000843",  # Adam Karveller (ending 0843)
+    "35303000735448",  # Kim Aylesworth (ending 5448)
+    "45563000000844",  # Nick Nastasi (ending 0844)
+})
+
 # The card list the app ships with, so a new deployment works straight away
 # instead of starting empty and waiting for someone to upload a spreadsheet.
 SEED_PATH = os.getenv(
@@ -896,6 +904,9 @@ def worklist(year: int, period: int, include_done: bool = False,
     done = period_status(year, period, db_path)
     out = []
     for card in list_cards(active_only=True, db_path=db_path):
+        # Exclude these cards even if an older SQLite roster still lists them as active.
+        if card["card_number"] in RELOAD_EXCLUDE_CARD_NUMBERS:
+            continue
         prior = done.get(card["card_number"])
         if prior and prior["status"] in ("done", "skipped") and not include_done:
             continue
