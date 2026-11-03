@@ -35,7 +35,8 @@ an adjustment. The adjustment store must be **1003 - Flowood MS**. Merchant
 
 Cards and targets come from the reporting app. Add only target minus current
 balance; skip cards at or above target. Adam Karveller, Kim Aylesworth, and Nick
-Nastasi remain excluded. The test launcher reads balances without filling or
+Nastasi remain excluded. The test launcher includes already-completed cards so an installation can be
+validated after a monthly reload. It reads balances without filling or
 submitting adjustment amounts or marking cards complete.
 
 Before final submission, save the card's planned adjustment as **pending** in

@@ -76,9 +76,17 @@ if ($count -match '^\d+$') {
 Write-Host ""
 Write-Host "Running the TEST (nothing will be loaded)..." -ForegroundColor Yellow
 & $venvPython @botArgs
+$testExit = $LASTEXITCODE
+if ($testExit -ne 0) {
+    Write-Host "Test failed. No wallet money was submitted; review the log above." -ForegroundColor Red
+    Read-Host "Press Enter to close this window"
+    exit $testExit
+}
 
 Write-Host ""
 Write-Host "Test finished. No money was added to any card." -ForegroundColor Green
 Write-Host "A log was saved in this folder, and the run shows on the Meal Cards" -ForegroundColor Cyan
 Write-Host "page in the app labelled as a dry run." -ForegroundColor Cyan
 Read-Host "Press Enter to close this window"
+
+exit $testExit

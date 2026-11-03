@@ -613,7 +613,7 @@ def _main():
             sys.stdout = logger.terminal
             sys.stderr = logger.terminal
         return
-    work = app.worklist(year=args.year, period=args.period, include_done=args.include_done)
+    work = app.worklist(year=args.year, period=args.period, include_done=args.include_done or args.dry_run)
     year, period = work["year"], work["period"]
     args.year, args.period = year, period
     state = RunState(base_dir / "state" / f"{year}-{period:02d}.json", app.base_url)
