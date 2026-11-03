@@ -117,8 +117,8 @@ failure only picks up what is left.
 dialog sitting open in the debug Chrome window. Switch to it, dismiss the
 dialog, and run again. The bot prints the open tabs to help you find it.
 
-**A card fails three times** - it is listed at the end and left unticked. Run
-the bot again; it will retry just the ones that did not finish.
+**A lookup fails three times** - it is listed at the end and left unticked.
+Only failures before wallet submission are retried automatically.
 
 **"Could not record this card in the app"** - the reload itself went through,
 but the app did not hear about it. The message tells you which card to tick by
@@ -139,3 +139,46 @@ launches a browser itself. That is why `setup.ps1` does not run
 `playwright install` - the ~400MB of bundled browsers would never be opened.
 It also means Paytronix sees an ordinary logged-in session rather than a fresh
 automated profile.
+
+
+## One-pass reload and reporting
+
+The live launcher now proceeds directly after login. Use the separate TEST RUN
+launcher for a dry run. It reloads pending cards, reopens each wallet to verify
+the resulting balance, and exports/builds the payroll files in the same browser
+connection. A delayed report is retried every minute for up to 45 minutes without
+repeating wallet adjustments (`--report-wait-minutes 0` disables the wait).
+
+Progress is saved under `state/YYYY-PP.json` immediately before submission and
+after balance verification. If a submission times out or verification fails, it
+stays **pending** and is never automatically submitted again. Reconcile the card's
+transaction history before resolving that entry; do not delete the journal to
+retry. Verified entries protect against another load even if the reporting app
+failed to save the result. Keep the same installation and journal between runs.
+A folder lock prevents simultaneous local launches. It does not coordinate runs
+on different PCs or from separate extracted copies; use one designated runner.
+After a forced termination, reconcile pending entries before removing the lock.
+
+Employee IDs still come from the reporting app's card mapping and retain its
+mapping-source metadata. This change does not validate fallback IDs against
+Paytronix or payroll. Review unmapped entries and mapping source before payroll.
+
+### Access Evo validation status
+
+The report code recognizes Access Evo merchant frames. Reload navigation still
+uses the legacy pxsweb account/wallet controls. The current Access Evo merchant
+frame showed **This page has been blocked by Chrome** during the read-only check
+on November 3, 2026. No new wallet adjustments were submitted. This branch must
+not be treated as Access Evo end-to-end validated until that page is available,
+its lookup/wallet controls are adapted, and a read-only run passes.
+
+
+### Required Access Evo organization
+
+The visible **Switch Organisation** control must read **Newk's Eatery**. The bot
+checks it before lookups, again before wallet submission, and before report
+submission/download. It stops on a different or unreadable organization and
+never switches organizations automatically. Reload controls must be embedded in
+that verified Access Evo tab; standalone Paytronix tabs are no longer a fallback.
+The current modern Evo merchant surface is not yet supported for reloads and
+will fail closed at preflight until its controls can be inspected and adapted.

@@ -68,26 +68,7 @@ if ($ReportOnly) {
     exit $reportExit
 }
 
-# 4. Offer a dry run first - reads every balance, loads nothing
-Write-Host ""
-Write-Host "A dry run reads each card's balance and shows what WOULD be loaded," -ForegroundColor Gray
-Write-Host "without adding any money. Worth doing if anything has changed." -ForegroundColor Gray
-$dry = Read-Host "Dry run first? (y/N)"
-
-Write-Host ""
-if ($dry -match '^[Yy]') {
-    Write-Host "Running a DRY RUN (nothing will be loaded)..." -ForegroundColor Yellow
-    & $venvPython (Join-Path $ScriptDir "meal_card_reload.py") --dry-run
-    Write-Host ""
-    $go = Read-Host "Dry run finished. Run the real reload now? (y/N)"
-    if ($go -notmatch '^[Yy]') {
-        Write-Host "Stopped. Nothing was loaded." -ForegroundColor Cyan
-        Read-Host "Press Enter to close this window"
-        exit 0
-    }
-    Write-Host ""
-}
-
+# 4. Live launcher performs one pass; use TEST RUN separately for a dry run.
 Write-Host "Running the reload bot..." -ForegroundColor Yellow
 & $venvPython (Join-Path $ScriptDir "meal_card_reload.py")
 $runExit = $LASTEXITCODE

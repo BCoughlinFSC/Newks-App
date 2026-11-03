@@ -20,13 +20,15 @@ Note on third-party widgets: Paytronix embeds Wootric (NPS survey), Intercom
 (chat) and Access-Evo (button) on pxsweb pages. These break automation two ways
 - the Wootric modal covers the page and swallows clicks, and its hidden
 select/textarea get picked up by generic selectors. Intercom also holds an open
-connection forever, so "networkidle" never fires. We block all three at the
-network layer and strip any leftovers from the DOM.
+connection forever, so "networkidle" never fires. We block survey/chat requests;
+Access Evo requests remain enabled because they can host the merchant session.
 """
 
 import argparse
+from meal_card_state import RunState, PendingSubmission, local_run_lock
 import getpass
 import json
+import math
 import os
 import re
 import sys
@@ -37,6 +39,7 @@ from pathlib import Path
 import httpx
 from playwright.sync_api import sync_playwright
 from meal_card_reports import report_date, run_reports
+from meal_card_organization import assert_organization, find_reload_surface
 
 # -- Config ------------------------------------------------------------------
 CHROME_DEBUG_PORT = 9222
@@ -64,7 +67,7 @@ CONFIG_FILE = "config.json"
 # Third-party widgets to block. Killing wootric-sdk.js at the network layer is
 # what stops the survey from ever appearing. Must be a compiled regex - the
 # glob form ("**wootric.com**") silently matches nothing here.
-WIDGET_URL_RE = re.compile(r"(wootric|intercom|access-evo)", re.I)
+WIDGET_URL_RE = re.compile(r"(wootric|intercom)", re.I)
 
 # Selector fragments that exclude widget-owned form controls, so
 # locator("select").last can't land on Wootric's hidden survey dropdown.
@@ -291,7 +294,7 @@ def connect_to_chrome(playwright):
 
 # -- Third-party widget suppression -------------------------------------------
 def block_widgets(context):
-    """Abort requests to Wootric / Intercom / Access-Evo so they never load."""
+    """Abort survey and chat requests, preserving the Access Evo merchant host."""
     def handler(route):
         try:
             route.abort()
@@ -450,16 +453,30 @@ def reset_to_lookup(page) -> bool:
     return False
 
 
-def process_card(page, card, dry_run: bool):
+def process_card(page, card, dry_run: bool, state=None, organization_page=None):
     """Run one card end to end. Returns (outcome, message, amount, balance)."""
     name = card["name"]
     target = float(card["target_amount"])
+    if str(card["card_number"]) in RELOAD_EXCLUDE_CARD_NUMBERS:
+        return ("skip", "Excluded from reload", None, None)
+    if not math.isfinite(target) or target < 0:
+        raise ValueError("Target must be a finite nonnegative amount")
+    if not dry_run and state is not None:
+        saved = state.get(card["card_number"])
+        if saved:
+            if saved["status"] == "pending":
+                raise PendingSubmission("Previous submission outcome is uncertain; reconcile transaction history before retrying.")
+            return ("skip", "Already verified in local period journal; no new adjustment", None, saved["balance_after"])
 
+    if organization_page is not None:
+        assert_organization(organization_page)
     step("lookup", lookup_card, page, card["card_number"])
     step("open adjust wallet", navigate_to_adjust_wallet, page)
     step("select Stored Value", select_stored_value_wallet, page)
 
     balance = step("read balance", get_current_balance, page)
+    if not math.isfinite(balance):
+        raise ValueError("Balance must be finite")
     reload_amount = round(target - balance, 2)
 
     if reload_amount <= 0:
@@ -471,12 +488,29 @@ def process_card(page, card, dry_run: bool):
                 reload_amount, balance)
 
     step("fill form", fill_adjustment_form, page, reload_amount, name)
-    step("confirm", confirm_adjustment, page)
+    if state is None:
+        raise RuntimeError("Live reload requires a durable period journal")
+    if organization_page is None:
+        raise RuntimeError("Live reload requires a verified Access Evo organization")
+    assert_organization(organization_page)
+    state.pending(card["card_number"], balance, reload_amount, target)
+    try:
+        assert_organization(organization_page)
+        step("confirm", confirm_adjustment, page)
+        if not verify_results(page):
+            raise RuntimeError("Paytronix did not show a results page")
+        step("verify lookup", lookup_card, page, card["card_number"])
+        step("verify wallet", navigate_to_adjust_wallet, page)
+        step("verify Stored Value", select_stored_value_wallet, page)
+        after = step("verify balance", get_current_balance, page)
+        if round(after - target, 2) != 0:
+            raise RuntimeError(f"Expected balance ${target:.2f}, found ${after:.2f}")
+        state.verified(card["card_number"], after)
+    except Exception as exc:
+        raise PendingSubmission("Submission may have succeeded; no automatic retry. " + str(exc)) from exc
 
     detail = f"Balance: ${balance:.2f} | Reloaded ${reload_amount:.2f} to Flowood MS"
-    if verify_results(page):
-        return "done", detail, reload_amount, balance
-    return "unverified", detail, reload_amount, balance
+    return "done", detail, reload_amount, balance
 
 
 # -- Main ----------------------------------------------------------------------
@@ -495,11 +529,15 @@ def parse_args():
                    help="Export and build reports only; never visit or adjust card wallets")
     p.add_argument("--skip-report", action="store_true",
                    help="Skip the automatic report after a live reload")
+    p.add_argument("--report-wait-minutes", type=int, default=45,
+                   help="Wait up to this many minutes for report data (default: 45)")
     p.add_argument("--report-from", type=report_date, help="Report start date YYYY-MM-DD (default: today)")
     p.add_argument("--report-to", type=report_date, help="Report end date YYYY-MM-DD (default: start date)")
     args = p.parse_args()
     if args.report_only and (args.dry_run or args.skip_report or args.max_cards or args.include_done):
         p.error("--report-only cannot be combined with reload/test options")
+    if args.report_wait_minutes < 0:
+        p.error("--report-wait-minutes cannot be negative")
     start = args.report_from or datetime.now().date()
     end = args.report_to or start
     if end < start:
@@ -508,20 +546,34 @@ def parse_args():
     return args
 
 
-def report_job(app, args, base_dir, timestamp, expected=None):
+def report_job(app, args, base_dir, timestamp, expected=None, context=None):
     """Separate read-only stage. A report failure must never retry card loads."""
     start = args.report_from or datetime.now().date()
     end = args.report_to or start
     # Include already-ticked cards when generating payroll, not just pending work.
     roster = app.worklist(year=args.year, period=args.period, include_done=True)["cards"]
+    if context is not None:
+        return run_reports(context, app, roster, RELOAD_EXCLUDE_CARD_NUMBERS,
+                           base_dir / "reports" / timestamp, start, end, expected, wait_minutes=args.report_wait_minutes)
     with sync_playwright() as playwright:
         browser = connect_to_chrome(playwright)
         # Do not call block_widgets here: Access Evo hosts the merchant frame.
         return run_reports(browser.contexts[0], app, roster, RELOAD_EXCLUDE_CARD_NUMBERS,
-                           base_dir / "reports" / timestamp, start, end, expected)
+                           base_dir / "reports" / timestamp, start, end, expected, wait_minutes=args.report_wait_minutes)
 
 
 def main():
+    previous_stdout, previous_stderr = sys.stdout, sys.stderr
+    try:
+        with local_run_lock(Path(__file__).parent / "state" / "run.lock"):
+            _main()
+    finally:
+        if isinstance(sys.stdout, Logger):
+            sys.stdout.close()
+        sys.stdout, sys.stderr = previous_stdout, previous_stderr
+
+
+def _main():
     args = parse_args()
     base_dir = Path(__file__).parent
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -542,6 +594,8 @@ def main():
         return
     work = app.worklist(year=args.year, period=args.period, include_done=args.include_done)
     year, period = work["year"], work["period"]
+    args.year, args.period = year, period
+    state = RunState(base_dir / "state" / f"{year}-{period:02d}.json", app.base_url)
     cards = work["cards"]
     # Defense in depth: filter cards if the app still returns an older roster.
     excluded_from_run = [c for c in cards if str(c.get("card_number", "")) in RELOAD_EXCLUDE_CARD_NUMBERS]
@@ -596,32 +650,16 @@ def main():
         context = browser.contexts[0]
 
         block_widgets(context)
-        print("Blocked third-party widgets (Wootric survey, Intercom, Access-Evo)")
+        print("Blocked survey/chat requests; Access Evo remains enabled")
 
         print(f"Connected to Chrome. {len(context.pages)} tab(s) visible to bot.")
         for i, p_ in enumerate(context.pages):
             print(f"  Tab {i}: {p_.url}")
 
-        # Prefer the pxsweb tab that has a merchant session (currentMerchantId in URL)
-        page = next((pg for pg in context.pages
-                     if "pxsweb.com" in pg.url and "currentMerchantId" in pg.url), None)
-        # Fall back to any pxsweb tab
-        if page is None:
-            page = next((pg for pg in context.pages if "pxsweb.com" in pg.url), None)
-        if page is None:
-            raise RuntimeError(
-                "No pxsweb.com tab found. Open https://www.pxsweb.com in your debug "
-                "Chrome and log in first."
-            )
-
-        # Auto-dismiss alert()/beforeunload prompts, which otherwise freeze the
-        # whole run behind a modal Chrome dialog.
-        page.on("dialog", lambda d: d.accept())
-
-        # Don't try to close ghost tabs - Paytronix pages have beforeunload prompts that hang.
-        # We've already locked onto the right page above; just bring it to front.
-        page.bring_to_front()
-        page.set_default_timeout(DEFAULT_TIMEOUT_MS)
+        organization_page, page = find_reload_surface(context)
+        organization_page.on("dialog", lambda d: d.accept())
+        organization_page.bring_to_front()
+        organization_page.set_default_timeout(DEFAULT_TIMEOUT_MS)
         print(f"Bot will drive: {page.url}")
         print()
 
@@ -633,7 +671,7 @@ def main():
 
             for attempt in range(1, CARD_ATTEMPTS + 1):
                 try:
-                    outcome, detail, amount, balance = process_card(page, card, args.dry_run)
+                    outcome, detail, amount, balance = process_card(page, card, args.dry_run, state, organization_page=organization_page)
 
                     if outcome == "skip":
                         print(f"  {detail}")
@@ -642,8 +680,13 @@ def main():
                         if args.dry_run:
                             app.log_line(f"{name} - {detail} (already at target)")
                         else:
-                            app.record_card(card["card_number"], "skipped",
-                                            balance_before=balance, detail=detail)
+                            saved = state.get(card["card_number"])
+                            if saved and saved["status"] == "verified":
+                                app.record_card(card["card_number"], "done", amount=saved["amount"],
+                                                balance_before=saved["balance_before"], detail=detail)
+                            else:
+                                app.record_card(card["card_number"], "skipped",
+                                                balance_before=balance, detail=detail)
                     elif outcome == "dry-run":
                         print(f"  {detail}")
                         app.log_line(f"{name} - {detail}")
@@ -664,6 +707,12 @@ def main():
                 except Exception as e:
                     lines = str(e).strip().splitlines()
                     msg = lines[0] if lines else e.__class__.__name__
+                    if isinstance(e, PendingSubmission):
+                        print(f"  NEEDS REVIEW: {msg}")
+                        errors += 1
+                        failed_cards.append((idx, name, msg))
+                        app.log_line(f"{name} - NEEDS REVIEW: {msg}")
+                        break
                     if attempt < CARD_ATTEMPTS:
                         print(f"  attempt {attempt}/{CARD_ATTEMPTS} failed ({msg}) - retrying")
                         if not reset_to_lookup(page):
@@ -696,28 +745,29 @@ def main():
             for idx, name, msg in failed_cards:
                 print(f"  [{idx}] {name} - {msg}")
             print()
-            print("Re-run the bot to pick them up again - cards that succeeded are")
+            print("Resolve pending submissions against transaction history before retrying.")
+            print("Re-run for safe failures - verified cards are")
             print("already ticked in the app and will be skipped automatically.")
         print(f"Log saved to: {log_file}")
 
-    app.finish_run(completed, skipped, errors, logger.text())
-    print("Run closed out in the app.")
+        app.finish_run(completed, skipped, errors, logger.text())
+        print("Run closed out in the app.")
 
-    report_failed = False
-    if not args.dry_run and not args.skip_report:
-        try:
-            report_job(app, args, base_dir, timestamp, report_expected)
-            if errors:
-                print("ATTENTION: Reload errors occurred; these reports cover only transactions actually exported by Paytronix.")
-        except Exception as exc:
-            report_failed = True
-            print(f"REPORT FAILED: {exc}")
-            print("Card reloads are already finished. Use REPORT ONLY to retry; do not reload again.")
+        report_failed = False
+        if not args.dry_run and not args.skip_report:
+            try:
+                report_job(app, args, base_dir, timestamp, report_expected, context=context)
+                if errors:
+                    print("ATTENTION: Reload errors occurred; these reports cover only transactions actually exported by Paytronix.")
+            except Exception as exc:
+                report_failed = True
+                print(f"REPORT FAILED: {exc}")
+                print("Card reloads are already finished. Use REPORT ONLY to retry; do not reload again.")
 
     logger.close()
     sys.stdout = logger.terminal
     sys.stderr = logger.terminal
-    if report_failed:
+    if report_failed or errors:
         raise SystemExit(1)
 
 

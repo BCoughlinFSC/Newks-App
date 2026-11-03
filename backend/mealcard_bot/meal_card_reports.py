@@ -3,14 +3,20 @@ import base64
 import csv
 import io
 import json
+import time
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlparse
+from meal_card_organization import assert_organization
 
 
 REPORT_TITLE = "Stored Value Sales and Added Value Detail Report"
 REQUIRED_COLUMNS = {"Card Number", "Dollars Added", "Date", "Store Name"}
+
+
+class ReportNotReady(ValueError):
+    """Export is valid but recent transactions are not available yet."""
 
 
 def report_date(value):
@@ -32,7 +38,9 @@ def find_paytronix_surface(context):
                     candidates.append((page, surface))
     if len(candidates) != 1:
         raise RuntimeError("Open exactly one signed-in Paytronix merchant session in debug Chrome (standalone or Access Evo).")
-    return candidates[0]
+    page, surface = candidates[0]
+    assert_organization(page)
+    return page, surface
 
 
 def export_report(context, destination, start, end, store="1003"):
@@ -51,9 +59,11 @@ def export_report(context, destination, start, end, store="1003"):
             surface.locator(f'input[name="date_{prefix}_{part}"]').fill(str(value))
     surface.locator('input[name="store"]').fill(store)
     surface.locator('select[name="output_type"]').select_option(label="CSV")
+    assert_organization(page)
     surface.get_by_role("button", name="Submit", exact=True).click()
     link = surface.get_by_role("link", name="Download Report", exact=True)
     link.wait_for(state="visible", timeout=180000)
+    assert_organization(page)
     with page.expect_download(timeout=180000) as pending:
         link.click()
     download = pending.value
@@ -111,12 +121,12 @@ def filter_report(raw, cards, excluded, start, end, expected=None):
     missing = [card for card, amount in (expected or {}).items()
                if totals.get(card, Decimal("0")) < Decimal(str(amount))]
     if missing:
-        raise ValueError(
+        raise ReportNotReady(
             "Paytronix report has not caught up with this run's loads. Reports can lag up to 45 minutes. "
             "Retry REPORT ONLY later; do not reload the cards. Missing card endings: "
             + ", ".join(card[-4:] for card in missing))
     if not selected:
-        raise ValueError("No eligible meal-card transactions in this export. Retry REPORT ONLY after Paytronix catches up.")
+        raise ReportNotReady("No eligible meal-card transactions in this export. Retry REPORT ONLY after Paytronix catches up.")
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(header)
@@ -152,13 +162,23 @@ def build_workbooks(client, filtered_path, destination):
     return result, [path for path, _ in decoded]
 
 
-def run_reports(context, app, cards, excluded, directory, start, end, expected=None):
+def run_reports(context, app, cards, excluded, directory, start, end, expected=None, wait_minutes=45):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     print(f"Exporting Paytronix report: {start} through {end}, Flowood MS")
-    source = export_report(context, directory, start, end)
-    print(f"Original Paytronix CSV saved: {source}")
-    filtered = filter_report(source.read_bytes(), cards, excluded, start, end, expected)
+    deadline = time.monotonic() + wait_minutes * 60
+    while True:
+        source = export_report(context, directory, start, end)
+        print(f"Original Paytronix CSV saved: {source}")
+        try:
+            filtered = filter_report(source.read_bytes(), cards, excluded, start, end, expected)
+            break
+        except ReportNotReady:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            print("Waiting for Paytronix report data; wallet reloads will not be repeated.")
+            time.sleep(min(60, remaining))
     filtered_path = directory / f"MealCardLoads-{end:%Y%m%d}-filtered.csv"
     filtered_path.write_bytes(filtered)
     result, paths = build_workbooks(app.client, filtered_path, directory)
