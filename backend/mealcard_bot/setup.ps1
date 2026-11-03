@@ -82,7 +82,7 @@ if (Test-Path $venvPython) {
 # Deliberately NOT running 'playwright install'. The bot attaches to the Chrome
 # you are already logged into (connect_over_cdp) and never launches a browser of
 # its own, so Playwright's ~400MB of bundled browsers are not needed.
-Write-Host "Installing packages (playwright, httpx)..." -ForegroundColor Yellow
+Write-Host "Installing packages (playwright, openpyxl)..." -ForegroundColor Yellow
 & $venvPython -m pip install --upgrade pip --quiet
 & $venvPython -m pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) {

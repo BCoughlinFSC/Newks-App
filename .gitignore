@@ -108,3 +108,9 @@ response.txt
 # Cards page works without anyone importing a spreadsheet first.
 !backend/data/mealcard_seed.json
 
+
+# Local meal-card progress and exported reports
+backend/mealcard_bot/state/
+backend/mealcard_bot/reports/
+backend/mealcard_bot/meal_card_reload_log_*.txt
+backend/mealcard_bot/config.json

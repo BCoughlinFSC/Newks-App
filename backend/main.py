@@ -23485,18 +23485,17 @@ async def mealcard_bot_package(current_user: User = Depends(get_current_user)):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _dirs, files in os.walk(MEALCARD_BOT_DIR):
+            _dirs[:] = [d for d in _dirs if d not in {"state", "reports", ".venv", "__pycache__"}]
             for name in sorted(files):
-                if name.endswith(".pyc") or "__pycache__" in root:
+                if name.endswith(".pyc") or name == "config.json" or name.startswith("meal_card_reload_log_"):
                     continue
                 full = os.path.join(root, name)
                 rel = os.path.relpath(full, MEALCARD_BOT_DIR)
                 zf.write(full, os.path.join("MealCardReloadBot", rel))
-        # Written here rather than kept in the repo so the download already
-        # points at whichever host served it.
-        zf.writestr(
-            os.path.join("MealCardReloadBot", "config.json"),
-            json.dumps({"app_url": APP_BASE_URL, "email": current_user.email}, indent=2),
-        )
+        # Standalone bot: include the shared local payroll builder, without
+        # generating a reporting-app URL or credentials configuration.
+        zf.write(os.path.join(os.path.dirname(MEALCARD_BOT_DIR), "mealcard_payroll.py"),
+                 os.path.join("MealCardReloadBot", "mealcard_payroll.py"))
 
     return {
         "filename": "MealCardReloadBot.zip",

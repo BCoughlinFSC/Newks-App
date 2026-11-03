@@ -1,141 +1,98 @@
-# Meal Card Reload Bot
+# Newk's Meal Card Bot
 
-Reloads the Newk's meal cards on Paytronix once a month, then records what it
-did in the reporting app.
+Run the monthly reload, verify balances, and build payroll reports from one
+launcher. This uses the Paytronix merchant frame inside Access Evo.
 
-You downloaded this from the app's **Meal Cards** page. It is already pointed at
-the right app and your email address (see `config.json`).
+## Setup and run
 
-## Use the .cmd files, not the .ps1 files
+1. Extract the ZIP into a permanent folder on your PC.
+2. Run **1 - SETUP - run me first.cmd** once.
+3. Run **2 - TEST RUN - adds no money.cmd** to test the installation.
+4. For the monthly workflow use **3 - RUN THE RELOAD - adds money.cmd**.
+   Log into Access Evo in the Chrome window it opens, select **Newk's Eatery**
+   in **Switch Organisation**, open **Loyalty / Paytronix**, and press Enter
+   in the launcher. Reloads, verification, and reports then run together.
 
-Windows refuses to run a PowerShell script that arrived from the internet, so
-double-clicking a `.ps1` here looks like it does nothing at all. The numbered
-`.cmd` files are the way in. They run the matching `.ps1` for that one launch
-only and change no setting on the machine.
+**No reporting app URL, account, login, or server is required.** The ZIP includes
+`roster.json`, the payroll builder, and employee mappings. Only Access Evo needs
+an authenticated browser session. Existing config.json files are ignored.
 
-## First time on this PC
+## Organization, account, and store checks
 
-1. **Unzip this folder first** - right-click the download, Extract All, and put
-   it somewhere you can find again (your Desktop is fine). Running from inside
-   the zip will not work.
-2. **Double-click `1 - SETUP - run me first.cmd`.**
+Both the Access Evo switcher and Paytronix merchant header must identify
+**Newk's Eatery**; the merchant header must be **Newk's Eatery (1085)**.
+The bot stops when either cannot be verified. It never chooses an organization
+for you and never falls back to an unrelated standalone Paytronix tab.
 
-That creates a private Python environment in this folder and installs two
-packages. Python has to be on the machine: if it is not, setup offers to
-install it for you, and if your PC blocks that it tells you where to get it.
-(If you install it by hand, tick **Add python.exe to PATH** on the installer's
-first screen - that is the box people miss.)
+Lookup stays on the embedded Paytronix host. Returned card number and card
+merchant must match before opening the wallet. Checks repeat before submitting
+an adjustment. The adjustment store must be **1003 - Flowood MS**. Merchant
+1085 and store 1003 are separate identifiers and must not be interchanged.
 
-Nothing is installed outside this folder except Python itself, and nothing else
-on the machine is changed.
+## Reload rules and recovery
 
-## Try it first — this one cannot spend anything
+Cards and targets come from the local `roster.json`. Add only target minus current
+balance; skip cards at or above target. Adam Karveller, Kim Aylesworth, and Nick
+Nastasi remain excluded. The test launcher includes already-completed cards so an installation can be
+validated after a monthly reload. It reads balances without filling or
+submitting adjustment amounts or marking cards complete.
 
-**Double-click `2 - TEST RUN - adds no money.cmd`.**
+Before final submission, save the card's planned adjustment as **pending** in
+`state/standalone-YYYY-PP.json`. Reopen the wallet after submission and require the expected
+balance before saving **verified** and recording completion locally.
 
-It does everything the real run does except add money: signs into the app, pulls
-the card list, looks each card up in Paytronix, reads its balance and works out
-what it would add. The adjustment form is never filled in or submitted, and no
-card is ticked off. There is no prompt in it that turns it into a real run.
+A confirmation timeout or failed verification never triggers another submission.
+It stays pending for transaction-history review. Do not delete the journal to
+retry. Verified journal entries prevent repeat loads even if the local results file could not
+be saved; rerunning restores those verified results locally.
 
-It offers to check only the first few cards, which is enough to prove your setup
-works without sitting through the whole list.
+A folder lock prevents overlapping local runs. It does not coordinate separate
+PCs or extracted copies. Use one designated folder on one PC. After a forced
+termination, reconcile pending transactions before removing `state/run.lock`.
 
-Use this to check everything is working before the real reload is due. The test
-does show up on the Meal Cards page, labelled as a dry run, so whoever owns the
-process can see your setup is good.
+## Reports
 
-## Every month
+After reloads, the same browser connection exports **Stored Value Sales and
+Added Value Detail Report** for Flowood, filters it to eligible roster cards,
+and uses the bundled payroll builder. The original CSV, filtered CSV,
+named transaction workbook, payroll workbook, and report summary are saved under
+`reports/<timestamp>/`.
 
-**Double-click `3 - RUN THE RELOAD - adds money.cmd`.**
-**This one does add money.**
+Recent transactions can be delayed. The report stage retries every minute for
+up to 45 minutes without reloading wallets. `--report-wait-minutes 0` disables
+the wait. If export still fails, use **4 - REPORT ONLY - adds no money.cmd**;
+choose the original load date. Report-only never adjusts wallets.
 
-It will:
+Employee IDs retain their mapping provenance in `roster.json`. Card-to-payroll mappings take
+priority over fallback IDs. Fallback IDs have not been independently verified;
+review the mapping source and Unmapped tab before using the file for payroll.
+AllPayID 0 entries remain excluded from payroll.
 
-1. Open a separate Chrome window on the Paytronix login page.
-2. Wait for you to log in and land on **Account Lookup**.
-3. Offer a **dry run** - reads every card's balance and prints what it *would*
-   load, without adding a cent. Say yes to this if anything has changed.
-4. Ask for your app password, so it can fetch the card list.
-5. Work through the cards, then print a summary.
-6. Export today's **Stored Value Sales and Added Value Detail Report** as CSV
-   for **1003 - Flowood MS**, keep only eligible roster cards, and send that CSV
-   to the app's existing payroll report builder.
-7. Save the original CSV, filtered meal-card CSV, both payroll workbooks and a
-   summary under `reports/<timestamp>/` beside the bot.
+## Validation
 
-## Reports without reloading cards
+On November 3, 2026 the Access Evo organization/merchant header, account lookup,
+card identity, wallet selection, current-balance field, and Flowood store option
+were inspected in the signed-in browser. No wallet adjustments were submitted.
+Local tests cover navigation binding, card/merchant mismatches, organization
+changes, confirmation timeouts, journal recovery, report retries, and the combined
+reload/report workflow. The complete installed bot has not yet been exercised
+on the user's PC; use the test launcher before the next live monthly run.
 
-Use **`4 - REPORT ONLY - adds no money.cmd`** after a manual reload or to retry
-a report. Enter the load date (YYYY-MM-DD), or press Enter for today. It never
-visits wallet adjustment pages, starts a reload run or ticks cards complete.
-Sign into Paytronix in the debug Chrome window; this reporting step supports
-both standalone Paytronix and Paytronix embedded in Access Evo. The reload
-automation itself still requires the standalone Paytronix tab.
+## Local roster and maintenance
 
-Paytronix warns that reports can lag up to **45 minutes**. After an automatic
-reload, the export is checked for the amounts added in that run before either
-workbook is built. If those loads are missing, wait and use REPORT ONLY. A
-report-only run cannot independently reconcile a previous manual run, so check
-the reported total against the loads you performed. Never rerun the reload just
-to retry an export.
+`roster.json` contains the existing repository roster, individual targets, and
+fallback employee IDs from prior payroll exports. Historical month checkmarks
+are not eligibility rules and are not used to schedule employees. Review the
+roster when employees change. Set `active` to false to remove an account from
+future runs; the three explicit exclusions remain enforced in the bot too.
+Card-number mappings in `employee_cards` override name-based `employee_names`.
+These fallback IDs are not newly verified; unmapped cards remain listed for review.
 
-Kim Aylesworth, Adam Karveller and Nick Nastasi are excluded from automated
-report input as well as reloads. Ordinary gift-card sales outside the meal-card
-roster are excluded. Employee-ID mapping and AllPayID 0 treatment are unchanged;
-review the workbook's **Unmapped** tab before handing it to payroll.
+Progress is stored under `state/`, logs beside the launcher, and reports under
+`reports/`. Keep those files between runs. The first standalone run has its own
+journal; no reporting-app data is imported or contacted.
 
-Command-line options:
-
-```
-python meal_card_reload.py --report-only --report-from 2026-11-02 --report-to 2026-11-02
-python meal_card_reload.py --skip-report
-```
-
-The report dates default to the local date the command starts. Dry runs never
-export or build payroll reports. The app must already provide
-`/api/mealcard/payroll-report`; no new server endpoint is required.
-
-The log is saved in this folder, and the run also shows up on the Meal Cards
-page in the app.
-
-## What it does per card
-
-Looks the card up, opens **Adjust Wallet**, reads the Stored Value balance, and
-adds the difference between that balance and the card's target. A card already
-at or above its target is skipped. Everything posts to store **1003 - Flowood
-MS**.
-
-The card list and the targets live in the app, not in this folder - so there is
-no spreadsheet here to go stale, and nothing to re-download when someone is
-added. Cards already ticked for the period are skipped, so re-running after a
-failure only picks up what is left.
-
-## If something goes wrong
-
-**"Could not attach to Chrome's debugging port"** - almost always a pop-up
-dialog sitting open in the debug Chrome window. Switch to it, dismiss the
-dialog, and run again. The bot prints the open tabs to help you find it.
-
-**A card fails three times** - it is listed at the end and left unticked. Run
-the bot again; it will retry just the ones that did not finish.
-
-**"Could not record this card in the app"** - the reload itself went through,
-but the app did not hear about it. The message tells you which card to tick by
-hand on the Meal Cards page.
-
-## Notes for whoever maintains this
-
-The source lives in the reporting app repo at `backend/mealcard_bot/`, and the
-app zips that folder on the fly for the download button - so changes here ship
-with the next app deploy, with no separate release step.
-
-`config.json` is **not** in the repo. The download endpoint writes it per
-download, so the zip already carries the right app URL and the email of whoever
-clicked the button.
-
-The bot attaches to an existing Chrome over CDP (`connect_over_cdp`) and never
-launches a browser itself. That is why `setup.ps1` does not run
-`playwright install` - the ~400MB of bundled browsers would never be opened.
-It also means Paytronix sees an ordinary logged-in session rather than a fresh
-automated profile.
+Source lives in `backend/mealcard_bot/`. The shared `backend/mealcard_payroll.py`
+is bundled as `mealcard_payroll.py` beside the bot when creating the ZIP.
+Python and Playwright attach to the launcher's debug Chrome on local port 9222;
+setup does not download separate browser binaries.
