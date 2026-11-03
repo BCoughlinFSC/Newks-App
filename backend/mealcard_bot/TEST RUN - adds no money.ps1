@@ -48,6 +48,7 @@ if (-not $chrome) {
 Write-Host "Opening Chrome (debug mode) to Paytronix..." -ForegroundColor Yellow
 Start-Process $chrome -ArgumentList @(
     '--remote-debugging-port=9222',
+    '--start-maximized',
     '--user-data-dir=C:/chrome-debug',
     'https://us.access-evo.com'
 )

@@ -241,3 +241,61 @@ class MerchantLabelTests(unittest.TestCase):
         from meal_card_organization import assert_merchant
         with self.assertRaisesRegex(RuntimeError, 'conflicts'):
             assert_merchant(self.surface("Newk's Eatery (1085)", '/merchant/home.srv?currentMerchantId=9999'), timeout_seconds=0)
+
+class SessionDiscoveryTests(unittest.TestCase):
+    def page(self, organization="Newk's Eatery", merchant="Newk's Eatery (1085)"):
+        from unittest.mock import Mock
+        from meal_card_organization import MERCHANT_HOST
+        page = Mock(url='https://us.access-evo.com/workspaces/example')
+        page.get_by_role.return_value.count.return_value = 1
+        page.get_by_role.return_value.inner_text.return_value = organization
+        frame = Mock(url='https://' + MERCHANT_HOST + '/homepage/default')
+        frame.locator.return_value.inner_text.return_value = merchant
+        frame.get_by_role.return_value.count.return_value = 1
+        frame.get_by_role.return_value.get_attribute.return_value = '/merchant/home.srv?currentMerchantId=1085'
+        frame.frame_element.return_value.is_visible.return_value = True
+        page.frames = [Mock(), frame]
+        return page, frame
+
+    def test_duplicate_verified_tabs_are_allowed(self):
+        from unittest.mock import Mock
+        from meal_card_organization import find_reload_surface
+        first, _ = self.page()
+        last, frame = self.page()
+        with patch('meal_card_organization.maximize_window') as maximize:
+            owner, selected = find_reload_surface(Mock(pages=[first, last]), timeout_seconds=0)
+            self.assertIs(owner, last)
+            self.assertIs(selected, frame)
+            maximize.assert_called_once_with(last)
+
+    def test_wrong_organization_is_never_selected(self):
+        from unittest.mock import Mock
+        from meal_card_organization import find_reload_surface
+        page, _ = self.page(organization='Another Organization')
+        with patch('meal_card_organization.maximize_window'), self.assertRaisesRegex(RuntimeError, 'Select Newk'):
+            find_reload_surface(Mock(pages=[page]), timeout_seconds=0)
+
+    def test_no_session_reports_counts_and_launcher_guidance(self):
+        from unittest.mock import Mock
+        from meal_card_organization import find_reload_surface
+        with self.assertRaisesRegex(RuntimeError, 'Found 0 Access Evo tab'):
+            find_reload_surface(Mock(pages=[]), timeout_seconds=0)
+
+    def test_hidden_or_wrong_merchant_frames_cannot_be_selected(self):
+        from unittest.mock import Mock
+        from meal_card_organization import find_reload_surface
+        for hidden in (False, True):
+            page, frame = self.page(merchant="Newk's Eatery (9999)")
+            frame.frame_element.return_value.is_visible.return_value = not hidden
+            with patch('meal_card_organization.maximize_window'), self.assertRaises(RuntimeError):
+                find_reload_surface(Mock(pages=[page]), timeout_seconds=0)
+
+    def test_window_maximize_uses_window_state(self):
+        from unittest.mock import Mock
+        from meal_card_organization import maximize_window
+        page = Mock()
+        session = page.context.new_cdp_session.return_value
+        session.send.return_value = {'windowId': 42}
+        maximize_window(page)
+        session.send.assert_any_call('Browser.setWindowBounds', {'windowId': 42, 'bounds': {'windowState': 'maximized'}})
+        session.detach.assert_called_once()
