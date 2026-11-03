@@ -58,6 +58,43 @@ It will:
    load, without adding a cent. Say yes to this if anything has changed.
 4. Ask for your app password, so it can fetch the card list.
 5. Work through the cards, then print a summary.
+6. Export today's **Stored Value Sales and Added Value Detail Report** as CSV
+   for **1003 - Flowood MS**, keep only eligible roster cards, and send that CSV
+   to the app's existing payroll report builder.
+7. Save the original CSV, filtered meal-card CSV, both payroll workbooks and a
+   summary under `reports/<timestamp>/` beside the bot.
+
+## Reports without reloading cards
+
+Use **`4 - REPORT ONLY - adds no money.cmd`** after a manual reload or to retry
+a report. Enter the load date (YYYY-MM-DD), or press Enter for today. It never
+visits wallet adjustment pages, starts a reload run or ticks cards complete.
+Sign into Paytronix in the debug Chrome window; this reporting step supports
+both standalone Paytronix and Paytronix embedded in Access Evo. The reload
+automation itself still requires the standalone Paytronix tab.
+
+Paytronix warns that reports can lag up to **45 minutes**. After an automatic
+reload, the export is checked for the amounts added in that run before either
+workbook is built. If those loads are missing, wait and use REPORT ONLY. A
+report-only run cannot independently reconcile a previous manual run, so check
+the reported total against the loads you performed. Never rerun the reload just
+to retry an export.
+
+Kim Aylesworth, Adam Karveller and Nick Nastasi are excluded from automated
+report input as well as reloads. Ordinary gift-card sales outside the meal-card
+roster are excluded. Employee-ID mapping and AllPayID 0 treatment are unchanged;
+review the workbook's **Unmapped** tab before handing it to payroll.
+
+Command-line options:
+
+```
+python meal_card_reload.py --report-only --report-from 2026-11-02 --report-to 2026-11-02
+python meal_card_reload.py --skip-report
+```
+
+The report dates default to the local date the command starts. Dry runs never
+export or build payroll reports. The app must already provide
+`/api/mealcard/payroll-report`; no new server endpoint is required.
 
 The log is saved in this folder, and the run also shows up on the Meal Cards
 page in the app.
