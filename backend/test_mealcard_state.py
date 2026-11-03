@@ -21,7 +21,7 @@ class StateTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.mocks = {}
         for name in ('lookup_card', 'navigate_to_adjust_wallet', 'select_stored_value_wallet',
-                     'assert_organization', 'fill_adjustment_form', 'confirm_adjustment', 'verify_results', 'get_current_balance'):
+                     'assert_session', 'verify_account', 'fill_adjustment_form', 'confirm_adjustment', 'verify_results', 'get_current_balance'):
             self.mocks[name] = self.stack.enter_context(patch.object(bot, name))
         self.mocks['verify_results'].return_value = True
         self.mocks['get_current_balance'].side_effect = [100, 160]
@@ -99,12 +99,70 @@ class OrganizationTests(unittest.TestCase):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
             state = RunState(Path(folder) / 'period.json', 'https://test.invalid')
-            for name in ('lookup_card', 'navigate_to_adjust_wallet', 'select_stored_value_wallet', 'fill_adjustment_form'):
+            for name in ('lookup_card', 'navigate_to_adjust_wallet', 'select_stored_value_wallet', 'verify_account', 'fill_adjustment_form'):
                 stack.enter_context(patch.object(bot, name))
             stack.enter_context(patch.object(bot, 'get_current_balance', return_value=100))
-            guard = stack.enter_context(patch.object(bot, 'assert_organization', side_effect=[None, None, RuntimeError('organization changed')]))
+            guard = stack.enter_context(patch.object(bot, 'assert_session', side_effect=[None, None, None, RuntimeError('organization changed')]))
             confirm = stack.enter_context(patch.object(bot, 'confirm_adjustment'))
             with self.assertRaises(PendingSubmission):
                 bot.process_card(None, CARD, False, state, organization_page=Mock())
             confirm.assert_not_called()
             self.assertEqual(state.get('100')['status'], 'pending')
+
+class AdapterTests(unittest.TestCase):
+    def test_lookup_stays_on_evo_host_and_merchant(self):
+        from unittest.mock import Mock
+        frame = Mock(url='https://azr1px.px.us.access-evo.com/merchant/csr/editwallet.srv')
+        self.assertEqual(bot.lookup_url(frame), 'https://azr1px.px.us.access-evo.com/accountlookup/accountlookup?currentMerchantId=1085')
+        for url in ('https://www.pxsweb.com/accountlookup/accountlookup', 'https://example.invalid', 'http://azr1px.px.us.access-evo.com'):
+            frame.url = url
+            with self.assertRaises(RuntimeError):
+                bot.lookup_url(frame)
+
+    def test_wrong_card_or_merchant_is_rejected(self):
+        from unittest.mock import Mock
+        frame = Mock()
+        for text in ("Card Number:\t999\tCard Merchant:\tNewk's Eatery\n", "Card Number:\t100\tCard Merchant:\tOther Brand\n", 'No accounts found'):
+            frame.inner_text.return_value = text
+            with self.assertRaises(RuntimeError):
+                bot.verify_account(frame, '100')
+        frame.inner_text.return_value = "Card Number:\t100\tCard Merchant:\tNewk's Eatery\nTemplate:\tGift Card"
+        bot.verify_account(frame, '100')
+
+    def test_report_retry_never_invokes_wallet_processing(self):
+        import meal_card_reports as reports
+        from datetime import date
+        from unittest.mock import Mock
+        day = date(2026, 11, 3)
+        with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
+            source = Path(folder) / 'report.csv'
+            source.write_bytes(b'csv')
+            exporter = stack.enter_context(patch.object(reports, 'export_report', return_value=source))
+            stack.enter_context(patch.object(reports, 'filter_report', side_effect=[reports.ReportNotReady('not yet'), b'filtered']))
+            stack.enter_context(patch.object(reports.time, 'sleep'))
+            stack.enter_context(patch.object(reports.time, 'monotonic', side_effect=[0, 1]))
+            stack.enter_context(patch.object(reports, 'build_workbooks', return_value=({'stats': {'total_added': 60, 'payroll_total': 60}}, [])))
+            process = stack.enter_context(patch.object(bot, 'process_card'))
+            reports.run_reports(Mock(), Mock(), [CARD], set(), folder, day, day, {'100': 60})
+            self.assertEqual(exporter.call_count, 2)
+            process.assert_not_called()
+
+    def test_single_run_uses_same_browser_for_report(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
+            stack.enter_context(patch.object(sys, 'argv', ['bot']))
+            stack.enter_context(patch.object(bot, '__file__', str(Path(folder) / 'bot.py')))
+            app = Mock(base_url='https://test.invalid')
+            app.worklist.return_value = {'year': 2026, 'period': 11, 'default_target': 160, 'cards': [CARD]}
+            stack.enter_context(patch.object(bot, 'connect_to_app', return_value=app))
+            runtime = stack.enter_context(patch.object(bot, 'sync_playwright'))
+            context = Mock(pages=[])
+            stack.enter_context(patch.object(bot, 'connect_to_chrome', return_value=Mock(contexts=[context])))
+            stack.enter_context(patch.object(bot, 'find_reload_surface', return_value=(Mock(), Mock())))
+            process = stack.enter_context(patch.object(bot, 'process_card', return_value=('done', 'verified', 60, 100)))
+            report = stack.enter_context(patch.object(bot, 'report_job'))
+            bot.main()
+            process.assert_called_once()
+            report.assert_called_once()
+            self.assertIs(report.call_args.kwargs['context'], context)
+            self.assertEqual(report.call_args.args[4], {'100': 60})

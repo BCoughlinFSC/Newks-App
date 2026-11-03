@@ -50,13 +50,13 @@ Write-Host "Opening Chrome (debug mode) to Paytronix..." -ForegroundColor Yellow
 Start-Process $chrome -ArgumentList @(
     '--remote-debugging-port=9222',
     '--user-data-dir=C:/chrome-debug',
-    'https://www.pxsweb.com/accountlookup/accountlookup'
+    'https://us.access-evo.com'
 )
 
 # 3. Wait for the human login step
 Write-Host ""
-Write-Host "  STEP 1: In the Chrome window that just opened, log into Paytronix." -ForegroundColor Green
-Write-Host "  STEP 2: Make sure you land on the Account Lookup page." -ForegroundColor Green
+Write-Host "  STEP 1: In the Chrome window that just opened, log into Access Evo." -ForegroundColor Green
+Write-Host "  STEP 2: Select Newk's Eatery in the organization switcher and open Loyalty / Paytronix." -ForegroundColor Green
 Write-Host ""
 Read-Host "When you are logged in and ready, press Enter"
 

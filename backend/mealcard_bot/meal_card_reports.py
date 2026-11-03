@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlparse
-from meal_card_organization import assert_organization
+from meal_card_organization import assert_session, find_reload_surface
 
 
 REPORT_TITLE = "Stored Value Sales and Added Value Detail Report"
@@ -27,20 +27,8 @@ def report_date(value):
 
 
 def find_paytronix_surface(context):
-    """Return the owner Page and Paytronix Page/Frame, including Access Evo."""
-    candidates = []
-    for page in context.pages:
-        for surface in [page] + list(page.frames)[1:]:
-            host = (urlparse(surface.url).hostname or "").lower()
-            if host == "www.pxsweb.com" or host == "pxsweb.com" or host.endswith(".px.us.access-evo.com"):
-                # Login pages are not a usable merchant session.
-                if surface.locator('button:has-text("Report Center")').count():
-                    candidates.append((page, surface))
-    if len(candidates) != 1:
-        raise RuntimeError("Open exactly one signed-in Paytronix merchant session in debug Chrome (standalone or Access Evo).")
-    page, surface = candidates[0]
-    assert_organization(page)
-    return page, surface
+    """Reporting uses the same verified organization/merchant binding as reloads."""
+    return find_reload_surface(context)
 
 
 def export_report(context, destination, start, end, store="1003"):
@@ -59,11 +47,11 @@ def export_report(context, destination, start, end, store="1003"):
             surface.locator(f'input[name="date_{prefix}_{part}"]').fill(str(value))
     surface.locator('input[name="store"]').fill(store)
     surface.locator('select[name="output_type"]').select_option(label="CSV")
-    assert_organization(page)
+    assert_session(page, surface)
     surface.get_by_role("button", name="Submit", exact=True).click()
     link = surface.get_by_role("link", name="Download Report", exact=True)
     link.wait_for(state="visible", timeout=180000)
-    assert_organization(page)
+    assert_session(page, surface)
     with page.expect_download(timeout=180000) as pending:
         link.click()
     download = pending.value

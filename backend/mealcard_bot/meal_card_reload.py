@@ -3,13 +3,13 @@ Meal Card Reload Bot - Paytronix Automation
 
 Connects to a Chrome you are already logged into, asks the Newk's reporting app
 which cards to load this period, reloads each card's Stored Value wallet on
-pxsweb.com, and posts each result back to the app.
+the Paytronix frame inside Access Evo, and posts each result back to the app.
 
 Usage:
   1. Run "Run Meal Card Reload.ps1" (it opens Chrome in debug mode for you), or
      launch Chrome yourself with:
      chrome.exe --remote-debugging-port=9222 --user-data-dir="C:/chrome-debug"
-  2. Log into pxsweb.com and land on Account Lookup
+  2. Log into Access Evo, select Newk's Eatery, and open Loyalty / Paytronix
   3. python meal_card_reload.py            (add --dry-run for a no-write pass)
 
 The card list, the per-card target amounts and the record of what was loaded all
@@ -35,11 +35,12 @@ import sys
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from playwright.sync_api import sync_playwright
 from meal_card_reports import report_date, run_reports
-from meal_card_organization import assert_organization, find_reload_surface
+from meal_card_organization import assert_organization, assert_session, find_reload_surface, MERCHANT_HOST
 
 # -- Config ------------------------------------------------------------------
 CHROME_DEBUG_PORT = 9222
@@ -48,7 +49,14 @@ DEFAULT_TIMEOUT_MS = 20000
 # pxsweb can take 25s+ to reach domcontentloaded, so navigation gets its own budget
 NAV_TIMEOUT_MS = 45000
 
-LOOKUP_URL = "https://www.pxsweb.com/accountlookup/accountlookup"
+LOOKUP_PATH = "/accountlookup/accountlookup"
+
+
+def lookup_url(surface):
+    current = urlparse(surface.url)
+    if current.scheme != "https" or current.hostname != MERCHANT_HOST:
+        raise RuntimeError("Lookup must remain inside the verified Access Evo merchant frame")
+    return urlunparse((current.scheme, current.netloc, LOOKUP_PATH, "", "currentMerchantId=1085", ""))
 
 # Retries per card. Most failures are transient page-load hiccups, so a second
 # or third attempt usually goes through.
@@ -322,16 +330,16 @@ def dismiss_overlays(page):
 # -- Paytronix automation ------------------------------------------------------
 def lookup_card(page, card_number: str):
     """Navigate to Account Lookup and search for a card number."""
-    page.goto(LOOKUP_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+    page.goto(lookup_url(page), wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
     # Deliberately NOT wait_for_load_state("networkidle") - Intercom keeps a
     # connection open, so networkidle never fires and every card times out.
     dismiss_overlays(page)
 
-    card_input = page.locator("#lookup-input-cardNumber")
+    card_input = page.get_by_role("textbox", name="Card Number", exact=True)
     card_input.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
     card_input.fill(card_number)
 
-    find_btn = page.locator('button:has-text("Find Account")')
+    find_btn = page.get_by_role("button", name="Find Account", exact=True)
     find_btn.click()
     # wait_until="domcontentloaded" matters: the default is "load", which never
     # fires on these pages, so the wait timed out even after the URL was correct.
@@ -343,10 +351,17 @@ def lookup_card(page, card_number: str):
             raise Exception(f"account page never loaded (stuck at {page.url})")
 
 
+def verify_account(page, card_number):
+    text = page.inner_text("body")
+    match = re.search(r"Card Number:\s*(\d+)\s+Card Merchant:\s*([^\n]+)", text)
+    if not match or match.group(1) != str(card_number) or match.group(2).strip() != "Newk's Eatery":
+        raise RuntimeError("Paytronix account does not match the requested card and Newk's merchant")
+
+
 def navigate_to_adjust_wallet(page):
     """From CSR Main Menu, click Adjust Wallet link."""
     dismiss_overlays(page)
-    link = page.locator('a[href*="editwallet"]').first
+    link = page.get_by_role("link", name="Adjust Wallet", exact=True)
     link.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
     link.click()
     try:
@@ -361,7 +376,7 @@ def select_stored_value_wallet(page):
     """Step 1: Select 'Stored Value' wallet and click Next."""
     dismiss_overlays(page)
     page.wait_for_timeout(500)
-    wallet_select = page.locator(MAIN_SELECT).last
+    wallet_select = page.locator("#walletSelect")
     wallet_select.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
     wallet_select.select_option(label="Stored Value")
     page.wait_for_timeout(300)
@@ -376,7 +391,7 @@ def get_current_balance(page) -> float:
     dismiss_overlays(page)
     page.wait_for_timeout(500)
     all_text = page.inner_text("body")
-    match = re.search(r"Current Balance:\s*([\d,]+\.\d{2})", all_text)
+    match = re.search(r"Current Balance:\s*\$?(-?[\d,]+\.\d{2})", all_text)
     if match:
         return float(match.group(1).replace(",", ""))
     raise Exception("Could not read current balance from page")
@@ -391,7 +406,10 @@ def fill_adjustment_form(page, amount: float, name: str):
     # Named fields on the Input Amount form. These beat positional lookups
     # (locator("select").last etc.) which broke whenever a widget injected an
     # extra control into the page.
-    page.locator('select[name="storenum"]').select_option(value=STORE_VALUE)
+    store = page.locator('select[name="storenum"]')
+    store.select_option(value=STORE_VALUE)
+    if store.input_value() != STORE_VALUE or store.locator("option:checked").inner_text().strip() != "1003 - Flowood MS":
+        raise RuntimeError("Adjustment store is not 1003 - Flowood MS")
 
     # Ensure 'Add' radio is checked (it is by default, but don't rely on it)
     add_radio = page.locator('input[name="op"][value="add"]')
@@ -443,8 +461,8 @@ def reset_to_lookup(page) -> bool:
             except Exception:
                 pass
             page.wait_for_timeout(1000)
-            page.goto(LOOKUP_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-            page.locator("#lookup-input-cardNumber").wait_for(
+            page.goto(lookup_url(page), wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+            page.get_by_role("textbox", name="Card Number", exact=True).wait_for(
                 state="visible", timeout=DEFAULT_TIMEOUT_MS
             )
             return True
@@ -469,8 +487,9 @@ def process_card(page, card, dry_run: bool, state=None, organization_page=None):
             return ("skip", "Already verified in local period journal; no new adjustment", None, saved["balance_after"])
 
     if organization_page is not None:
-        assert_organization(organization_page)
+        assert_session(organization_page, page)
     step("lookup", lookup_card, page, card["card_number"])
+    step("verify account", verify_account, page, card["card_number"])
     step("open adjust wallet", navigate_to_adjust_wallet, page)
     step("select Stored Value", select_stored_value_wallet, page)
 
@@ -487,19 +506,21 @@ def process_card(page, card, dry_run: bool, state=None, organization_page=None):
         return ("dry-run", f"Balance: ${balance:.2f} | WOULD reload ${reload_amount:.2f}",
                 reload_amount, balance)
 
-    step("fill form", fill_adjustment_form, page, reload_amount, name)
     if state is None:
         raise RuntimeError("Live reload requires a durable period journal")
     if organization_page is None:
         raise RuntimeError("Live reload requires a verified Access Evo organization")
-    assert_organization(organization_page)
+    assert_session(organization_page, page)
+    step("fill form", fill_adjustment_form, page, reload_amount, name)
+    assert_session(organization_page, page)
     state.pending(card["card_number"], balance, reload_amount, target)
     try:
-        assert_organization(organization_page)
+        assert_session(organization_page, page)
         step("confirm", confirm_adjustment, page)
         if not verify_results(page):
             raise RuntimeError("Paytronix did not show a results page")
         step("verify lookup", lookup_card, page, card["card_number"])
+        step("verify account again", verify_account, page, card["card_number"])
         step("verify wallet", navigate_to_adjust_wallet, page)
         step("verify Stored Value", select_stored_value_wallet, page)
         after = step("verify balance", get_current_balance, page)
@@ -633,11 +654,6 @@ def _main():
     print(f"{total} card(s) to process")
     print()
 
-    app.start_run(year, period)
-    print(f"App run #{app.run_id} started"
-          + (" — it will show on the Meal Cards page as a dry run" if args.dry_run else ""))
-    print()
-
     completed = 0
     skipped = 0
     errors = 0
@@ -660,6 +676,8 @@ def _main():
         organization_page.on("dialog", lambda d: d.accept())
         organization_page.bring_to_front()
         organization_page.set_default_timeout(DEFAULT_TIMEOUT_MS)
+        app.start_run(year, period)
+        print(f"App run #{app.run_id} started" + (" (dry run)" if args.dry_run else ""))
         print(f"Bot will drive: {page.url}")
         print()
 

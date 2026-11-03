@@ -13,28 +13,39 @@ def assert_organization(page):
         raise RuntimeError(f"Select {EXPECTED_ORGANIZATION} in Access Evo before running. Selected: {actual!r}")
 
 
-def find_reload_surface(context):
-    """Only use merchant controls embedded in the verified organization shell.
+EXPECTED_MERCHANT = "Newk's Eatery (1085)"
+MERCHANT_HOST = "azr1px.px.us.access-evo.com"
 
-    The existing reload adapter supports legacy pxsweb controls. A modern Evo
-    merchant surface must be adapted from observed controls before live use.
-    Never escape into another tab or navigate to a different merchant host.
-    """
+
+def assert_merchant(surface):
+    marker = surface.get_by_text(EXPECTED_MERCHANT, exact=True).first
+    marker.wait_for(state="visible", timeout=20000)
+    if not marker.is_visible():
+        raise RuntimeError("Cannot verify Newk's Eatery merchant 1085")
+
+
+def assert_session(owner, surface):
+    assert_organization(owner)
+    if (urlparse(surface.url).hostname or "").lower() != MERCHANT_HOST:
+        raise RuntimeError("Paytronix merchant frame changed host; stopping")
+    assert_merchant(surface)
+
+
+def find_reload_surface(context):
+    """Bind the visible Newk's merchant frame to its verified Evo shell."""
     candidates = []
     for page in context.pages:
         if (urlparse(page.url).hostname or "").lower() != "us.access-evo.com":
             continue
-        if page.get_by_role("button", name="Switch Organisation", exact=True).count():
-            candidates.append(page)
+        iframe = page.locator('iframe[title="Paytronix"]')
+        if iframe.count() != 1:
+            continue
+        handle = iframe.element_handle()
+        surface = handle.content_frame() if handle else None
+        if surface is not None:
+            candidates.append((page, surface))
     if len(candidates) != 1:
-        raise RuntimeError("Open exactly one Access Evo organization session for the meal-card run")
-    owner = candidates[0]
-    assert_organization(owner)
-    frames = [frame for frame in owner.frames[1:]
-              if (urlparse(frame.url).hostname or "").lower() in {"pxsweb.com", "www.pxsweb.com"}
-              and frame.locator("#lookup-input-cardNumber").count()]
-    if len(frames) != 1:
-        raise RuntimeError("Access Evo organization verified, but the legacy reload controls are unavailable. "
-                           "The Access Evo reload adapter needs a read-only validation before live use. "
-                           "No wallet has been adjusted.")
-    return owner, frames[0]
+        raise RuntimeError("Open exactly one Access Evo Paytronix session in debug Chrome")
+    owner, surface = candidates[0]
+    assert_session(owner, surface)
+    return owner, surface
