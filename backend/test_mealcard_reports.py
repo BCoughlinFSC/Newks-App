@@ -9,13 +9,14 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
+from unittest.mock import Mock
 from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).parent / "mealcard_bot"))
 import meal_card_reports as reports
 import meal_card_reload as bot
 import mealcard_payroll
+from meal_card_local import LocalBackend
 
 DAY = date(2026, 11, 2)
 CARDS = [{"card_number": "100", "name": "Test Employee"}]
@@ -64,19 +65,12 @@ class ReportTests(unittest.TestCase):
         filtered = reports.filter_report(export(row()), CARDS, set(), DAY, DAY, {"100": "15.03"})
         mapping = {"100": {"employee_id": "123", "entity": "90219", "name": "Test Employee"}}
 
-        def handle(request):
+        with tempfile.TemporaryDirectory() as folder:
             import json
-            self.assertEqual(request.url.path, "/api/mealcard/payroll-report")
-            payload = json.loads(request.content)
-            built = mealcard_payroll.build_reports(base64.b64decode(payload["content_b64"]),
-                                                  payload["filename"], {"100": "Test Employee"},
-                                                  mapping, {}, "test mapping")
-            return httpx.Response(200, json={"stats": built["stats"], "unmapped": built["unmapped"],
-                "files": [{"filename": built["names_filename"], "data": base64.b64encode(built["names_xlsx"]).decode()},
-                          {"filename": built["payroll_filename"], "data": base64.b64encode(built["payroll_xlsx"]).decode()}]})
-
-        with tempfile.TemporaryDirectory() as folder, httpx.Client(
-                base_url="https://test.invalid", transport=httpx.MockTransport(handle)) as client:
+            roster = {'default_target': 160, 'cards': CARDS, 'employee_cards': list(mapping.values()), 'employee_names': []}
+            roster['employee_cards'][0]['card_number'] = '100'
+            (Path(folder) / 'roster.json').write_text(json.dumps(roster))
+            client = LocalBackend(folder)
             source = Path(folder) / "MealCardLoads-20261102-filtered.csv"
             source.write_bytes(filtered)
             result, paths = reports.build_workbooks(client, source, folder)
@@ -91,7 +85,7 @@ class ReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, \
              patch.object(sys, "argv", ["bot", "--report-only"]), \
              patch.object(bot, "__file__", str(Path(folder) / "bot.py")), \
-             patch.object(bot, "connect_to_app") as connect, \
+             patch.object(bot, "connect_to_backend") as connect, \
              patch.object(bot, "report_job") as job, \
              patch.object(bot, "process_card") as process:
             bot.main()
@@ -107,8 +101,9 @@ class ReportTests(unittest.TestCase):
 
     def test_rejects_server_path_traversal(self):
         response = {"stats": {}, "files": [{"filename": "../escape.xlsx", "data": "UEs="}] * 2}
-        with tempfile.TemporaryDirectory() as folder, httpx.Client(
-                base_url="https://test.invalid", transport=httpx.MockTransport(lambda r: httpx.Response(200, json=response))) as client:
+        with tempfile.TemporaryDirectory() as folder:
+            client = Mock()
+            client.build_reports.return_value = response
             source = Path(folder) / "input.csv"
             source.write_bytes(b"test")
             with self.assertRaisesRegex(ValueError, "filename"):

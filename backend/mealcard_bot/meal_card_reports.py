@@ -1,4 +1,4 @@
-"""Read-only Paytronix export followed by the app's existing payroll builder."""
+"""Read-only Paytronix export followed by the bundled local payroll builder."""
 import base64
 import csv
 import io
@@ -123,24 +123,19 @@ def filter_report(raw, cards, excluded, start, end, expected=None):
 
 
 def build_workbooks(client, filtered_path, destination):
-    """Use the same authenticated endpoint as the Meal Cards upload button."""
-    response = client.post("/api/mealcard/payroll-report", json={
-        "filename": filtered_path.name,
-        "content_b64": base64.b64encode(filtered_path.read_bytes()).decode("ascii"),
-    }, timeout=180.0)
-    response.raise_for_status()
-    result = response.json()
+    """Build workbooks locally using the bundled payroll builder and roster mappings."""
+    result = client.build_reports(filtered_path.read_bytes(), filtered_path.name)
     files = result.get("files", [])
     if len(files) != 2:
-        raise ValueError("The app did not return both payroll workbooks.")
+        raise ValueError("The local builder did not return both payroll workbooks.")
     decoded = []
     for item in files:
         name = item["filename"]
         if name != Path(name).name or "/" in name or "\\" in name or not name.endswith(".xlsx"):
-            raise ValueError("The app returned an invalid workbook filename.")
+            raise ValueError("The local builder returned an invalid workbook filename.")
         data = base64.b64decode(item["data"], validate=True)
         if not data.startswith(b"PK"):
-            raise ValueError("The app returned an invalid workbook.")
+            raise ValueError("The local builder returned an invalid workbook.")
         decoded.append((Path(destination) / name, data))
     for path, data in decoded:
         path.write_bytes(data)
@@ -169,7 +164,7 @@ def run_reports(context, app, cards, excluded, directory, start, end, expected=N
             time.sleep(min(60, remaining))
     filtered_path = directory / f"MealCardLoads-{end:%Y%m%d}-filtered.csv"
     filtered_path.write_bytes(filtered)
-    result, paths = build_workbooks(app.client, filtered_path, directory)
+    result, paths = build_workbooks(app, filtered_path, directory)
     for path in paths:
         print(f"Workbook saved: {path}")
     print(f"Report total added: ${result['stats']['total_added']:.2f}")

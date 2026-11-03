@@ -1,9 +1,8 @@
 """
 Meal Card Reload Bot - Paytronix Automation
 
-Connects to a Chrome you are already logged into, asks the Newk's reporting app
-which cards to load this period, reloads each card's Stored Value wallet on
-the Paytronix frame inside Access Evo, and posts each result back to the app.
+Connects to Chrome already signed into Access Evo, reads the local roster,
+reloads each eligible card, verifies balances, and builds reports locally.
 
 Usage:
   1. Run "Run Meal Card Reload.ps1" (it opens Chrome in debug mode for you), or
@@ -12,9 +11,9 @@ Usage:
   2. Log into Access Evo, select Newk's Eatery, and open Loyalty / Paytronix
   3. python meal_card_reload.py            (add --dry-run for a no-write pass)
 
-The card list, the per-card target amounts and the record of what was loaded all
-live in the app, not in a spreadsheet - so this folder holds no data and never
-goes stale. Period defaults to the current calendar month.
+The roster and employee mappings live in roster.json beside this script.
+Progress, logs, CSV exports, and payroll workbooks stay in this folder.
+No reporting app URL, account, or API is required.
 
 Note on third-party widgets: Paytronix embeds Wootric (NPS survey), Intercom
 (chat) and Access-Evo (button) on pxsweb pages. These break automation two ways
@@ -26,7 +25,6 @@ Access Evo requests remain enabled because they can host the merchant session.
 
 import argparse
 from meal_card_state import RunState, PendingSubmission, local_run_lock
-import getpass
 import json
 import math
 import os
@@ -37,7 +35,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
-import httpx
 from playwright.sync_api import sync_playwright
 from meal_card_reports import report_date, run_reports
 from meal_card_organization import assert_organization, assert_session, find_reload_surface, MERCHANT_HOST
@@ -70,7 +67,7 @@ RELOAD_EXCLUDE_CARD_NUMBERS = frozenset({
     "45563000000844",  # Nick Nastasi (ending 0844)
 })
 
-CONFIG_FILE = "config.json"
+
 
 # Third-party widgets to block. Killing wootric-sdk.js at the network layer is
 # what stops the survey from ever appearing. Must be a compiled regex - the
@@ -123,131 +120,10 @@ def step(name, fn, *args, **kwargs):
         raise StepError(f"{name}: {detail}") from e
 
 
-# -- The app ------------------------------------------------------------------
-class AppClient:
-    """Talks to the Newk's reporting app: the worklist in, results out.
-
-    Authentication is the same login the website uses, so there is no extra
-    password or API key to manage - and whoever runs the bot is recorded as
-    having run it.
-    """
-
-    def __init__(self, base_url: str, token: str, dry_run: bool = False):
-        self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(
-            base_url=self.base_url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=60.0,
-        )
-        self.run_id = None
-        # A test run must not tick anything off. The caller already skips these
-        # calls; the client refuses them too, so one missed branch cannot mark a
-        # card loaded when no money moved.
-        self.dry_run = dry_run
-
-    @classmethod
-    def sign_in(cls, base_url: str, email: str, password: str,
-                dry_run: bool = False) -> "AppClient":
-        r = httpx.post(f"{base_url.rstrip('/')}/api/auth/login",
-                       json={"email": email, "password": password}, timeout=60.0)
-        if r.status_code == 401:
-            raise SystemExit("That email and password were not accepted by the app.")
-        r.raise_for_status()
-        return cls(base_url, r.json()["access_token"], dry_run=dry_run)
-
-    def worklist(self, year=None, period=None, include_done=False) -> dict:
-        params = {"include_done": str(include_done).lower()}
-        if year:
-            params["year"] = year
-        if period:
-            params["period"] = period
-        r = self.client.get("/api/mealcard/worklist", params=params)
-        r.raise_for_status()
-        return r.json()
-
-    def start_run(self, year: int, period: int) -> int:
-        # Declare the mode up front: while the run is in flight, "is this
-        # spending money?" is the question anyone watching the app will have.
-        r = self.client.post("/api/mealcard/runs",
-                             json={"year": year, "period": period,
-                                   "dry_run": self.dry_run})
-        r.raise_for_status()
-        self.run_id = r.json()["run_id"]
-        return self.run_id
-
-    def log_line(self, text: str):
-        """Progress for the app's run log.
-
-        A test run posts no card results by design, so without this its log
-        would stay empty for the whole run and read as stuck.
-        """
-        if self.run_id is None:
-            return
-        try:
-            self.client.post(f"/api/mealcard/runs/{self.run_id}/log", json={"text": text})
-        except Exception:
-            pass    # the local log file is the real record; never fail over this
-
-    def record_card(self, card_number, status, amount=None, balance_before=None, detail=""):
-        """Post one card's outcome. Never fatal: a reload that happened must not
-        be lost to a network blip, so this warns and carries on."""
-        if self.run_id is None or self.dry_run:
-            return
-        try:
-            r = self.client.post(
-                f"/api/mealcard/runs/{self.run_id}/card",
-                json={"card_number": card_number, "status": status, "amount": amount,
-                      "balance_before": balance_before, "detail": detail},
-            )
-            r.raise_for_status()
-        except Exception as e:
-            print(f"  WARNING - could not record this card in the app ({e.__class__.__name__}). "
-                  f"Tick it by hand: {card_number} = {status}")
-
-    def finish_run(self, completed, skipped, errors, log):
-        if self.run_id is None:
-            return
-        try:
-            self.client.post(
-                f"/api/mealcard/runs/{self.run_id}/finish",
-                json={"completed": completed, "skipped": skipped, "errors": errors,
-                      "log": log[-200000:],   # keep the tail if a run got chatty
-                      # A test run is still worth a row - it is how you see from
-                      # the app that someone's setup works - but it must never
-                      # read as a month that got loaded.
-                      "status": "dry-run" if self.dry_run else "finished"},
-            )
-        except Exception as e:
-            print(f"  WARNING - could not close out the run in the app ({e.__class__.__name__}).")
-
-
-def load_config(base_dir: Path) -> dict:
-    path = base_dir / CONFIG_FILE
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        print(f"WARNING - {CONFIG_FILE} is not valid JSON; ignoring it.")
-        return {}
-
-
-def connect_to_app(base_dir: Path, args) -> AppClient:
-    cfg = load_config(base_dir)
-    base_url = args.app_url or os.getenv("MEALCARD_APP_URL") or cfg.get("app_url")
-    email = args.email or os.getenv("MEALCARD_APP_EMAIL") or cfg.get("email")
-
-    if not base_url:
-        base_url = input("Reporting app URL: ").strip()
-    if not email:
-        email = input("Your app email: ").strip()
-
-    password = os.getenv("MEALCARD_APP_PASSWORD")
-    if not password:
-        password = getpass.getpass(f"App password for {email}: ")
-
-    print(f"Signing in to {base_url} as {email}")
-    return AppClient.sign_in(base_url, email, password, dry_run=args.dry_run)
+# -- Local roster and results -------------------------------------------------
+def connect_to_backend(base_dir, args):
+    from meal_card_local import LocalBackend
+    return LocalBackend(base_dir, roster_path=args.roster, dry_run=args.dry_run)
 
 
 # -- Chrome connection --------------------------------------------------------
@@ -544,8 +420,7 @@ def parse_args():
     p.add_argument("--include-done", action="store_true",
                    help="Also include cards already ticked for this period")
     p.add_argument("--max-cards", type=int, help="Stop after this many cards (for testing)")
-    p.add_argument("--app-url", help="Reporting app URL (overrides config.json)")
-    p.add_argument("--email", help="Your app email (overrides config.json)")
+    p.add_argument("--roster", type=Path, help="Local roster JSON (default: roster.json beside the bot)")
     p.add_argument("--report-only", action="store_true",
                    help="Export and build reports only; never visit or adjust card wallets")
     p.add_argument("--skip-report", action="store_true",
@@ -604,7 +479,7 @@ def _main():
     sys.stdout = logger
     sys.stderr = logger
 
-    app = connect_to_app(base_dir, args)
+    app = connect_to_backend(base_dir, args)
     if args.report_only:
         try:
             report_job(app, args, base_dir, timestamp)
@@ -616,7 +491,7 @@ def _main():
     work = app.worklist(year=args.year, period=args.period, include_done=args.include_done or args.dry_run)
     year, period = work["year"], work["period"]
     args.year, args.period = year, period
-    state = RunState(base_dir / "state" / f"{year}-{period:02d}.json", app.base_url)
+    state = RunState(base_dir / "state" / f"standalone-{year}-{period:02d}.json", app.scope)
     cards = work["cards"]
     # Defense in depth: filter cards if the app still returns an older roster.
     excluded_from_run = [c for c in cards if str(c.get("card_number", "")) in RELOAD_EXCLUDE_CARD_NUMBERS]
@@ -634,12 +509,12 @@ def _main():
         print("  TEST RUN - NO MONEY WILL BE ADDED TO ANY CARD.")
         print("  Each balance is read and the amount worked out, then thrown")
         print("  away. The Paytronix form is never filled in or submitted,")
-        print("  and nothing is ticked off in the app.")
+        print("  and no wallet adjustment is submitted.")
         print("=" * 60)
     print("-" * 60)
 
     if not cards:
-        print(f"Nothing to do - every active card is already ticked for period {period}.")
+        print(f"Nothing to do - every eligible card is already recorded for period {period}.")
         if not args.dry_run and not args.skip_report:
             report_job(app, args, base_dir, timestamp)
         logger.close()
@@ -677,7 +552,7 @@ def _main():
         organization_page.bring_to_front()
         organization_page.set_default_timeout(DEFAULT_TIMEOUT_MS)
         app.start_run(year, period)
-        print(f"App run #{app.run_id} started" + (" (dry run)" if args.dry_run else ""))
+        print(f"Local run #{app.run_id} started" + (" (dry run)" if args.dry_run else ""))
         print(f"Bot will drive: {page.url}")
         print()
 
@@ -752,7 +627,7 @@ def _main():
         if args.dry_run:
             print(f"TEST RUN SUMMARY: {skipped} already at target, {errors} errors, "
                   f"{total - skipped - errors} would have been loaded")
-            print("No money was added. Nothing was ticked off in the app.")
+            print("No money was added. No reload completion was recorded.")
         else:
             print(f"SUMMARY: {completed} completed, {skipped} skipped, {errors} errors")
         if retried:
@@ -765,11 +640,11 @@ def _main():
             print()
             print("Resolve pending submissions against transaction history before retrying.")
             print("Re-run for safe failures - verified cards are")
-            print("already ticked in the app and will be skipped automatically.")
+            print("saved locally and will be skipped automatically.")
         print(f"Log saved to: {log_file}")
 
         app.finish_run(completed, skipped, errors, logger.text())
-        print("Run closed out in the app.")
+        print("Run saved locally.")
 
         report_failed = False
         if not args.dry_run and not args.skip_report:

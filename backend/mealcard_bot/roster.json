@@ -1,0 +1,340 @@
+{
+  "source": "Existing repository meal-card roster; review locally when employees change.",
+  "mapping_source": "Repository fallback mappings from earlier payroll exports; not independently verified",
+  "default_target": 160,
+  "cards": [
+    {
+      "card_number": "35303000174738",
+      "name": "Klara Smith",
+      "target_amount": null,
+      "sort_order": 2
+    },
+    {
+      "card_number": "35303000175190",
+      "name": "Emily Moore",
+      "target_amount": null,
+      "sort_order": 3
+    },
+    {
+      "card_number": "35303000603202",
+      "name": "Gene Pearson",
+      "target_amount": null,
+      "sort_order": 4
+    },
+    {
+      "card_number": "35303000649586",
+      "name": "Beth Thrasher",
+      "target_amount": null,
+      "sort_order": 5
+    },
+    {
+      "card_number": "35303000649750",
+      "name": "Matt Wilson",
+      "target_amount": null,
+      "sort_order": 6
+    },
+    {
+      "card_number": "35303000732351",
+      "name": "Marc Hostetler",
+      "target_amount": null,
+      "sort_order": 7
+    },
+    {
+      "card_number": "35303000735243",
+      "name": "Veronica Adul'Ali",
+      "target_amount": null,
+      "sort_order": 8
+    },
+    {
+      "card_number": "35303000735302",
+      "name": "Frank Paci",
+      "target_amount": null,
+      "sort_order": 9
+    },
+    {
+      "card_number": "35303000735353",
+      "name": "Tiffany Croxton",
+      "target_amount": null,
+      "sort_order": 10
+    },
+    {
+      "card_number": "35303000735689",
+      "name": "Heather Chase",
+      "target_amount": null,
+      "sort_order": 12
+    },
+    {
+      "card_number": "35303000773592",
+      "name": "Liz Pearson",
+      "target_amount": null,
+      "sort_order": 13
+    },
+    {
+      "card_number": "35303000773739",
+      "name": "Ferro Ferro",
+      "target_amount": null,
+      "sort_order": 14
+    },
+    {
+      "card_number": "35303000790131",
+      "name": "Amy McIntosh",
+      "target_amount": null,
+      "sort_order": 15
+    },
+    {
+      "card_number": "35303000827614",
+      "name": "Sean Gaughan",
+      "target_amount": null,
+      "sort_order": 16
+    },
+    {
+      "card_number": "35303000865602",
+      "name": "Nathan Neinast",
+      "target_amount": null,
+      "sort_order": 17
+    },
+    {
+      "card_number": "35303000945319",
+      "name": "Reanne Burnett",
+      "target_amount": null,
+      "sort_order": 18
+    },
+    {
+      "card_number": "45563000000789",
+      "name": "Mike Jones",
+      "target_amount": null,
+      "sort_order": 19
+    },
+    {
+      "card_number": "45563000000877",
+      "name": "Madison Newcomb",
+      "target_amount": null,
+      "sort_order": 22
+    },
+    {
+      "card_number": "45563000000880",
+      "name": "Cynthia Baxter (Board Meeting $600.00)",
+      "target_amount": 600,
+      "sort_order": 23
+    },
+    {
+      "card_number": "45563000000894",
+      "name": "Jon Williams",
+      "target_amount": null,
+      "sort_order": 24
+    },
+    {
+      "card_number": "45563000000899",
+      "name": "Chris Cheek",
+      "target_amount": null,
+      "sort_order": 25
+    },
+    {
+      "card_number": "45563000000919",
+      "name": "Chris Newcomb",
+      "target_amount": null,
+      "sort_order": 26
+    },
+    {
+      "card_number": "45563000000934",
+      "name": "Tonya Bell",
+      "target_amount": null,
+      "sort_order": 27
+    },
+    {
+      "card_number": "45563000000936",
+      "name": "Matthew Hayward",
+      "target_amount": null,
+      "sort_order": 28
+    },
+    {
+      "card_number": "45563000000938",
+      "name": "Trey Fuller",
+      "target_amount": null,
+      "sort_order": 29
+    },
+    {
+      "card_number": "45563000000966",
+      "name": "Madison Newcomb (office card $300.00)",
+      "target_amount": 300,
+      "sort_order": 30
+    },
+    {
+      "card_number": "45563000000975",
+      "name": "Nadia Watson",
+      "target_amount": null,
+      "sort_order": 31
+    },
+    {
+      "card_number": "45563000001005",
+      "name": "Cynthia Baxter (Personal)",
+      "target_amount": null,
+      "sort_order": 32
+    },
+    {
+      "card_number": "45563000001016",
+      "name": "Jessica Drahem",
+      "target_amount": null,
+      "sort_order": 33
+    },
+    {
+      "card_number": "45563000001030",
+      "name": "Matilyn Skinner",
+      "target_amount": null,
+      "sort_order": 34
+    },
+    {
+      "card_number": "45563000001046",
+      "name": "Tracey King",
+      "target_amount": null,
+      "sort_order": 35
+    }
+  ],
+  "employee_names": [
+    {
+      "name": "Adam Karveller",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
+      "name": "Amy McIntosh",
+      "employee_id": "8005",
+      "entity": "90219"
+    },
+    {
+      "name": "Beth Thrasher",
+      "employee_id": "9094701",
+      "entity": "90219"
+    },
+    {
+      "name": "Chris Cheek",
+      "employee_id": "5036",
+      "entity": "90219"
+    },
+    {
+      "name": "Chris Newcomb",
+      "employee_id": "5034",
+      "entity": "90219"
+    },
+    {
+      "name": "Cynthia Baxter (Board Meeting $600.00)",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
+      "name": "Cynthia Baxter (Personal)",
+      "employee_id": "5000",
+      "entity": "90219"
+    },
+    {
+      "name": "Emily Moore",
+      "employee_id": "8027",
+      "entity": "90219"
+    },
+    {
+      "name": "Frank Paci",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
+      "name": "Gene Pearson",
+      "employee_id": "1935",
+      "entity": "90218"
+    },
+    {
+      "name": "Heather Chase",
+      "employee_id": "8289",
+      "entity": "90219"
+    },
+    {
+      "name": "Jessica Drahem",
+      "employee_id": "9099358",
+      "entity": "90219"
+    },
+    {
+      "name": "Jon Williams",
+      "employee_id": "5026",
+      "entity": "90219"
+    },
+    {
+      "name": "Klara Smith",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
+      "name": "Liz Pearson",
+      "employee_id": "1962",
+      "entity": "90219"
+    },
+    {
+      "name": "Madison Newcomb",
+      "employee_id": "8024",
+      "entity": "90219"
+    },
+    {
+      "name": "Madison Newcomb (office card $300.00)",
+      "employee_id": "0",
+      "entity": ""
+    },
+    {
+      "name": "Marc Hostetler",
+      "employee_id": "9091357",
+      "entity": "90218"
+    },
+    {
+      "name": "Matilyn Skinner",
+      "employee_id": "8301",
+      "entity": "90219"
+    },
+    {
+      "name": "Matt Wilson",
+      "employee_id": "1203",
+      "entity": "90219"
+    },
+    {
+      "name": "Matthew Hayward",
+      "employee_id": "8300",
+      "entity": "90219"
+    },
+    {
+      "name": "Mike Jones",
+      "employee_id": "8000",
+      "entity": "90219"
+    },
+    {
+      "name": "Nadia Watson",
+      "employee_id": "8307",
+      "entity": "90219"
+    },
+    {
+      "name": "Nick Nastasi",
+      "employee_id": "5028",
+      "entity": "90219"
+    },
+    {
+      "name": "Reanne Burnett",
+      "employee_id": "8309",
+      "entity": "90219"
+    },
+    {
+      "name": "Sean Gaughan",
+      "employee_id": "9100541",
+      "entity": "90218"
+    },
+    {
+      "name": "Tonya Bell",
+      "employee_id": "5035",
+      "entity": "90219"
+    },
+    {
+      "name": "Tracey King",
+      "employee_id": "5041",
+      "entity": "90219"
+    },
+    {
+      "name": "Trey Fuller",
+      "employee_id": "8299",
+      "entity": "90219"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Meal Card Reload - one-click monthly launcher
 # Opens Chrome in debug mode to Paytronix, waits for you to log in,
-# then runs the reload bot against the card list in the reporting app.
+# then runs the reload bot against the local roster.json card list.
 
 param([switch]$ReportOnly)
 
@@ -75,7 +75,7 @@ $runExit = $LASTEXITCODE
 
 Write-Host ""
 Write-Host "Finished. A timestamped log was saved in this folder," -ForegroundColor Cyan
-Write-Host "and the run is recorded on the Meal Cards page in the app." -ForegroundColor Cyan
+Write-Host "and the run is recorded locally under state." -ForegroundColor Cyan
 Write-Host "Payroll files are saved under reports. If export failed, use REPORT ONLY later." -ForegroundColor Cyan
 Read-Host "Press Enter to close this window"
 exit $runExit

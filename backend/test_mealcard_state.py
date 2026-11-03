@@ -152,9 +152,9 @@ class AdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
             stack.enter_context(patch.object(sys, 'argv', ['bot']))
             stack.enter_context(patch.object(bot, '__file__', str(Path(folder) / 'bot.py')))
-            app = Mock(base_url='https://test.invalid')
+            app = Mock(scope='standalone:Newks-1085')
             app.worklist.return_value = {'year': 2026, 'period': 11, 'default_target': 160, 'cards': [CARD]}
-            stack.enter_context(patch.object(bot, 'connect_to_app', return_value=app))
+            stack.enter_context(patch.object(bot, 'connect_to_backend', return_value=app))
             runtime = stack.enter_context(patch.object(bot, 'sync_playwright'))
             context = Mock(pages=[])
             stack.enter_context(patch.object(bot, 'connect_to_chrome', return_value=Mock(contexts=[context])))
@@ -166,3 +166,48 @@ class AdapterTests(unittest.TestCase):
             report.assert_called_once()
             self.assertIs(report.call_args.kwargs['context'], context)
             self.assertEqual(report.call_args.args[4], {'100': 60})
+
+class StandaloneTests(unittest.TestCase):
+    def make_backend(self, folder, dry_run=False):
+        import json
+        from meal_card_local import LocalBackend
+        roster = {'default_target': 160, 'cards': [dict(CARD)], 'employee_names': []}
+        (Path(folder) / 'roster.json').write_text(json.dumps(roster))
+        return LocalBackend(folder, dry_run=dry_run)
+
+    def test_roster_and_progress_work_without_network_or_credentials(self):
+        import socket
+        with tempfile.TemporaryDirectory() as folder, patch.object(socket, 'create_connection', side_effect=AssertionError('network forbidden')):
+            backend = self.make_backend(folder)
+            work = backend.worklist(2026, 11)
+            self.assertEqual(work['cards'][0]['card_number'], '100')
+            backend.start_run(2026, 11)
+            backend.record_card('100', 'done', 60, 100)
+            backend.finish_run(1, 0, 0, 'completed locally')
+            restarted = self.make_backend(folder)
+            self.assertEqual(restarted.worklist(2026, 11)['cards'], [])
+            self.assertEqual(len(restarted.worklist(2026, 12)['cards']), 1)
+            self.assertEqual(len(restarted.worklist(2026, 11, include_done=True)['cards']), 1)
+
+    def test_dry_run_cannot_mark_local_card_complete(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend = self.make_backend(folder, dry_run=True)
+            backend.start_run(2026, 11)
+            backend.record_card('100', 'done', 60, 100)
+            self.assertFalse(backend.results_path(2026, 11).exists())
+
+    def test_no_url_or_password_prompt_in_connection(self):
+        with tempfile.TemporaryDirectory() as folder, patch('builtins.input', side_effect=AssertionError('unexpected prompt')):
+            self.make_backend(folder)
+            from argparse import Namespace
+            backend = bot.connect_to_backend(Path(folder), Namespace(roster=None, dry_run=True))
+            self.assertEqual(len(backend.worklist(2026, 11)['cards']), 1)
+
+    def test_duplicate_roster_cards_rejected(self):
+        import json
+        from meal_card_local import LocalBackend
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'roster.json'
+            path.write_text(json.dumps({'default_target': 160, 'cards': [CARD, CARD]}))
+            with self.assertRaisesRegex(ValueError, 'unique'):
+                LocalBackend(folder)

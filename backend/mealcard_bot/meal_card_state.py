@@ -29,13 +29,13 @@ class PendingSubmission(RuntimeError):
 
 
 class RunState:
-    def __init__(self, path, app_url):
+    def __init__(self, path, scope):
         self.path = Path(path)
-        self.data = {"app_url": app_url.rstrip("/"), "cards": {}}
+        self.data = {"scope": scope.rstrip("/"), "cards": {}}
         if self.path.exists():
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
-            if loaded["app_url"] != self.data["app_url"]:
-                raise RuntimeError("Period journal belongs to a different reporting app")
+            if loaded.get("scope", loaded.get("app_url")) != self.data["scope"]:
+                raise RuntimeError("Period journal belongs to a different organization or workflow")
             self.data = loaded
 
     def get(self, card):

@@ -1,7 +1,6 @@
 # Meal Card Reload - TEST RUN
 #
-# Does everything the real monthly run does EXCEPT add money: it signs into the
-# app, fetches the card list, looks each card up in Paytronix and reads its
+# Reads the local roster, looks each card up in Access Evo and reads its
 # balance, and works out what it would add. The adjustment form is never filled
 # in or submitted, and no card is ticked off.
 #
@@ -85,8 +84,8 @@ if ($testExit -ne 0) {
 
 Write-Host ""
 Write-Host "Test finished. No money was added to any card." -ForegroundColor Green
-Write-Host "A log was saved in this folder, and the run shows on the Meal Cards" -ForegroundColor Cyan
-Write-Host "page in the app labelled as a dry run." -ForegroundColor Cyan
+Write-Host "A log was saved in this folder. Run details are saved locally." -ForegroundColor Cyan
+Write-Host "No reporting app login or URL is required." -ForegroundColor Cyan
 Read-Host "Press Enter to close this window"
 
 exit $testExit
