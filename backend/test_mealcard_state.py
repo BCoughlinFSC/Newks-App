@@ -211,3 +211,33 @@ class StandaloneTests(unittest.TestCase):
             path.write_text(json.dumps({'default_target': 160, 'cards': [CARD, CARD]}))
             with self.assertRaisesRegex(ValueError, 'unique'):
                 LocalBackend(folder)
+
+class MerchantLabelTests(unittest.TestCase):
+    def surface(self, text, href='/merchant/home.srv?currentMerchantId=1085'):
+        from unittest.mock import Mock
+        frame = Mock()
+        frame.locator.return_value.inner_text.return_value = text
+        frame.get_by_role.return_value.count.return_value = 1
+        frame.get_by_role.return_value.get_attribute.return_value = href
+        return frame
+
+    def test_wrapped_typographic_label_is_accepted(self):
+        from meal_card_organization import assert_merchant
+        frame = self.surface("px PXS Newk’s\u00a0Eatery\n(1085) Home Report Center")
+        assert_merchant(frame, timeout_seconds=0)
+        frame.get_by_text.assert_not_called()
+
+    def test_wrong_merchant_number_is_rejected(self):
+        from meal_card_organization import assert_merchant
+        with self.assertRaisesRegex(RuntimeError, 'Wrong Paytronix merchant'):
+            assert_merchant(self.surface("Newk's Eatery (9999)"), timeout_seconds=0)
+
+    def test_url_alone_cannot_satisfy_check(self):
+        from meal_card_organization import assert_merchant
+        with self.assertRaisesRegex(RuntimeError, 'visible Paytronix merchant'):
+            assert_merchant(self.surface('Home Report Center'), timeout_seconds=0)
+
+    def test_conflicting_home_merchant_is_rejected(self):
+        from meal_card_organization import assert_merchant
+        with self.assertRaisesRegex(RuntimeError, 'conflicts'):
+            assert_merchant(self.surface("Newk's Eatery (1085)", '/merchant/home.srv?currentMerchantId=9999'), timeout_seconds=0)

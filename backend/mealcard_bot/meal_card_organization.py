@@ -1,5 +1,8 @@
 """Organization checks use the visible Access Evo switcher, never URL guesses."""
-from urllib.parse import urlparse
+import re
+import time
+import unicodedata
+from urllib.parse import urlparse, parse_qs
 
 EXPECTED_ORGANIZATION = "Newk's Eatery"
 
@@ -17,11 +20,48 @@ EXPECTED_MERCHANT = "Newk's Eatery (1085)"
 MERCHANT_HOST = "azr1px.px.us.access-evo.com"
 
 
-def assert_merchant(surface):
-    marker = surface.get_by_text(EXPECTED_MERCHANT, exact=True).first
-    marker.wait_for(state="visible", timeout=20000)
-    if not marker.is_visible():
-        raise RuntimeError("Cannot verify Newk's Eatery merchant 1085")
+def normalize_label(text):
+    text = unicodedata.normalize("NFKC", text).replace("\u2019", "'").replace("\u02bc", "'")
+    return " ".join(text.split())
+
+
+def assert_merchant(surface, timeout_seconds=45):
+    """Check rendered merchant identity without relying on the first exact node.
+
+    Responsive navigation can contain duplicate/hidden spans and split labels.
+    Body inner_text reads rendered text and normalization handles line wrapping,
+    smart apostrophes, and nonbreaking spaces. URL values never substitute for
+    a positive visible merchant identity.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    expected = re.compile(r"(?<![\w])Newk's Eatery\s*\(\s*1085\s*\)", re.I)
+    merchant_label = re.compile(r"(?<![\w])Newk's Eatery\s*\(\s*(\d+)\s*\)", re.I)
+    last_text = ""
+    while True:
+        try:
+            last_text = normalize_label(surface.locator("body").inner_text(timeout=5000))
+            label = merchant_label.search(last_text)
+            if label and label.group(1) != "1085":
+                raise RuntimeError("Wrong Paytronix merchant: " + label.group(0))
+            if expected.search(last_text):
+                home = surface.get_by_role("link", name="px PXS", exact=True)
+                if home.count() == 1:
+                    ids = parse_qs(urlparse(home.get_attribute("href") or "").query).get("currentMerchantId", [])
+                    if ids and ids != ["1085"]:
+                        raise RuntimeError("Paytronix merchant link conflicts with Newk's merchant 1085")
+                return
+        except RuntimeError:
+            raise
+        except Exception:
+            # The iframe may still be navigating/hydrating after SSO.
+            pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Cannot verify the visible Paytronix merchant as Newk's Eatery (1085). "
+                "Access Evo organization was checked separately. Open the Paytronix "
+                "sidebar so the merchant name is visible, wait for the page to finish "
+                "loading, and rerun the no-money test. No wallet submission was attempted.")
+        time.sleep(0.25)
 
 
 def assert_session(owner, surface):
